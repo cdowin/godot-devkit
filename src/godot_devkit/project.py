@@ -9,6 +9,7 @@ defaults, so a config-less repo gets the stock behavior.
 from __future__ import annotations
 
 import subprocess
+import sys
 import tomllib
 from functools import lru_cache
 from pathlib import Path
@@ -32,8 +33,14 @@ def load_config() -> dict:
     path = repo_root() / CONFIG_NAME
     if not path.is_file():
         return {}
-    with path.open('rb') as fh:
-        return tomllib.load(fh)
+    try:
+        with path.open('rb') as fh:
+            return tomllib.load(fh)
+    except tomllib.TOMLDecodeError as err:
+        # Config error, not drift: exit 2 per the contract (1 is reserved for
+        # findings — CI must not read a toml typo as "drift found").
+        print(f'godot-devkit: invalid {CONFIG_NAME}: {err}', file=sys.stderr)
+        raise SystemExit(2) from err
 
 
 def git_lines(*args: str) -> list[str]:

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 
 from godot_devkit.project import git_lines, load_config, repo_root
 
@@ -53,7 +54,16 @@ def run() -> int:
         hard += 1
 
     print('[check:repo-hygiene] CHECK 3 — no dangling worktrees')
-    dangling = git_lines('worktree', 'prune', '-n', '-v')
+    # `git worktree prune -n -v` reports on STDERR (a silent false-PASS trap);
+    # the porcelain listing marks prunable entries on stdout — parse that.
+    dangling = []
+    current = ''
+    for ln in git_lines('worktree', 'list', '--porcelain'):
+        if ln.startswith('worktree '):
+            current = ln.removeprefix('worktree ')
+        elif ln == 'prunable' or ln.startswith('prunable '):
+            reason = ln.removeprefix('prunable').strip() or 'prunable'
+            dangling.append(f'{current}  ({reason})')
     if dangling:
         print('  WORKTREES  a prune would remove:')
         print('\n'.join(f'    {ln}' for ln in dangling))
@@ -68,6 +78,12 @@ def run() -> int:
         return names
 
     print(f'[check:repo-hygiene] CHECK 4 — no merged-but-undeleted branches (merged into {mainline})')
+    # An unresolvable mainline would make every `--merged` query return [],
+    # silently disabling this check — that's a config error, not a clean tree.
+    if not git_lines('rev-parse', '--verify', '--quiet', f'{mainline}^{{commit}}'):
+        print(f"  ERROR  mainline '{mainline}' does not resolve — CHECK 4 cannot run", file=sys.stderr)
+        print(f"[check:repo-hygiene] CONFIG ERROR — fix [repo_hygiene] mainline in devkit.toml")
+        return 2
     for b in branch_names('--merged', mainline):
         if protected.search(b):
             continue

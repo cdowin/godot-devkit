@@ -59,8 +59,11 @@ def _run_check(name: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args or args[0] in ('-h', '--help', 'help'):
+    if not args:
         return _usage()
+    if args[0] in ('-h', '--help', 'help'):
+        print(__doc__.strip())
+        return 0
     cmd, rest = args[0], args[1:]
     if cmd in ('-V', '--version', 'version'):
         print(f'godot-devkit {__version__}')

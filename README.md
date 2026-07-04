@@ -79,7 +79,7 @@ scope = ["CLAUDE.md", ".claude/rules/*.md", ".claude/agents/*.md"]
 ephemeral = ["docs/reviews/"]
 
 [uid]
-scan_dirs = ["data", "scenes", "resources", "systems", "autoloads", "shared"]
+exclude_prefixes = ["addons/"]
 
 [tres]
 exclude_prefixes = ["addons/"]

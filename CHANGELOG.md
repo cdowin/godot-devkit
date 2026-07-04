@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.0 — 2026-07-04
+
+Post-review release — all findings from the full code-reviewer pass fixed:
+
+- **CRITICAL fix**: `check repo-hygiene` CHECK 3 could never detect a dangling
+  worktree (`git worktree prune -n -v` reports on stderr; the gate read
+  stdout). Now parses `git worktree list --porcelain` `prunable` entries.
+- **Fix**: an unresolvable `[repo_hygiene] mainline` no longer silently
+  disables CHECK 4 — it is a CONFIG ERROR, exit 2.
+- **Fix**: a malformed `devkit.toml` exits 2 with a clean message instead of
+  a traceback at exit 1 (1 is reserved for findings).
+- **Change (upgrade note)**: `check uid` CHECK 1 now censuses ALL tracked
+  .tres/.tscn (addons/ exempt) instead of a `[uid] scan_dirs` allowlist — the
+  config key is now `exclude_prefixes`; the PASS line reports the ref/file
+  census. Attribute matching is order-independent (a reordered ext_resource
+  ref is censused, not skipped).
+- **Fix**: top-level `--help`/`help` exits 0.
+
 ## v0.2.0 — 2026-07-04
 
 - Converted from a vendored file-set to a real Python package: one

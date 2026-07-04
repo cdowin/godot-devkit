@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "godot-devkit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads) + static repo gates (uid, tres-format, doc, shell, repo-hygiene)."
 readme = "README.md"
 requires-python = ">=3.11"
