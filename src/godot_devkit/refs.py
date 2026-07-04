@@ -19,10 +19,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from godot_tscn import parse, _basename
+from godot_devkit.tscn import parse, _basename
+from godot_devkit.project import repo_root, load_config
 
 # --- Scope -------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = repo_root()
 ALWAYS_EXCLUDED = ('.git/', '.godot/', '.claude/worktrees/', 'pm/roadmap/zz_archive/', 'addons/')
 GD_GLOB = '*.gd'
 SCENE_GLOBS = ('*.tscn', '*.tres')
@@ -185,12 +186,12 @@ def run(symbol: str, include_tests: bool) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('symbol', help='a class_name / method / signal, or a .gd/.tscn/.tres filename/uid')
     parser.add_argument('--tests', action='store_true', help='include tests/ in the scan (excluded by default)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return run(args.symbol, args.tests)
 
 

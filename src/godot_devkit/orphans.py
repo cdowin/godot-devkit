@@ -25,10 +25,11 @@ import re
 import subprocess
 from pathlib import Path
 
-from godot_tscn import parse, parse_text, _basename
+from godot_devkit.tscn import parse, parse_text, _basename
+from godot_devkit.project import repo_root, load_config
 
 # --- Scope -------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = repo_root()
 VENDORED_EXCLUDED = ('addons/',)  # excluded from the whole scan (corpus + candidates) — not ours
 CANDIDATE_GLOBS = ('*.gd', '*.tscn', '*.tres')
 # tools/ scripts are one-shot `godot --script <path>` CLI entry points, run
@@ -237,12 +238,12 @@ def find_orphans(include_tests: bool) -> tuple[list[str], list[str]]:
     return orphans, caveats
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--tests', action='store_true',
                         help='also consider tests/ and data/ for orphan candidates (excluded by default)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     orphans, caveats = find_orphans(args.tests)
 

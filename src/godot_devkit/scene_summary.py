@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 
-from godot_tscn import (
+from godot_devkit.tscn import (
     PACKED_ARRAY,
     REF_ARROW,
     RESOURCE_REF,
@@ -110,13 +110,13 @@ def print_summary(sections: list[Section], path: str, show_all: bool) -> None:
         print_tree(nodes, ext, show_all)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('file', help='path to a .tscn or .tres')
     parser.add_argument('--props', action='store_true',
                         help='show ALL scalar props per node (default: a curated subset)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         sections = parse(args.file)
     except OSError as err:

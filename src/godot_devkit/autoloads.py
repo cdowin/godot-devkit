@@ -30,10 +30,11 @@ import argparse
 import re
 from pathlib import Path
 
-from godot_tscn import parse_text, _strip_quotes
+from godot_devkit.tscn import parse_text, _strip_quotes
+from godot_devkit.project import repo_root, load_config
 
 # --- Scope -------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = repo_root()
 PROJECT_GODOT = 'project.godot'
 EXPECTED_PREFIXES = (
     'autoloads/core/', 'autoloads/sim/', 'autoloads/input/',
@@ -59,6 +60,15 @@ SUFFIX_EXPECT: dict[str, set[str]] = {
     'Service': {INERT},
 }
 NO_SUFFIX = '(no recognized suffix)'
+
+# devkit.toml overrides ([autoloads] suffixes = {Manager = "emits", ...},
+# expected_prefixes = ["autoloads/", ...]) replace the defaults above.
+_CFG = load_config().get('autoloads', {})
+if _CFG.get('suffixes'):
+    SUFFIX_EXPECT = {k: {v} if isinstance(v, str) else set(v)
+                     for k, v in _CFG['suffixes'].items()}
+if _CFG.get('expected_prefixes'):
+    EXPECTED_PREFIXES = tuple(_CFG['expected_prefixes'])
 
 
 def list_autoloads() -> list[tuple[str, str]]:
@@ -129,10 +139,10 @@ def _flags(row: dict) -> str:
     return f'  [{"; ".join(notes)}]' if notes else ''
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.parse_args()
+    parser.parse_args(argv)
 
     rows = census()
     groups: dict[str, list[dict]] = {}

@@ -19,7 +19,7 @@ import argparse
 import subprocess
 from dataclasses import dataclass
 
-from godot_tscn import (
+from godot_devkit.tscn import (
     PACKED_ARRAY,
     REF_ARROW,
     RESOURCE_REF,
@@ -201,7 +201,7 @@ def read_at_git_ref(path: str, ref: str) -> str:
     return result.stdout
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('file', help='path to a .tscn or .tres (or the OLD file in two-file mode)')
@@ -209,7 +209,7 @@ def main() -> int:
                         help='the NEW file, for two-file mode (omit to diff against --git)')
     parser.add_argument('--git', metavar='REF', nargs='?', const=DEFAULT_GIT_REF,
                         help=f'diff FILE@REF vs the working tree (default ref: {DEFAULT_GIT_REF})')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.new_file:
         if args.git:

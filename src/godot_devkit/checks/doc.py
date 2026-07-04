@@ -26,9 +26,11 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from godot_devkit.project import repo_root, load_config
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCOPE_GLOBS = ('CLAUDE.md', '.claude/rules/*.md', '.claude/agents/*.md')
+REPO_ROOT = repo_root()
+_CFG = load_config().get('doc', {})
+SCOPE_GLOBS = tuple(_CFG.get('scope', ('CLAUDE.md', '.claude/rules/*.md', '.claude/agents/*.md')))
 MAKEFILE = REPO_ROOT / 'Makefile'
 ALLOW_MARKER = 'doc-scan:allow'
 
@@ -44,7 +46,7 @@ PLACEHOLDER_CHARS = ('<', '>', '*', '$')
 URL_PREFIXES = ('http://', 'https://', 'mailto:')
 # docs/reviews/ is create-resolve-DELETE by design (docs/reviews/README.md) — an
 # example filename cited there is expected to no longer exist, not a claim.
-EPHEMERAL_DIRS = ('docs/reviews/',)
+EPHEMERAL_DIRS = tuple(_CFG.get('ephemeral', ('docs/reviews/',)))
 
 
 def scope_files() -> list[Path]:
@@ -157,10 +159,10 @@ def run() -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.parse_args()
+    parser.parse_args(argv)
     return run()
 
 
