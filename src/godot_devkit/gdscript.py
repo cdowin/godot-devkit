@@ -148,7 +148,7 @@ class ScriptIndex:
         target = facts.extends
         if target is None:
             base = 'RefCounted'                    # implicit base of a bare script
-        elif target.startswith('"') or target.startswith('preload'):
+        elif target.startswith(('"', 'preload')):
             match = QUOTED_RE.search(target)
             parent = self._resolve(match.group(1), seen) if match else None
             if parent is None:

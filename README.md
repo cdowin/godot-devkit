@@ -81,7 +81,7 @@ All subcommands of the one `godot-devkit` entry point:
 
 | Command | What it does |
 |---|---|
-| `scene <file.tscn\|.tres> [--props]` | Compact node tree + ext/sub resources + tile bounds for one scene |
+| `scene <file.tscn\|.tres> [--props] [--paths]` | Compact node tree + ext/sub resources + tile bounds for one scene. `--paths` prints each node's full path — the same address the write verbs take |
 | `scene-diff <file> [--git <ref>]` | **Structural** diff vs a git ref — nodes added/removed/reparented, props changed, `tile_map_data` compared as decoded bounds — instead of an unreadable serialized byte diff |
 | `scene-diff <old> <new>` | Same, between two files |
 | `refs <symbol> [--tests]` | Reference-aware symbol search across `class_name` / methods / signals / `.gd`/`.tscn`/`.tres` paths / uids (word-boundary, comment-stripped) |
@@ -90,12 +90,40 @@ All subcommands of the one `godot-devkit` entry point:
 
 A shared parser (`tscn.py`) all of them compose — sections, properties, resource-ref resolution, TileMapLayer binary decoding.
 
+### Scene surgery (write verbs)
+
+Nodes are addressed **by path** — `.` is the root, `Name` its child, `Parent/Name` deeper. That is how
+`.tscn` addresses them in `parent=`, and it is what `scene --paths` prints. (Format-4 `unique_id=` is a
+serialisation detail, not an address; nothing keys off it.)
+
+| Command | What it does |
+|---|---|
+| `scene set <file> <node-path> <prop> <value>` | Assign a property, replacing the value in place (inline `; comments` survive) or appending it to the node |
+| `scene rename <file> <node-path> <new-name>` | Rename a node **and every reference to it** — descendants' `parent=`, `[connection from=/to=]`, `[editable path=]`, and every relative `NodePath("...")` literal, resolved against the node that owns it |
+| `scene add <file> <parent-path> <name> <type> [--script res://x.gd]` | Add a node after the parent's subtree; `--script` mints the `ext_resource` from the script's `.uid` sidecar, so the ref is born canonical |
+| `scene rm <file> <node-path>` | Remove a node, its descendants, its connections and editable markers, and any `ext_resource` left unreferenced |
+| `scene reparent <file> <node-path> <new-parent>` | Move a subtree and re-express the NodePaths that pointed into or out of it |
+| `scene canonicalize <file>...` | Restore what `PackedScene.pack()` + `ResourceSaver.save()` drop: uid-in-refs, the file's own header uid, `index=` on instance-child overrides, `[editable path=]` |
+
+Every verb takes `--dry-run` (prints a unified diff, writes nothing), is **idempotent** (a second run
+reports `unchanged`), and **refuses** — exit 1, with a reason — rather than write a result it cannot
+guarantee. Untouched lines are never rewritten: parse → serialise with no mutation is byte-identical,
+proven over every `.tscn`/`.tres` in the consuming repos plus a fixture carrying the awkward
+constructs (`&"StringName"` literals, inline `;` comments, multi-line dictionaries, instance
+overrides).
+
+`canonicalize` restores from **evidence, never invention**. A uid comes from the target's own `.uid`
+sidecar, its `[gd_scene]`/`[gd_resource]` header, or its `.import` file — falling back to what the rest
+of the repo already says about that path. An `index=` is counted off the base scene's actual children.
+Anything unresolvable is reported and left alone.
+
 ### Static gates (`godot-devkit check <gate>`, pure git + parse, no Godot boot)
 
 | Gate | Guards against |
 |---|---|
 | `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`; every Script `ext_resource` uid matches the target's actual `.uid`. Prevents cold-cache `invalid UID … using text path` failures. |
 | `check tres` | Path-only `ext_resource` refs (missing `uid=`). Godot 4.4+ silently upgrades these on any editor/import pass — churn that leaks into unrelated commits. Migrate once, then this keeps the tree canonical. |
+| `check props` | Assignments to properties that **do not exist** — the export was renamed or deleted and the scene still names the old one. Godot drops such an assignment silently, so the node comes up half-configured with every gate green. Checks scene nodes, sub_resources and `.tres` resources against the script's `@export` chain and the engine's ClassDB. Nothing is called dead unless the whole picture resolved; everything else is censused as UNVERIFIED, never failed. |
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
@@ -121,8 +149,11 @@ scene-diff:   ; @$(DEVKIT) scene-diff $(FILE) $(ARGS)
 refs:         ; @$(DEVKIT) refs $(NAME) $(ARGS)
 orphans:      ; @$(DEVKIT) orphans $(ARGS)
 autoloads:    ; @$(DEVKIT) autoloads
+scene-set:    ; @$(DEVKIT) scene set $(FILE) $(ARGS)
+scene-canon:  ; @$(DEVKIT) scene canonicalize $(FILE)
 uid-scan:     ; @$(DEVKIT) check uid
 tres-scan:    ; @$(DEVKIT) check tres
+prop-scan:    ; @$(DEVKIT) check props
 doc-scan:     ; @$(DEVKIT) check doc
 shell-scan:   ; @$(DEVKIT) check shell
 repo-hygiene: ; @$(DEVKIT) check repo-hygiene
@@ -150,12 +181,37 @@ exclude_prefixes = ["addons/"]
 [tres]
 exclude_prefixes = ["addons/"]
 
+[props]
+exclude_prefixes = ["addons/"]
+# Escape hatch for properties a script answers to without declaring them
+# statically (a `_get_property_list` shape the scanner cannot see):
+extra_properties = { MyWidget = ["virtual_prop"] }
+
 [repo_hygiene]
 mainline = "origin/main"
 protected = "^(main|staging|archive/.*)$"
 
 [shell]
 roots = ["tools"]
+```
+
+## Development
+
+```sh
+python3 -m unittest discover -s tests -t tests          # the suite (stdlib only)
+python3 -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('src').rglob('*.py')]"
+```
+
+Tests that need a Godot repo (round-trip corpus, gate calibration) skip cleanly when no consumer
+checkout is present; the hermetic fixtures under `tests/fixtures/` always run.
+
+`check props` compares against a snapshot of Godot's ClassDB in
+`src/godot_devkit/data/classdb.json`. Reading it boots nothing. Regenerate when the target engine
+minor moves:
+
+```sh
+godot --headless --dump-extension-api      # writes ./extension_api.json
+python3 tools/gen_classdb.py extension_api.json
 ```
 
 ## Requirements

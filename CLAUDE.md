@@ -20,9 +20,16 @@ Headless dev tooling for Godot 4.x, consumed as a **pinned-tag Python package** 
 src/godot_devkit/
   cli.py            # the ONE entry point; subcommand dispatch, no logic
   project.py        # repo_root() (git toplevel of cwd), load_config(), git_lines()
-  tscn.py           # shared .tscn/.tres parser (sections, refs, tile_map_data decode)
+  tscn.py           # shared .tscn/.tres grammar (sections + line spans, refs, tile_map_data)
+  tscn_document.py  # the mutable document: span surgery, path map, NodePath retargeting
+  classdb.py        # data/classdb.json — Godot's built-in property table, snapshotted
+  gdscript.py       # repo-wide index of what each .gd exports / extends / is named
   scene_summary.py  scene_diff.py  refs.py  orphans.py  autoloads.py
-  checks/           # uid.py  tres.py  doc.py  repo_hygiene.py  shell.py
+  scene_edit.py     # write verbs: set / rename / add / rm / reparent
+  scene_canonicalize.py   # restore uid-in-refs, header uid, index=, [editable]
+  checks/           # uid.py  tres.py  props.py  doc.py  repo_hygiene.py  shell.py
+tests/              # stdlib unittest; fixtures/ is hermetic, consumer-repo cases skip cleanly
+tools/gen_classdb.py    # regenerate the ClassDB snapshot from --dump-extension-api
 ```
 
 Tool modules own their behavior and expose `main(argv)` (introspection) or `run()` (checks); `cli.py` only routes.

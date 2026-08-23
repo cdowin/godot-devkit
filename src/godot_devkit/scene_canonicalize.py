@@ -29,7 +29,6 @@ from __future__ import annotations
 import argparse
 import difflib
 import re
-from functools import lru_cache
 from pathlib import Path
 
 from godot_devkit.project import git_lines, repo_root
@@ -64,9 +63,14 @@ class UidIndex:
     def __init__(self, root: Path) -> None:
         self.root = root
         self._cross_reference: dict[str, str] | None = None
+        self._resolved: dict[str, str | None] = {}
 
-    @lru_cache(maxsize=2048)
     def of(self, res_path: str) -> str | None:
+        if res_path not in self._resolved:
+            self._resolved[res_path] = self._resolve(res_path)
+        return self._resolved[res_path]
+
+    def _resolve(self, res_path: str) -> str | None:
         if not res_path.startswith(RES_PREFIX):
             return None
         file = self.root / res_path[len(RES_PREFIX):]
@@ -101,13 +105,15 @@ class BaseScenes:
 
     def __init__(self, root: Path) -> None:
         self.root = root
+        self._parsed: dict[str, tuple[Section, ...]] = {}
 
-    @lru_cache(maxsize=256)
     def _sections(self, res_path: str) -> tuple[Section, ...]:
-        file = self.root / res_path[len(RES_PREFIX):]
-        if not res_path.startswith(RES_PREFIX) or not file.is_file():
-            return ()
-        return tuple(parse(str(file)))
+        if res_path not in self._parsed:
+            file = self.root / res_path[len(RES_PREFIX):]
+            self._parsed[res_path] = (
+                tuple(parse(str(file)))
+                if res_path.startswith(RES_PREFIX) and file.is_file() else ())
+        return self._parsed[res_path]
 
     def child_index(self, res_path: str, parent: list[str], name: str) -> int | None:
         """The ordinal of `name` among the children of `parent` in `res_path`."""

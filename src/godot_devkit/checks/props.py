@@ -39,7 +39,7 @@ from pathlib import Path
 from godot_devkit import classdb
 from godot_devkit.gdscript import RES_PREFIX, Resolution, ScriptIndex
 from godot_devkit.project import git_lines, load_config, repo_root
-from godot_devkit.tscn import Section, join_path, node_own_path, parse, split_path
+from godot_devkit.tscn import Section, node_own_path, parse, split_path
 
 DEFAULT_EXCLUDE = ('addons/',)
 SCRIPT_PROP = 'script'

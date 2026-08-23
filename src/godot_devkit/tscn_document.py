@@ -34,7 +34,6 @@ from godot_devkit.tscn import (
     PROP_ASSIGN,
     ROOT_PATH,
     SUBNAME_SEP,
-    Prop,
     Section,
     TscnError,
     _parse_lines,
@@ -274,8 +273,9 @@ class TscnDocument:
                 pattern = _attr_pattern(attr)
                 if not pattern.search(line):
                     raise TscnError(f'section header has no {attr}= attribute: {line}')
+                replacement = join_path(list(moved))
                 edits.append((section.header_line, section.header_line + 1, [pattern.sub(
-                    lambda m: m.group(1) + join_path(list(moved)) + m.group(3),
+                    lambda m, value=replacement: m.group(1) + value + m.group(3),
                     line, count=1)]))
         return edits
 
@@ -293,8 +293,9 @@ class TscnDocument:
                 if not NODE_PATH_LITERAL.search(prop.value):
                     continue
                 rewritten = NODE_PATH_LITERAL.sub(
-                    lambda m: (m.group(1) + 'NodePath("'
-                               + _retarget(m.group(2), owner_old, owner_new, mapping) + '")'),
+                    lambda m, old=owner_old, new=owner_new: (
+                        m.group(1) + 'NodePath("'
+                        + _retarget(m.group(2), old, new, mapping) + '")'),
                     prop.value)
                 if rewritten != prop.value:
                     edits.append((prop.start, prop.end, [prop.render(rewritten)]))

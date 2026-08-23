@@ -60,7 +60,13 @@ def scope_files() -> list[Path]:
 
 
 def real_make_targets() -> set[str]:
-    """Every recipe name the Makefile actually defines."""
+    """Every recipe name the Makefile actually defines.
+
+    A repo with no Makefile has no make targets — an empty set, not a crash.
+    (Any `make x` a doc still claims is then reported as dead, which is right.)
+    """
+    if not MAKEFILE.is_file():
+        return set()
     text = MAKEFILE.read_text(encoding='utf-8', errors='replace')
     return set(MAKE_TARGET_RECIPE.findall(text))
 

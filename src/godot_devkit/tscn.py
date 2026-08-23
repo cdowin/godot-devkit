@@ -149,8 +149,10 @@ def _parse_lines(lines: list[str]) -> list[Section]:
             index += 1
             continue
         stripped = line.lstrip()
-        if (current is None or not stripped or stripped.startswith(COMMENT_CHAR)
-                or '=' not in line or stripped.startswith('[')):
+        # Not a property line: outside any section, blank, a comment, a
+        # continuation we already folded, or a bracketed form we do not own.
+        if (current is None or '=' not in line
+                or stripped.startswith((COMMENT_CHAR, '['))):
             index += 1
             continue
 
