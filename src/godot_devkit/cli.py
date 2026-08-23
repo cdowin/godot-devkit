@@ -8,8 +8,8 @@ Introspection (pure parse, never boots Godot):
     godot-devkit autoloads
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid | tres | doc | shell | repo-hygiene
-    godot-devkit check all          # the offline fast set (uid+tres+doc+shell);
+    godot-devkit check uid | tres | props | doc | shell | repo-hygiene
+    godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell);
                                     # repo-hygiene is close-time (network) and
                                     # always explicit.
 
@@ -22,7 +22,7 @@ import sys
 
 from godot_devkit import __version__
 
-OFFLINE_CHECKS = ('uid', 'tres', 'doc', 'shell')
+OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 
 
 def _usage() -> int:
@@ -37,6 +37,9 @@ def _run_check(name: str) -> int:
     if name == 'tres':
         from godot_devkit.checks import tres
         return tres.run()
+    if name == 'props':
+        from godot_devkit.checks import props
+        return props.run()
     if name == 'doc':
         from godot_devkit.checks import doc
         return doc.main([])

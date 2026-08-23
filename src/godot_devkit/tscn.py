@@ -102,10 +102,16 @@ def _basename(path: str) -> str:
     return path.rsplit(PATH_SEP, 1)[-1]
 
 
-def _scan(text: str, depth: int, in_string: bool, escaped: bool
-          ) -> tuple[int, bool, bool, int]:
-    """Consume one line of a value. Returns the carried (depth, in_string,
-    escaped) plus the index of a top-level `;` comment (-1 if none)."""
+def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool = False,
+              comment_char: str = COMMENT_CHAR) -> tuple[int, bool, bool, int]:
+    """Consume one line, tracking bracket depth with STRING AWARENESS.
+
+    Returns the carried (depth, in_string, escaped) plus the index at which a
+    top-level comment starts (-1 if none). Brackets and comment characters
+    inside a quoted string do not count — which is the whole reason this exists
+    rather than a `line.count('(')` heuristic. `comment_char` is `;` for the
+    resource format and `#` for GDScript, whose exports this also scans.
+    """
     for index, char in enumerate(text):
         if in_string:
             if escaped:
@@ -121,7 +127,7 @@ def _scan(text: str, depth: int, in_string: bool, escaped: bool
             depth += 1
         elif char in CLOSERS:
             depth -= 1
-        elif char == COMMENT_CHAR and depth <= 0:
+        elif char == comment_char and depth <= 0:
             return depth, in_string, escaped, index
     return depth, in_string, escaped, -1
 
@@ -151,13 +157,14 @@ def _parse_lines(lines: list[str]) -> list[Section]:
         key, _, raw_value = line.partition('=')
         prefix = line[:len(key) + 1]
         start = index
-        depth, in_string, escaped, comment_at = _scan(raw_value, 0, False, False)
+        depth, in_string, escaped, comment_at = scan_line(raw_value)
         value = raw_value[:comment_at] if comment_at >= 0 else raw_value
         comment = raw_value[comment_at:].strip() if comment_at >= 0 else ''
         while (depth > 0 or in_string) and index + 1 < len(lines):
             index += 1
             follow = lines[index]
-            depth, in_string, escaped, comment_at = _scan(follow, depth, in_string, escaped)
+            depth, in_string, escaped, comment_at = scan_line(
+                follow, depth, in_string, escaped)
             body = follow[:comment_at] if comment_at >= 0 else follow
             comment = follow[comment_at:].strip() if comment_at >= 0 else comment
             value += ' ' + body.strip()

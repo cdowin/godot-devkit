@@ -1,0 +1,14 @@
+[gd_scene load_steps=2 format=3 uid="uid://cfixtureclean"]
+
+[ext_resource type="Script" uid="uid://dfixturecontract" path="res://systems/contract.gd" id="1_contract"]
+
+[node name="Room" type="Node2D"]
+
+[node name="FloorLayer" type="TileMapLayer" parent="."]
+position = Vector2(0, 0)
+
+[node name="Contract" type="Node2D" parent="." node_paths=PackedStringArray("background_layer")]
+script = ExtResource("1_contract")
+background_layer = NodePath("../FloorLayer")
+flags = 3
+tint = Color(1, 1, 1, 1)

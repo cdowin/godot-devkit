@@ -18,12 +18,15 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from godot_devkit.tscn import scan_line
+
 RES_PREFIX = 'res://'
 
 CLASS_NAME_RE = re.compile(r'^\s*class_name\s+([A-Za-z_]\w*)')
 EXTENDS_RE = re.compile(r'^\s*extends\s+(.+?)\s*(?:#.*)?$')
 EXPORT_RE = re.compile(r'^\s*@export')
 VAR_RE = re.compile(r'\bvar\s+([A-Za-z_]\w*)')
+GDSCRIPT_COMMENT = '#'
 QUOTED_RE = re.compile(r'"([^"]+)"')
 # `@export_group("A")` and friends annotate the inspector; they declare nothing.
 NON_DECLARING_EXPORTS = ('@export_group', '@export_subgroup', '@export_category')
@@ -54,7 +57,11 @@ def scan_script(text: str, res_path: str) -> ScriptFacts:
     """Extract class_name / extends / @export names from one .gd source."""
     facts = ScriptFacts(res_path=res_path)
     pending_export = False
-    for line in text.split('\n'):
+    lines = text.split('\n')
+    index = -1
+    while index + 1 < len(lines):
+        index += 1
+        line = lines[index]
         stripped = line.strip()
         if facts.class_name is None:
             match = CLASS_NAME_RE.match(line)
@@ -69,6 +76,16 @@ def scan_script(text: str, res_path: str) -> ScriptFacts:
         if EXPORT_RE.match(line):
             if stripped.startswith(NON_DECLARING_EXPORTS):
                 continue
+            # `@export_flags(\n  "A:1",\n) var x` — fold the annotation's
+            # argument list back onto one line before looking for the `var`.
+            folded = line
+            depth, in_string, escaped, _ = scan_line(line, comment_char=GDSCRIPT_COMMENT)
+            while (depth > 0 or in_string) and index + 1 < len(lines):
+                index += 1
+                folded += ' ' + lines[index].strip()
+                depth, in_string, escaped, _ = scan_line(
+                    lines[index], depth, in_string, escaped, GDSCRIPT_COMMENT)
+            line = folded
             match = VAR_RE.search(line)
             if match:
                 facts.exports.add(match.group(1))
