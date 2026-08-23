@@ -49,6 +49,7 @@ CONNECTION_KIND = 'connection'
 EDITABLE_KIND = 'editable'
 EXT_RESOURCE_KIND = 'ext_resource'
 SUB_RESOURCE_KIND = 'sub_resource'
+RESOURCE_KIND = 'resource'
 SCENE_KINDS = ('gd_scene', 'gd_resource')
 COMMENT_CHAR = ';'
 PARENT_SEG = '..'
@@ -221,6 +222,7 @@ class TscnDocument:
         self._warn_dangling(doomed)
         for block in sorted(self._blocks_referencing(doomed), reverse=True):
             self._splice(block[0], block[1], [])
+        self._prune_unreferenced_ext_resources()
 
     def add_node(self, parent_path: str, name: str, node_type: str,
                  script: str | None = None) -> None:
@@ -247,55 +249,66 @@ class TscnDocument:
                      [pattern.sub(lambda m: m.group(1) + value + m.group(3), line, count=1)])
 
     def _apply_path_map(self, mapping: PathMap) -> None:
-        """Rewrite every reference affected by `old -> new` subtree moves."""
-        self._rewrite_path_attrs(mapping)
-        self._rewrite_node_paths(mapping)
+        """Rewrite every reference affected by `old -> new` subtree moves.
 
-    def _rewrite_path_attrs(self, mapping: PathMap) -> None:
-        for index in range(len(self.sections) - 1, -1, -1):
-            section = self.sections[index]
+        Edits are computed from ONE snapshot of the parse and then applied
+        bottom-up, so no edit invalidates another's line span and no edit is
+        re-derived from a half-updated document.
+        """
+        edits = self._path_attr_edits(mapping) + self._node_path_edits(mapping)
+        for start, end, replacement in sorted(edits, reverse=True):
+            self.lines[start:end] = replacement
+        self._reparse()
+
+    def _path_attr_edits(self, mapping: PathMap) -> list[tuple[int, int, list[str]]]:
+        edits = []
+        for section in self.sections:
             for attr in PATH_ATTRS.get(section.kind, ()):
                 current = section.attrs.get(attr)
                 if current is None:
                     continue
                 moved = _map_path(tuple(split_path(current)), mapping)
-                if moved != tuple(split_path(current)):
-                    self._rewrite_attr(section, attr, join_path(list(moved)))
-                    section = self.sections[index]
+                if moved == tuple(split_path(current)):
+                    continue
+                line = self.lines[section.header_line]
+                pattern = _attr_pattern(attr)
+                if not pattern.search(line):
+                    raise TscnError(f'section header has no {attr}= attribute: {line}')
+                edits.append((section.header_line, section.header_line + 1, [pattern.sub(
+                    lambda m: m.group(1) + join_path(list(moved)) + m.group(3),
+                    line, count=1)]))
+        return edits
 
-    def _rewrite_node_paths(self, mapping: PathMap) -> None:
+    def _node_path_edits(self, mapping: PathMap) -> list[tuple[int, int, list[str]]]:
         """Retarget relative NodePath literals so they still point where they did."""
-        while True:
-            edit = self._next_node_path_edit(mapping)
-            if edit is None:
-                return
-            prop, owner_old, section = edit
-            rewritten = NODE_PATH_LITERAL.sub(
-                lambda m: (m.group(1) + 'NodePath("'
-                           + _retarget(m.group(2), owner_old,
-                                       _map_path(owner_old, mapping), mapping) + '")'),
-                prop.value)
-            self._splice(prop.start, prop.end, [prop.render(rewritten)])
-
-    def _next_node_path_edit(self, mapping: PathMap):
+        edits = []
         for section in self.sections:
             if section.kind != NODE_KIND:
+                if section.kind in (SUB_RESOURCE_KIND, RESOURCE_KIND):
+                    self._note_unowned_node_paths(section)
                 continue
             owner_old = self.node_path(section)
+            owner_new = _map_path(owner_old, mapping)
             for prop in section.entries:
-                for match in NODE_PATH_LITERAL.finditer(prop.value):
-                    if _retarget(match.group(2), owner_old,
-                                 _map_path(owner_old, mapping), mapping) != match.group(2):
-                        return prop, owner_old, section
-        for section in self.sections:
-            if section.kind in (SUB_RESOURCE_KIND, 'resource'):
-                for prop in section.entries:
-                    if NODE_PATH_LITERAL.search(prop.value):
-                        self.notes.append(
-                            f'NOT REWRITTEN  {section.kind} '
-                            f'{section.attrs.get("id", "?")}.{prop.key} holds a NodePath; '
-                            f'its owning node is unknowable from the file — verify by hand')
-        return None
+                if not NODE_PATH_LITERAL.search(prop.value):
+                    continue
+                rewritten = NODE_PATH_LITERAL.sub(
+                    lambda m: (m.group(1) + 'NodePath("'
+                               + _retarget(m.group(2), owner_old, owner_new, mapping) + '")'),
+                    prop.value)
+                if rewritten != prop.value:
+                    edits.append((prop.start, prop.end, [prop.render(rewritten)]))
+        return edits
+
+    def _note_unowned_node_paths(self, section: Section) -> None:
+        """A NodePath inside a sub_resource resolves against whatever node uses
+        it — unknowable from this file, so we say so instead of guessing."""
+        for prop in section.entries:
+            if NODE_PATH_LITERAL.search(prop.value):
+                self.notes.append(
+                    f'NOT REWRITTEN  {section.kind} {section.attrs.get("id", "?")}.'
+                    f'{prop.key} holds a NodePath; its owning node is unknowable '
+                    f'from this file — verify by hand')
 
     def _move_subtree(self, node_path: str, parent_path: str) -> None:
         """Relocate a node's block (and its descendants') after the new parent's."""
@@ -304,11 +317,13 @@ class TscnDocument:
         moved_lines: list[str] = []
         for start, end in sorted(blocks):
             moved_lines.extend(self.lines[start:end])
+        while moved_lines and not moved_lines[-1].strip():
+            moved_lines.pop()                        # separators are re-added below
         for start, end in sorted(blocks, reverse=True):
             self.lines[start:end] = []
         self._reparse()
         insert = self._subtree_end(self.node(parent_path))
-        self._splice(insert, insert, moved_lines)
+        self._splice(insert, insert, ['', *moved_lines])
 
     def _subtree_end(self, section: Section) -> int:
         """The line index just past a node's own block and all its descendants'."""
@@ -344,6 +359,19 @@ class TscnDocument:
                         self.notes.append(
                             f'DANGLING  {join_path(list(owner))}.{prop.key} = '
                             f'NodePath("{match.group(2)}") now points at nothing')
+
+    def _prune_unreferenced_ext_resources(self) -> None:
+        """Drop ext_resources the removal left with no referent — what Godot
+        does on the next resave anyway. Reported, never silent."""
+        for ref_id, section in reversed(list(self.ext_resources().items())):
+            needle = EXT_REF.format(id=ref_id)
+            if any(needle in line for index, line in enumerate(self.lines)
+                   if index != section.header_line):
+                continue
+            self.notes.append(f'PRUNED  ext_resource {ref_id} '
+                              f'({section.attrs.get("path", "?")}) is no longer referenced')
+            self._splice(section.header_line, section.header_line + 1, [])
+        self._bump_load_steps()
 
     def _ensure_ext_resource(self, res_path: str, res_type: str) -> str:
         """Reuse or append an ext_resource for `res_path`; returns its id.

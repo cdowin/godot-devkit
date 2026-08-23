@@ -1,11 +1,19 @@
 """godot-devkit CLI — one entry point, subcommand per tool.
 
 Introspection (pure parse, never boots Godot):
-    godot-devkit scene <file.tscn|.tres> [--props]
+    godot-devkit scene <file.tscn|.tres> [--props] [--paths]
     godot-devkit scene-diff <file> [--git <ref>]  |  scene-diff <old> <new>
     godot-devkit refs <symbol> [--tests]
     godot-devkit orphans [--tests]
     godot-devkit autoloads
+
+Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
+    godot-devkit scene set      <file> <node-path> <prop> <value>
+    godot-devkit scene rename   <file> <node-path> <new-name>
+    godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
+    godot-devkit scene rm       <file> <node-path>
+    godot-devkit scene reparent <file> <node-path> <new-parent>
+    (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid | tres | props | doc | shell | repo-hygiene
@@ -72,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f'godot-devkit {__version__}')
         return 0
     if cmd == 'scene':
+        from godot_devkit import scene_edit
+        if rest and rest[0] in scene_edit.VERBS:
+            return scene_edit.main(rest)
         from godot_devkit import scene_summary
         return scene_summary.main(rest)
     if cmd == 'scene-diff':

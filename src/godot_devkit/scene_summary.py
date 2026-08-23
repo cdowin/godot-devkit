@@ -52,7 +52,8 @@ def format_prop(key: str, value: str, ext: dict[str, dict]) -> str:
     return f'{key}={value}'
 
 
-def print_tree(nodes: list[Section], ext: dict[str, dict], show_all: bool) -> None:
+def print_tree(nodes: list[Section], ext: dict[str, dict], show_all: bool,
+               show_paths: bool = False) -> None:
     children: dict[str, list[Section]] = defaultdict(list)
     root: Section | None = None
     for node in nodes:
@@ -71,7 +72,11 @@ def print_tree(nodes: list[Section], ext: dict[str, dict], show_all: bool) -> No
         return f'{node.attrs.get("name", "?")} [{kind or "?"}]{suffix}'
 
     def walk(node: Section, depth: int) -> None:
-        print(f'{INDENT * (depth + 1)}{describe(node)}')
+        if show_paths:
+            # The address the write verbs take, so read output is write input.
+            print(f'{INDENT}{node_own_path(node):<48} {describe(node)}')
+        else:
+            print(f'{INDENT * (depth + 1)}{describe(node)}')
         lookup = '.' if node is root else node_own_path(node)
         for child in children.get(lookup, []):
             walk(child, depth + 1)
@@ -83,7 +88,8 @@ def print_tree(nodes: list[Section], ext: dict[str, dict], show_all: bool) -> No
             walk(node, 0)
 
 
-def print_summary(sections: list[Section], path: str, show_all: bool) -> None:
+def print_summary(sections: list[Section], path: str, show_all: bool,
+                  show_paths: bool = False) -> None:
     scene = next((s for s in sections if s.kind in ('gd_scene', 'gd_resource')), None)
     ext = {s.attrs['id']: s.attrs for s in sections if s.kind == 'ext_resource'}
     subs = [s for s in sections if s.kind == 'sub_resource']
@@ -107,7 +113,7 @@ def print_summary(sections: list[Section], path: str, show_all: bool) -> None:
 
     if nodes:
         print(f'\n## node tree ({len(nodes)})')
-        print_tree(nodes, ext, show_all)
+        print_tree(nodes, ext, show_all, show_paths)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,12 +122,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('file', help='path to a .tscn or .tres')
     parser.add_argument('--props', action='store_true',
                         help='show ALL scalar props per node (default: a curated subset)')
+    parser.add_argument('--paths', action='store_true',
+                        help='print each node\'s full path — the address the '
+                             'scene write verbs take')
     args = parser.parse_args(argv)
     try:
         sections = parse(args.file)
     except OSError as err:
         parser.error(str(err))
-    print_summary(sections, args.file, args.props)
+    print_summary(sections, args.file, args.props, args.paths)
     return 0
 
 
