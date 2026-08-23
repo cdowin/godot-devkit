@@ -25,6 +25,8 @@ AWKWARD_CONSTRUCTS = (
     'index="0"',                          # instance-child override
     '[editable path=',                    # editable-children marker
     '[connection ',                       # signal connection
+    'tracks/0/path = NodePath(',           # an Animation track path in a sub_resource
+    '&"pulse": SubResource(',              # StringName dictionary key, multi-line value
 )
 
 

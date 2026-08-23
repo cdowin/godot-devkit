@@ -67,10 +67,17 @@ class RenameRewritesReferences(VerbCase):
         self.assertIn('wall_layer = NodePath', text)
         self.assertIn('; The contract wires the layers by NodePath', text)
 
+    def test_rewrites_animation_track_paths(self) -> None:
+        """An Animation lives in a sub_resource with no path of its own; its
+        tracks resolve against the AnimationPlayer's `root_node`. A rename that
+        misses them breaks the animation silently."""
+        self.run_verb('rename', str(self.scene), 'WallLayer', 'Walls')
+        self.assertIn('tracks/0/path = NodePath("Walls:modulate")', self.text())
+
     def test_touches_only_the_lines_that_reference_the_node(self) -> None:
         before = self.text()
         self.run_verb('rename', str(self.scene), 'WallLayer', 'Walls')
-        self.assertEqual(len(self.changed_lines(before)), 3)
+        self.assertEqual(len(self.changed_lines(before)), 4)
 
     def test_is_idempotent(self) -> None:
         self.run_verb('rename', str(self.scene), 'WallLayer', 'Walls')
@@ -136,7 +143,7 @@ class AddRemoveReparent(VerbCase):
         self.run_verb('rm', str(self.scene), 'Panel')
         text = self.text()
         self.assertNotIn('panel.tscn', text)
-        self.assertIn('load_steps=5', text)          # 6 -> 5, one resource fewer
+        self.assertIn('load_steps=7', text)          # 8 -> 7, one resource fewer
 
     def test_reparent_moves_the_subtree_and_fixes_its_nodepaths(self) -> None:
         self.run_verb('reparent', str(self.scene), 'Nested/Deep', '.')

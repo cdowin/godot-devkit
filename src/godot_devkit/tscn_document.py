@@ -26,6 +26,7 @@ a plausible-looking wrong answer.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from pathlib import Path
 
 from godot_devkit.tscn import (
@@ -61,6 +62,12 @@ PATH_ATTRS = {
     CONNECTION_KIND: ('from', 'to'),
     EDITABLE_KIND: ('path',),
 }
+SUB_RESOURCE_REF = re.compile(r'SubResource\("([^"]*)"\)')
+# An AnimationPlayer's track paths resolve against `root_node`, NOT against the
+# player — and Godot omits the property when it holds the default `..`.
+ANIMATION_HOSTS = ('AnimationPlayer',)
+ROOT_NODE_PROP = 'root_node'
+DEFAULT_ROOT_NODE = '..'
 SCRIPT_PROP = 'script'
 LOAD_STEPS_ATTR = 'load_steps'
 EXT_REF = 'ExtResource("{id}")'
@@ -280,14 +287,24 @@ class TscnDocument:
         return edits
 
     def _node_path_edits(self, mapping: PathMap) -> list[tuple[int, int, list[str]]]:
-        """Retarget relative NodePath literals so they still point where they did."""
+        """Retarget relative NodePath literals so they still point where they did.
+
+        Covers sub_resources too — an Animation's `tracks/N/path` is a NodePath
+        like any other, and a rename that misses it breaks the animation
+        silently.
+        """
         edits = []
+        frames = self._sub_resource_frames()
         for section in self.sections:
-            if section.kind != NODE_KIND:
-                if section.kind in (SUB_RESOURCE_KIND, RESOURCE_KIND):
+            if section.kind in (SUB_RESOURCE_KIND, RESOURCE_KIND):
+                owner_old = frames.get(section.attrs.get('id', ''))
+                if owner_old is None:
                     self._note_unowned_node_paths(section)
+                    continue
+            elif section.kind == NODE_KIND:
+                owner_old = self.node_path(section)
+            else:
                 continue
-            owner_old = self.node_path(section)
             owner_new = _map_path(owner_old, mapping)
             for prop in section.entries:
                 if not NODE_PATH_LITERAL.search(prop.value):
@@ -300,6 +317,59 @@ class TscnDocument:
                 if rewritten != prop.value:
                     edits.append((prop.start, prop.end, [prop.render(rewritten)]))
         return edits
+
+    def _resolution_frame(self, node: Section) -> tuple[str, ...]:
+        """The node path a node's sub-resources resolve their NodePaths against.
+
+        Usually the node itself. An AnimationPlayer is the exception that makes
+        this worth having: its Animation tracks are spelled relative to
+        `root_node`, which defaults to `..` and is omitted when default.
+        """
+        path = self.node_path(node)
+        prop = node.prop(ROOT_NODE_PROP)
+        literal = None
+        if prop is not None:
+            match = NODE_PATH_LITERAL.search(prop.value)
+            literal = match.group(2) if match else None
+        elif node.attrs.get('type') in ANIMATION_HOSTS:
+            literal = DEFAULT_ROOT_NODE
+        if literal is None:
+            return path
+        resolved = resolve_node_path(list(path), literal)
+        return tuple(resolved) if resolved is not None else path
+
+    def _sub_resource_frames(self) -> dict[str, tuple[str, ...] | None]:
+        """sub_resource id -> the frame its NodePaths resolve in.
+
+        A sub_resource has no path of its own, so it borrows the frame of the
+        node that uses it, followed transitively (node -> AnimationLibrary ->
+        Animation). `None` means two different nodes use it in two different
+        frames — ambiguous, so we report instead of rewriting.
+        """
+        subs = {s.attrs['id']: s for s in self.sections
+                if s.kind == SUB_RESOURCE_KIND and 'id' in s.attrs}
+        frames: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+        pending: list[tuple[str, tuple[str, ...]]] = []
+        for node in self.nodes:
+            frame = self._resolution_frame(node)
+            for prop in node.entries:
+                for match in SUB_RESOURCE_REF.finditer(prop.value):
+                    frames[match.group(1)].add(frame)
+                    pending.append((match.group(1), frame))
+        seen: set[tuple[str, tuple[str, ...]]] = set()
+        while pending:
+            entry = pending.pop()
+            if entry in seen:
+                continue
+            seen.add(entry)
+            section = subs.get(entry[0])
+            if section is None:
+                continue
+            for prop in section.entries:
+                for match in SUB_RESOURCE_REF.finditer(prop.value):
+                    frames[match.group(1)].add(entry[1])
+                    pending.append((match.group(1), entry[1]))
+        return {sid: (next(iter(f)) if len(f) == 1 else None) for sid, f in frames.items()}
 
     def _note_unowned_node_paths(self, section: Section) -> None:
         """A NodePath inside a sub_resource resolves against whatever node uses
