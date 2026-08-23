@@ -23,6 +23,7 @@ src/godot_devkit/
   tscn.py           # shared .tscn/.tres grammar (sections + line spans, refs, tile_map_data)
   tscn_document.py  # the mutable document: span surgery, path map, NodePath retargeting
   classdb.py        # data/classdb.json — Godot's built-in property table, snapshotted
+  uid_index.py      # where a resource's uid lives (.uid sidecar / header / .import / repo)
   gdscript.py       # repo-wide index of what each .gd exports / extends / is named
   scene_summary.py  scene_diff.py  refs.py  orphans.py  autoloads.py
   scene_edit.py     # write verbs: set / rename / add / rm / reparent

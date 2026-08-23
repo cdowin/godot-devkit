@@ -71,7 +71,6 @@ DEFAULT_ROOT_NODE = '..'
 SCRIPT_PROP = 'script'
 LOAD_STEPS_ATTR = 'load_steps'
 EXT_REF = 'ExtResource("{id}")'
-UID_SIDECAR_SUFFIX = '.uid'
 
 PathMap = dict[tuple[str, ...], tuple[str, ...]]
 
@@ -456,10 +455,11 @@ class TscnDocument:
                       default=0) + 1
         stem = res_path.rsplit(PATH_SEP, 1)[-1].rsplit('.', 1)[0]
         ref_id = f'{ordinal}_{stem}'
-        uid = self._sidecar_uid(res_path)
+        uid = self._uid_of(res_path)
         if uid is None:
-            self.notes.append(f'NO UID  {res_path} has no .uid sidecar — ref written '
-                              f'path-only; run `check tres` after Godot resaves it')
+            self.notes.append(f'NO UID  {res_path} has no resolvable uid (.uid sidecar, '
+                              f'resource header, .import, or an existing repo ref) — '
+                              f'the ref is path-only and `check tres` will flag it')
             attrs = f'type="{res_type}" path="{res_path}" id="{ref_id}"'
         else:
             attrs = f'type="{res_type}" uid="{uid}" path="{res_path}" id="{ref_id}"'
@@ -469,16 +469,18 @@ class TscnDocument:
         self._bump_load_steps()
         return ref_id
 
-    def _sidecar_uid(self, res_path: str) -> str | None:
-        if self.path is None or not res_path.startswith('res://'):
-            return None
-        root = _repo_root_for(self.path)
-        if root is None:
-            return None
-        sidecar = root / (res_path[len('res://'):] + UID_SIDECAR_SUFFIX)
-        if not sidecar.is_file():
-            return None
-        return sidecar.read_text(encoding='utf-8').strip() or None
+    def _uid_of(self, res_path: str) -> str | None:
+        """The uid to write into a new ref, via the one uid resolver.
+
+        The project root is the document's own `project.godot` ancestor when it
+        has one, and the invoking repo otherwise — a scene being authored into a
+        scratch directory still resolves its script's uid.
+        """
+        from godot_devkit.project import repo_root
+        from godot_devkit.uid_index import UidIndex
+
+        root = _repo_root_for(self.path) if self.path is not None else None
+        return UidIndex(root or repo_root()).of(res_path)
 
     def _bump_load_steps(self) -> None:
         scene = next((s for s in self.sections if s.kind in SCENE_KINDS), None)

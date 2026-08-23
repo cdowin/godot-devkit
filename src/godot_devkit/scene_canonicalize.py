@@ -31,73 +31,19 @@ import difflib
 import re
 from pathlib import Path
 
-from godot_devkit.project import git_lines, repo_root
+from godot_devkit.project import repo_root
 from godot_devkit.tscn import Section, node_own_path, parse, split_path
 from godot_devkit.tscn_document import TscnDocument
+from godot_devkit.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
 
-RES_PREFIX = 'res://'
-UID_ATTR = re.compile(r'\buid="(uid://[0-9a-z]+)"')
-PATH_ATTR = re.compile(r'\bpath="(res://[^"]+)"')
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 SCENE_HEADER_KINDS = ('gd_scene', 'gd_resource')
-UID_SIDECAR_SUFFIX = '.uid'
-IMPORT_SUFFIX = '.import'
 INSTANCE_ATTR = 'instance'
 EDITABLE_KIND = 'editable'
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 DIFF_CONTEXT = 1
-
-
-class UidIndex:
-    """Where a Godot resource's uid lives, by resource kind.
-
-    Three homes, and a fourth resort: a `.gd` keeps it in a `.gd.uid` sidecar, a
-    `.tscn`/`.tres` in its own header, an imported asset (`.png`, `.ttf`, `.ogg`)
-    in its `.import` file. If none of those exist — the file is untracked, or
-    generated — we fall back to what the rest of the repo already says about it,
-    which is evidence rather than invention.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self._cross_reference: dict[str, str] | None = None
-        self._resolved: dict[str, str | None] = {}
-
-    def of(self, res_path: str) -> str | None:
-        if res_path not in self._resolved:
-            self._resolved[res_path] = self._resolve(res_path)
-        return self._resolved[res_path]
-
-    def _resolve(self, res_path: str) -> str | None:
-        if not res_path.startswith(RES_PREFIX):
-            return None
-        file = self.root / res_path[len(RES_PREFIX):]
-        sidecar = file.with_suffix(file.suffix + UID_SIDECAR_SUFFIX)
-        if sidecar.is_file():
-            return sidecar.read_text(encoding='utf-8').strip() or None
-        importer = file.with_suffix(file.suffix + IMPORT_SUFFIX)
-        for candidate in (file, importer):
-            if candidate.is_file() and candidate.suffix in ('.tscn', '.tres', IMPORT_SUFFIX):
-                match = UID_ATTR.search(candidate.read_text(
-                    encoding='utf-8', errors='replace')[:4096])
-                if match:
-                    return match.group(1)
-        return self._from_cross_reference(res_path)
-
-    def _from_cross_reference(self, res_path: str) -> str | None:
-        if self._cross_reference is None:
-            self._cross_reference = {}
-            for rel in git_lines('ls-files', '*.tscn', '*.tres'):
-                for line in (self.root / rel).read_text(
-                        encoding='utf-8', errors='replace').splitlines():
-                    if not line.startswith('[ext_resource '):
-                        continue
-                    path_m, uid_m = PATH_ATTR.search(line), UID_ATTR.search(line)
-                    if path_m and uid_m:
-                        self._cross_reference.setdefault(path_m.group(1), uid_m.group(1))
-        return self._cross_reference.get(res_path)
 
 
 class BaseScenes:
@@ -161,7 +107,7 @@ def _restore_header_uid(doc: TscnDocument, rel: str, uids: UidIndex) -> list[str
     header = next((s for s in doc.sections if s.kind in SCENE_HEADER_KINDS), None)
     if header is None or 'uid' in header.attrs:
         return []
-    known = uids._from_cross_reference(RES_PREFIX + rel)
+    known = uids.from_repo_references(RES_PREFIX + rel)
     if known is None:
         return [f'  UNRESOLVED  {rel} has no header uid and nothing references it by uid']
     line = doc.lines[header.header_line]

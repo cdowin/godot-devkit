@@ -168,6 +168,34 @@ class AddRemoveReparent(VerbCase):
         self.assertIn('target = NodePath("../../../WallLayer")', text)
 
 
+class ScriptRefsAreBornCanonical(VerbCase):
+    """`check tres` requires uid-in-refs. A verb that mints a path-only ref is
+    handing the next gate a failure, so `add --script` resolves the uid."""
+
+    def test_add_with_script_writes_a_uid_in_ref(self) -> None:
+        from support import temp_repo
+
+        with temp_repo('canon_repo') as root:
+            scene = root / 'scenes/panel.tscn'
+            code = scene_edit.main(['add', str(scene), '.', 'Logic', 'Node2D',
+                                    '--script', 'res://systems/logic.gd'])
+            text = scene.read_text(encoding='utf-8')
+        self.assertEqual(code, scene_edit.EXIT_OK)
+        self.assertIn('uid="uid://dcanonlogic" path="res://systems/logic.gd"', text)
+        self.assertIn('script = ExtResource(', text)
+
+    def test_add_reports_a_script_whose_uid_cannot_be_resolved(self) -> None:
+        from support import temp_repo
+
+        with temp_repo('canon_repo') as root:
+            scene = root / 'scenes/panel.tscn'
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                scene_edit.main(['add', str(scene), '.', 'Ghost', 'Node2D',
+                                 '--script', 'res://systems/ghost.gd'])
+        self.assertIn('NO UID', output.getvalue())
+
+
 class DryRun(VerbCase):
     def test_dry_run_writes_nothing(self) -> None:
         before = self.text()
