@@ -13,6 +13,9 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
     godot-devkit scene rm       <file> <node-path>
     godot-devkit scene reparent <file> <node-path> <new-parent>
+    godot-devkit scene canonicalize <file>...   # restore what PackedScene.pack()
+                                                # drops: uid-in-refs, the header
+                                                # uid, index= on instance children
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
@@ -81,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if cmd == 'scene':
         from godot_devkit import scene_edit
+        if rest and rest[0] == 'canonicalize':
+            from godot_devkit import scene_canonicalize
+            return scene_canonicalize.main(rest[1:])
         if rest and rest[0] in scene_edit.VERBS:
             return scene_edit.main(rest)
         from godot_devkit import scene_summary
