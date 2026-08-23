@@ -1,0 +1,471 @@
+"""tscn_document.py — a .tscn you can edit WITHOUT reformatting it.
+
+The document owns the file's lines verbatim. Every edit is span surgery: replace
+the lines a property/section actually occupies, leave every other byte alone.
+`TscnDocument.load(p).text == p.read_text()` is the invariant the whole toolkit
+rests on, and it is what makes these verbs safer than `sed` rather than a
+fancier way to be reckless.
+
+Nodes are addressed BY PATH, because that is how .tscn addresses them:
+`parent="Center"` + `name="Panel"` is the node `Center/Panel`, and the root is
+`.`. Format 4's `unique_id=` is a serialisation detail, not an address — nothing
+here keys off it.
+
+The hard part is not moving lines, it is keeping REFERENCES true. A rename or a
+reparent changes the absolute path of a whole subtree, so this module rewrites,
+in one pass driven by a single old-path -> new-path map:
+  * every `parent=` on a descendant,
+  * every `[connection from=/to=]` and `[editable path=]`,
+  * every relative `NodePath("...")` literal that resolved into the moved
+    subtree — resolved against the node that OWNS it, never text-matched.
+A blanket `s/Sandbox/Vertical room/g` cannot tell `NodePath("Sandbox/X")` from
+prose; that is the incident this module exists to make impossible. When a
+reference cannot be re-expressed truthfully, the edit RAISES instead of writing
+a plausible-looking wrong answer.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from godot_devkit.tscn import (
+    NODE_PATH_LITERAL,
+    PATH_SEP,
+    PROP_ASSIGN,
+    ROOT_PATH,
+    SUBNAME_SEP,
+    Prop,
+    Section,
+    TscnError,
+    _parse_lines,
+    join_path,
+    node_own_path,
+    resolve_node_path,
+    split_path,
+)
+
+NODE_KIND = 'node'
+CONNECTION_KIND = 'connection'
+EDITABLE_KIND = 'editable'
+EXT_RESOURCE_KIND = 'ext_resource'
+SUB_RESOURCE_KIND = 'sub_resource'
+SCENE_KINDS = ('gd_scene', 'gd_resource')
+COMMENT_CHAR = ';'
+PARENT_SEG = '..'
+
+# Header attributes whose value is a scene-relative NODE PATH (so a rename or a
+# reparent has to rewrite them). `node_paths=` is deliberately absent: it lists
+# PROPERTY names, not paths, and rewriting it is a classic blanket-sed bug.
+PATH_ATTRS = {
+    NODE_KIND: ('parent',),
+    CONNECTION_KIND: ('from', 'to'),
+    EDITABLE_KIND: ('path',),
+}
+SCRIPT_PROP = 'script'
+LOAD_STEPS_ATTR = 'load_steps'
+EXT_REF = 'ExtResource("{id}")'
+UID_SIDECAR_SUFFIX = '.uid'
+
+PathMap = dict[tuple[str, ...], tuple[str, ...]]
+
+
+def _attr_pattern(name: str) -> re.Pattern:
+    return re.compile(rf'(\b{name}=")((?:[^"\\]|\\.)*)(")')
+
+
+class TscnDocument:
+    """A parsed .tscn/.tres whose text survives a no-op round trip byte-for-byte."""
+
+    def __init__(self, text: str, path: Path | None = None) -> None:
+        self.path = path
+        self.lines = text.split('\n')
+        self.sections = _parse_lines(self.lines)
+        self.notes: list[str] = []
+
+    # --- construction / serialisation --------------------------------------
+    @classmethod
+    def load(cls, path: str | Path) -> TscnDocument:
+        file = Path(path)
+        return cls(file.read_text(encoding='utf-8'), file)
+
+    @property
+    def text(self) -> str:
+        return '\n'.join(self.lines)
+
+    def save(self, path: str | Path | None = None) -> Path:
+        target = Path(path) if path is not None else self.path
+        if target is None:
+            raise TscnError('no path to save to')
+        target.write_text(self.text, encoding='utf-8')
+        return target
+
+    def _reparse(self) -> None:
+        self.sections = _parse_lines(self.lines)
+
+    # --- lookups ------------------------------------------------------------
+    @property
+    def nodes(self) -> list[Section]:
+        return [s for s in self.sections if s.kind == NODE_KIND]
+
+    def node(self, path: str) -> Section:
+        wanted = split_path(path)
+        for section in self.nodes:
+            if split_path(node_own_path(section)) == wanted:
+                return section
+        # Convenience: address the root by its own name as well as by `.`.
+        root = self.root
+        if root is not None and wanted == [root.attrs.get('name')]:
+            return root
+        raise TscnError(f'no node at path {path!r}')
+
+    def has_node(self, path: str) -> bool:
+        try:
+            self.node(path)
+        except TscnError:
+            return False
+        return True
+
+    @property
+    def root(self) -> Section | None:
+        return next((s for s in self.nodes if 'parent' not in s.attrs), None)
+
+    def node_path(self, section: Section) -> tuple[str, ...]:
+        return tuple(split_path(node_own_path(section)))
+
+    def descendants(self, section: Section) -> list[Section]:
+        """Every node under `section`, in file order (the section excluded)."""
+        base = self.node_path(section)
+        return [n for n in self.nodes
+                if len(self.node_path(n)) > len(base) and self.node_path(n)[:len(base)] == base]
+
+    def ext_resources(self) -> dict[str, Section]:
+        return {s.attrs['id']: s for s in self.sections
+                if s.kind == EXT_RESOURCE_KIND and 'id' in s.attrs}
+
+    # --- line surgery -------------------------------------------------------
+    def _splice(self, start: int, end: int, replacement: list[str]) -> None:
+        self.lines[start:end] = replacement
+        self._reparse()
+
+    def _block_span(self, section: Section) -> tuple[int, int]:
+        """The lines a section owns for move/delete: its header and body, any
+        contiguous comment lines directly above it (they document THIS section),
+        and the blank separator lines below it."""
+        start = section.header_line
+        while start > 0 and self.lines[start - 1].lstrip().startswith(COMMENT_CHAR):
+            start -= 1
+        end = section.body_end
+        while end < len(self.lines) and not self.lines[end].strip():
+            end += 1
+        return start, end
+
+    # --- properties ---------------------------------------------------------
+    def set_prop(self, node_path: str, key: str, value: str) -> str:
+        """Assign `key = value` on a node. Returns 'set' or 'added'."""
+        section = self.node(node_path)
+        existing = section.prop(key)
+        if existing is not None:
+            self._splice(existing.start, existing.end, [existing.render(value)])
+            return 'set'
+        self._splice(section.body_end, section.body_end, [f'{key}{PROP_ASSIGN}{value}'])
+        return 'added'
+
+    def remove_prop(self, node_path: str, key: str) -> None:
+        section = self.node(node_path)
+        existing = section.prop(key)
+        if existing is None:
+            raise TscnError(f'node {node_path!r} has no property {key!r}')
+        self._splice(existing.start, existing.end, [])
+
+    # --- structure ----------------------------------------------------------
+    def rename_node(self, node_path: str, new_name: str) -> None:
+        section = self.node(node_path)
+        old = self.node_path(section)
+        if not new_name or PATH_SEP in new_name:
+            raise TscnError(f'invalid node name {new_name!r}')
+        if not old:                                   # the scene root
+            self._rewrite_attr(section, 'name', new_name)
+            return
+        new = old[:-1] + (new_name,)
+        if any(self.node_path(n) == new for n in self.nodes):
+            raise TscnError(f'a sibling named {new_name!r} already exists')
+        self._apply_path_map({old: new})
+        self._rewrite_attr(self.node(join_path(list(old))), 'name', new_name)
+
+    def reparent_node(self, node_path: str, new_parent_path: str) -> None:
+        section = self.node(node_path)
+        old = self.node_path(section)
+        if not old:
+            raise TscnError('cannot reparent the scene root')
+        parent = self.node(new_parent_path)
+        target = self.node_path(parent)
+        if target[:len(old)] == old:
+            raise TscnError('cannot reparent a node under itself')
+        new = target + (old[-1],)
+        if new == old:
+            return
+        if any(self.node_path(n) == new for n in self.nodes):
+            raise TscnError(f'{new_parent_path!r} already has a child named {old[-1]!r}')
+
+        self._apply_path_map({old: new})
+        moved = self.node(join_path(list(old)))
+        self._rewrite_attr(moved, 'parent', join_path(list(target)))
+        self._move_subtree(join_path(list(new)), parent_path=join_path(list(target)))
+
+    def remove_node(self, node_path: str) -> None:
+        section = self.node(node_path)
+        if self.node_path(section) == ():
+            raise TscnError('cannot remove the scene root')
+        doomed = {self.node_path(section)}
+        doomed.update(self.node_path(n) for n in self.descendants(section))
+        self._warn_dangling(doomed)
+        for block in sorted(self._blocks_referencing(doomed), reverse=True):
+            self._splice(block[0], block[1], [])
+
+    def add_node(self, parent_path: str, name: str, node_type: str,
+                 script: str | None = None) -> None:
+        parent = self.node(parent_path)
+        parent_abs = self.node_path(parent)
+        if any(self.node_path(n) == parent_abs + (name,) for n in self.nodes):
+            raise TscnError(f'{parent_path!r} already has a child named {name!r}')
+        header = (f'[node name="{name}" type="{node_type}" '
+                  f'parent="{join_path(list(parent_abs))}"]')
+        body = [header]
+        if script:
+            ref_id = self._ensure_ext_resource(script, 'Script')
+            body.append(f'{SCRIPT_PROP}{PROP_ASSIGN}{EXT_REF.format(id=ref_id)}')
+        insert = self._subtree_end(self.node(parent_path))
+        self._splice(insert, insert, ['', *body])
+
+    # --- reference bookkeeping ---------------------------------------------
+    def _rewrite_attr(self, section: Section, attr: str, value: str) -> None:
+        line = self.lines[section.header_line]
+        pattern = _attr_pattern(attr)
+        if not pattern.search(line):
+            raise TscnError(f'section header has no {attr}= attribute: {line}')
+        self._splice(section.header_line, section.header_line + 1,
+                     [pattern.sub(lambda m: m.group(1) + value + m.group(3), line, count=1)])
+
+    def _apply_path_map(self, mapping: PathMap) -> None:
+        """Rewrite every reference affected by `old -> new` subtree moves."""
+        self._rewrite_path_attrs(mapping)
+        self._rewrite_node_paths(mapping)
+
+    def _rewrite_path_attrs(self, mapping: PathMap) -> None:
+        for index in range(len(self.sections) - 1, -1, -1):
+            section = self.sections[index]
+            for attr in PATH_ATTRS.get(section.kind, ()):
+                current = section.attrs.get(attr)
+                if current is None:
+                    continue
+                moved = _map_path(tuple(split_path(current)), mapping)
+                if moved != tuple(split_path(current)):
+                    self._rewrite_attr(section, attr, join_path(list(moved)))
+                    section = self.sections[index]
+
+    def _rewrite_node_paths(self, mapping: PathMap) -> None:
+        """Retarget relative NodePath literals so they still point where they did."""
+        while True:
+            edit = self._next_node_path_edit(mapping)
+            if edit is None:
+                return
+            prop, owner_old, section = edit
+            rewritten = NODE_PATH_LITERAL.sub(
+                lambda m: (m.group(1) + 'NodePath("'
+                           + _retarget(m.group(2), owner_old,
+                                       _map_path(owner_old, mapping), mapping) + '")'),
+                prop.value)
+            self._splice(prop.start, prop.end, [prop.render(rewritten)])
+
+    def _next_node_path_edit(self, mapping: PathMap):
+        for section in self.sections:
+            if section.kind != NODE_KIND:
+                continue
+            owner_old = self.node_path(section)
+            for prop in section.entries:
+                for match in NODE_PATH_LITERAL.finditer(prop.value):
+                    if _retarget(match.group(2), owner_old,
+                                 _map_path(owner_old, mapping), mapping) != match.group(2):
+                        return prop, owner_old, section
+        for section in self.sections:
+            if section.kind in (SUB_RESOURCE_KIND, 'resource'):
+                for prop in section.entries:
+                    if NODE_PATH_LITERAL.search(prop.value):
+                        self.notes.append(
+                            f'NOT REWRITTEN  {section.kind} '
+                            f'{section.attrs.get("id", "?")}.{prop.key} holds a NodePath; '
+                            f'its owning node is unknowable from the file — verify by hand')
+        return None
+
+    def _move_subtree(self, node_path: str, parent_path: str) -> None:
+        """Relocate a node's block (and its descendants') after the new parent's."""
+        section = self.node(node_path)
+        blocks = [self._block_span(s) for s in (section, *self.descendants(section))]
+        moved_lines: list[str] = []
+        for start, end in sorted(blocks):
+            moved_lines.extend(self.lines[start:end])
+        for start, end in sorted(blocks, reverse=True):
+            self.lines[start:end] = []
+        self._reparse()
+        insert = self._subtree_end(self.node(parent_path))
+        self._splice(insert, insert, moved_lines)
+
+    def _subtree_end(self, section: Section) -> int:
+        """The line index just past a node's own block and all its descendants'."""
+        spans = [self._block_span(s) for s in (section, *self.descendants(section))]
+        end = max(span[1] for span in spans)
+        while end > 0 and not self.lines[end - 1].strip():
+            end -= 1
+        return end
+
+    def _blocks_referencing(self, doomed: set[tuple[str, ...]]) -> list[tuple[int, int]]:
+        blocks = []
+        for section in self.sections:
+            if section.kind == NODE_KIND:
+                if self.node_path(section) in doomed:
+                    blocks.append(self._block_span(section))
+                continue
+            for attr in PATH_ATTRS.get(section.kind, ()):
+                value = section.attrs.get(attr)
+                if value is not None and tuple(split_path(value)) in doomed:
+                    blocks.append(self._block_span(section))
+                    break
+        return blocks
+
+    def _warn_dangling(self, doomed: set[tuple[str, ...]]) -> None:
+        for section in self.nodes:
+            owner = self.node_path(section)
+            if owner in doomed:
+                continue
+            for prop in section.entries:
+                for match in NODE_PATH_LITERAL.finditer(prop.value):
+                    target = resolve_node_path(list(owner), match.group(2).split(SUBNAME_SEP)[0])
+                    if target is not None and _longest_prefix(tuple(target), doomed):
+                        self.notes.append(
+                            f'DANGLING  {join_path(list(owner))}.{prop.key} = '
+                            f'NodePath("{match.group(2)}") now points at nothing')
+
+    def _ensure_ext_resource(self, res_path: str, res_type: str) -> str:
+        """Reuse or append an ext_resource for `res_path`; returns its id.
+        The uid comes from the resource's committed `.uid` sidecar, so a scene
+        authored here is born canonical (`check tres` demands uid-in-refs)."""
+        for ref_id, section in self.ext_resources().items():
+            if section.attrs.get('path') == res_path:
+                return ref_id
+        used = self.ext_resources()
+        ordinal = max((int(k.split('_')[0]) for k in used if k.split('_')[0].isdigit()),
+                      default=0) + 1
+        stem = res_path.rsplit(PATH_SEP, 1)[-1].rsplit('.', 1)[0]
+        ref_id = f'{ordinal}_{stem}'
+        uid = self._sidecar_uid(res_path)
+        if uid is None:
+            self.notes.append(f'NO UID  {res_path} has no .uid sidecar — ref written '
+                              f'path-only; run `check tres` after Godot resaves it')
+            attrs = f'type="{res_type}" path="{res_path}" id="{ref_id}"'
+        else:
+            attrs = f'type="{res_type}" uid="{uid}" path="{res_path}" id="{ref_id}"'
+        anchor = max((s.body_end for s in self.sections
+                      if s.kind in (EXT_RESOURCE_KIND, *SCENE_KINDS)), default=1)
+        self._splice(anchor, anchor, [f'[{EXT_RESOURCE_KIND} {attrs}]'])
+        self._bump_load_steps()
+        return ref_id
+
+    def _sidecar_uid(self, res_path: str) -> str | None:
+        if self.path is None or not res_path.startswith('res://'):
+            return None
+        root = _repo_root_for(self.path)
+        if root is None:
+            return None
+        sidecar = root / (res_path[len('res://'):] + UID_SIDECAR_SUFFIX)
+        if not sidecar.is_file():
+            return None
+        return sidecar.read_text(encoding='utf-8').strip() or None
+
+    def _bump_load_steps(self) -> None:
+        scene = next((s for s in self.sections if s.kind in SCENE_KINDS), None)
+        if scene is None or LOAD_STEPS_ATTR not in scene.attrs:
+            return                                   # format 4 omits load_steps
+        steps = 1 + sum(1 for s in self.sections
+                        if s.kind in (EXT_RESOURCE_KIND, SUB_RESOURCE_KIND))
+        line = self.lines[scene.header_line]
+        self._splice(scene.header_line, scene.header_line + 1,
+                     [re.sub(rf'\b{LOAD_STEPS_ATTR}=\d+', f'{LOAD_STEPS_ATTR}={steps}', line)])
+
+
+def _repo_root_for(path: Path) -> Path | None:
+    for parent in path.resolve().parents:
+        if (parent / 'project.godot').is_file():
+            return parent
+    return None
+
+
+def _longest_prefix(path: tuple[str, ...], keys) -> tuple[str, ...] | None:
+    """The longest key in `keys` that is `path` or one of its ancestors."""
+    best = None
+    for key in keys:
+        if path[:len(key)] == key and (best is None or len(key) > len(best)):
+            best = key
+    return best
+
+
+def _map_path(path: tuple[str, ...], mapping: PathMap) -> tuple[str, ...]:
+    key = _longest_prefix(path, mapping.keys())
+    return path if key is None else mapping[key] + path[len(key):]
+
+
+def _retarget(literal: str, owner_old: tuple[str, ...], owner_new: tuple[str, ...],
+              mapping: PathMap) -> str:
+    """Re-spell one NodePath literal so it still resolves to the same node.
+
+    Tries the minimal edit first (swap the renamed segment in place, keeping the
+    author's `../` style); falls back to recomputing the relative path when the
+    owner itself moved. Refuses rather than emit a path that resolves elsewhere.
+    """
+    main, sep, subname = literal.partition(SUBNAME_SEP)
+    target_old = resolve_node_path(list(owner_old), main)
+    if target_old is None:
+        return literal                               # absolute or above-root
+    target_new = _map_path(tuple(target_old), mapping)
+    if tuple(target_old) == target_new and owner_old == owner_new:
+        return literal
+
+    candidate = _swap_in_place(main, owner_old, mapping)
+    if candidate is not None:
+        resolved = resolve_node_path(list(owner_new), candidate)
+        if resolved is not None and tuple(resolved) == target_new:
+            return candidate + sep + subname
+    candidate = _relative_path(owner_new, target_new)
+    resolved = resolve_node_path(list(owner_new), candidate)
+    if resolved is None or tuple(resolved) != target_new:
+        raise TscnError(f'cannot re-express NodePath("{literal}") after the move')
+    return candidate + sep + subname
+
+
+def _swap_in_place(main: str, owner: tuple[str, ...], mapping: PathMap) -> str | None:
+    """Rebuild a literal by renaming only the segments it spells out itself."""
+    walk = list(owner)
+    parts = main.split(PATH_SEP)
+    rebuilt: list[str] = []
+    for part in parts:
+        if part in ('', '.'):
+            rebuilt.append(part)
+            continue
+        if part == PARENT_SEG:
+            if not walk:
+                return None
+            walk.pop()
+            rebuilt.append(part)
+            continue
+        walk.append(part)
+        moved = _map_path(tuple(walk), mapping)
+        rebuilt.append(moved[len(walk) - 1] if len(moved) == len(walk) else part)
+    return PATH_SEP.join(rebuilt)
+
+
+def _relative_path(owner: tuple[str, ...], target: tuple[str, ...]) -> str:
+    common = 0
+    while common < min(len(owner), len(target)) and owner[common] == target[common]:
+        common += 1
+    hops = [PARENT_SEG] * (len(owner) - common)
+    rest = list(target[common:])
+    return PATH_SEP.join(hops + rest) if (hops or rest) else ROOT_PATH
