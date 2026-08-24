@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased — the .tscn toolkit
+## v0.4.0 — 2026-08-23 — the .tscn toolkit
+
+**On upgrade:** nothing a consumer must edit — every existing subcommand, flag, and output shape is
+unchanged, so bumping `DEVKIT_VERSION` is a one-line diff. The new `check props` gate is **opt-in**:
+it runs only when a consumer wires it into its own gate set. It currently reports 25 findings in
+nullbound and 5 in trail, all of them real renamed-export assignments that Godot drops silently — so
+wire it deliberately, after a cleanup pass, not as part of the version bump.
 
 A `.tscn` is text, and now it is text we edit *through* tools instead of around them.
 
