@@ -107,7 +107,8 @@ def _basename(path: str) -> str:
 
 
 def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool = False,
-              comment_char: str = COMMENT_CHAR) -> tuple[int, bool, bool, int]:
+              comment_char: str = COMMENT_CHAR,
+              comment_in_brackets: bool = False) -> tuple[int, bool, bool, int]:
     """Consume one line, tracking bracket depth with STRING AWARENESS.
 
     Returns the carried (depth, in_string, escaped) plus the index at which a
@@ -115,6 +116,9 @@ def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool 
     inside a quoted string do not count — which is the whole reason this exists
     rather than a `line.count('(')` heuristic. `comment_char` is `;` for the
     resource format and `#` for GDScript, whose exports this also scans.
+    `comment_in_brackets` is the one place the two grammars differ: a `;` inside
+    a multi-line `.tres` value is DATA, a `#` inside a multi-line GDScript
+    `enum {}` or array literal is a COMMENT.
     """
     for index, char in enumerate(text):
         if in_string:
@@ -131,7 +135,7 @@ def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool 
             depth += 1
         elif char in CLOSERS:
             depth -= 1
-        elif char == comment_char and depth <= 0:
+        elif char == comment_char and (comment_in_brackets or depth <= 0):
             return depth, in_string, escaped, index
     return depth, in_string, escaped, -1
 
