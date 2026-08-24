@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0
 
 **New gate — `check defaults`.** A `.tres` assignment may not repeat the value its script already
 declares as the `@export` default. Two writers, two formats: hand-authored data spells every property
