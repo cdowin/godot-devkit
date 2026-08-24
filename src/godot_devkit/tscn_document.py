@@ -35,6 +35,7 @@ from godot_devkit.tscn import (
     PROP_ASSIGN,
     ROOT_PATH,
     SUBNAME_SEP,
+    Prop,
     Section,
     TscnError,
     _parse_lines,
@@ -182,6 +183,20 @@ class TscnDocument:
         if existing is None:
             raise TscnError(f'node {node_path!r} has no property {key!r}')
         self._splice(existing.start, existing.end, [])
+
+    def delete_props(self, props: list[Prop]) -> int:
+        """Delete whole property assignments by their line spans, bottom-up.
+
+        Batch, because every deletion shifts the spans below it — one pass in
+        reverse file order keeps the surviving spans valid without a reparse
+        per line. Multi-line values come out whole: the span is what the parser
+        folded, not one line of it.
+        """
+        for prop in sorted(props, key=lambda entry: entry.start, reverse=True):
+            self.lines[prop.start:prop.end] = []
+        if props:
+            self._reparse()
+        return len(props)
 
     # --- structure ----------------------------------------------------------
     def rename_node(self, node_path: str, new_name: str) -> None:

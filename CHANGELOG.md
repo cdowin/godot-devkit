@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.5.0
+
+**New gate — `check defaults`.** A `.tres` assignment may not repeat the value its script already
+declares as the `@export` default. Two writers, two formats: hand-authored data spells every property
+out, Godot's writer omits anything equal to the default — so `trigger = 0` for
+`@export var trigger: Trigger = Trigger.ALL_PLAYERS_DOWN` vanishes on the first editor save and the
+file diffs forever. Precision is the design constraint, as in `check props`: both sides of every
+comparison must normalise into one small closed value language (bool / number / string / empty array /
+empty dict / null / numeric constructor), with enum members, `const`s and `const Alias = preload(...)`
+chains resolved from the scripts themselves. Anything outside it — an accessor on the export, an
+engine built-in with no default table, a `preload()` default — is censused as NOT-A-FINDING and never
+reported. Calibrated against Godot's own writer over 559 real `.tres`: **0 false positives, 97.1% of
+the engine's own elisions found.** Config: `[defaults] exclude_prefixes`.
+
+**Scope, stated plainly:** the gate judges the property-ELISION dimension only. Godot's writer also
+reorders properties into declaration order, respells typed arrays and floats, mints `ext_resource`
+entries for typed-array element types, and drops `;` comments. A PASS means "no redundant defaults",
+not "the editor would leave this file alone" — the other dimensions are not decidable by parse without
+reimplementing `ResourceFormatSaverText`.
+
+**New flag — `scene canonicalize --elide-defaults`.** The fixer for the above. Opt-in, because it
+deletes lines. It is a line-deletion pass, never a re-serialisation: over 559 consumer `.tres` it
+removed 2479 assignments from 384 files with **zero lines added, zero structural lines touched, every
+`;` comment and every `uid=` intact, and zero change to any loaded property value** (proven by loading
+every resource in Godot before and after and comparing every STORAGE property, recursively). The
+contrast is the point — a headless load-and-re-save over the same corpus rewrote 558 of 559 files,
+deleted 1157 comment lines, and silently emptied resources whose script failed to compile.
+
+**Fix — `scene canonicalize` no longer reports a uid-less `.tres` as UNRESOLVED.** A `.tscn` always
+leaves the editor with a header uid, so a missing one is a real `pack()` loss. A hand-authored `.tres`
+legitimately has none, and when nothing references it by uid there is nothing to restore and nothing
+broken. This was 372 false findings out of 559 files in one consumer.
+
+**Internal.** `ext_index` / `ref_path` / `script_path` moved from `checks/props.py` into `tscn.py`
+(one home, two consumers); `scan_line` grew `comment_in_brackets`, the one place the two grammars
+differ (a `;` inside a multi-line `.tres` value is data, a `#` inside a GDScript `enum {}` is a
+comment); `TscnDocument.delete_props` does batch bottom-up span deletion.
+
 ## v0.4.0 — 2026-08-23 — the .tscn toolkit
 
 **On upgrade:** nothing a consumer must edit — every existing subcommand, flag, and output shape is

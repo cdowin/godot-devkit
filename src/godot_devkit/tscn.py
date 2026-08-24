@@ -38,6 +38,10 @@ TILE_DATA_B64 = re.compile(r'PackedByteArray\("([^"]*)"\)')
 NODE_PATH_LITERAL = re.compile(r'(\^?)NodePath\("([^"]*)"\)')
 REF_ARROW = '→'
 
+EXT_RESOURCE_ONLY = re.compile(r'^ExtResource\("([^"]*)"\)$')
+EXT_RESOURCE_KIND = 'ext_resource'
+SCRIPT_PROP = 'script'
+
 COMMENT_CHAR = ';'
 OPENERS = '([{'
 CLOSERS = ')]}'
@@ -103,7 +107,8 @@ def _basename(path: str) -> str:
 
 
 def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool = False,
-              comment_char: str = COMMENT_CHAR) -> tuple[int, bool, bool, int]:
+              comment_char: str = COMMENT_CHAR,
+              comment_in_brackets: bool = False) -> tuple[int, bool, bool, int]:
     """Consume one line, tracking bracket depth with STRING AWARENESS.
 
     Returns the carried (depth, in_string, escaped) plus the index at which a
@@ -111,6 +116,9 @@ def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool 
     inside a quoted string do not count — which is the whole reason this exists
     rather than a `line.count('(')` heuristic. `comment_char` is `;` for the
     resource format and `#` for GDScript, whose exports this also scans.
+    `comment_in_brackets` is the one place the two grammars differ: a `;` inside
+    a multi-line `.tres` value is DATA, a `#` inside a multi-line GDScript
+    `enum {}` or array literal is a COMMENT.
     """
     for index, char in enumerate(text):
         if in_string:
@@ -127,7 +135,7 @@ def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool 
             depth += 1
         elif char in CLOSERS:
             depth -= 1
-        elif char == comment_char and depth <= 0:
+        elif char == comment_char and (comment_in_brackets or depth <= 0):
             return depth, in_string, escaped, index
     return depth, in_string, escaped, -1
 
@@ -219,6 +227,24 @@ def resolve_ref(value: str, ext: dict[str, dict]) -> str:
         target = ext[ref_id]
         return REF_ARROW + _basename(target.get('path') or target.get('uid', '?'))
     return REF_ARROW + ref_id
+
+
+def ext_index(sections: list[Section]) -> dict[str, dict]:
+    """`{ext_resource id: its header attrs}` — how a `ExtResource("id")` resolves."""
+    return {s.attrs['id']: s.attrs for s in sections
+            if s.kind == EXT_RESOURCE_KIND and 'id' in s.attrs}
+
+
+def ref_path(value: str, ext: dict[str, dict]) -> str | None:
+    """The `res://` path an `ExtResource("id")` value points at, or None."""
+    match = EXT_RESOURCE_ONLY.match(value.strip())
+    return ext.get(match.group(1), {}).get('path') if match else None
+
+
+def script_path(section: Section, ext: dict[str, dict]) -> str | None:
+    """The `res://` path of the section's `script = ExtResource(...)`, or None."""
+    prop = section.prop(SCRIPT_PROP)
+    return ref_path(prop.value, ext) if prop is not None else None
 
 
 def node_own_path(node: Section) -> str:

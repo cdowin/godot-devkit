@@ -104,6 +104,7 @@ serialisation detail, not an address; nothing keys off it.)
 | `scene rm <file> <node-path>` | Remove a node, its descendants, its connections and editable markers, and any `ext_resource` left unreferenced |
 | `scene reparent <file> <node-path> <new-parent>` | Move a subtree and re-express the NodePaths that pointed into or out of it |
 | `scene canonicalize <file>...` | Restore what `PackedScene.pack()` + `ResourceSaver.save()` drop: uid-in-refs, the file's own header uid, `index=` on instance-child overrides, `[editable path=]` |
+| `scene canonicalize --elide-defaults <file>...` | Also **delete** `.tres` assignments proven equal to the script's `@export` default — the ones Godot's writer omits, so a hand-authored file stops diffing on every editor save. Opt-in, because it removes lines |
 
 Every verb takes `--dry-run` (prints a unified diff, writes nothing), is **idempotent** (a second run
 reports `unchanged`), and **refuses** — exit 1, with a reason — rather than write a result it cannot
@@ -111,6 +112,17 @@ guarantee. Untouched lines are never rewritten: parse → serialise with no muta
 proven over every `.tscn`/`.tres` in the consuming repos plus a fixture carrying the awkward
 constructs (`&"StringName"` literals, inline `;` comments, multi-line dictionaries, instance
 overrides).
+
+**Why `--elide-defaults` is a line-deletion pass and not a load-and-re-save.** Godot's own writer
+produces the canonical form, but running it over a tree is destructive: measured over one consumer's
+559 `.tres`, a headless load-and-re-save rewrote 558 of them — deleting every `;` comment (1157 lines
+across 107 files), reordering properties into declaration order, respelling typed arrays
+(`[a, b]` -> `Array[Resource]([a, b])`) and floats (`0.30` -> `0.3`), minting new `ext_resource`
+entries with random ids, and dropping every `uid=`. Worse, a resource whose script fails to compile in
+that context loads scriptless and saves as an EMPTY file, with `ResourceSaver.save()` returning `OK`.
+So this pass never re-serialises: it deletes only the assignment lines it can PROVE are redundant, and
+every other byte is carried through. Over that same corpus it removed 2479 assignments from 384 files
+with zero lines added, zero structural lines touched, and zero change to any loaded property value.
 
 `canonicalize` restores from **evidence, never invention**. A uid comes from the target's own `.uid`
 sidecar, its `[gd_scene]`/`[gd_resource]` header, or its `.import` file — falling back to what the rest
@@ -124,6 +136,7 @@ Anything unresolvable is reported and left alone.
 | `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`; every Script `ext_resource` uid matches the target's actual `.uid`. Prevents cold-cache `invalid UID … using text path` failures. |
 | `check tres` | Path-only `ext_resource` refs (missing `uid=`). Godot 4.4+ silently upgrades these on any editor/import pass — churn that leaks into unrelated commits. Migrate once, then this keeps the tree canonical. |
 | `check props` | Assignments to properties that **do not exist** — the export was renamed or deleted and the scene still names the old one. Godot drops such an assignment silently, so the node comes up half-configured with every gate green. Checks scene nodes, sub_resources and `.tres` resources against the script's `@export` chain and the engine's ClassDB. Nothing is called dead unless the whole picture resolved; everything else is censused as UNVERIFIED, never failed. |
+| `check defaults` | `.tres` assignments that repeat the script's declared `@export` default. Hand-authored data spells every property out; Godot's writer omits the defaults — so the file diffs forever, and the mop-up is `git checkout --` every session. Judges the elision dimension ONLY (see below); anything outside a small closed value language is censused, never reported. |
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
@@ -150,10 +163,11 @@ refs:         ; @$(DEVKIT) refs $(NAME) $(ARGS)
 orphans:      ; @$(DEVKIT) orphans $(ARGS)
 autoloads:    ; @$(DEVKIT) autoloads
 scene-set:    ; @$(DEVKIT) scene set $(FILE) $(ARGS)
-scene-canon:  ; @$(DEVKIT) scene canonicalize $(FILE)
+scene-canon:  ; @$(DEVKIT) scene canonicalize $(FILE) $(ARGS)
 uid-scan:     ; @$(DEVKIT) check uid
 tres-scan:    ; @$(DEVKIT) check tres
 prop-scan:    ; @$(DEVKIT) check props
+defaults-scan:; @$(DEVKIT) check defaults
 doc-scan:     ; @$(DEVKIT) check doc
 shell-scan:   ; @$(DEVKIT) check shell
 repo-hygiene: ; @$(DEVKIT) check repo-hygiene
@@ -182,6 +196,9 @@ exclude_prefixes = ["addons/"]
 exclude_prefixes = ["addons/"]
 
 [props]
+exclude_prefixes = ["addons/"]
+
+[defaults]
 exclude_prefixes = ["addons/"]
 # Escape hatch for properties a script answers to without declaring them
 # statically (a `_get_property_list` shape the scanner cannot see):
