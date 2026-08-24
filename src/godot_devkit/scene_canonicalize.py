@@ -19,6 +19,15 @@ it leaves out are load-bearing, and all three recur on every single pass:
    child leaks as an orphan on EVERY load. That is what stack-overflowed an
    unrelated unit test.
 
+`--elide-defaults` adds the fourth, and it SUBTRACTS instead of restoring: a
+hand-authored `.tres` spells out properties whose value equals the script's
+`@export` default, and Godot's writer omits exactly those — so the file diffs on
+every editor save until one form wins. It is opt-in because it deletes lines, and
+because deleting them is only safe where the redundancy is PROVEN
+(`resource_defaults`); anything unprovable is left alone. Unlike a load-and-
+re-save it touches nothing else: comments, ordering, uids and value spellings all
+survive, which is what makes it safe to run over a whole tree.
+
 Each is restored from evidence, never invented: a uid comes from the target's own
 `.uid` sidecar, its `[gd_scene/gd_resource]` header, or its `.import` file, and an
 `index` is counted off the base scene's actual children. Anything that cannot be
@@ -31,13 +40,16 @@ import difflib
 import re
 from pathlib import Path
 
-from godot_devkit.project import repo_root
+from godot_devkit.gdscript import ScriptIndex
+from godot_devkit.project import git_lines, repo_root
+from godot_devkit.resource_defaults import DefaultAnalyzer
 from godot_devkit.tscn import Section, node_own_path, parse, split_path
 from godot_devkit.tscn_document import TscnDocument
 from godot_devkit.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
-SCENE_HEADER_KINDS = ('gd_scene', 'gd_resource')
+RESOURCE_HEADER_KIND = 'gd_resource'
+SCENE_HEADER_KINDS = ('gd_scene', RESOURCE_HEADER_KIND)
 INSTANCE_ATTR = 'instance'
 EDITABLE_KIND = 'editable'
 EXIT_OK = 0
@@ -109,6 +121,12 @@ def _restore_header_uid(doc: TscnDocument, rel: str, uids: UidIndex) -> list[str
         return []
     known = uids.from_repo_references(RES_PREFIX + rel)
     if known is None:
+        # A .tscn always leaves the editor with a header uid, so a missing one
+        # is a real pack() loss. A hand-authored .tres legitimately has none —
+        # Godot writes one only for a registered resource — and with nothing
+        # referencing it by uid there is nothing to restore and nothing broken.
+        if header.kind == RESOURCE_HEADER_KIND:
+            return []
         return [f'  UNRESOLVED  {rel} has no header uid and nothing references it by uid']
     line = doc.lines[header.header_line]
     doc.lines[header.header_line] = line[:-1] + f' uid="{known}"]'
@@ -166,8 +184,17 @@ def _restore_editable_markers(doc: TscnDocument) -> list[str]:
     return [f'  EDITABLE  added [editable path="{host}"]' for host in missing]
 
 
-def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes
-                 ) -> tuple[str, list[str]]:
+def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> list[str]:
+    """Delete assignments PROVEN equal to the script's declared default."""
+    redundant = analyzer.analyze(doc.sections)
+    report = [f'  DEFAULT  {item.where}.{item.prop.key} = {item.prop.value} '
+              f'(declared default {item.default}) — removed' for item in redundant]
+    doc.delete_props([item.prop for item in redundant])
+    return report
+
+
+def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
+                 analyzer: DefaultAnalyzer | None = None) -> tuple[str, list[str]]:
     """-> (canonical text, one report line per restoration or refusal)."""
     doc = TscnDocument(path.read_text(encoding='utf-8'), path)
     try:
@@ -178,6 +205,8 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes
     report += _restore_header_uid(doc, rel, uids)
     report += _restore_indexes(doc, bases)
     report += _restore_editable_markers(doc)
+    if analyzer is not None:
+        report += _elide_redundant_defaults(doc, analyzer)
     return doc.text, report
 
 
@@ -188,11 +217,18 @@ def main(argv: list[str]) -> int:
     parser.add_argument('files', nargs='+')
     parser.add_argument('--dry-run', action='store_true',
                         help='print the unified diff instead of writing')
+    parser.add_argument('--elide-defaults', action='store_true',
+                        help='also DELETE assignments proven equal to the '
+                             'script\'s @export default (what Godot\'s writer '
+                             'omits); see `check defaults`')
     args = parser.parse_args(argv)
 
     root = repo_root()
     uids = UidIndex(root)
     bases = BaseScenes(root)
+    analyzer = None
+    if args.elide_defaults:
+        analyzer = DefaultAnalyzer(ScriptIndex(root, git_lines('ls-files', '*.gd')))
     unresolved = 0
     for name in args.files:
         path = Path(name)
@@ -200,7 +236,7 @@ def main(argv: list[str]) -> int:
             print(f'godot-devkit scene canonicalize: no such file: {path}')
             return EXIT_USAGE
         before = path.read_text(encoding='utf-8')
-        after, report = canonicalize(path, root, uids, bases)
+        after, report = canonicalize(path, root, uids, bases, analyzer)
         unresolved += sum(1 for line in report if 'UNRESOLVED' in line)
         if after == before and not report:
             print(f'canonicalize  {path}  already canonical')
@@ -211,8 +247,11 @@ def main(argv: list[str]) -> int:
                 fromfile=f'a/{path.name}', tofile=f'b/{path.name}', n=DIFF_CONTEXT)), end='')
         elif after != before:
             path.write_text(after, encoding='utf-8')
-        restored = sum(1 for line in report if 'UNRESOLVED' not in line)
-        print(f'canonicalize  {path}  {restored} restored, '
+        # "changes", not "restored": with --elide-defaults a change can be a
+        # deletion, and a count that lies about its own direction is worse than
+        # no count.
+        changes = sum(1 for line in report if 'UNRESOLVED' not in line)
+        print(f'canonicalize  {path}  {changes} change(s), '
               f'{sum(1 for line in report if "UNRESOLVED" in line)} unresolved'
               f'{" (dry run)" if args.dry_run else ""}')
         for line in report:
