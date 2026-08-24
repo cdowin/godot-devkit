@@ -1,11 +1,77 @@
 # godot-devkit
 
-Headless developer tooling for Godot 4.x projects — pure-parse scene introspection and fast static repo gates. Nothing here boots Godot (one exception: nothing — even the uid tooling is pure text). Extracted from two shipping Godot 4.6 projects where every tool runs in CI and in pre-commit hooks.
+Headless developer tooling for Godot 4.x projects — scene introspection, structural surgery, and fast
+static repo gates. Nothing here boots Godot. Extracted from two shipping Godot 4.6 projects where
+every tool runs in CI and in pre-commit hooks.
 
-Two design commitments:
+## Goal
 
-1. **Read-only, pure parse.** The introspect tools parse Godot's text-resource format directly (including binary `tile_map_data` decoding) — no editor, no import step, no `.godot/` cache dependency. Safe to run anywhere, anytime, in parallel.
-2. **Versioned, not vendored.** One Python package, one entry point, semver git tags. Consumers pin a tag in a single Makefile variable and put project variation in `devkit.toml` — nobody edits tool files in place, so there is no fork-drift to police.
+**Give developers and LLMs simple, sharp tools to parse and work with Godot's text scene formats
+(`.tscn` / `.tres`) without opening the editor.** A `.tscn` is text, so every structural question and
+every structural change should be answerable by one command that runs in milliseconds, anywhere, in
+parallel — not by loading a hundred thousand tokens of packed bytes into a human's head or a model's
+context.
+
+## Northstar
+
+> **Any change you can make to a scene by hand, you should be able to make through one deterministic
+> command that touches nothing else — and prove it, without ever reading the file.**
+
+For a **human**, that means the editor stops being mandatory for mechanical work, and diffs stay
+reviewable.
+
+For an **LLM**, it means three specific things, and they are the reason this repo exists in its
+current shape:
+
+| | |
+|---|---|
+| **A framework** | A small, stable vocabulary of verbs to reach for, so a model composes known-good operations instead of inventing a bespoke `sed` or throwaway script every time. Fewer degrees of freedom is the feature. |
+| **Determinism** | The same command on the same input produces the same bytes. Parse → serialise with no mutation is **byte-identical**. A tool that reformats what it was not asked to touch is worse than no tool, because its damage hides inside a legitimate diff. |
+| **Token reduction** | Reading a tile-heavy scene can cost 100k+ tokens. `scene` answers structure in a few hundred; the write verbs put **zero** file content in context. Editing a property should never require loading the file that holds it. |
+
+### What else that implies
+
+These are not extra nice-to-haves — each one is a lesson from a real incident:
+
+- **Refuse rather than mangle.** The worst outcome is never an error; it is *silent partial success*.
+  A blanket rename once rewrote a `NodePath("Foo/Bar")` while it was rewriting prose, and reported
+  success. If a verb cannot guarantee a correct result, it must decline and say why. Loud failure is a
+  feature; a model can recover from it, and cannot recover from a lie.
+- **Read output is write input.** The address you get back from `scene` is the address `scene set`
+  accepts. One addressing vocabulary in both directions, so a model never has to translate between
+  "how I saw it" and "how I change it".
+- **Idempotence.** Running the same command twice is a no-op the second time. Models retry; retries
+  must be safe.
+- **Machine-readable on request.** Deterministic ordering, and `--json` where structure matters, so a
+  consumer parses instead of regexing prose.
+- **Prove the edit without re-reading it.** `scene-diff` closes the loop: make the change, confirm
+  exactly what moved, still without loading the file.
+- **Encode the footguns as gates.** Godot has silent-failure modes — a property assigned to a script
+  that no longer declares it, an `ext_resource` that lost its `uid=`, an instance override missing
+  `index=`. Nobody should have to *remember* those. The toolkit should refuse to let them through, so
+  the knowledge lives in a gate instead of in a person or a prompt.
+- **Bounded blast radius.** A verb changes what it was asked to change and nothing adjacent.
+
+## Design commitments
+
+1. **Pure parse — never boots Godot.** The tools read and write Godot's text-resource format directly
+   (including binary `tile_map_data` decoding) — no editor, no import step, no `.godot/` cache
+   dependency. Safe to run anywhere, anytime, in parallel.
+   *(This was previously stated as "read-only, pure parse." Write verbs broadened the scope; they did
+   not weaken the invariant, because the invariant was never read-only — it was never-boot-the-engine.
+   A `.tscn` is text.)*
+2. **Deterministic and non-destructive.** Byte-identical round trip on untouched content; refuse
+   rather than silently reformat.
+3. **Versioned, not vendored.** One Python package, one entry point, semver git tags. Consumers pin a
+   tag in a single Makefile variable and put project variation in `devkit.toml` — nobody edits tool
+   files in place, so there is no fork-drift to police.
+
+## Scope boundary
+
+This does **not** replace Godot for bulk content authoring. Painting a `TileMapLayer` cell-by-cell,
+baking navigation, importing art — those need the engine. This toolkit owns **structure**: nodes,
+properties, resource references, connections, and the gates that keep them honest. That is the
+majority of what changes in a scene file after it first exists.
 
 ## Tools
 
@@ -15,7 +81,7 @@ All subcommands of the one `godot-devkit` entry point:
 
 | Command | What it does |
 |---|---|
-| `scene <file.tscn\|.tres> [--props]` | Compact node tree + ext/sub resources + tile bounds for one scene |
+| `scene <file.tscn\|.tres> [--props] [--paths]` | Compact node tree + ext/sub resources + tile bounds for one scene. `--paths` prints each node's full path — the same address the write verbs take |
 | `scene-diff <file> [--git <ref>]` | **Structural** diff vs a git ref — nodes added/removed/reparented, props changed, `tile_map_data` compared as decoded bounds — instead of an unreadable serialized byte diff |
 | `scene-diff <old> <new>` | Same, between two files |
 | `refs <symbol> [--tests]` | Reference-aware symbol search across `class_name` / methods / signals / `.gd`/`.tscn`/`.tres` paths / uids (word-boundary, comment-stripped) |
@@ -24,12 +90,40 @@ All subcommands of the one `godot-devkit` entry point:
 
 A shared parser (`tscn.py`) all of them compose — sections, properties, resource-ref resolution, TileMapLayer binary decoding.
 
+### Scene surgery (write verbs)
+
+Nodes are addressed **by path** — `.` is the root, `Name` its child, `Parent/Name` deeper. That is how
+`.tscn` addresses them in `parent=`, and it is what `scene --paths` prints. (Format-4 `unique_id=` is a
+serialisation detail, not an address; nothing keys off it.)
+
+| Command | What it does |
+|---|---|
+| `scene set <file> <node-path> <prop> <value>` | Assign a property, replacing the value in place (inline `; comments` survive) or appending it to the node |
+| `scene rename <file> <node-path> <new-name>` | Rename a node **and every reference to it** — descendants' `parent=`, `[connection from=/to=]`, `[editable path=]`, and every relative `NodePath("...")` literal, resolved against the node that owns it |
+| `scene add <file> <parent-path> <name> <type> [--script res://x.gd]` | Add a node after the parent's subtree; `--script` mints the `ext_resource` from the script's `.uid` sidecar, so the ref is born canonical |
+| `scene rm <file> <node-path>` | Remove a node, its descendants, its connections and editable markers, and any `ext_resource` left unreferenced |
+| `scene reparent <file> <node-path> <new-parent>` | Move a subtree and re-express the NodePaths that pointed into or out of it |
+| `scene canonicalize <file>...` | Restore what `PackedScene.pack()` + `ResourceSaver.save()` drop: uid-in-refs, the file's own header uid, `index=` on instance-child overrides, `[editable path=]` |
+
+Every verb takes `--dry-run` (prints a unified diff, writes nothing), is **idempotent** (a second run
+reports `unchanged`), and **refuses** — exit 1, with a reason — rather than write a result it cannot
+guarantee. Untouched lines are never rewritten: parse → serialise with no mutation is byte-identical,
+proven over every `.tscn`/`.tres` in the consuming repos plus a fixture carrying the awkward
+constructs (`&"StringName"` literals, inline `;` comments, multi-line dictionaries, instance
+overrides).
+
+`canonicalize` restores from **evidence, never invention**. A uid comes from the target's own `.uid`
+sidecar, its `[gd_scene]`/`[gd_resource]` header, or its `.import` file — falling back to what the rest
+of the repo already says about that path. An `index=` is counted off the base scene's actual children.
+Anything unresolvable is reported and left alone.
+
 ### Static gates (`godot-devkit check <gate>`, pure git + parse, no Godot boot)
 
 | Gate | Guards against |
 |---|---|
 | `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`; every Script `ext_resource` uid matches the target's actual `.uid`. Prevents cold-cache `invalid UID … using text path` failures. |
 | `check tres` | Path-only `ext_resource` refs (missing `uid=`). Godot 4.4+ silently upgrades these on any editor/import pass — churn that leaks into unrelated commits. Migrate once, then this keeps the tree canonical. |
+| `check props` | Assignments to properties that **do not exist** — the export was renamed or deleted and the scene still names the old one. Godot drops such an assignment silently, so the node comes up half-configured with every gate green. Checks scene nodes, sub_resources and `.tres` resources against the script's `@export` chain and the engine's ClassDB. Nothing is called dead unless the whole picture resolved; everything else is censused as UNVERIFIED, never failed. |
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
@@ -39,15 +133,15 @@ A shared parser (`tscn.py`) all of them compose — sections, properties, resour
 No PyPI needed — install straight from a git tag (pin it):
 
 ```sh
-uv tool install "git+https://github.com/cdowin/godot-devkit@v0.2.0"   # on PATH as godot-devkit
+uv tool install "git+https://github.com/cdowin/godot-devkit@v0.3.0"   # on PATH as godot-devkit
 # or invoke pinned without installing:
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.2.0" godot-devkit scene scenes/main.tscn
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.3.0" godot-devkit scene scenes/main.tscn
 ```
 
 Suggested Makefile wiring (one pinned variable, targets delegate):
 
 ```make
-DEVKIT_VERSION := v0.2.0
+DEVKIT_VERSION := v0.3.0
 DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
 
 scene:        ; @$(DEVKIT) scene $(FILE) $(ARGS)
@@ -55,8 +149,11 @@ scene-diff:   ; @$(DEVKIT) scene-diff $(FILE) $(ARGS)
 refs:         ; @$(DEVKIT) refs $(NAME) $(ARGS)
 orphans:      ; @$(DEVKIT) orphans $(ARGS)
 autoloads:    ; @$(DEVKIT) autoloads
+scene-set:    ; @$(DEVKIT) scene set $(FILE) $(ARGS)
+scene-canon:  ; @$(DEVKIT) scene canonicalize $(FILE)
 uid-scan:     ; @$(DEVKIT) check uid
 tres-scan:    ; @$(DEVKIT) check tres
+prop-scan:    ; @$(DEVKIT) check props
 doc-scan:     ; @$(DEVKIT) check doc
 shell-scan:   ; @$(DEVKIT) check shell
 repo-hygiene: ; @$(DEVKIT) check repo-hygiene
@@ -84,12 +181,37 @@ exclude_prefixes = ["addons/"]
 [tres]
 exclude_prefixes = ["addons/"]
 
+[props]
+exclude_prefixes = ["addons/"]
+# Escape hatch for properties a script answers to without declaring them
+# statically (a `_get_property_list` shape the scanner cannot see):
+extra_properties = { MyWidget = ["virtual_prop"] }
+
 [repo_hygiene]
 mainline = "origin/main"
 protected = "^(main|staging|archive/.*)$"
 
 [shell]
 roots = ["tools"]
+```
+
+## Development
+
+```sh
+python3 -m unittest discover -s tests -t tests          # the suite (stdlib only)
+python3 -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('src').rglob('*.py')]"
+```
+
+Tests that need a Godot repo (round-trip corpus, gate calibration) skip cleanly when no consumer
+checkout is present; the hermetic fixtures under `tests/fixtures/` always run.
+
+`check props` compares against a snapshot of Godot's ClassDB in
+`src/godot_devkit/data/classdb.json`. Reading it boots nothing. Regenerate when the target engine
+minor moves:
+
+```sh
+godot --headless --dump-extension-api      # writes ./extension_api.json
+python3 tools/gen_classdb.py extension_api.json
 ```
 
 ## Requirements

@@ -1,15 +1,26 @@
 """godot-devkit CLI — one entry point, subcommand per tool.
 
 Introspection (pure parse, never boots Godot):
-    godot-devkit scene <file.tscn|.tres> [--props]
+    godot-devkit scene <file.tscn|.tres> [--props] [--paths]
     godot-devkit scene-diff <file> [--git <ref>]  |  scene-diff <old> <new>
     godot-devkit refs <symbol> [--tests]
     godot-devkit orphans [--tests]
     godot-devkit autoloads
 
+Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
+    godot-devkit scene set      <file> <node-path> <prop> <value>
+    godot-devkit scene rename   <file> <node-path> <new-name>
+    godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
+    godot-devkit scene rm       <file> <node-path>
+    godot-devkit scene reparent <file> <node-path> <new-parent>
+    godot-devkit scene canonicalize <file>...   # restore what PackedScene.pack()
+                                                # drops: uid-in-refs, the header
+                                                # uid, index= on instance children
+    (every verb takes --dry-run, prints a unified diff, and is idempotent)
+
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid | tres | doc | shell | repo-hygiene
-    godot-devkit check all          # the offline fast set (uid+tres+doc+shell);
+    godot-devkit check uid | tres | props | doc | shell | repo-hygiene
+    godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell);
                                     # repo-hygiene is close-time (network) and
                                     # always explicit.
 
@@ -22,7 +33,7 @@ import sys
 
 from godot_devkit import __version__
 
-OFFLINE_CHECKS = ('uid', 'tres', 'doc', 'shell')
+OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 
 
 def _usage() -> int:
@@ -37,6 +48,9 @@ def _run_check(name: str) -> int:
     if name == 'tres':
         from godot_devkit.checks import tres
         return tres.run()
+    if name == 'props':
+        from godot_devkit.checks import props
+        return props.run()
     if name == 'doc':
         from godot_devkit.checks import doc
         return doc.main([])
@@ -69,6 +83,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f'godot-devkit {__version__}')
         return 0
     if cmd == 'scene':
+        from godot_devkit import scene_edit
+        if rest and rest[0] == 'canonicalize':
+            from godot_devkit import scene_canonicalize
+            return scene_canonicalize.main(rest[1:])
+        if rest and rest[0] in scene_edit.VERBS:
+            return scene_edit.main(rest)
         from godot_devkit import scene_summary
         return scene_summary.main(rest)
     if cmd == 'scene-diff':
