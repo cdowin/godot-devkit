@@ -13,16 +13,21 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
     godot-devkit scene rm       <file> <node-path>
     godot-devkit scene reparent <file> <node-path> <new-parent>
-    godot-devkit scene canonicalize <file>...   # restore what PackedScene.pack()
-                                                # drops: uid-in-refs, the header
-                                                # uid, index= on instance children
+    godot-devkit scene canonicalize <file>... [--elide-defaults]
+                                    # restore what PackedScene.pack() drops:
+                                    # uid-in-refs, the header uid, index= on
+                                    # instance children; --elide-defaults also
+                                    # removes assignments equal to the script's
+                                    # @export default (what the editor omits)
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid | tres | props | doc | shell | repo-hygiene
-    godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell);
-                                    # repo-hygiene is close-time (network) and
-                                    # always explicit.
+    godot-devkit check uid | tres | props | defaults | doc | shell | repo-hygiene
+    godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell).
+                                    # `defaults` and `repo-hygiene` stay explicit:
+                                    # the first is red until a tree is canonicalized
+                                    # once, the second is close-time and hits the
+                                    # network.
 
 Per-project config: devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
@@ -34,6 +39,12 @@ import sys
 from godot_devkit import __version__
 
 OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
+# Deliberately OUT of `check all`: `defaults` reports thousands of findings on a
+# tree that has never been canonicalized, so folding it into the aggregate would
+# turn every existing consumer's gate red on a version bump. Wire it explicitly,
+# after the one-time cleanup pass. `repo-hygiene` is excluded for its own reason
+# (it is close-time and hits the network).
+EXPLICIT_CHECKS = ('defaults', 'repo-hygiene')
 
 
 def _usage() -> int:
@@ -51,6 +62,9 @@ def _run_check(name: str) -> int:
     if name == 'props':
         from godot_devkit.checks import props
         return props.run()
+    if name == 'defaults':
+        from godot_devkit.checks import defaults
+        return defaults.run()
     if name == 'doc':
         from godot_devkit.checks import doc
         return doc.main([])
@@ -67,7 +81,8 @@ def _run_check(name: str) -> int:
             print()
         return worst
     print(f'godot-devkit: unknown check {name!r} '
-          f'(expected: {", ".join((*OFFLINE_CHECKS, "repo-hygiene", "all"))})', file=sys.stderr)
+          f'(expected: {", ".join((*OFFLINE_CHECKS, *EXPLICIT_CHECKS, "all"))})',
+          file=sys.stderr)
     return 2
 
 
