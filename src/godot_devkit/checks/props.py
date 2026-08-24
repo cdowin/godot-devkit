@@ -39,11 +39,18 @@ from pathlib import Path
 from godot_devkit import classdb
 from godot_devkit.gdscript import RES_PREFIX, Resolution, ScriptIndex
 from godot_devkit.project import git_lines, load_config, repo_root
-from godot_devkit.tscn import Section, node_own_path, parse, split_path
+from godot_devkit.tscn import (
+    Section,
+    ext_index as _ext_index,
+    node_own_path,
+    parse,
+    ref_path as _ref_path,
+    script_path as _script_path,
+    split_path,
+)
 
 DEFAULT_EXCLUDE = ('addons/',)
 SCRIPT_PROP = 'script'
-EXT_RESOURCE_REF = re.compile(r'^ExtResource\("([^"]*)"\)$')
 NODE_PATHS_ATTR = re.compile(r'PackedStringArray\(([^)]*)\)')
 QUOTED = re.compile(r'"([^"]*)"')
 CHECKED_KINDS = ('node', 'sub_resource', 'resource')
@@ -129,23 +136,6 @@ class SceneCache:
                 kind = kind or inherited_kind
                 script = script or inherited_script
         return kind, script
-
-
-def _ext_index(sections: list[Section]) -> dict[str, dict]:
-    return {s.attrs['id']: s.attrs for s in sections
-            if s.kind == 'ext_resource' and 'id' in s.attrs}
-
-
-def _ref_path(value: str, ext: dict[str, dict]) -> str | None:
-    match = EXT_RESOURCE_REF.match(value.strip())
-    if match is None:
-        return None
-    return ext.get(match.group(1), {}).get('path')
-
-
-def _script_path(section: Section, ext: dict[str, dict]) -> str | None:
-    prop = section.prop(SCRIPT_PROP)
-    return _ref_path(prop.value, ext) if prop is not None else None
 
 
 def _is_unverifiable_key(key: str) -> bool:
