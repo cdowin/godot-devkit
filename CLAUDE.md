@@ -25,10 +25,12 @@ src/godot_devkit/
   classdb.py        # data/classdb.json — Godot's built-in property table, snapshotted
   uid_index.py      # where a resource's uid lives (.uid sidecar / header / .import / repo)
   gdscript.py       # repo-wide index of what each .gd exports / extends / is named
+  gd_declarations.py# the DECLARATION half of an @export: type, initializer, accessor, enums, consts
+  resource_defaults.py # which .tres assignments equal the declared default (gate + fixer share it)
   scene_summary.py  scene_diff.py  refs.py  orphans.py  autoloads.py
   scene_edit.py     # write verbs: set / rename / add / rm / reparent
   scene_canonicalize.py   # restore uid-in-refs, header uid, index=, [editable]
-  checks/           # uid.py  tres.py  props.py  doc.py  repo_hygiene.py  shell.py
+  checks/           # uid.py  tres.py  props.py  defaults.py  doc.py  repo_hygiene.py  shell.py
 tests/              # stdlib unittest; fixtures/ is hermetic, consumer-repo cases skip cleanly
 tools/gen_classdb.py    # regenerate the ClassDB snapshot from --dump-extension-api
 ```

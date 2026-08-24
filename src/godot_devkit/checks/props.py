@@ -41,12 +41,18 @@ from godot_devkit.gdscript import RES_PREFIX, Resolution, ScriptIndex
 from godot_devkit.project import git_lines, load_config, repo_root
 from godot_devkit.tscn import (
     Section,
-    ext_index as _ext_index,
     node_own_path,
     parse,
-    ref_path as _ref_path,
-    script_path as _script_path,
     split_path,
+)
+from godot_devkit.tscn import (
+    ext_index as _ext_index,
+)
+from godot_devkit.tscn import (
+    ref_path as _ref_path,
+)
+from godot_devkit.tscn import (
+    script_path as _script_path,
 )
 
 DEFAULT_EXCLUDE = ('addons/',)
