@@ -39,6 +39,39 @@ a scene either) — rather than implying everything here is `.tscn` tooling.
 `story_ordinal_prefix`, `checks`, the six vocabulary/graph lists, and `[pm.scaffold.<grain>]` for
 projects whose frontmatter schema differs. Stock defaults are the strict graph.
 
+**Hardening from the pre-release review.** The gate could be turned into a rubber stamp by a
+`devkit.toml` typo: `[pm] checks` accepted any iterable, so `checks = "D1"` iterated into *characters*,
+no rule name matched, and the gate walked the whole tree finding nothing while printing PASS and a
+census that made it look thorough. Every `[pm]` value is now type-checked and `checks` is validated
+against the known rule names; a malformed section exits **2** (config error), never 0 and never 1 —
+`project.py` already stated that contract and only `TOMLDecodeError` had honoured it.
+
+**Fix — frontmatter writes preserved every byte except the ones asked for.** `Path.read_text` /
+`write_text` apply universal-newline translation, and `str.splitlines()` additionally breaks on
+U+2028/U+2029/form-feed/lone-CR — so a one-field status write silently converted a CRLF file to LF
+and rewrote exotic body separators. Reads and writes now pass `newline=''` and split on `\n` only,
+proven byte-for-byte on CRLF and on a body carrying U+2028, form feed and a lone CR.
+
+**Fix — `pm prune` could destroy an archive without recording the resurrect anchor, and say it had.**
+The prune-log stamp was skipped when `ROADMAP.md` did not exist, while the success line still claimed
+the anchor was written. The index is now created and stamped before anything is deleted.
+
+**Fix — a mid-cascade write failure** (an unwritable story file) raised a traceback and left a
+half-applied close. It now aborts with exit 2 and says the command is idempotent — re-run to finish.
+
+**Fix — the gate and the CLI disagreed about a quoted `status: "done"`.** The CLI unquoted it, the
+gate did not, so `check pm` called a tree clean while `pm prune` deleted a directory from it.
+`field_of` now unquotes centrally — one definition, both readers.
+
+**Fix — a directory with no grain file is reported, not skipped.** A milestone dir missing
+`milestone.md` (or a feature dir missing `feature.md`) silently took every descendant out of the scan.
+Those are now findings that name what was skipped.
+
+**Also fixed:** ids are rejected as glob patterns (`pm milestone ready '*'` resolved to a real
+milestone); `prune`'s lag-by-one now orders versions numerically, so `0.9` no longer counts as newer
+than `0.11`; `prune` in a repo with no commits exits 2 instead of raising; `_slugify` is ASCII-only,
+so `pm new` cannot mint a non-ASCII directory name as a permanent id.
+
 **Fix — `__version__` had drifted from `pyproject.toml`** (`0.4.0` vs `0.5.0`), which rule 7 forbids.
 Both now read `0.6.0`.
 

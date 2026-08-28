@@ -33,11 +33,19 @@ children, and a feature at `review` with its stories at their `review` terminal
 """
 from __future__ import annotations
 
+import sys
+
 from godot_devkit.pm import model
 
 
 def run() -> int:
-    cfg = model.load()
+    try:
+        cfg = model.load()
+    except model.ConfigError as err:
+        # Exit 2, never 1: a config typo is not a finding, and CI must not read
+        # it as "drift found" (the contract project.py states).
+        print(f'[check:pm] ERROR — {err}', file=sys.stderr)
+        return 2
     findings: list[str] = []
 
     def report(msg: str) -> None:
@@ -52,9 +60,16 @@ def run() -> int:
     # Rule 4 — a gate that scans nothing must say so. A misconfigured
     # roadmap_dir would otherwise print a serene PASS over zero files.
     if not mdirs:
+        print()
         print(f'[check:pm] FAIL — no milestones found under {cfg.roadmap_dir}/ '
               f'(wrong [pm] roadmap_dir, or an empty tree?)')
         return 1
+
+    # Always on, never gated by `checks`: these are not a drift RULE, they are
+    # the scan telling you it could not see part of the tree.
+    for path, why in model.orphan_dirs(cfg):
+        report(f'{cfg.rel(path)}/ is a {why} — every grain under it was SKIPPED '
+               f'by this scan')
 
     n_features = 0
     n_stories = 0
@@ -62,7 +77,7 @@ def run() -> int:
 
     for mdir in mdirs:
         mfile = mdir / 'milestone.md'
-        mid = model.unquote(model.field_of(mfile, 'id'))
+        mid = model.field_of(mfile, 'id')
         mstat = model.field_of(mfile, 'status')
         if mstat == 'done':
             done_milestone_dirs += 1
@@ -97,7 +112,7 @@ def run() -> int:
                            f'pm feature done --review-record <path>)  [{frel}]')
 
             for sfile in view.stories:
-                sid = model.unquote(model.field_of(sfile, 'id'))
+                sid = model.field_of(sfile, 'id')
                 sstat = model.field_of(sfile, 'status')
                 srel = cfg.rel(sfile)
                 if 'D4' in enabled and sstat not in cfg.story_states:

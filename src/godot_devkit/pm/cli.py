@@ -64,8 +64,7 @@ def _ok(msg: str) -> None:
 
 
 def _scaffold_fields(cfg: model.PmConfig, grain: str) -> tuple[tuple[str, str], ...]:
-    from godot_devkit.project import load_config
-    override = load_config().get('pm', {}).get('scaffold', {}).get(grain)
+    override = cfg.scaffold.get(grain)
     if not override:
         return STOCK_SCAFFOLD[grain]
     return tuple((str(k), '' if v is None else str(v)) for k, v in override.items())
@@ -82,16 +81,24 @@ def _write_grain(path: Path, identity: list[tuple[str, str]],
 
 
 def _slugify(text: str) -> str:
-    out = ''.join(c if c.isalnum() else '-' for c in text.lower())
+    """ASCII-only, because the result becomes a permanent directory name.
+
+    `str.isalnum()` is Unicode-aware, so it would happily mint `café-niño` or a
+    CJK path — an NFC/NFD and Windows-encoding hazard for something that is an
+    id forever after.
+    """
+    keep = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    out = ''.join(c if c in keep else '-' for c in text.lower())
     while '--' in out:
         out = out.replace('--', '-')
     return out.strip('-')
 
 
-def _set_status(cfg: model.PmConfig, path: Path, value: str) -> None:
+def _set_status(cfg: model.PmConfig, path: Path, value: str, note: str = '') -> None:
     if not model.set_field(path, 'status', value):
         raise Usage(f'could not rewrite status in {cfg.rel(path)} '
-                    f'(malformed frontmatter?)')
+                    f'(malformed frontmatter, or the file is not writable)'
+                    + (f'. {note}' if note else ''))
 
 
 # --- story --------------------------------------------------------------------
@@ -237,9 +244,12 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     # Stories first: if the FEATURE flip is the one that fails, the gate still
     # sees a non-done feature and a re-run completes the close cleanly.
     for p in to_close:
-        _set_status(cfg, p, 'done')
+        _set_status(cfg, p, 'done',
+                    'CASCADE ABORTED — some stories may already be done; '
+                    're-run the same command to finish (it is idempotent).')
         _ok(f'  story {p.name}: review -> done')
-    _set_status(cfg, ff, 'done')
+    _set_status(cfg, ff, 'done',
+                'Stories were flipped; re-run to finish closing the feature.')
     _ok(f'feature {fid}: {cur} -> done (review record: {record})')
     return 0
 
@@ -268,7 +278,7 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     mf = model.milestone_file(cfg, mid)
     if mf is None:
         raise Usage(f'no milestone resolves from id {mid!r}')
-    cur = model.unquote(model.field_of(mf, 'status'))
+    cur = model.field_of(mf, 'status')
     if cur not in cfg.milestone_states:
         raise Usage(f'milestone {mid!r} has an unknown current status {cur!r}')
     if cur == to:
@@ -295,7 +305,7 @@ def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
     only = args[0] if args else ''
     for mdir in model.milestone_dirs(cfg):
         mfile = mdir / 'milestone.md'
-        mid = model.unquote(model.field_of(mfile, 'id'))
+        mid = model.field_of(mfile, 'id')
         if only and only != mid:
             continue
         print(f'milestone {mid:<10} [{model.field_of(mfile, "status")}]')
@@ -386,7 +396,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             raise Usage(f'no feature resolves from id {fid!r}')
         # The milestone comes from the FEATURE's own frontmatter — single
         # source, never re-derived from the id string.
-        mid = model.unquote(model.field_of(fdir / 'feature.md', 'milestone'))
+        mid = model.field_of(fdir / 'feature.md', 'milestone')
         sf = fdir / 'stories' / f'{slug}.md'
         if sf.exists():
             raise Refused(f'story {fid}/{slug!r} already exists')
@@ -430,16 +440,24 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     if dirty:
         raise Refused('working tree dirty — commit or stash first '
                       '(the prune must be its own commit)')
-    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=cfg.root,
-                          capture_output=True, text=True, check=True).stdout.strip()
+    try:
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=cfg.root,
+                              capture_output=True, text=True,
+                              check=True).stdout.strip()
+    except subprocess.CalledProcessError as err:
+        raise Usage('cannot resolve HEAD — a repo with no commits has no '
+                    'resurrect anchor to record, so there is nothing safe to '
+                    'prune against') from err
 
     targets: list[tuple[Path, str]] = []
     for archive in (cfg.roadmap / model.ARCHIVE_DIR_NAME,
                     cfg.root / cfg.review_dir / model.ARCHIVE_DIR_NAME):
         if archive.is_dir():
             targets.append((archive, f'{cfg.rel(archive)}/ (all)'))
-    done_dirs = [d for d in model.milestone_dirs(cfg)
-                 if model.unquote(model.field_of(d / 'milestone.md', 'status')) == 'done']
+    done_dirs = sorted(
+        (d for d in model.milestone_dirs(cfg)
+         if model.field_of(d / 'milestone.md', 'status') == 'done'),
+        key=lambda d: model.version_key(d.name))
     if len(done_dirs) > 1:
         keep = done_dirs[-1]
         for d in done_dirs:
@@ -450,20 +468,24 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
         _ok('prune: nothing to prune')
         return 0
 
+    # The anchor is the ONLY way back to what this deletes, so it is written
+    # BEFORE the delete and the index is CREATED if absent. Skipping the stamp
+    # because the file happened not to exist — while still printing "resurrect
+    # anchor ... stamped" — is a destructive command lying about recoverability.
     index = cfg.roadmap / 'ROADMAP.md'
-    if index.is_file():
-        text = index.read_text(encoding='utf-8')
-        if '## Prune log' not in text:
-            text += (
-                '\n## Prune log\n\nThe working tree keeps only active milestones — git '
-                'history is the archive. Each entry\nrecords the last commit that still '
-                'CONTAINS the pruned paths: browse with\n`git ls-tree -r <hash> <path>` and '
-                'resurrect any file with `git show <hash>:<old-path>`.\n')
-        stamp = datetime.now(timezone.utc).date().isoformat()
-        text += f'\n- **{stamp}** — pruned from commit `{head}`:\n'
-        for _, label in targets:
-            text += f'  - `{label}`\n'
-        index.write_text(text, encoding='utf-8')
+    text = index.read_text(encoding='utf-8') if index.is_file() else '# Roadmap\n'
+    if '## Prune log' not in text:
+        text += (
+            '\n## Prune log\n\nThe working tree keeps only active milestones — git '
+            'history is the archive. Each entry\nrecords the last commit that still '
+            'CONTAINS the pruned paths: browse with\n`git ls-tree -r <hash> <path>` and '
+            'resurrect any file with `git show <hash>:<old-path>`.\n')
+    stamp = datetime.now(timezone.utc).date().isoformat()
+    text += f'\n- **{stamp}** — pruned from commit `{head}`:\n'
+    for _, label in targets:
+        text += f'  - `{label}`\n'
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(text, encoding='utf-8')
 
     for path, _ in targets:
         subprocess.run(['git', 'rm', '-r', '-q', '--ignore-unmatch', cfg.rel(path)],
@@ -479,7 +501,11 @@ def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help', 'help'):
         print(USAGE)
         return 0 if argv else 2
-    cfg = model.load()
+    try:
+        cfg = model.load()
+    except model.ConfigError as err:
+        print(f'[pm] ERROR — {err}', file=sys.stderr)
+        return 2
     cmd, rest = argv[0], argv[1:]
     table = {
         'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,

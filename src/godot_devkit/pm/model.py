@@ -69,6 +69,7 @@ class PmConfig:
     feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
     checks: tuple[str, ...] = DEFAULT_CHECKS
+    scaffold: dict = field(default_factory=dict)
 
     @property
     def roadmap(self) -> Path:
@@ -82,29 +83,83 @@ class PmConfig:
             return str(path)
 
 
-def load(root: Path | None = None) -> PmConfig:
+class ConfigError(Exception):
+    """A malformed `[pm]` section. Exit 2 — a config typo is NOT a finding.
+
+    `project.py` states the contract: exit 1 is reserved for findings, so CI
+    must never read a toml mistake as "drift found". A gate that exits 1 on a
+    typo is bad; one that exits 0 is catastrophic (see `checks` below).
+    """
+
+
+def load() -> PmConfig:
     """Build the config from `[pm]` in devkit.toml, defaults where unset."""
-    base = root if root is not None else repo_root()
-    section = load_config().get('pm', {}) if root is None else {}
+    section = load_config().get('pm', {})
+    if not isinstance(section, dict):
+        raise ConfigError('[pm] must be a table')
 
     def tup(key: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
         val = section.get(key)
-        return tuple(str(v) for v in val) if val else fallback
+        if val is None:
+            return fallback
+        # A bare string iterates into CHARACTERS and a table into KEYS, so an
+        # unvalidated tuple() here silently yields a vocabulary of nonsense.
+        # For `checks` that means every rule switches off and the gate prints a
+        # serene PASS over real drift — the read-side cardinal sin. Refuse.
+        if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
+            raise ConfigError(f'[pm] {key} must be a list of strings, got {val!r}')
+        if not val:
+            raise ConfigError(
+                f'[pm] {key} is empty — remove the key to take the default '
+                f'({" ".join(fallback)}) rather than declaring nothing')
+        return tuple(val)
+
+    def flag(key: str, fallback: bool) -> bool:
+        val = section.get(key, fallback)
+        if not isinstance(val, bool):
+            raise ConfigError(f'[pm] {key} must be true/false, got {val!r}')
+        return val
+
+    def num(key: str, fallback: int) -> int:
+        val = section.get(key, fallback)
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise ConfigError(f'[pm] {key} must be an integer, got {val!r}')
+        return val
+
+    def text(key: str, fallback: str) -> str:
+        val = section.get(key, fallback)
+        if not isinstance(val, str):
+            raise ConfigError(f'[pm] {key} must be a string, got {val!r}')
+        return val
+
+    checks = tup('checks', DEFAULT_CHECKS)
+    unknown = [c for c in checks if c not in DEFAULT_CHECKS]
+    if unknown:
+        # An unknown name is indistinguishable from a disabled rule at runtime,
+        # so a typo would quietly narrow the gate. Name it instead.
+        raise ConfigError(
+            f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
+            f'known rules are {" ".join(DEFAULT_CHECKS)}')
+
+    scaffold = section.get('scaffold', {})
+    if not isinstance(scaffold, dict):
+        raise ConfigError('[pm] scaffold must be a table')
 
     return PmConfig(
-        root=base,
-        roadmap_dir=str(section.get('roadmap_dir', 'pm/roadmap')),
-        review_dir=str(section.get('review_dir', 'docs/reviews')),
-        review_min_content_bytes=int(section.get('review_min_content_bytes', 20)),
-        review_slug_fallback=bool(section.get('review_slug_fallback', False)),
-        story_ordinal_prefix=bool(section.get('story_ordinal_prefix', False)),
+        root=repo_root(),
+        scaffold={k: v for k, v in scaffold.items() if isinstance(v, dict)},
+        roadmap_dir=text('roadmap_dir', 'pm/roadmap'),
+        review_dir=text('review_dir', 'docs/reviews'),
+        review_min_content_bytes=num('review_min_content_bytes', 20),
+        review_slug_fallback=flag('review_slug_fallback', False),
+        story_ordinal_prefix=flag('story_ordinal_prefix', False),
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
         milestone_transitions=tup('milestone_transitions', DEFAULT_MILESTONE_TRANSITIONS),
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
-        checks=tup('checks', DEFAULT_CHECKS),
+        checks=checks,
     )
 
 
@@ -114,7 +169,39 @@ def transition_legal(graph: tuple[str, ...], src: str, dst: str) -> bool:
 
 
 # --- frontmatter --------------------------------------------------------------
-_FENCE = re.compile(r'^---[ \t]*$')
+# NOTE the split rule below. `str.splitlines()` breaks on U+2028, U+2029, form
+# feed and a lone CR as well as on newlines — so splitlines()+'\n'.join() silently
+# rewrites every one of those into LF, and turns a CRLF file into an LF file.
+# That is a write verb touching bytes it was not asked to touch (rule 3). Split
+# on '\n' ONLY: a trailing '\r' then rides along as part of the line's content
+# and is preserved verbatim, and split/join round-trips byte-for-byte.
+_FENCE = re.compile(r'^---[ \t]*\r?$')
+
+
+def _split(text: str) -> list[str]:
+    return text.split('\n')
+
+
+# Path.read_text/write_text apply UNIVERSAL NEWLINE translation: read turns
+# every \r\n and lone \r into \n, write turns \n back into os.linesep. So the
+# terminators are destroyed before any split logic runs, and a CRLF file
+# silently becomes LF on a one-field write. `newline=''` disables both halves
+# and hands us the bytes as they are. (Path.read_text only gained a `newline`
+# parameter in 3.13; the floor here is 3.11, so open() it is.)
+def _read(path: Path) -> str:
+    with path.open('r', encoding='utf-8', newline='') as fh:
+        return fh.read()
+
+
+def _write(path: Path, text: str) -> None:
+    with path.open('w', encoding='utf-8', newline='') as fh:
+        fh.write(text)
+
+
+def _eol(line: str) -> str:
+    """The CR half of a CRLF terminator, so a rewritten line keeps the file's
+    convention instead of quietly converting it."""
+    return '\r' if line.endswith('\r') else ''
 
 
 def _fence_bounds(lines: list[str]) -> tuple[int, int] | None:
@@ -134,7 +221,7 @@ def field_of(path: Path, key: str) -> str:
     never leak out and be mistaken for the grain's status.
     """
     try:
-        lines = path.read_text(encoding='utf-8').splitlines()
+        lines = _split(_read(path))
     except (OSError, UnicodeDecodeError):
         return ''
     bounds = _fence_bounds(lines)
@@ -142,7 +229,8 @@ def field_of(path: Path, key: str) -> str:
         return ''
     for line in lines[bounds[0] + 1:bounds[1]]:
         if line.startswith(f'{key}:'):
-            return line[len(key) + 1:].strip()
+            # .strip() also removes the CRLF carriage return.
+            return unquote(line[len(key) + 1:].strip())
     return ''
 
 
@@ -157,29 +245,33 @@ def set_field(path: Path, key: str, value: str) -> bool:
     """Set-or-insert a frontmatter scalar, preserving every other byte.
 
     Rewrites the key in place if present, else inserts it just before the
-    closing fence. Returns False WITHOUT writing when the file has no leading
-    frontmatter block — a malformed file has nowhere to put the key, and
-    silently dropping it is the failure mode this refuses to have.
+    closing fence. Every other byte in the file — including its line-ending
+    convention and any U+2028/form-feed/lone-CR in the body — is preserved.
+
+    Returns False WITHOUT writing when the file has no leading frontmatter
+    block (nowhere to put the key) or when the write itself fails. Silently
+    dropping the key is the failure mode this refuses to have; the caller turns
+    a False into a loud refusal.
     """
     try:
-        text = path.read_text(encoding='utf-8')
+        text = _read(path)
     except (OSError, UnicodeDecodeError):
         return False
-    lines = text.splitlines()
+    lines = _split(text)
     bounds = _fence_bounds(lines)
     if bounds is None:
         return False
     open_i, close_i = bounds
     for i in range(open_i + 1, close_i):
         if lines[i].startswith(f'{key}:'):
-            lines[i] = f'{key}: {value}'
+            lines[i] = f'{key}: {value}{_eol(lines[i])}'
             break
     else:
-        lines.insert(close_i, f'{key}: {value}')
-    out = '\n'.join(lines)
-    if text.endswith('\n'):
-        out += '\n'
-    path.write_text(out, encoding='utf-8')
+        lines.insert(close_i, f'{key}: {value}{_eol(lines[close_i])}')
+    try:
+        _write(path, '\n'.join(lines))
+    except OSError:
+        return False
     return True
 
 
@@ -187,7 +279,18 @@ def set_field(path: Path, key: str, value: str) -> bool:
 # Milestone dirs carry a human suffix after the version (`0.28-chronicle`); the
 # id is just the version. Resolution globs the version prefix, active tree
 # first, then the archive.
+# Ids reach glob() as patterns, so `pm milestone ready '*'` would resolve to
+# whatever sorted first and transition it. An id is a literal, never a pattern.
+_GLOB_CHARS = set('*?[]!')
+
+
+def id_is_literal(value: str) -> bool:
+    return bool(value) and not (_GLOB_CHARS & set(value))
+
+
 def milestone_dir(cfg: PmConfig, mid: str) -> Path | None:
+    if not id_is_literal(mid):
+        return None
     for base in (cfg.roadmap, cfg.roadmap / ARCHIVE_DIR_NAME):
         if not base.is_dir():
             continue
@@ -207,7 +310,7 @@ def milestone_file(cfg: PmConfig, mid: str) -> Path | None:
 
 def feature_dir(cfg: PmConfig, fid: str) -> Path | None:
     mid, _, slug = fid.partition('/')
-    if not slug:
+    if not slug or not id_is_literal(slug):
         return None
     d = milestone_dir(cfg, mid)
     if d is None:
@@ -235,7 +338,7 @@ def story_file(cfg: PmConfig, sid: str) -> Path | None:
     """
     mid, _, rest = sid.partition('/')
     fslug, _, sslug = rest.partition('/')
-    if not fslug or not sslug:
+    if not fslug or not sslug or not id_is_literal(sslug):
         return None
     fdir = feature_dir(cfg, f'{mid}/{fslug}')
     if fdir is None:
@@ -263,6 +366,33 @@ class AmbiguousStory(Exception):
 
 
 # --- children -----------------------------------------------------------------
+def orphan_dirs(cfg: PmConfig) -> list[tuple[Path, str]]:
+    """Directories that LOOK like a grain but carry no grain file.
+
+    `milestone_dirs`/`feature_files` filter these out so the rest of the walk
+    can assume a grain file exists — but silently dropping a directory takes
+    every descendant with it, and the census then reads as thorough while a
+    half-scaffolded milestone's drift goes unseen. Reporting them is rule 4:
+    say what was skipped rather than quietly narrowing the scan.
+    """
+    out: list[tuple[Path, str]] = []
+    if not cfg.roadmap.is_dir():
+        return out
+    for d in sorted(cfg.roadmap.iterdir()):
+        if not d.is_dir() or d.name == ARCHIVE_DIR_NAME:
+            continue
+        if not (d / 'milestone.md').is_file():
+            out.append((d, 'milestone dir with no milestone.md'))
+            continue
+        fdir = d / 'features'
+        if not fdir.is_dir():
+            continue
+        for f in sorted(fdir.iterdir()):
+            if f.is_dir() and not (f / 'feature.md').is_file():
+                out.append((f, 'feature dir with no feature.md'))
+    return out
+
+
 def milestone_dirs(cfg: PmConfig, include_archive: bool = False) -> list[Path]:
     """Milestone dirs in the ACTIVE tree (archived ones predate the schema)."""
     if not cfg.roadmap.is_dir():
@@ -275,6 +405,19 @@ def milestone_dirs(cfg: PmConfig, include_archive: bool = False) -> list[Path]:
             out += [d for d in sorted(arch.iterdir())
                     if d.is_dir() and (d / 'milestone.md').is_file()]
     return out
+
+
+def version_key(name: str) -> tuple:
+    """Sort key that orders 0.9 BEFORE 0.10 — numeric components compare as
+    numbers. Lexical order gets this backwards the moment a project has both a
+    one-digit and a two-digit component, and `prune`'s lag-by-one uses it to
+    decide which milestone survives."""
+    head = name.split('-', 1)[0]
+    parts = []
+    for chunk in re.split(r'[.]', head):
+        m = re.match(r'^(\d*)(.*)$', chunk)
+        parts.append((int(m.group(1)) if m.group(1) else -1, m.group(2)))
+    return tuple(parts)
 
 
 def feature_files(mdir: Path) -> list[Path]:
@@ -302,7 +445,7 @@ def record_is_substantive(cfg: PmConfig, path: Path) -> bool:
     if not path.is_file():
         return False
     try:
-        body = path.read_text(encoding='utf-8')
+        body = _read(path)
     except (OSError, UnicodeDecodeError):
         return False
     return len(''.join(body.split())) >= cfg.review_min_content_bytes

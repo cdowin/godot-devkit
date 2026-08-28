@@ -344,5 +344,168 @@ class StatusReport(unittest.TestCase):
                         '  -- unphased (0/1 done)'])
 
 
+class ConfigValidation(unittest.TestCase):
+    """A malformed `[pm]` must never narrow the gate into a rubber stamp.
+
+    A bare string iterates into characters and a table into keys, so an
+    unvalidated `checks` silently disables every rule and prints PASS over real
+    drift. Each case here is a plausible authoring mistake.
+    """
+
+    def _drifted(self, root: Path) -> None:
+        write(root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md',
+              {'id': '0.1/alpha/s0', 'feature': '0.1/alpha', 'milestone': '"0.1"',
+               'name': 'S0', 'status': 'banana'})
+
+    def test_bad_checks_is_a_config_error_not_a_pass(self):
+        for bad in ('checks = "D1"', 'checks = ["D9"]', 'checks = ["d1","d4"]',
+                    'checks = 7', 'checks = []', 'checks = { a = 1 }'):
+            with self.subTest(bad=bad), tree(story_statuses=('todo',)) as root:
+                self._drifted(root)
+                (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')
+                code, _ = run_gate(root)
+                # 2 = config error. NEVER 0 — that is the rubber stamp.
+                self.assertEqual(code, 2, f'{bad!r} must not be accepted')
+
+    def test_other_scalar_type_errors_are_also_exit_2(self):
+        for bad in ('review_min_content_bytes = "twenty"',
+                    'review_slug_fallback = "yes"', 'roadmap_dir = 3'):
+            with self.subTest(bad=bad), tree() as root:
+                (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')
+                self.assertEqual(run_gate(root)[0], 2)
+
+    def test_a_valid_subset_still_narrows_correctly(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._drifted(root)
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D1","D2"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)   # D4 is off, so the bogus status is quiet
+
+
+class WriteFidelity(unittest.TestCase):
+    """Rule 3 — a write verb touches only what it was asked to touch."""
+
+    def test_crlf_survives_a_status_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / 'g.md'
+            p.write_bytes(b'---\r\nid: a\r\nstatus: todo\r\n---\r\n\r\nbody\r\n')
+            self.assertTrue(model.set_field(p, 'status', 'wip'))
+            self.assertEqual(
+                p.read_bytes(),
+                b'---\r\nid: a\r\nstatus: wip\r\n---\r\n\r\nbody\r\n')
+
+    def test_exotic_body_line_breaks_survive(self):
+        # str.splitlines() breaks on U+2028, form feed and a lone CR; joining
+        # back on '\n' would rewrite all three. Compare BYTES — read_text() does
+        # its own newline translation and would hide exactly this defect.
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / 'g.md'
+            body = 'A\u2028B\npage\x0cbreak\ncr-only\rtail\n'
+            p.write_text('---\nid: a\nstatus: todo\n---\n\n' + body, encoding='utf-8')
+            before = p.read_bytes()
+            self.assertTrue(model.set_field(p, 'status', 'wip'))
+            self.assertEqual(p.read_bytes(),
+                             before.replace(b'status: todo', b'status: wip'))
+
+    def test_an_unwritable_file_reports_failure_instead_of_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / 'g.md'
+            write(p, {'id': 'a', 'status': 'todo'})
+            p.chmod(0o444)
+            try:
+                self.assertFalse(model.set_field(p, 'status', 'wip'))
+            finally:
+                p.chmod(0o644)
+
+    def test_a_mid_cascade_write_failure_aborts_loudly(self):
+        with tree(feature_status='review', story_statuses=('review', 'review')) as root:
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            blocked = sorted(sdir.glob('*.md'))[-1]
+            blocked.chmod(0o444)
+            try:
+                code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+            finally:
+                blocked.chmod(0o644)
+            # Exit 2 (a tool failure), never 1 (which means "findings"), and it
+            # must say how to finish rather than abandoning the user mid-write.
+            self.assertEqual(code, 2)
+            self.assertIn('re-run', out.lower())
+
+
+class StructuralIntegrity(unittest.TestCase):
+    def test_a_dir_with_no_grain_file_is_reported_not_skipped(self):
+        with tree(story_statuses=('todo',)) as root:
+            ghost = root / 'pm/roadmap/0.2-beta/features/gizmo'
+            write(ghost / 'feature.md',
+                  {'id': '0.2/gizmo', 'milestone': '"0.2"', 'name': 'G',
+                   'status': 'done', 'reviewed': ''})
+            # 0.2-beta has NO milestone.md, so its drifted feature would
+            # otherwise vanish from the scan entirely.
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('SKIPPED', out)
+
+
+class Prune(unittest.TestCase):
+    def _commit(self, root: Path) -> None:
+        for args in (['add', '-A'], ['-c', 'user.email=t@t', '-c', 'user.name=t',
+                                     'commit', '-qm', 'x']):
+            subprocess.run(['git', *args], cwd=root, check=True,
+                           capture_output=True)
+
+    def test_the_resurrect_anchor_is_written_even_with_no_roadmap_index(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            other = root / 'pm/roadmap/0.2-later'
+            write(other / 'milestone.md',
+                  {'id': '"0.2"', 'name': 'Later', 'status': 'done'})
+            self._commit(root)
+            self.assertFalse((root / 'pm/roadmap/ROADMAP.md').exists())
+            code, out = run_cli(root, 'prune')
+            self.assertEqual(code, 0, out)
+            index = root / 'pm/roadmap/ROADMAP.md'
+            # The anchor is the only way back to what prune deleted; claiming to
+            # have stamped it without doing so is the failure this pins.
+            self.assertTrue(index.is_file())
+            self.assertIn('Prune log', index.read_text())
+
+    def test_lag_by_one_keeps_the_version_newest_not_the_lexically_last(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            for v in ('0.9', '0.10', '0.11'):
+                write(root / f'pm/roadmap/{v}-m/milestone.md',
+                      {'id': f'"{v}"', 'name': v, 'status': 'done'})
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                self._commit(root)
+                code, out = run_cli(root, 'prune')
+            finally:
+                os.chdir(previous)
+            self.assertEqual(code, 0, out)
+            survivors = sorted(p.name for p in (root / 'pm/roadmap').iterdir()
+                               if p.is_dir())
+            self.assertEqual(survivors, ['0.11-m'])
+
+    def test_prune_refuses_a_dirty_tree(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._commit(root)
+            (root / 'dirty.txt').write_text('x', encoding='utf-8')
+            code, out = run_cli(root, 'prune')
+            self.assertEqual(code, 1)
+            self.assertIn('dirty', out)
+
+
+class IdsAreLiterals(unittest.TestCase):
+    def test_a_glob_never_resolves_to_a_grain(self):
+        with tree() as root:
+            for bad in ('*', '0.?', '0.1/*'):
+                with self.subTest(bad=bad):
+                    self.assertEqual(run_cli(root, 'milestone', 'ready', bad)[0], 2)
+
+
 if __name__ == '__main__':
     unittest.main()
