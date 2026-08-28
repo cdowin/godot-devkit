@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.9.0 — 2026-08-27 — the guidance ships with the tool
+
+**On upgrade:** nothing changes until you run `godot-devkit pm install-skills`. Nothing is written to
+a consuming repo without that explicit command.
+
+**New — `pm install-skills`.** The tool shipped without its manual: a consumer got a
+precondition-checked CLI and had to reinvent the doctrine that drives it. Measured across the two
+consumers, that doctrine had forked badly — the execution rule differed by 57 lines out of ~60.
+`install-skills` writes it once, from here:
+
+- `.claude/rules/pm-execution.md` — the claim→close loop, why the CLI refuses what it refuses, and
+  the close-evidence promotion test. Installed as a **rule**, not a skill file, because
+  `.claude/rules/*.md` with a `paths:` header **auto-loads** for any agent touching the tree while a
+  skill must be invoked. A per-edit loop that has to be asked for does not arrive.
+- `.claude/skills/pm-operations/SKILL.md` — the operations manual: grain schemas, scaffolding,
+  decomposition, phases, reading `status`/`validate`, and the prune model. A **skill**, because you
+  reach for it deliberately when planning or restructuring, not on every edit.
+
+Both are generated and carry a header saying so. Re-running is idempotent; a stale generated file
+updates in place; a file the tool did **not** write is refused rather than clobbered (`--force`
+overrides), because silently overwriting is how a project loses a decision it made on purpose.
+
+**Where the line falls.** These two carry only what the CLI enforces and explains. A project's own
+SDLC — branching, versioning, release ceremony, dispatch, review rosters, and what a milestone
+*means* in that codebase — stays local. No agent ships from here for the same reason: an agent
+carries a project's vocabulary.
+
+**New — `pm init`.** For a repo with no tree at all: creates `pm/roadmap/` and a seeded `ROADMAP.md`
+(with the § Prune log idiom already in it), installs the guidance, and prints the remaining wiring —
+the gate target, the optional `[pm]` config, and the first scaffold commands — as a checklist rather
+than a README to go find.
+
 ## v0.8.0 — 2026-08-27 — validate
 
 **On upgrade:** `check pm` gains five integrity rules (V1–V5), on by default, so a tree with a

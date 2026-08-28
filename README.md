@@ -171,6 +171,14 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain to the schema. Creation only — never overwrites |
 | `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
+| `pm install-skills [--force]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
+| `pm init` | Stand up a tree in a repo that has none — `pm/roadmap/` + a seeded `ROADMAP.md`, the two guidance files, and the remaining wiring printed as a checklist |
+
+**What ships as guidance, and what does not.** The two installed files carry only the loop the CLI
+itself enforces and the manual for the tree it operates. A project's own SDLC — branching, versioning,
+release ceremony, agent dispatch, who reviews what, and what a milestone *means* in that codebase —
+stays in that project's own rules and agents, because it differs per repo and always will. The
+installed files are generated: edit them and the next install refuses rather than overwriting.
 
 Exit codes follow the house contract: `0` ok (including an idempotent no-op), `1` refused, `2` usage.
 The vocabularies, the transition graphs, the review-record definition and the drift predicates live
