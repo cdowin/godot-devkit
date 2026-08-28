@@ -18,6 +18,8 @@ the milestone machine has no `review` state (nothing transitions into one).
     review_min_content_bytes = 20  # anti-rubber-stamp floor (non-whitespace)
     review_slug_fallback = false   # also accept <review_dir>/<feature-slug>*.md
     story_ordinal_prefix = false   # also resolve stories/NN-<slug>.md
+    place_branch_on_building = false  # `pm milestone building` also checks the
+                                   # milestone's branch out in the trunk worktree
     milestone_states      = [...]  # vocabulary overrides
     feature_states        = [...]
     story_states          = [...]
@@ -29,6 +31,7 @@ the milestone machine has no `review` state (nothing transitions into one).
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -79,6 +82,7 @@ class PmConfig:
     review_min_content_bytes: int = 20
     review_slug_fallback: bool = False
     story_ordinal_prefix: bool = False
+    place_branch_on_building: bool = False
     milestone_states: tuple[str, ...] = DEFAULT_MILESTONE_STATES
     feature_states: tuple[str, ...] = DEFAULT_FEATURE_STATES
     story_states: tuple[str, ...] = DEFAULT_STORY_STATES
@@ -155,6 +159,7 @@ def load() -> PmConfig:
         review_min_content_bytes=number(sect, 'pm', 'review_min_content_bytes', 20),
         review_slug_fallback=flag(sect, 'pm', 'review_slug_fallback', False),
         story_ordinal_prefix=flag(sect, 'pm', 'story_ordinal_prefix', False),
+        place_branch_on_building=flag(sect, 'pm', 'place_branch_on_building', False),
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
@@ -512,6 +517,44 @@ def shipped_version(cfg: PmConfig) -> str | None:
     return None
 
 
+def git_worktrees(cfg: PmConfig) -> tuple[list[tuple[Path, str]], str]:
+    """([(path, branch), ...] MAIN worktree first, reason) — every worktree.
+
+    One `git worktree list --porcelain` parse, because two readers need
+    different halves of the same answer: D10 wants the trunk's branch, and
+    branch placement additionally has to know whether some OTHER worktree
+    already holds the branch (git allows exactly one).
+
+    `branch` is `''` for a detached or bare entry — the entry still exists,
+    which is the distinction that matters. An EMPTY list is the only "git could
+    not answer" signal, and it always carries a reason.
+    """
+    try:
+        listing = subprocess.run(['git', 'worktree', 'list', '--porcelain'],
+                                 cwd=cfg.root, capture_output=True, text=True,
+                                 check=True).stdout
+    except (subprocess.CalledProcessError, OSError) as err:
+        return [], f'git is unavailable ({type(err).__name__})'
+    entries: list[tuple[Path, str]] = []
+    path: Path | None = None
+    branch = ''
+    for line in listing.split('\n'):
+        # A blank line ends a record; `worktree ` opens the next one. Flushing
+        # on the OPENER rather than the blank keeps a truncated final record.
+        if line.startswith('worktree '):
+            if path is not None:
+                entries.append((path, branch))
+            path, branch = Path(line[len('worktree '):]), ''
+        elif line.startswith('branch ') and path is not None:
+            ref = line[len('branch '):].strip()
+            branch = ref[len('refs/heads/'):] if ref.startswith('refs/heads/') else ref
+    if path is not None:
+        entries.append((path, branch))
+    if not entries:
+        return [], 'git reported no worktree'
+    return entries, ''
+
+
 def trunk_checkout_branch(cfg: PmConfig) -> tuple[str | None, str]:
     """(branch, reason) for git's MAIN worktree — the trunk.
 
@@ -522,24 +565,14 @@ def trunk_checkout_branch(cfg: PmConfig) -> tuple[str | None, str]:
     HEAD — which is what CI checks out. Silently skipping there turned D10 off
     in the one environment it exists to guard, and said nothing.
     """
-    import subprocess
-    try:
-        listing = subprocess.run(['git', 'worktree', 'list', '--porcelain'],
-                                 cwd=cfg.root, capture_output=True, text=True,
-                                 check=True).stdout
-        first = next((ln[len('worktree '):] for ln in listing.split('\n')
-                      if ln.startswith('worktree ')), None)
-        if first is None:
-            return None, 'git reported no worktree'
-        branch = subprocess.run(['git', 'branch', '--show-current'], cwd=first,
-                                capture_output=True, text=True,
-                                check=True).stdout.strip()
-        if not branch:
-            return None, 'the trunk is on a DETACHED HEAD (a CI checkout looks '\
-                         'like this — D10 cannot verify placement here)'
-        return branch, ''
-    except (subprocess.CalledProcessError, FileNotFoundError) as err:
-        return None, f'git is unavailable ({type(err).__name__})'
+    entries, reason = git_worktrees(cfg)
+    if not entries:
+        return None, reason
+    branch = entries[0][1]
+    if not branch:
+        return None, 'the trunk is on a DETACHED HEAD (a CI checkout looks '\
+                     'like this — D10 cannot verify placement here)'
+    return branch, ''
 
 
 # --- shared drift predicates --------------------------------------------------

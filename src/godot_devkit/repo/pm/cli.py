@@ -30,7 +30,9 @@ USAGE = """usage: godot-devkit pm <command>
   feature <ready|building> <feature-id>
   feature review <feature-id>
   feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
-  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done)
+  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done;
+                                                        building also places branch: in the trunk
+                                                        when [pm] place_branch_on_building)
   status [<milestone>]
   get <grain-id> <key>                    (read one frontmatter field)
   set <grain-id> <key> <value>            (write one — never `status`)
@@ -271,6 +273,108 @@ def cmd_feature(cfg: model.PmConfig, args: list[str]) -> int:
     raise Usage(USAGE)
 
 
+# --- branch placement ---------------------------------------------------------
+# Opt-in via `[pm] place_branch_on_building`: the flip to `building` also checks
+# the milestone's `branch:` out in the TRUNK worktree. D10 asserts that state,
+# and one command creating an obligation another has to satisfy by hand is the
+# gap where drift lives — a milestone flips, the checkout is forgotten, and the
+# gate fails on a difference nobody meant to make.
+#
+# The ORDERING is the contract:
+#   * every refusal is decided BEFORE the flip, so a refused placement leaves
+#     milestone.md byte-identical. The status never records a build the tree
+#     cannot host.
+#   * the flip lands BEFORE the checkout, because the flip is the fact and the
+#     checkout is its consequence. If the checkout then fails, that is exit 2
+#     with a re-run instruction rather than a rollback: D10 already reports the
+#     outstanding placement, and `pm milestone building <id>` is idempotent —
+#     its already-building no-op path re-runs placement, which IS the repair.
+def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    """Run git without raising on a non-zero exit — callers read `returncode`.
+
+    An ABSENT git is a different failure from a git that said no: nothing about
+    the tree is wrong, the tool simply is not there, so that is a usage error.
+    """
+    try:
+        return subprocess.run(['git', *args], cwd=cwd, capture_output=True,
+                              text=True, check=False)
+    except OSError as err:
+        raise Usage(f'git is unavailable ({type(err).__name__}) — cannot place '
+                    f'the milestone branch') from err
+
+
+def _placement_target(cfg: model.PmConfig, mid: str,
+                      mfile: Path) -> tuple[Path, str] | None:
+    """(trunk, branch) to check out, or None when there is nothing to place.
+
+    Every reason not to place is decided here — this runs before any write.
+    """
+    branch = model.unquote(model.field_of(mfile, 'branch'))
+    if not branch:
+        raise Refused(
+            f'milestone {mid} declares no branch:, so there is nothing to place '
+            f'(D9 asks for the same stamp). Set it with '
+            f'`pm set {mid} branch <name>`, then re-run.')
+    if branch in cfg.trunk_branches:
+        # Loud, not silent: "builds on the trunk" is a real answer, and a
+        # placement command that printed nothing would read as a failure.
+        _ok(f'milestone {mid} builds on {branch}, a trunk branch — nothing to place')
+        return None
+
+    entries, reason = model.git_worktrees(cfg)
+    # NO entries is the refusal — not "no branch". A DETACHED-but-present trunk
+    # is still a place to put the branch (this gate is opt-in, and the
+    # dirty-check below still guards the tree), so it gets placed. An empty
+    # listing means git could not answer at all: the target is unverifiable, and
+    # a write verb does not guess at its target.
+    if not entries:
+        raise Refused(f'cannot place branch {branch!r}: {reason} — the trunk '
+                      f'worktree is unverifiable, so nothing was flipped')
+    trunk, on_branch = entries[0]
+    if on_branch == branch:
+        _ok(f'trunk {trunk} is already on {branch}')
+        return None
+
+    if _git(['rev-parse', '--verify', '--quiet',
+             f'refs/heads/{branch}'], cfg.root).returncode != 0:
+        raise Refused(
+            f'branch {branch!r} does not exist. A milestone declares WHERE its '
+            f'work lives; it does not authorize minting the ref. Create it with '
+            f'`git -C {trunk} checkout -b {branch}`, then re-run '
+            f'(nothing was flipped)')
+    holder = next((p for p, b in entries[1:] if b == branch), None)
+    if holder is not None:
+        raise Refused(
+            f'branch {branch!r} is checked out in another worktree ({holder}) — '
+            f'git allows one worktree per branch, so the trunk cannot take it. '
+            f'Build there, or retire it with `git worktree remove {holder}`, '
+            f'then re-run (nothing was flipped)')
+
+    status = _git(['status', '--porcelain'], trunk)
+    if status.returncode != 0:
+        raise Refused(
+            f'cannot read the trunk worktree status at {trunk} '
+            f'({status.stderr.strip() or "git failed"}) — nothing was flipped')
+    if status.stdout.strip():
+        raise Refused(
+            f'trunk {trunk} is dirty — a checkout would drag the uncommitted '
+            f'changes onto {branch}. Commit or stash there, then re-run '
+            f'(nothing was flipped)')
+    return trunk, branch
+
+
+def _place_branch(cfg: model.PmConfig, mid: str, trunk: Path, branch: str) -> None:
+    """Check `branch` out in the trunk. Runs only AFTER the status flip landed."""
+    res = _git(['checkout', '--quiet', branch], trunk)
+    if res.returncode != 0:
+        raise Usage(
+            f'milestone {mid} is now building, but checking {branch!r} out in '
+            f'{trunk} FAILED ({res.stderr.strip() or "git failed"}). The status '
+            f'flip stands — re-run `pm milestone building {mid}` — it is '
+            f'idempotent and re-runs the placement.')
+    _ok(f'trunk {trunk}: checked out {branch}')
+
+
 # --- milestone ----------------------------------------------------------------
 def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     if len(args) != 2:
@@ -285,8 +389,16 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     cur = model.field_of(mf, 'status')
     if cur not in cfg.milestone_states:
         raise Usage(f'milestone {mid!r} has an unknown current status {cur!r}')
+    place = to == 'building' and cfg.place_branch_on_building
     if cur == to:
         _ok(f'milestone {mid} already {to} (no-op)')
+        # The no-op is also the REPAIR: a trunk that drifted off the milestone's
+        # branch (or a placement that failed after the flip) is put back by
+        # re-running the very command D10's finding names.
+        if place:
+            target = _placement_target(cfg, mid, mf)
+            if target is not None:
+                _place_branch(cfg, mid, *target)
         return 0
     if not model.transition_legal(cfg.milestone_transitions, cur, to):
         raise Refused(f'illegal milestone transition {cur} -> {to} for {mid!r}')
@@ -299,8 +411,11 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
         if pending:
             raise Refused(f'milestone {mid} -> done: features not done: '
                           f'{" ".join(pending)}')
+    target = _placement_target(cfg, mid, mf) if place else None
     _set_status(cfg, mf, to)
     _ok(f'milestone {mid}: {cur} -> {to}')
+    if target is not None:
+        _place_branch(cfg, mid, *target)
     return 0
 
 

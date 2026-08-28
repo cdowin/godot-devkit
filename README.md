@@ -291,7 +291,7 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm feature <ready\|building> <feature-id>` | The claim-side flips |
 | `pm feature review <feature-id>` | Refuses unless every story is at `review` |
 | `pm feature done <feature-id> [--review-record <path>]` | Cascade-closes every `review` story **and** the feature, atomically. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical |
-| `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done |
+| `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from a template. Creation only — never overwrites. A new milestone also gets `HANDOFF.md` + `DECISIONS.md` |
@@ -357,6 +357,8 @@ review_dir  = "docs/reviews"    # where review records live
 review_min_content_bytes = 20   # anti-rubber-stamp floor (non-whitespace bytes)
 review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
 story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
+place_branch_on_building = false  # `pm milestone building` also checks that
+                                #   milestone's `branch:` out in the trunk
 checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
           "V1","V2","V3","V4","V5"]             # integrity rules (see `pm validate`)
 # D8/D9/D10 are the FLOW rules — opt in by naming them here:
