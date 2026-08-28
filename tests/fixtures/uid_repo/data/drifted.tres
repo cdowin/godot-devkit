@@ -1,0 +1,7 @@
+[gd_resource type="Resource" load_steps=2 format=3 uid="uid://ddriftedres0"]
+
+[ext_resource type="Script" uid="uid://dstaleuid001" path="res://systems/rule.gd" id="1_rule"]
+
+[resource]
+script = ExtResource("1_rule")
+speed = 4.0 ; a trailing comment the repair must not disturb

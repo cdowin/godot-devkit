@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://dghostscene0"]
+
+; systems/ghost.gd has no .uid sidecar at all, so there is no should-be value
+; to write — this drift is reported and never "repaired" by invention.
+[ext_resource type="Script" uid="uid://dghostuid000" path="res://systems/ghost.gd" id="1_ghost"]
+
+[node name="Ghost" type="Node2D"]
+script = ExtResource("1_ghost")

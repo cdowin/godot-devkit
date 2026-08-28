@@ -47,8 +47,11 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
      hand-edit would leave, off the SAME predicates)
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid | tres | props | defaults | doc | shell | repo-hygiene
-                      | pm | agents
+    godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
+                      | repo-hygiene | pm | agents
+                                    # `uid --fix` applies the repair the gate
+                                    # already computes: a stale Script ref uid
+                                    # rewritten to the target's .uid sidecar
     godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell).
                                     # `defaults` and `repo-hygiene` stay explicit:
                                     # the first is red until a tree is canonicalized
@@ -66,6 +69,7 @@ from godot_devkit import __version__
 from godot_devkit.core.config import ConfigError
 
 OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
+FIX_FLAG = '--fix'
 # Deliberately OUT of `check all`: `defaults` reports thousands of findings on a
 # tree that has never been canonicalized, so folding it into the aggregate would
 # turn every existing consumer's gate red on a version bump. Wire it explicitly,
@@ -80,19 +84,27 @@ def _usage() -> int:
     return 2
 
 
-def _run_check(name: str) -> int:
+def _run_check(name: str, flags: list[str]) -> int:
+    # Only `uid` takes a flag today. An unknown one is a usage error, never a
+    # silently-ignored argument: a consumer that thinks it asked for a repair
+    # and got a read-only run has been lied to.
+    unknown = [f for f in flags if not (name == 'uid' and f == FIX_FLAG)]
+    if unknown:
+        print(f'godot-devkit: check {name}: unexpected argument(s) '
+              f'{" ".join(unknown)}', file=sys.stderr)
+        return 2
     try:
-        return _dispatch_check(name)
+        return _dispatch_check(name, fix=FIX_FLAG in flags)
     except ConfigError as err:
         # A devkit.toml mistake is exit 2, never 1 (findings) and never 0.
         print(f'godot-devkit: {err}', file=sys.stderr)
         return 2
 
 
-def _dispatch_check(name: str) -> int:
+def _dispatch_check(name: str, fix: bool = False) -> int:
     if name == 'uid':
         from godot_devkit.godot.checks import uid
-        return uid.run()
+        return uid.run(fix=fix)
     if name == 'tres':
         from godot_devkit.godot.checks import tres
         return tres.run()
@@ -123,6 +135,8 @@ def _dispatch_check(name: str) -> int:
             worst = max(worst, _dispatch_check(check))
             print()
         return worst
+    # `all` never repairs: an aggregate that writes is the last place a
+    # consumer expects one, so `--fix` is asked for on the gate itself.
     print(f'godot-devkit: unknown check {name!r} '
           f'(expected: {", ".join((*OFFLINE_CHECKS, *EXPLICIT_CHECKS, "all"))})',
           file=sys.stderr)
@@ -173,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'check':
         if not rest:
             return _usage()
-        return _run_check(rest[0])
+        return _run_check(rest[0], rest[1:])
     print(f'godot-devkit: unknown command {cmd!r}', file=sys.stderr)
     return _usage()
 

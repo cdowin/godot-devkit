@@ -164,7 +164,7 @@ Order matters — some start red by design:
 
 | Step | Command | Expect |
 |---|---|---|
-| 1 | `check uid` | Red if `.uid` sidecars are untracked. Commit them; the policy is the gate. |
+| 1 | `check uid` | Red if `.uid` sidecars are untracked. Commit them; the policy is the gate. Stale refs clear with `check uid --fix`. |
 | 2 | [uid-in-refs migration](#appendix-migrating-to-canonical-uid-in-refs) → `check tres` | Red until migrated once. |
 | 3 | `check props` | Findings are real renamed-export bugs. Fix before wiring. |
 | 4 | `scene canonicalize --elide-defaults` → `check defaults` | Red on any tree never canonicalized. Clean once, then gate. |
@@ -283,7 +283,7 @@ Anything unresolvable is reported and left alone.
 
 | Gate | Guards against |
 |---|---|
-| `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`; every Script `ext_resource` uid matches the target's actual `.uid`. Prevents cold-cache `invalid UID … using text path` failures. |
+| `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`; every Script `ext_resource` uid matches the target's actual `.uid`. Prevents cold-cache `invalid UID … using text path` failures. **`check uid --fix`** applies the repair the gate already computes — each stale ref rewritten to the target's sidecar value, byte-surgically (only the `uid="…"` attribute on that line), then exits 0 so a re-run is clean. A drift with no should-be value (the target has no `.uid` at all) stays a finding: minting one would be invention, not repair. `--fix` on a clean tree is a no-op that says so; on any other gate, or on `check all`, it is a usage error. |
 | `check tres` | Path-only `ext_resource` refs (missing `uid=`). Godot 4.4+ silently upgrades these on any editor/import pass — churn that leaks into unrelated commits. Migrate once, then this keeps the tree canonical. |
 | `check props` | Assignments to properties that **do not exist** — the export was renamed or deleted and the scene still names the old one. Godot drops such an assignment silently, so the node comes up half-configured with every gate green. Checks scene nodes, sub_resources and `.tres` resources against the script's `@export` chain and the engine's ClassDB. Nothing is called dead unless the whole picture resolved; everything else is censused as UNVERIFIED, never failed. |
 | `check defaults` | `.tres` assignments that repeat the script's declared `@export` default. Hand-authored data spells every property out; Godot's writer omits the defaults — so the file diffs forever, and the mop-up is `git checkout --` every session. Judges the elision dimension ONLY (see below); anything outside a small closed value language is censused, never reported. |
