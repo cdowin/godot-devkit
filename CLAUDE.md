@@ -21,47 +21,65 @@ change here lands in other projects' commit gates — treat the CLI as a publish
 6. **Exit codes are contract:** 0 pass, 1 findings, 2 usage error. Output line shapes (`  DRIFT  …`, `[check:x] PASS — …`) are grepped by consumers — changing them is a **minor** bump at least.
 7. **Semver, enforced by habit:** patch = fix with identical interface; minor = new subcommand/flag/config key or output-format change; major = anything a consumer Makefile/hook must edit to survive. `__version__` in `src/godot_devkit/__init__.py` and `version` in `pyproject.toml` move together, always.
 
-## Layout
+## Where things live
 
-```
-src/godot_devkit/
-  cli.py            # the ONE entry point; subcommand dispatch, no logic
-  data/classdb.json # Godot's built-in property table, snapshotted
+Two families and a shared floor. The rule, not the inventory — `ls src/godot_devkit`
+is the inventory, and it cannot go stale:
 
-  core/             # engine-agnostic infrastructure. Knows about neither family.
-    project.py      #   repo_root(), load_config(), git_lines() — finds the repo
-    config.py       #   what a config VALUE may be: typed coercion, ConfigError
+- **`core/`** — infrastructure that knows about neither family. `project.py` finds the
+  repo and loads config; `config.py` decides what a config VALUE may be. Nothing here
+  may import from `godot/` or `repo/`.
+- **`godot/`** — everything that knows what a `.tscn` is, layered `format/` → `index/`
+  → `read/`+`write/` → `checks/`. A layer may import downward, never up.
+- **`repo/`** — repo discipline with no Godot in it: the `pm` tracker and the gates
+  that read markdown, shell and git. **Nothing in `repo/` may import `godot/`.** That
+  is what keeps rule 2's exit clause real rather than sentimental — check it before
+  you add an import, because nothing else will.
 
-  godot/            # FAMILY 1 — everything that knows what a .tscn is
-    format/         #   the grammar: tscn, tscn_document, classdb
-    index/          #   repo-wide indexes built by parsing: uid_index, gdscript,
-                    #   gd_declarations, resource_defaults
-    read/           #   read verbs: scene_summary, scene_diff, refs, orphans, autoloads
-    write/          #   write verbs: scene_edit, scene_canonicalize
-    checks/         #   Godot gates: uid, tres, props, defaults
+A module that fits neither family is a signal worth raising, not a placement problem
+to solve quietly. Tool modules own their behavior and expose `main(argv)` or `run()`;
+`cli.py` only routes.
 
-  repo/             # FAMILY 2 — repo discipline. No Godot in it; could leave tomorrow.
-    checks/         #   doc, shell, repo_hygiene, pm, agents
-    pm/             #   model, cli, validate, execlist + templates/ and guidance/
-tests/              # stdlib unittest; fixtures/ is hermetic, consumer cases skip cleanly
-tools/gen_classdb.py    # regenerate the ClassDB snapshot from --dump-extension-api
-```
-
-The tree IS the story rule 2 tells: two families, `core/` shared and knowing about
-neither, the Godot side layered grammar → index → verbs → gates. `repo/` has no
-Godot import in it, which is what makes rule 2's exit clause a real option rather
-than a sentiment.
-
-Tool modules own their behavior and expose `main(argv)` (introspection) or `run()` (checks); `cli.py` only routes.
-
-- **New check** = module in **the right family's** `checks/` + branch in `_run_check` + README table
-  row + CHANGELOG line + the Layout block above if it adds a MODULE. (That last clause is how `pm/`
-  went unlisted for three releases: every other step was followed.) A check that fits neither family
-  is a signal worth raising, not a placement problem to solve quietly.
-- **Every config value goes through `core/config.py`.** Never `tuple(cfg.get(...))` — a bare string
-  is iterable, and that is how seven gates shipped a silent PASS over an empty census in v0.9.0.
+- **New check** = module in the right family's `checks/` + branch in `_run_check` +
+  README table row + CHANGELOG line.
 - **New read verb** = module + `cli.py` route + README table row + CHANGELOG line.
-- **New WRITE verb** = all of the above, **plus** a round-trip fidelity case in the corpus, an explicit refusal path with a test that proves it declines rather than mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`) — Godot addresses them that way; format-4 `unique_id` is not the addressing key. Read output must be valid write input: the address `scene` prints is the address the write verbs accept.
+- **New WRITE verb** = all of the above, **plus** a round-trip fidelity case in the
+  corpus, an explicit refusal path with a test proving it declines rather than
+  mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`) —
+  Godot addresses them that way; format-4 `unique_id` is not the addressing key.
+  Read output must be valid write input.
+- **Every config value goes through `core/config.py`.** Never `tuple(cfg.get(...))` —
+  a bare string is iterable, and that is how seven gates shipped a silent PASS over an
+  empty census in v0.9.0.
+
+## How we work
+
+- **The README carries the why; this file carries the enforceable form.** If a change
+  makes you want to edit this file, ask first whether it changed *doctrine* or merely
+  *contents*. Contents belong in the tree, in `--help`, or in the README. A CLAUDE.md
+  that has to be edited whenever code moves is a manifest, and it will lie.
+- **The consumers are the fixtures.** Two live repos pin this package. Their real trees
+  are the test corpus for every read verb and every gate — which also means a
+  regression here breaks two projects' commit gates before anyone notices here.
+- **Verify against source, never a cached wheel.** `uvx --from <path>` caches by
+  version, so an unchanged version number serves stale code and a fixed bug still
+  reproduces. Use `PYTHONPATH=src python3 -m godot_devkit.cli …`.
+- **A review is part of a release, not a courtesy.** Every minor bump in this package
+  so far has had a pre-release review return NOT RELEASE-SAFE, and each time the
+  blocker was a false PASS that would have shipped a permanently-green gate.
+
+### Reporting to Chris
+
+**Every decision he needs to make goes in a numbered `NEEDS YOU` list at the TOP**, so
+he can answer "1 yes, 2 delete" without scrolling. Each item is a decision, not an
+observation, and it carries the thing being decided **in the message** — a path, a
+commit hash, or the content itself. Never "there are three open questions" — name them
+A, B, C. When nothing needs him, say "nothing needs you" explicitly.
+
+- **Gate output only when it FAILED, or when you ran it yourself** — one line
+  ("157/157, my run"), never a pasted PASS block. A wall of green tells him nothing.
+- **Numbers, not adjectives.** "228 files, census unchanged", not "verified thoroughly".
+- **Say what you did NOT verify.** A claim with an unstated gap is worse than a gap.
 
 ## Verification loop
 

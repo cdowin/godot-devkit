@@ -23,10 +23,16 @@ batch flips at the end; move the status the moment its precondition holds.
    go `pm story review <id>` straight from `todo` — the sanctioned no-`wip` edge.)
 2. **Commit atomically.** One logical unit per commit. The story stays `wip` — you
    do not advance it further. There is no `story done` verb.
-3. **Reviewer flips to review.** `pm story review <id>` at review start. Fixes land
-   in place on the same dispatch; no re-review. `review` is the story's terminal.
-4. **Feature reviewer closes the stack.** `pm feature done <id> --review-record <path>`
-   flips every `review` story under the feature **and** the feature itself, atomically.
+3. **The story moves to review when its work is ready to be reviewed.**
+   `pm story review <id>`. Fixes land in place; no re-review. `review` is the story's
+   terminal — it goes no further on its own.
+4. **The feature close flips the stack.** `pm feature done <id> --review-record <path>`
+   moves every `review` story under the feature **and** the feature itself, atomically.
+
+**WHO performs steps 3 and 4 is your project's call, and your own rules must say.** The
+two live answers are "the builder flips its own work to review" and "the orchestrator
+flips it after verifying against git" — the tool permits either and has no opinion. What
+it does NOT permit is a story reaching `done` any other way; see below.
 5. **Never hand-edit `status:`.** Every transition goes through the CLI. Creation too:
    `pm new milestone|feature|story|bug` scaffolds to the schema.
 6. **Leave evidence at close.** One terse block at the grain that closed. See below.
@@ -36,7 +42,9 @@ batch flips at the end; move the status the moment its precondition holds.
 Worth knowing, so a refusal reads as a rule rather than a bug:
 
 - **A story reaches `done` only through the feature cascade.** A per-story `done`
-  flip is a review-skip hole; the graph has no such edge.
+  flip is a review-skip hole; the graph has no such edge. If a definition or a habit
+  in your project describes one, `godot-devkit check agents` will find it — that drift
+  is why a story can sit at `wip` with finished work while its feature refuses to close.
 - **`pm feature review` refuses unless every story is at `review`.** A feature cannot
   be under review while its own work is unfinished.
 - **`pm feature done` refuses without a *substantive* review record** — a pointer that
@@ -80,6 +88,9 @@ banner`. Link the hash and stop.
   consistent, `depends_on`/`consumed_by` resolve, the feature graph is acyclic and
   phase-monotone. A ref into a pruned milestone is UNVERIFIABLE, not a failure.
 - `check pm` — status drift, and the same integrity rules, as a gate.
+- `check agents` — your agent/rule/skill definitions, against this vocabulary. Prose
+  drifts from tooling silently; this is what makes it loud.
+- `pm vocabulary --json` — the graph itself, if you write your own checks.
 
 Run the gate in your per-change gate set. A PM tree is only worth what it can be
 trusted to say.

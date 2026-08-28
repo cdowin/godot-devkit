@@ -304,6 +304,13 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm install-skills [--force]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
 | `pm init` | Stand up a tree in a repo that has none — `pm/roadmap/` + a seeded `ROADMAP.md`, the two guidance files, and the remaining wiring printed as a checklist |
 
+**Why a rule AND a skill, not one of each.** A rule with a `paths:` header **auto-loads**
+for any agent that touches the matched files; a skill must be invoked. The claim→close loop
+is a protocol whose whole purpose is preventing status/reality drift, so it cannot depend on
+something remembering to ask for it — it has to arrive unasked. The operations manual is the
+opposite: consulted deliberately when planning or restructuring, and it would be pure cost
+loaded on every edit. Same content split by *when it needs to be in front of you*.
+
 **What ships as guidance, and what does not.** The two installed files carry only the loop the CLI
 itself enforces and the manual for the tree it operates. A project's own SDLC — branching, versioning,
 release ceremony, agent dispatch, who reviews what, and what a milestone *means* in that codebase —
