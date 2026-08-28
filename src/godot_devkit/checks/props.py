@@ -38,7 +38,7 @@ from pathlib import Path
 
 from godot_devkit import classdb
 from godot_devkit.gdscript import RES_PREFIX, Resolution, ScriptIndex
-from godot_devkit.project import git_lines, load_config, repo_root
+from godot_devkit.project import git_lines, load_config, repo_root, config_section, str_tuple
 from godot_devkit.tscn import (
     Section,
     node_own_path,
@@ -266,8 +266,8 @@ def _check_section(section: Section, rel: str, ext: dict[str, dict], scripts: Sc
 
 def run() -> int:
     root = repo_root()
-    config = load_config().get('props', {})
-    exclude = tuple(config.get('exclude_prefixes', DEFAULT_EXCLUDE))
+    config = config_section('props')
+    exclude = str_tuple(config, 'props', 'exclude_prefixes', DEFAULT_EXCLUDE)
     extra = config.get('extra_properties', {})
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')

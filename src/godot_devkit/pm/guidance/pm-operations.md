@@ -28,10 +28,16 @@ pm/roadmap/
       stories/<slug>.md          id: <milestone>/<feature-slug>/<story-slug>
 ```
 
-**Scaffold, never hand-create** — `pm new milestone|feature|story|bug` writes the
-schema your project has configured (`[pm.scaffold.<grain>]`), refuses to overwrite,
-and starts every grain at its initial status. A hand-made file is how a tree grows
-a field the resolvers do not read.
+**Scaffold, never hand-create** — `pm new milestone|feature|story|bug` renders the
+grain from a template, refuses to overwrite, and starts it at its initial status. A
+hand-made file is how a tree grows a field the resolvers do not read.
+
+To change what a grain looks like here, set `[pm] template_dir`, run
+`pm templates` to copy the packaged templates out, and edit the markdown. A file
+present there wins; anything missing falls back, so overriding one grain does not
+make this project responsible for the rest. A new milestone also gets a `HANDOFF.md`
+(the cold-start doc) and a `DECISIONS.md` (append-only, one block per decision that
+would otherwise be re-litigated).
 
 ## Status vocabularies
 

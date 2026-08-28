@@ -51,6 +51,7 @@ from __future__ import annotations
 import sys
 
 from godot_devkit import __version__
+from godot_devkit.project import ConfigError
 
 OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 # Deliberately OUT of `check all`: `defaults` reports thousands of findings on a
@@ -68,6 +69,15 @@ def _usage() -> int:
 
 
 def _run_check(name: str) -> int:
+    try:
+        return _dispatch_check(name)
+    except ConfigError as err:
+        # A devkit.toml mistake is exit 2, never 1 (findings) and never 0.
+        print(f'godot-devkit: {err}', file=sys.stderr)
+        return 2
+
+
+def _dispatch_check(name: str) -> int:
     if name == 'uid':
         from godot_devkit.checks import uid
         return uid.run()
@@ -95,7 +105,7 @@ def _run_check(name: str) -> int:
     if name == 'all':
         worst = 0
         for check in OFFLINE_CHECKS:
-            worst = max(worst, _run_check(check))
+            worst = max(worst, _dispatch_check(check))
             print()
         return worst
     print(f'godot-devkit: unknown check {name!r} '

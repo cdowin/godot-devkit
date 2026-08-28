@@ -1,6 +1,8 @@
 # Changelog
 
-## v0.10.0 — 2026-08-27 — templates, field mutation, execution lists
+## Unreleased — templates, field mutation, execution lists
+
+> **Not tagged.** Pin `v0.9.0` until this is released.
 
 **On upgrade:** `[pm.scaffold.<grain>]` is **replaced** by template files. Point `[pm] template_dir`
 at a directory, run `pm templates` to populate it, and edit the markdown — a project can now change a
@@ -32,7 +34,14 @@ The list is **opt-in per file**: a file with no block is not stale, or the gate 
 tree that never asked for the feature. `pm sync` adds blocks; `pm sync --check` and V6 only judge the
 ones that exist.
 
-## v0.9.0 — 2026-08-27 — the guidance ships with the tool
+## v0.9.0 — 2026-08-27 — the pm family
+
+**The first pinnable release of everything below.** `v0.6.0`–`v0.8.0` were in-tree
+version bumps during one continuous build and were never tagged; their notes are kept
+for the record, but `v0.9.0` is the tag that contains all of them. Do not try to pin
+them.
+
+### the guidance ships with the tool
 
 **Hardening from the second pre-release review.** The headline was a false PASS in the *recommended*
 configuration: `[pm] story_ordinal_prefix = true` was meant to teach V2 about a story file's `NN-`
@@ -93,7 +102,7 @@ carries a project's vocabulary.
 the gate target, the optional `[pm]` config, and the first scaffold commands — as a checklist rather
 than a README to go find.
 
-## v0.8.0 — 2026-08-27 — validate
+## v0.8.0 — validate  *(never tagged — shipped inside `v0.9.0`)*
 
 **On upgrade:** `check pm` gains five integrity rules (V1–V5), on by default, so a tree with a
 dangling `depends_on` that previously passed will now fail. That is the point — but check with
@@ -124,7 +133,7 @@ prune model; hiding them would conceal a typo, so they are counted and named in 
 **`pm validate` refuses an empty tree** (exit 2) rather than printing VALID over zero grains — the
 same rule-4 guard `check pm` carries.
 
-## v0.7.0 — 2026-08-27 — the flow rules
+## v0.7.0 — the flow rules  *(never tagged — shipped inside `v0.9.0`)*
 
 **On upgrade:** nothing changes unless you ask for it. The three new rules are **opt-in** — name them
 in `[pm] checks` to enable them. A project that ships from the trunk and bumps its version at
@@ -146,7 +155,7 @@ milestone close is running a different, valid flow; failing it would make the ga
 
 **Config:** `version_file`, `version_pattern`, `trunk_branches`, and the three rule names in `checks`.
 
-## v0.6.0 — 2026-08-27 — project management
+## v0.6.0 — project management  *(never tagged — shipped inside `v0.9.0`)*
 
 **On upgrade:** nothing a consumer must edit. Every existing subcommand, flag and output shape is
 unchanged, and the new `check pm` is **opt-in** — it is deliberately excluded from `check all`,

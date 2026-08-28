@@ -23,11 +23,11 @@ import re
 import subprocess
 import sys
 
-from godot_devkit.project import git_lines, load_config, repo_root
+from godot_devkit.project import git_lines, load_config, repo_root, config_section, str_tuple
 
 
 def run() -> int:
-    cfg = load_config().get('repo_hygiene', {})
+    cfg = config_section('repo_hygiene')
     mainline = cfg.get('mainline', 'origin/main')
     protected = re.compile(cfg.get('protected', r'^(main|staging|archive/.*)$'))
     hard = 0

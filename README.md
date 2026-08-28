@@ -42,7 +42,6 @@ These are not extra nice-to-haves — each one is a lesson from a real incident:
   "how I saw it" and "how I change it".
 - **Idempotence.** Running the same command twice is a no-op the second time. Models retry; retries
   must be safe.
-- **Machine-readable on request.** Deterministic ordering, and `--json` where structure matters, so a
   consumer parses instead of regexing prose.
 - **Prove the edit without re-reading it.** `scene-diff` closes the loop: make the change, confirm
   exactly what moved, still without loading the file.
@@ -193,15 +192,15 @@ in one module that both the CLI and `check pm` import — one definition, two re
 No PyPI needed — install straight from a git tag (pin it):
 
 ```sh
-uv tool install "git+https://github.com/cdowin/godot-devkit@v0.3.0"   # on PATH as godot-devkit
+uv tool install "git+https://github.com/cdowin/godot-devkit@v0.9.0"   # on PATH as godot-devkit
 # or invoke pinned without installing:
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.3.0" godot-devkit scene scenes/main.tscn
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.9.0" godot-devkit scene scenes/main.tscn
 ```
 
 Suggested Makefile wiring (one pinned variable, targets delegate):
 
 ```make
-DEVKIT_VERSION := v0.3.0
+DEVKIT_VERSION := v0.9.0
 DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
 
 scene:        ; @$(DEVKIT) scene $(FILE) $(ARGS)
@@ -246,7 +245,8 @@ exclude_prefixes = ["addons/"]
 exclude_prefixes = ["addons/"]
 
 [pm]
-roadmap_dir = "pm/roadmap"      # the tree, relative to the repo root
+roadmap_dir  = "pm/roadmap"     # the tree, relative to the repo root
+template_dir = "pm/templates"   # REQUIRED to override a grain template
 review_dir  = "docs/reviews"    # where review records live
 review_min_content_bytes = 20   # anti-rubber-stamp floor (non-whitespace bytes)
 review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
@@ -268,10 +268,6 @@ trunk_branches = ["staging", "main"]            # D10: `branch: staging` = no in
 # The stock graph is the STRICT one: the story terminal is `review` (`done`
 # comes only from the feature cascade) and milestones have no `review` state.
 
-[pm.scaffold.feature]           # per-grain scaffold schema, if yours differs
-reviewed = ""
-risk = "medium"
-size = "m"
 
 [defaults]
 exclude_prefixes = ["addons/"]

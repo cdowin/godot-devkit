@@ -12,7 +12,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from godot_devkit.project import git_lines, load_config, repo_root
+from godot_devkit.project import git_lines, load_config, repo_root, config_section, str_tuple
 
 DEFAULT_ROOTS = ('tools',)
 SHEBANGS = ('#!/usr/bin/env bash', '#!/bin/bash', '#!/usr/bin/env sh', '#!/bin/sh')
@@ -23,7 +23,7 @@ def run() -> int:
         print('[check:shell] SKIP — shellcheck not on PATH (install it to enable this gate)')
         return 0
     root = repo_root()
-    roots = tuple(load_config().get('shell', {}).get('roots', DEFAULT_ROOTS))
+    roots = str_tuple(config_section('shell'), 'shell', 'roots', DEFAULT_ROOTS)
     targets = []
     for rel in git_lines('ls-files', *roots):
         path = root / rel

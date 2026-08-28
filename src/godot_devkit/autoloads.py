@@ -31,7 +31,7 @@ import re
 from pathlib import Path
 
 from godot_devkit.tscn import parse_text, _strip_quotes
-from godot_devkit.project import repo_root, load_config
+from godot_devkit.project import load_config, repo_root, config_section, str_tuple
 
 # --- Scope -------------------------------------------------------------------
 REPO_ROOT = repo_root()
@@ -63,7 +63,7 @@ NO_SUFFIX = '(no recognized suffix)'
 
 # devkit.toml overrides ([autoloads] suffixes = {Manager = "emits", ...},
 # expected_prefixes = ["autoloads/", ...]) replace the defaults above.
-_CFG = load_config().get('autoloads', {})
+_CFG = config_section('autoloads')
 if _CFG.get('suffixes'):
     SUFFIX_EXPECT = {k: {v} if isinstance(v, str) else set(v)
                      for k, v in _CFG['suffixes'].items()}

@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections import Counter
 
 from godot_devkit.gdscript import ScriptIndex
-from godot_devkit.project import git_lines, load_config, repo_root
+from godot_devkit.project import git_lines, load_config, repo_root, config_section, str_tuple
 from godot_devkit.resource_defaults import DefaultAnalyzer
 from godot_devkit.tscn import parse
 
@@ -44,7 +44,7 @@ MAX_LISTED = 40
 
 def run() -> int:
     root = repo_root()
-    config = load_config().get(CONFIG_SECTION, {})
+    config = config_section(CONFIG_SECTION)
     exclude = tuple(config.get('exclude_prefixes', DEFAULT_EXCLUDE))
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')

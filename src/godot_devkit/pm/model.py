@@ -32,7 +32,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from godot_devkit.project import load_config, repo_root
+from godot_devkit.project import (ConfigError, config_section, flag, number,
+                                  repo_root, str_tuple, text)
 
 # --- stock policy -------------------------------------------------------------
 # The story terminal is `review`: there is deliberately NO story `*->done` edge,
@@ -79,7 +80,6 @@ class PmConfig:
     feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
     checks: tuple[str, ...] = DEFAULT_CHECKS
-    scaffold: dict = field(default_factory=dict)
     # D8 only: where the shipped version lives, and the line that carries it.
     template_dir: str = ''
     version_file: str = 'project.godot'
@@ -98,54 +98,17 @@ class PmConfig:
             return str(path)
 
 
-class ConfigError(Exception):
-    """A malformed `[pm]` section. Exit 2 — a config typo is NOT a finding.
-
-    `project.py` states the contract: exit 1 is reserved for findings, so CI
-    must never read a toml mistake as "drift found". A gate that exits 1 on a
-    typo is bad; one that exits 0 is catastrophic (see `checks` below).
-    """
-
-
 def load() -> PmConfig:
     """Build the config from `[pm]` in devkit.toml, defaults where unset."""
-    section = load_config().get('pm', {})
-    if not isinstance(section, dict):
-        raise ConfigError('[pm] must be a table')
+    sect = config_section('pm')
 
     def tup(key: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
-        val = section.get(key)
-        if val is None:
-            return fallback
-        # A bare string iterates into CHARACTERS and a table into KEYS, so an
-        # unvalidated tuple() here silently yields a vocabulary of nonsense.
-        # For `checks` that means every rule switches off and the gate prints a
-        # serene PASS over real drift — the read-side cardinal sin. Refuse.
-        if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
-            raise ConfigError(f'[pm] {key} must be a list of strings, got {val!r}')
-        if not val:
+        out = str_tuple(sect, 'pm', key, fallback)
+        if not out:
             raise ConfigError(
                 f'[pm] {key} is empty — remove the key to take the default '
                 f'({" ".join(fallback)}) rather than declaring nothing')
-        return tuple(val)
-
-    def flag(key: str, fallback: bool) -> bool:
-        val = section.get(key, fallback)
-        if not isinstance(val, bool):
-            raise ConfigError(f'[pm] {key} must be true/false, got {val!r}')
-        return val
-
-    def num(key: str, fallback: int) -> int:
-        val = section.get(key, fallback)
-        if not isinstance(val, int) or isinstance(val, bool):
-            raise ConfigError(f'[pm] {key} must be an integer, got {val!r}')
-        return val
-
-    def text(key: str, fallback: str) -> str:
-        val = section.get(key, fallback)
-        if not isinstance(val, str):
-            raise ConfigError(f'[pm] {key} must be a string, got {val!r}')
-        return val
+        return out
 
     checks = tup('checks', DEFAULT_CHECKS)
     unknown = [c for c in checks if c not in KNOWN_CHECKS]
@@ -159,7 +122,8 @@ def load() -> PmConfig:
     # Compile here, not at use: an invalid regex or a missing capture group is
     # a CONFIG error (exit 2), never a finding (exit 1). Deferring it meant CI
     # read a devkit.toml typo as "PM drift found".
-    version_pattern = text('version_pattern', r'^config/version="(.*)"$')
+    version_pattern = text(sect, 'pm', 'version_pattern',
+                           r'^config/version="(.*)"$')
     try:
         compiled = re.compile(version_pattern)
     except re.error as err:
@@ -168,33 +132,23 @@ def load() -> PmConfig:
         raise ConfigError('[pm] version_pattern needs one capture group around '
                           'the version itself')
 
-    scaffold = section.get('scaffold', {})
-    if not isinstance(scaffold, dict):
-        raise ConfigError('[pm] scaffold must be a table')
-    # MN4 — the un-fixed half of the checks fix. An unknown grain key or a
-    # non-table value was silently ignored, which is indistinguishable from a
-    # setting that did nothing.
-    known_grains = ('milestone', 'feature', 'story', 'bug')
-    for key, val in scaffold.items():
-        if key not in known_grains:
-            raise ConfigError(f'[pm.scaffold.{key}] is not a grain — expected '
-                              f'one of {", ".join(known_grains)}')
-        if not isinstance(val, dict):
-            raise ConfigError(f'[pm.scaffold.{key}] must be a table of '
-                              f'field = "default" pairs, got {val!r}')
-        for fk, fv in val.items():
-            if isinstance(fv, (dict, list)):
-                raise ConfigError(f'[pm.scaffold.{key}] {fk} must be a scalar, '
-                                  f'got {fv!r}')
+    # `[pm.scaffold.*]` was retired by template files. Refuse it rather than
+    # ignoring it: a config key that silently does nothing is worse than one
+    # that errors, because the author believes it took effect.
+    if 'scaffold' in sect:
+        raise ConfigError(
+            '[pm.scaffold.*] was replaced by template FILES — set [pm] '
+            'template_dir and run `pm templates` to copy them out, then edit '
+            'the markdown (a template can change a grain\'s whole shape, not '
+            'just its frontmatter defaults)')
 
     return PmConfig(
         root=repo_root(),
-        scaffold=dict(scaffold),
-        roadmap_dir=text('roadmap_dir', 'pm/roadmap'),
-        review_dir=text('review_dir', 'docs/reviews'),
-        review_min_content_bytes=num('review_min_content_bytes', 20),
-        review_slug_fallback=flag('review_slug_fallback', False),
-        story_ordinal_prefix=flag('story_ordinal_prefix', False),
+        roadmap_dir=text(sect, 'pm', 'roadmap_dir', 'pm/roadmap'),
+        review_dir=text(sect, 'pm', 'review_dir', 'docs/reviews'),
+        review_min_content_bytes=number(sect, 'pm', 'review_min_content_bytes', 20),
+        review_slug_fallback=flag(sect, 'pm', 'review_slug_fallback', False),
+        story_ordinal_prefix=flag(sect, 'pm', 'story_ordinal_prefix', False),
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
@@ -202,8 +156,8 @@ def load() -> PmConfig:
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
-        template_dir=text('template_dir', ''),
-        version_file=text('version_file', 'project.godot'),
+        template_dir=text(sect, 'pm', 'template_dir', ''),
+        version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
         trunk_branches=tup('trunk_branches', ('staging', 'main')),
     )
