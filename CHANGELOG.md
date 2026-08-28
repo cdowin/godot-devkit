@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.12.0 — 2026-08-28 — `tiles`, and a `check uid` that repairs what it reports
+
+**New family — `tiles`.** A TileMapLayer serialises its entire map into one base64 property, so every
+question about it is unanswerable by reading and every edit is a throwaway script. In nullbound that
+stopped being theoretical: three agents hand-rolled the same twelve-byte cell decoder in a single
+day, and painting a region took a bespoke encode/decode pass each time.
+
+```
+tiles <file.tscn> [--layer NAME] [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]
+tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]
+tiles erase <file> --layer NAME --region X0,Y0,X1,Y1
+```
+
+The read side prints cell count, bounds and a tile-kind histogram per layer; `--cols`/`--rows` are
+the edge-finders (per-column and per-row counts show where a wall stops or a lid is missing in one
+screen), `--at` answers one cell, `--region` censuses a rectangle. The write side fills or clears a
+rectangle and regenerates **only** that layer's `tile_map_data` assignment — its inline `;` comment
+survives, surviving cells keep their position in the stream so the encoded value changes as little
+as the edit does, and a paint that changes no cell writes nothing and reports `unchanged`. Both
+verbs take `--dry-run`.
+
+Refusals land before anything is written: an unknown layer, a name two layers answer to, a malformed
+`--tile`/`--region`, a coordinate the format cannot carry, and a `tile_map_data` value that does not
+decode — re-encoding a partial read would silently delete the tail of a map. A full node path beats
+a bare name, so `Nested/WallLayer` stays addressable in a scene that also has a root-level
+`WallLayer`.
+
+**New flag — `check uid --fix`.** The gate already computes the should-be value and prints it in
+every DRIFT line; `--fix` writes it, byte-surgically (only the `uid="…"` attribute on the drifted
+line changes), and exits 0 so the re-run is clean. It will NOT invent: a ref whose target has no
+`.uid` at all, and check 2's untracked sidecars, both need a uid that does not exist yet — those
+stay findings and `--fix` still exits 1 when one is present. `--fix` on a clean tree is a no-op that
+says so.
+
+**On upgrade — three output/behavior notes a consumer may grep.** `check uid` gains one line in its
+FAIL output when fixable drift is present (`  Fix: re-run with --fix …`); the DRIFT/UNTRACKED/PASS
+line shapes are unchanged. `check <gate>` now REFUSES unrecognised trailing arguments with exit 2
+instead of ignoring them — `--fix` on any gate but `uid` (including `check all`) is a usage error,
+because a consumer that believes it asked for a repair and got a read-only run has been lied to. And
+an undecodable `tile_map_data` now renders as `PackedByteArray (unparsed)` in `scene`/`scene-diff`
+rather than a bounds line computed off a partial read; a well-formed value's line is unchanged.
+
+Internally the twelve-byte layout moved into one codec (`godot/format/tilemap.py`) that the read
+side, the write side and `scene`/`scene-diff` all share, along with the command-line spelling of a
+tile and a region — so the two verbs cannot drift into two dialects of the same argument.
+
 ## v0.11.0 — 2026-08-28 — `pm milestone building` can place the branch
 
 **New opt-in — `[pm] place_branch_on_building`.** `pm milestone building <id>` also checks that
