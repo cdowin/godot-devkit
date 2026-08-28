@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.10.0 — 2026-08-27 — templates, field mutation, execution lists
+
+**On upgrade:** `[pm.scaffold.<grain>]` is **replaced** by template files. Point `[pm] template_dir`
+at a directory, run `pm templates` to populate it, and edit the markdown — a project can now change a
+grain's whole shape, not just its frontmatter defaults. Nothing else changes; `check pm` gains V6,
+which is inert until a file actually carries a generated block.
+
+**Templates are files.** `pm new` renders `milestone|feature|story|bug` from markdown templates with
+`{placeholder}` fills, and a new milestone also gets a `HANDOFF.md` (the cold-start doc) and a
+`DECISIONS.md` (append-only, one block per decision that would otherwise be re-litigated). A project
+template wins over the packaged one **per file**, so overriding one grain does not make you responsible
+for the rest. Unknown placeholders are left visible rather than blanked — a template is prose as well
+as schema, and silently emptying something that merely looked like a placeholder corrupts the file.
+
+**`pm get` / `pm set` / `pm claim` / `pm release` — frontmatter mutation as code.** Every hand-rolled
+`sed` over frontmatter is a chance to rewrite a line ending, drop a field, or move a value that had
+preconditions on it. These go through the same byte-fidelity-proven writer the transitions use.
+`status` is **refused**: it is the one field with a transition graph behind it, and a settable status
+would reopen the hole the CLI exists to close. `claim`/`release` finally put `owner:` — hand-edited
+everywhere `status:` was not — behind a command.
+
+**`pm sync` — the execution list, generated.** A milestone states the order its features are built in;
+a feature states the order its stories are. Standing doctrine forbids hand-maintaining exactly this
+("a second scoreboard, and it will lie") — and it lies because a *human* maintains it. Rendered between
+markers from the same tree `pm status` reads, it is not a second source of truth but a view of the only
+one, and **V6** fails when the two disagree. Order is phase, then dependency (Kahn, name-tiebroken so
+the output is stable), then name.
+
+The list is **opt-in per file**: a file with no block is not stale, or the gate would go red on every
+tree that never asked for the feature. `pm sync` adds blocks; `pm sync --check` and V6 only judge the
+ones that exist.
+
 ## v0.9.0 — 2026-08-27 — the guidance ships with the tool
 
 **Hardening from the second pre-release review.** The headline was a false PASS in the *recommended*

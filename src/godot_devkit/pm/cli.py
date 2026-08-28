@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from godot_devkit.pm import model
+from godot_devkit.pm import model, templates
 
 PROG = 'godot-devkit pm'
 
@@ -32,6 +32,12 @@ USAGE = """usage: godot-devkit pm <command>
   feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
   milestone <ready|building|done> <milestone-id>       (done refuses unless all features done)
   status [<milestone>]
+  get <grain-id> <key>                    (read one frontmatter field)
+  set <grain-id> <key> <value>            (write one — never `status`)
+  claim <grain-id> <owner>                (sugar for set … owner)
+  release <grain-id>                      (clear owner)
+  templates [--force]                     (copy the templates into the project to edit)
+  sync [--check]                          (re-render the execution lists)
   validate                                (structural + referential integrity)
   install-skills [--force]                (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
@@ -41,17 +47,6 @@ USAGE = """usage: godot-devkit pm <command>
   new bug <milestone> <slug>
   prune                                   (delete cooled archives; stamp the prune log)"""
 
-# Stock scaffold schemas: ordered (key, literal-value) pairs emitted after the
-# computed identity fields. Override wholesale per grain with
-# `[pm.scaffold.<grain>]` in devkit.toml when a project's schema differs.
-STOCK_SCAFFOLD: dict[str, tuple[tuple[str, str], ...]] = {
-    'milestone': (('theme', ''), ('target_date', ''), ('actual_date', ''),
-                  ('depends_on', '[]'), ('risk', 'low'), ('track', ''), ('labels', '[]')),
-    'feature': (('reviewed', ''), ('risk', 'medium'), ('size', 'm'),
-                ('depends_on', '[]'), ('consumed_by', '[]'), ('labels', '[]')),
-    'story': (('owner', ''), ('estimate', ''), ('depends_on', '[]'), ('labels', '[]')),
-    'bug': (('name', ''), ('severity', 'medium'), ('labels', '[]')),
-}
 
 
 class Refused(Exception):
@@ -64,24 +59,6 @@ class Usage(Exception):
 
 def _ok(msg: str) -> None:
     print(f'[pm] {msg}')
-
-
-def _scaffold_fields(cfg: model.PmConfig, grain: str) -> tuple[tuple[str, str], ...]:
-    override = cfg.scaffold.get(grain)
-    if not override:
-        return STOCK_SCAFFOLD[grain]
-    return tuple((str(k), '' if v is None else str(v)) for k, v in override.items())
-
-
-def _write_grain(path: Path, identity: list[tuple[str, str]],
-                 fields: tuple[tuple[str, str], ...], body: str) -> None:
-    lines = ['---']
-    for key, val in [*identity, *fields]:
-        lines.append(f'{key}: {val}' if val != '' else f'{key}:')
-    lines += ['---', '', body.rstrip(), '']
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('w', encoding='utf-8', newline='') as fh:
-        fh.write('\n'.join(lines))
 
 
 def _check_slug(kind: str, value: str) -> str:
@@ -501,6 +478,123 @@ def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+# `status:` is deliberately NOT settable here. It is the one field with a
+# transition graph and preconditions behind it, and a `pm set` that could move
+# it would reopen the exact hole the CLI exists to close.
+PROTECTED_FIELDS = ('status',)
+
+
+def _grain_file(cfg: model.PmConfig, gid: str) -> Path:
+    """Resolve any grain id — milestone, feature, story or bug — to its file."""
+    if '/bugs/' in gid:
+        mid, _, rest = gid.partition('/bugs/')
+        mdir = model.milestone_dir(cfg, mid)
+        bf = (mdir / 'bugs' / f'{rest}.md') if mdir else None
+        if bf and bf.is_file():
+            return bf
+        raise Usage(f'no bug resolves from id {gid!r}')
+    depth = gid.count('/')
+    found = (model.milestone_file(cfg, gid) if depth == 0 else
+             model.feature_file(cfg, gid) if depth == 1 else
+             model.story_file(cfg, gid))
+    if found is None:
+        raise Usage(f'no grain resolves from id {gid!r}')
+    return found
+
+
+def cmd_get(cfg: model.PmConfig, args: list[str]) -> int:
+    if len(args) != 2:
+        raise Usage(USAGE)
+    gid, key = args
+    print(model.field_of(_grain_file(cfg, gid), key))
+    return 0
+
+
+def cmd_set(cfg: model.PmConfig, args: list[str]) -> int:
+    """Set one frontmatter field. The point is that a tool does this, not a regex.
+
+    Every hand-rolled `sed` over frontmatter is a chance to rewrite a line
+    ending, drop a field, or move a `status:` that had preconditions on it.
+    """
+    if len(args) != 3:
+        raise Usage(USAGE)
+    gid, key, value = args
+    if key in PROTECTED_FIELDS:
+        raise Refused(
+            f'{key!r} has a transition graph and preconditions behind it — move '
+            f'it with `pm story|feature|milestone <transition>`, not `pm set`')
+    if not key or not key.replace('_', '').isalnum():
+        raise Usage(f'{key!r} is not a frontmatter key')
+    if '\n' in value or '\r' in value:
+        raise Refused('a frontmatter scalar is one line')
+    path = _grain_file(cfg, gid)
+    before = model.field_of(path, key)
+    if not model.set_field(path, key, value):
+        raise Usage(f'could not write {key}: in {cfg.rel(path)} '
+                    f'(malformed frontmatter, or the file is not writable)')
+    _ok(f'{gid}: {key} {before!r} -> {value!r}')
+    return 0
+
+
+def cmd_claim(cfg: model.PmConfig, args: list[str]) -> int:
+    """Set `owner:` — the field that was hand-edited everywhere `status:` was not."""
+    if len(args) != 2:
+        raise Usage(USAGE)
+    return cmd_set(cfg, [args[0], 'owner', args[1]])
+
+
+def cmd_release(cfg: model.PmConfig, args: list[str]) -> int:
+    if len(args) != 1:
+        raise Usage(USAGE)
+    return cmd_set(cfg, [args[0], 'owner', ''])
+
+
+def cmd_templates(cfg: model.PmConfig, args: list[str]) -> int:
+    """Copy the packaged templates into the project so they can be edited."""
+    force = '--force' in args
+    for a in args:
+        if a != '--force':
+            raise Usage(f'unknown flag {a!r}')
+    try:
+        written = templates.install(cfg, force)
+    except templates.MissingTemplate as err:
+        raise Usage(str(err)) from err
+    for path in written:
+        _ok(f'installed {cfg.rel(path)}')
+    if not written:
+        _ok(f'{cfg.template_dir}/ already populated (--force to overwrite)')
+    return 0
+
+
+def cmd_sync(cfg: model.PmConfig, args: list[str]) -> int:
+    """Re-render every execution list from the tree.
+
+    The list a milestone/feature shows is generated, never authored — which is
+    what makes it safe to have one at all. `--check` reports without writing
+    (the same predicate V6 gates on).
+    """
+    check = '--check' in args
+    for a in args:
+        if a != '--check':
+            raise Usage(f'unknown flag {a!r}')
+    from godot_devkit.pm import execlist
+    results = execlist.sync(cfg, write=not check, existing_only=check)
+    changed = [p for p, c in results if c]
+    for path in changed:
+        _ok(f'{"stale" if check else "updated"} {cfg.rel(path)}')
+    if not results and not check:
+        raise Usage(f'no grains found under {cfg.roadmap_dir}/')
+    if not changed:
+        _ok(f'all {len(results)} execution list(s) current')
+        return 0
+    if check:
+        print(f'[pm] {len(changed)} stale execution list(s) — run `pm sync`',
+              file=sys.stderr)
+        return 1
+    _ok(f'{len(changed)} of {len(results)} updated')
+    return 0
+
+
 def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
     """Structural + referential integrity. The same predicates `check pm` runs."""
     if args:
@@ -542,10 +636,13 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             raise Refused(f'{cfg.rel(mdir)} already exists')
         (mdir / 'features').mkdir(parents=True, exist_ok=True)
         (mdir / 'bugs').mkdir(parents=True, exist_ok=True)
-        _write_grain(mdir / 'milestone.md',
-                     [('id', f'"{ver}"'), ('name', name), ('status', 'planning')],
-                     _scaffold_fields(cfg, 'milestone'), f'# v{ver} — {name}')
-        _ok(f'milestone {ver} scaffolded: {cfg.rel(mdir / "milestone.md")}')
+        values = {'id': ver, 'name': name}
+        for tpl, dest in (('milestone', 'milestone.md'),
+                          ('HANDOFF', 'HANDOFF.md'),
+                          ('DECISIONS', 'DECISIONS.md')):
+            templates.write(mdir / dest,
+                            templates.render(templates.load(cfg, tpl), values))
+            _ok(f'created {cfg.rel(mdir / dest)}')
         return 0
     if grain == 'feature':
         if len(rest) < 3:
@@ -560,11 +657,10 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             raise Refused(f'feature {mid}/{slug!r} already exists')
         (fdir / 'stories').mkdir(parents=True, exist_ok=True)
         (fdir / 'plans').mkdir(parents=True, exist_ok=True)
-        _write_grain(fdir / 'feature.md',
-                     [('id', f'{mid}/{slug}'), ('milestone', f'"{mid}"'),
-                      ('name', name), ('status', 'planning')],
-                     _scaffold_fields(cfg, 'feature'), f'# {name}')
-        _ok(f'feature {mid}/{slug} scaffolded: {cfg.rel(fdir / "feature.md")}')
+        templates.write(fdir / 'feature.md', templates.render(
+            templates.load(cfg, 'feature'),
+            {'id': f'{mid}/{slug}', 'milestone': mid, 'name': name}))
+        _ok(f'created {cfg.rel(fdir / "feature.md")}')
         return 0
     if grain == 'story':
         if len(rest) < 3:
@@ -580,11 +676,11 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         sf = fdir / 'stories' / f'{slug}.md'
         if sf.exists():
             raise Refused(f'story {fid}/{slug!r} already exists')
-        _write_grain(sf, [('id', f'{fid}/{slug}'), ('feature', fid),
-                          ('milestone', f'"{mid}"'), ('name', name),
-                          ('status', 'todo')],
-                     _scaffold_fields(cfg, 'story'), f'# {name}')
-        _ok(f'story {fid}/{slug} scaffolded: {cfg.rel(sf)}')
+        templates.write(sf, templates.render(
+            templates.load(cfg, 'story'),
+            {'id': f'{fid}/{slug}', 'feature': fid, 'milestone': mid,
+             'name': name}))
+        _ok(f'created {cfg.rel(sf)}')
         return 0
     if grain == 'bug':
         if len(rest) != 2:
@@ -596,14 +692,12 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         bf = mdir / 'bugs' / f'{slug}.md'
         if bf.exists():
             raise Refused(f'bug {mid}/bugs/{slug!r} already exists')
-        # Bugs anchor to where they were CAUGHT, not where they get fixed — the
-        # file path preserves the catch history.
-        _write_grain(bf, [('id', f'{mid}/bugs/{slug}'), ('milestone', f'"{mid}"'),
-                          ('status', 'open'), ('caught_in', f'"{mid}"'),
-                          ('fixed_in', '')],
-                     _scaffold_fields(cfg, 'bug'),
-                     f'# {slug}\n\n## Symptom\n\n## Root cause\n\n## Fix')
-        _ok(f'bug {mid}/bugs/{slug} scaffolded: {cfg.rel(bf)}')
+        # Bugs anchor to where they were CAUGHT, not where they get fixed —
+        # the file path preserves the catch history.
+        templates.write(bf, templates.render(
+            templates.load(cfg, 'bug'),
+            {'id': f'{mid}/bugs/{slug}', 'milestone': mid, 'slug': slug}))
+        _ok(f'created {cfg.rel(bf)}')
         return 0
     raise Usage(USAGE)
 
@@ -698,7 +792,8 @@ def main(argv: list[str]) -> int:
         'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,
         'status': cmd_status, 'new': cmd_new, 'prune': cmd_prune,
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
-        'init': cmd_init,
+        'init': cmd_init, 'set': cmd_set, 'get': cmd_get, 'claim': cmd_claim,
+        'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
     }
     fn = table.get(cmd)
     if fn is None:

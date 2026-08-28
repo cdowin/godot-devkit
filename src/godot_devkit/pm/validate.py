@@ -12,6 +12,8 @@ undrifted and still depend on a feature that does not exist.
     V4  `depends_on` / `consumed_by` refs resolve
     V5  the feature dependency graph is acyclic and phase-monotone (no feature
         depends on one in a LATER phase)
+    V6  a generated execution-list block, WHERE ONE EXISTS, matches the tree it
+        was rendered from (the list is opt-in per file; absence is not staleness)
 
 **Pruned milestones are not errors.** Git history is the archive, so a ref like
 `0.19.4` naming a milestone no longer in the working tree is expected. V4
@@ -31,7 +33,7 @@ from godot_devkit.pm import model
 # the number sequences the build, it is not identity.
 _ORDINAL = re.compile(r'^\d\d-')
 
-VALIDATE_RULES = ('V1', 'V2', 'V3', 'V4', 'V5')
+VALIDATE_RULES = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 
 _REF_KEYS = ('depends_on', 'consumed_by')
 
@@ -204,6 +206,16 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
 
     if 'V5' in on:
         findings.extend(_graph_findings(graph))
+    if 'V6' in on:
+        # A generated list is only safe BECAUSE this fails when it drifts.
+        # Without V6 it is exactly the hand-maintained second scoreboard the
+        # doctrine forbids — it just happens to have been written by a tool once.
+        from godot_devkit.pm import execlist
+        for path, changed in execlist.sync(cfg, write=False, existing_only=True):
+            if changed:
+                findings.append(
+                    f'{cfg.rel(path)}: the execution list is stale — the tree has '
+                    f'moved since it was rendered; run `pm sync`')
     return findings, census
 
 

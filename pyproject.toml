@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "godot-devkit"
-version = "0.9.0"
+version = "0.10.0"
 description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads) + static repo gates (uid, tres-format, props, defaults, doc, shell, repo-hygiene) + a PM-tree tracker with its own drift gate."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,4 +30,5 @@ godot-devkit = "godot_devkit.cli:main"
 packages = ["src/godot_devkit"]
 # The guidance markdown is read at runtime via importlib.resources — it must be
 # in the wheel, not just the sdist.
-artifacts = ["src/godot_devkit/pm/guidance/*.md"]
+artifacts = ["src/godot_devkit/pm/guidance/*.md",
+             "src/godot_devkit/pm/templates/*.md"]

@@ -54,11 +54,11 @@ DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review')
 # drifting, it is running a different (valid) flow, and a gate that fails it
 # would be lying. Opt in with `[pm] checks`.
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7',
-                  'V1', 'V2', 'V3', 'V4', 'V5')
+                  'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 FLOW_CHECKS = ('D8', 'D9', 'D10')
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
-VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5')
+VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
@@ -81,6 +81,7 @@ class PmConfig:
     checks: tuple[str, ...] = DEFAULT_CHECKS
     scaffold: dict = field(default_factory=dict)
     # D8 only: where the shipped version lives, and the line that carries it.
+    template_dir: str = ''
     version_file: str = 'project.godot'
     version_pattern: str = r'^config/version="(.*)"$'
     trunk_branches: tuple[str, ...] = ('staging', 'main')
@@ -201,6 +202,7 @@ def load() -> PmConfig:
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
+        template_dir=text('template_dir', ''),
         version_file=text('version_file', 'project.godot'),
         version_pattern=version_pattern,
         trunk_branches=tup('trunk_branches', ('staging', 'main')),

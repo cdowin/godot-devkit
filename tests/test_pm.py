@@ -921,5 +921,165 @@ class PhaseEdges(unittest.TestCase):
             self.assertEqual(validate.run(model.PmConfig(root=root))[0], [])
 
 
+class Templates(unittest.TestCase):
+    def test_new_grains_come_from_templates_and_validate(self):
+        with tree() as root:
+            self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'b', 'B')[0], 0)
+            ff = root / 'pm/roadmap/0.1-demo/features/b/feature.md'
+            self.assertEqual(model.field_of(ff, 'id'), '0.1/b')
+            self.assertEqual(model.field_of(ff, 'milestone'), '0.1')
+            self.assertEqual(run_cli(root, 'validate')[0], 0)
+
+    def test_a_new_milestone_gets_handoff_and_decisions(self):
+        with tree() as root:
+            run_cli(root, 'new', 'milestone', '0.2', 'Second')
+            mdir = root / 'pm/roadmap/0.2-second'
+            for f in ('milestone.md', 'HANDOFF.md', 'DECISIONS.md'):
+                self.assertTrue((mdir / f).is_file(), f)
+            self.assertIn('0.2 Second', (mdir / 'HANDOFF.md').read_text())
+
+    def test_a_project_template_overrides_the_packaged_one(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            tdir = root / 'pm/templates'
+            tdir.mkdir(parents=True)
+            (tdir / 'story.md').write_text(
+                '---\nid: {id}\nfeature: {feature}\nmilestone: "{milestone}"\n'
+                'name: {name}\nstatus: todo\nhouse_field: yes\n---\n\n# {name}\n',
+                encoding='utf-8')
+            run_cli(root, 'new', 'story', '0.1/alpha', 's', 'S')
+            sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s.md'
+            self.assertEqual(model.field_of(sf, 'house_field'), 'yes')
+
+    def test_missing_grains_fall_back_to_the_packaged_template(self):
+        # Overriding one grain must not make a project own all of them.
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            (root / 'pm/templates').mkdir(parents=True)
+            self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'z', 'Z')[0], 0)
+
+    def test_templates_command_copies_them_out_without_clobbering(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            self.assertEqual(run_cli(root, 'templates')[0], 0)
+            self.assertTrue((root / 'pm/templates/feature.md').is_file())
+            (root / 'pm/templates/feature.md').write_text('mine\n', encoding='utf-8')
+            run_cli(root, 'templates')
+            self.assertEqual((root / 'pm/templates/feature.md').read_text(), 'mine\n')
+
+
+class FieldMutation(unittest.TestCase):
+    def test_set_and_get_round_trip(self):
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(
+                run_cli(root, 'set', '0.1/alpha/s0', 'estimate', '3d')[0], 0)
+            code, out = run_cli(root, 'get', '0.1/alpha/s0', 'estimate')
+            self.assertEqual(code, 0)
+            self.assertIn('3d', out)
+
+    def test_status_is_refused(self):
+        # It has a transition graph and preconditions behind it; a settable
+        # status would reopen the hole the CLI exists to close.
+        with tree(story_statuses=('todo',)) as root:
+            code, out = run_cli(root, 'set', '0.1/alpha/s0', 'status', 'done')
+            self.assertEqual(code, 1)
+            self.assertIn('transition', out)
+            sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
+            self.assertEqual(model.field_of(sf, 'status'), 'todo')
+
+    def test_claim_and_release_move_owner(self):
+        with tree(story_statuses=('todo',)) as root:
+            sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
+            run_cli(root, 'claim', '0.1/alpha/s0', 'dev-1')
+            self.assertEqual(model.field_of(sf, 'owner'), 'dev-1')
+            run_cli(root, 'release', '0.1/alpha/s0')
+            self.assertEqual(model.field_of(sf, 'owner'), '')
+
+    def test_every_grain_kind_resolves(self):
+        with tree(story_statuses=('todo',)) as root:
+            run_cli(root, 'new', 'bug', '0.1', 'oops')
+            for gid in ('0.1', '0.1/alpha', '0.1/alpha/s0', '0.1/bugs/oops'):
+                with self.subTest(gid=gid):
+                    self.assertEqual(run_cli(root, 'set', gid, 'labels', '[]')[0], 0)
+
+    def test_set_replaces_an_existing_field_byte_for_byte(self):
+        with tree() as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            before = ff.read_bytes()
+            run_cli(root, 'set', '0.1/alpha', 'name', 'Renamed')
+            self.assertEqual(ff.read_bytes(),
+                             before.replace(b'name: Alpha', b'name: Renamed'))
+
+    def test_set_inserts_a_missing_field_and_changes_nothing_else(self):
+        with tree() as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            before = ff.read_text().splitlines()
+            run_cli(root, 'set', '0.1/alpha', 'risk', 'high')
+            after = ff.read_text().splitlines()
+            self.assertEqual(len(after), len(before) + 1)
+            self.assertIn('risk: high', after)
+            self.assertEqual([ln for ln in after if ln != 'risk: high'], before)
+
+
+class ExecutionList(unittest.TestCase):
+    def _validate(self, root):
+        from godot_devkit.pm import validate
+        return validate.run(model.PmConfig(root=root))
+
+    def test_sync_writes_a_block_and_validate_then_passes(self):
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(run_cli(root, 'sync')[0], 0)
+            mfile = root / 'pm/roadmap/0.1-demo/milestone.md'
+            self.assertIn('pm:execution', mfile.read_text())
+            self.assertEqual(self._validate(root)[0], [])
+
+    def test_a_tree_with_no_block_is_not_stale(self):
+        # The list is opt-in per file; absence is not staleness, or the gate
+        # would go red on every tree that never asked for the feature.
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(self._validate(root)[0], [])
+            self.assertEqual(run_cli(root, 'sync', '--check')[0], 0)
+
+    def test_v6_catches_a_stale_list(self):
+        with tree(story_statuses=('todo',)) as root:
+            run_cli(root, 'sync')
+            run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
+            self.assertTrue(any('stale' in f for f in self._validate(root)[0]))
+            self.assertEqual(run_cli(root, 'sync', '--check')[0], 1)
+            run_cli(root, 'sync')
+            self.assertEqual(run_cli(root, 'sync', '--check')[0], 0)
+
+    def test_order_follows_dependencies_then_name(self):
+        with tree() as root:
+            for slug in ('aaa', 'zzz'):
+                run_cli(root, 'new', 'feature', '0.1', slug, slug.upper())
+            fdir = root / 'pm/roadmap/0.1-demo/features'
+            # aaa sorts first by name but depends on zzz, so zzz must lead.
+            model.set_field(fdir / 'aaa/feature.md', 'depends_on', '["0.1/zzz"]')
+            run_cli(root, 'sync')
+            block = (root / 'pm/roadmap/0.1-demo/milestone.md').read_text()
+            self.assertLess(block.index('`zzz`'), block.index('`aaa`'))
+            self.assertIn('after zzz', block)
+
+    def test_sync_is_idempotent(self):
+        with tree(story_statuses=('todo',)) as root:
+            run_cli(root, 'sync')
+            mfile = root / 'pm/roadmap/0.1-demo/milestone.md'
+            once = mfile.read_bytes()
+            run_cli(root, 'sync')
+            self.assertEqual(mfile.read_bytes(), once)
+
+    def test_sync_preserves_the_rest_of_the_file(self):
+        with tree() as root:
+            mfile = root / 'pm/roadmap/0.1-demo/milestone.md'
+            mfile.write_text(mfile.read_text() + '\n## Notes\n\nkeep me\n',
+                             encoding='utf-8')
+            run_cli(root, 'sync')
+            self.assertIn('keep me', mfile.read_text())
+
+
 if __name__ == '__main__':
     unittest.main()
