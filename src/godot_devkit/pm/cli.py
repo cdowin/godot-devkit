@@ -80,7 +80,30 @@ def _write_grain(path: Path, identity: list[tuple[str, str]],
         lines.append(f'{key}: {val}' if val != '' else f'{key}:')
     lines += ['---', '', body.rstrip(), '']
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('\n'.join(lines), encoding='utf-8')
+    with path.open('w', encoding='utf-8', newline='') as fh:
+        fh.write('\n'.join(lines))
+
+
+def _check_slug(kind: str, value: str) -> str:
+    """A slug becomes a path component AND half an id. Reject anything else.
+
+    `_slugify` was applied to a grain's NAME only, never to the slug or version
+    argument, and `id_is_literal` guards resolution rather than creation — so
+    `pm new bug 0.1 ../../../pwned` wrote outside the repo root and exited 0.
+    A write verb that touches what it was not asked to is the cardinal sin.
+    """
+    if not value:
+        raise Usage(f'{kind} may not be empty')
+    if value in ('.', '..') or any(c in value for c in '/\\'):
+        raise Refused(f'{kind} {value!r} contains a path separator — a slug is '
+                      f'one path component, never a path')
+    if '..' in value:
+        raise Refused(f'{kind} {value!r} contains "..", which would escape the '
+                      f'tree')
+    if value.startswith('-') or any(c in value for c in '*?[]!'):
+        raise Refused(f'{kind} {value!r} contains a glob or leading dash — ids '
+                      f'are literals')
+    return value
 
 
 def _slugify(text: str) -> str:
@@ -483,7 +506,7 @@ def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
     if args:
         raise Usage(USAGE)
     from godot_devkit.pm import validate as _validate
-    findings, census = _validate.run(cfg)
+    findings, census = _validate.run(cfg, set(cfg.checks) & set(model.VALIDATE_CHECKS))
     for msg in findings:
         print(f'  INVALID  {msg}')
     if not census['grains']:
@@ -511,7 +534,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if grain == 'milestone':
         if len(rest) < 2:
             raise Usage(USAGE)
-        ver, name = rest[0], ' '.join(rest[1:])
+        ver, name = _check_slug('milestone version', rest[0]), ' '.join(rest[1:])
         if model.milestone_dir(cfg, ver) is not None:
             raise Refused(f'milestone {ver!r} already exists')
         mdir = cfg.roadmap / f'{ver}-{_slugify(name)}'
@@ -527,7 +550,8 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if grain == 'feature':
         if len(rest) < 3:
             raise Usage(USAGE)
-        mid, slug, name = rest[0], rest[1], ' '.join(rest[2:])
+        mid, slug = rest[0], _check_slug('feature slug', rest[1])
+        name = ' '.join(rest[2:])
         mdir = model.milestone_dir(cfg, mid)
         if mdir is None:
             raise Usage(f'no milestone resolves from {mid!r}')
@@ -545,7 +569,8 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if grain == 'story':
         if len(rest) < 3:
             raise Usage(USAGE)
-        fid, slug, name = rest[0], rest[1], ' '.join(rest[2:])
+        fid, slug = rest[0], _check_slug('story slug', rest[1])
+        name = ' '.join(rest[2:])
         fdir = model.feature_dir(cfg, fid)
         if fdir is None:
             raise Usage(f'no feature resolves from id {fid!r}')
@@ -564,7 +589,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if grain == 'bug':
         if len(rest) != 2:
             raise Usage(USAGE)
-        mid, slug = rest
+        mid, slug = rest[0], _check_slug('bug slug', rest[1])
         mdir = model.milestone_dir(cfg, mid)
         if mdir is None:
             raise Usage(f'no milestone resolves from {mid!r}')
@@ -640,7 +665,14 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     for _, label in targets:
         text += f'  - `{label}`\n'
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(text, encoding='utf-8')
+    try:
+        # newline='' for the same reason model.py does it: never rewrite a
+        # file's line endings as a side effect of appending to it.
+        with index.open('w', encoding='utf-8', newline='') as fh:
+            fh.write(text)
+    except OSError as err:
+        raise Usage(f'could not stamp the resurrect anchor into '
+                    f'{cfg.rel(index)} ({err}) — nothing was deleted') from err
 
     for path, _ in targets:
         subprocess.run(['git', 'rm', '-r', '-q', '--ignore-unmatch', cfg.rel(path)],

@@ -744,5 +744,182 @@ class Guidance(unittest.TestCase):
             self.assertEqual(run_cli(root, 'validate')[0], 0)
 
 
+class OrdinalPrefix(unittest.TestCase):
+    """`story_ordinal_prefix` must TEACH V2 the prefix, never switch V2 off.
+
+    Skipping instead of stripping left every story in such a tree unchecked
+    while the gate printed VALID — under the configuration the docs mandate.
+    """
+
+    def _prefixed(self, root: Path, sid: str) -> Path:
+        sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+        p = sdir / '01-boots.md'
+        write(p, {'id': sid, 'feature': '0.1/alpha', 'milestone': '"0.1"',
+                  'name': 'B', 'status': 'todo'})
+        return p
+
+    def _validate(self, root: Path):
+        from godot_devkit.pm import validate
+        return validate.run(model.PmConfig(root=root, story_ordinal_prefix=True))
+
+    def test_a_prefixed_file_with_a_matching_id_is_valid(self):
+        with tree(story_statuses=()) as root:
+            self._prefixed(root, '0.1/alpha/boots')
+            self.assertEqual(self._validate(root)[0], [])
+
+    def test_a_prefixed_file_with_a_WRONG_id_is_still_caught(self):
+        # The regression: this used to pass because the whole arm was skipped.
+        with tree(story_statuses=()) as root:
+            self._prefixed(root, 'TOTAL/GARBAGE/nonsense')
+            findings = self._validate(root)[0]
+            self.assertTrue(any('does not match its path' in f for f in findings),
+                            findings)
+
+    def test_the_prefix_is_not_stripped_when_the_flag_is_off(self):
+        with tree(story_statuses=()) as root:
+            self._prefixed(root, '0.1/alpha/boots')
+            from godot_devkit.pm import validate
+            findings = validate.run(model.PmConfig(root=root))[0]
+            self.assertTrue(any('does not match its path' in f for f in findings))
+
+
+class RefParsing(unittest.TestCase):
+    """An unreadable ref list is a FINDING. Never an empty list.
+
+    Returning [] would mean "no refs to check", so a trailing comment or a YAML
+    block sequence would take every ref out of V4's reach and still read clean.
+    """
+
+    def _with(self, root: Path, raw: str):
+        ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+        self.assertTrue(model.set_field(ff, 'depends_on', raw))
+        from godot_devkit.pm import validate
+        return validate.run(model.PmConfig(root=root))
+
+    def test_a_dangling_ref_in_the_normal_shape_is_found(self):
+        with tree() as root:
+            findings, census = self._with(root, '["0.1/ghost"]')
+            self.assertTrue(any('resolves to nothing' in f for f in findings))
+            self.assertEqual(census['refs'], 1)
+
+    def test_unreadable_shapes_are_reported_not_silently_dropped(self):
+        for raw in ('["0.1/ghost"]  # note', '0.1/ghost', '[["0.1/ghost"]]',
+                    '["0.1/a, and 0.1/b"]'):
+            with self.subTest(raw=raw), tree() as root:
+                findings, _ = self._with(root, raw)
+                self.assertTrue(findings, f'{raw!r} vanished silently')
+
+    def test_empty_and_null_are_genuinely_empty(self):
+        for raw in ('[]', 'null', '~'):
+            with self.subTest(raw=raw), tree() as root:
+                findings, census = self._with(root, raw)
+                self.assertEqual(findings, [])
+                self.assertEqual(census['refs'], 0)
+
+    def test_the_ref_census_does_not_depend_on_which_rules_ran(self):
+        with tree() as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            model.set_field(ff, 'depends_on', '["0.1/alpha"]')
+            from godot_devkit.pm import validate
+            cfg = model.PmConfig(root=root)
+            self.assertEqual(validate.run(cfg, {'V1'})[1]['refs'],
+                             validate.run(cfg, {'V4'})[1]['refs'])
+
+
+class FlowRuleEdges(unittest.TestCase):
+    def test_d8_refuses_when_two_milestones_are_building(self):
+        # A matching sibling used to mask the exact drift D8 exists for.
+        with tree(milestone_status='building', story_statuses=('todo',)) as root:
+            write(root / 'pm/roadmap/0.2-two/milestone.md',
+                  {'id': '"0.2"', 'name': 'Two', 'status': 'building',
+                   'branch': 'staging'})
+            model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md',
+                            'branch', 'staging')
+            (root / 'project.godot').write_text(
+                '[application]\nconfig/version="0.1"\n', encoding='utf-8')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D8"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('milestones are building', out)
+
+    def test_d10_says_so_when_it_cannot_see_the_trunk(self):
+        # Detached HEAD is what CI checks out; silently skipping there turned
+        # D10 off in the one environment it guards.
+        with tree(milestone_status='building', story_statuses=('todo',)) as root:
+            model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md',
+                            'branch', 'feat/0.1-demo')
+            (root / 'project.godot').write_text(
+                '[application]\nconfig/version="0.1"\n', encoding='utf-8')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+            subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                           capture_output=True)
+            subprocess.run(['git', '-c', 'user.email=t@t', '-c', 'user.name=t',
+                            'commit', '-qm', 'x'], cwd=root, check=True,
+                           capture_output=True)
+            subprocess.run(['git', 'checkout', '--detach', '-q', 'HEAD'],
+                           cwd=root, check=True, capture_output=True)
+            code, out = run_gate(root)
+            self.assertIn('UNVERIFIED', out)
+            self.assertIn('DETACHED', out)
+
+
+class ConfigValueErrors(unittest.TestCase):
+    def test_a_bad_version_pattern_is_exit_2_not_a_finding(self):
+        for bad in ('version_pattern = "config/version=\\"(.*\\""',
+                    'version_pattern = "^config/version=.*$"'):
+            with self.subTest(bad=bad), tree() as root:
+                (root / 'devkit.toml').write_text(
+                    f'[pm]\nchecks = ["D8"]\n{bad}\n', encoding='utf-8')
+                self.assertEqual(run_gate(root)[0], 2)
+
+    def test_scaffold_misconfiguration_is_refused_not_ignored(self):
+        for bad in ('[pm.scaffold]\nmilestone = "theme,risk"',
+                    '[pm.scaffold.epic]\nx = "y"',
+                    '[pm.scaffold.story]\ntags = ["a"]'):
+            with self.subTest(bad=bad), tree() as root:
+                (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')
+                self.assertEqual(run_gate(root)[0], 2)
+
+
+class NewRefusesUnsafeSlugs(unittest.TestCase):
+    def test_a_slug_is_one_path_component_never_a_path(self):
+        with tree() as root:
+            before = sorted(p.name for p in root.iterdir())
+            for bad in ('../../../pwned', 'a/b', '..', '-dash', 'glob*'):
+                with self.subTest(bad=bad):
+                    code, _ = run_cli(root, 'new', 'bug', '0.1', bad)
+                    self.assertEqual(code, 1)
+            self.assertEqual(sorted(p.name for p in root.iterdir()), before)
+
+    def test_a_milestone_version_is_validated_too(self):
+        with tree() as root:
+            self.assertEqual(
+                run_cli(root, 'new', 'milestone', '../../oops', 'Name')[0], 1)
+
+
+class PhaseEdges(unittest.TestCase):
+    def test_a_numeric_phase_may_not_depend_on_an_unordered_one(self):
+        # `seam` means nothing blocks on it; sitting mid-chain contradicts that.
+        with tree() as root:
+            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
+            fdir = root / 'pm/roadmap/0.1-demo/features'
+            model.set_field(fdir / 'alpha/feature.md', 'phase', '2')
+            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
+            model.set_field(fdir / 'beta/feature.md', 'phase', 'seam')
+            from godot_devkit.pm import validate
+            findings = validate.run(model.PmConfig(root=root))[0]
+            self.assertTrue(any('seam' in f for f in findings), findings)
+
+    def test_an_unphased_milestone_raises_no_phase_findings(self):
+        with tree() as root:
+            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
+            fdir = root / 'pm/roadmap/0.1-demo/features'
+            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
+            from godot_devkit.pm import validate
+            self.assertEqual(validate.run(model.PmConfig(root=root))[0], [])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -22,26 +22,68 @@ counted and reported in the summary.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from godot_devkit.pm import model
+
+# A story FILE may carry an ordering prefix (`01-slug.md`) that its ID does not:
+# the number sequences the build, it is not identity.
+_ORDINAL = re.compile(r'^\d\d-')
 
 VALIDATE_RULES = ('V1', 'V2', 'V3', 'V4', 'V5')
 
 _REF_KEYS = ('depends_on', 'consumed_by')
 
 
+class Unparseable(Exception):
+    """A ref list this parser cannot read. NEVER silently an empty list.
+
+    Returning [] would mean "no refs to check" — so a trailing comment, a YAML
+    block sequence, or a bare scalar would take every ref out of V4's reach and
+    still report clean. An unreadable value is a finding.
+    """
+
+
 def _refs(path: Path, key: str) -> list[str]:
-    """The ids inside a `key: ["a", "b"]` frontmatter list."""
-    raw = model.field_of(path, key)
-    if not raw.startswith('[') or not raw.endswith(']'):
+    """The ids inside a `key: ["a", "b"]` frontmatter list.
+
+    Deliberately narrow: the scaffolder mints exactly this flat inline form, so
+    anything else is either hand-authored drift or a shape this parser would
+    misread. Both get reported rather than skipped.
+    """
+    raw = model.field_of(path, key).strip()
+    if not raw or raw in ('[]', 'null', '~'):
         return []
+    if not (raw.startswith('[') and raw.endswith(']')):
+        raise Unparseable(f'{key}: {raw!r} is not an inline list — write '
+                          f'{key}: ["a", "b"] (a block sequence or trailing '
+                          f'comment cannot be read from the frontmatter line)')
+    inner = raw[1:-1]
+    if '[' in inner or ']' in inner:
+        raise Unparseable(f'{key}: {raw!r} nests brackets — only a flat list '
+                          f'of ids is supported')
     out = []
-    for part in raw[1:-1].split(','):
-        part = part.strip().strip('"').strip("'").strip()
+    for part in inner.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if part[0] in '"\'' and part[-1] == part[0]:
+            part = part[1:-1]
+        if ',' in part or ' ' in part.strip():
+            raise Unparseable(f'{key}: entry {part!r} contains a separator — '
+                              f'ids never contain spaces or commas')
         if part:
             out.append(part)
     return out
+
+
+def _safe_refs(path: Path, key: str, bad, rel: str) -> list[str]:
+    try:
+        return _refs(path, key)
+    except Unparseable as err:
+        bad(f'{rel}: {err}')
+        return []
 
 
 def _grain_exists(cfg: model.PmConfig, ref: str) -> bool | None:
@@ -108,8 +150,15 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                 sid = model.field_of(sfile, 'id')
                 if 'V1' in on and (not sid or not model.field_of(sfile, 'status')):
                     bad(f'{cfg.rel(sfile)}: missing id: or status: in the frontmatter')
-                s_expect = f'{expect}/{sfile.stem}'
-                if 'V2' in on and sid and sid != s_expect and not cfg.story_ordinal_prefix:
+                # `story_ordinal_prefix` TEACHES V2 about the prefix; it must
+                # never switch the check off. Skipping instead of stripping
+                # left every story in such a tree unchecked while the gate
+                # printed VALID — under the configuration the docs mandate.
+                stem = sfile.stem
+                if cfg.story_ordinal_prefix:
+                    stem = _ORDINAL.sub('', stem)
+                s_expect = f'{expect}/{stem}'
+                if 'V2' in on and sid and sid != s_expect:
                     bad(f'{cfg.rel(sfile)}: id {sid!r} does not match its path '
                         f'(expected {s_expect!r})')
                 if 'V3' in on:
@@ -121,18 +170,17 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                     if own and own != mid:
                         bad(f'{cfg.rel(sfile)}: milestone: {own!r} but it lives '
                             f'under milestone {mid!r}')
-                if 'V4' in on:
-                    for ref in _refs(sfile, 'depends_on'):
-                        census['refs'] += 1
-                        got = _grain_exists(cfg, ref)
-                        if got is None:
-                            census['unverifiable'] += 1
-                        elif not got:
-                            bad(f'{cfg.rel(sfile)}: depends_on {ref!r} resolves to '
-                                f'nothing (its milestone IS in the tree)')
+                for ref in _safe_refs(sfile, 'depends_on', bad, cfg.rel(sfile)):
+                    census['refs'] += 1
+                    got = _grain_exists(cfg, ref)
+                    if got is None:
+                        census['unverifiable'] += 1
+                    elif not got and 'V4' in on:
+                        bad(f'{cfg.rel(sfile)}: depends_on {ref!r} resolves to '
+                            f'nothing (its milestone IS in the tree)')
 
             for key in _REF_KEYS:
-                for ref in _refs(ffile, key):
+                for ref in _safe_refs(ffile, key, bad, cfg.rel(ffile)):
                     census['refs'] += 1
                     got = _grain_exists(cfg, ref)
                     if got is None:
@@ -145,7 +193,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                     elif key == 'depends_on' and fid and ref.count('/') == 1:
                         graph[fid][1].append(ref)
 
-        for ref in _refs(mfile, 'depends_on'):
+        for ref in _safe_refs(mfile, 'depends_on', bad, cfg.rel(mfile)):
             census['refs'] += 1
             got = _grain_exists(cfg, ref)
             if got is None:
@@ -182,14 +230,28 @@ def _graph_findings(graph: dict[str, tuple[str, list[str]]]) -> list[str]:
         if colour[node] == WHITE:
             walk(node, [])
 
-    # Phase-monotone — a feature may not depend on one scheduled LATER.
+    # Phase-monotone — a feature may not depend on one scheduled LATER, and a
+    # numeric-phase feature may not depend on one with no ordering at all.
+    # Exempting non-numeric phases silently let `seam` (defined as neither
+    # blocking nor blocked) sit in the middle of a dependency chain.
+    phased = any(p.isdigit() for p, _ in graph.values())
     for fid, (phase, deps) in sorted(graph.items()):
         if not phase.isdigit():
             continue
         for dep in deps:
-            dep_phase = graph.get(dep, ('', []))[0]
-            if dep_phase.isdigit() and int(dep_phase) > int(phase):
-                out.append(f'{fid} is phase {phase} but depends on {dep} in the '
-                           f'LATER phase {dep_phase} — the buckets contradict '
-                           f'the graph')
+            if dep not in graph:
+                continue
+            dep_phase = graph[dep][0]
+            if dep_phase.isdigit():
+                if int(dep_phase) > int(phase):
+                    out.append(f'{fid} is phase {phase} but depends on {dep} in '
+                               f'the LATER phase {dep_phase} — the buckets '
+                               f'contradict the graph')
+            elif phased:
+                what = f'phase {dep_phase!r}' if dep_phase else 'no phase'
+                out.append(f'{fid} is phase {phase} but depends on {dep}, which '
+                           f'has {what} — it carries no ordering, so the bucket '
+                           f'cannot be honoured'
+                           + (' (`seam` means nothing blocks on it)'
+                              if dep_phase == 'seam' else ''))
     return out

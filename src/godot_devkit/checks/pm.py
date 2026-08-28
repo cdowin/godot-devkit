@@ -159,18 +159,28 @@ def run() -> int:
         if version is None:
             report(f'no version found in {cfg.version_file} — D8 cannot verify '
                    f'the building milestone(s) {", ".join(ids)}')
-        elif version not in ids:
+        elif len(ids) > 1:
+            # "The version names what is being built" cannot hold for two. A
+            # matching sibling used to mask exactly the drift D8 exists for: a
+            # milestone left at `building` when the next one started.
+            report(f'{len(ids)} milestones are building ({", ".join(ids)}) — the '
+                   f'version can only name one; close the finished one (D8)')
+        elif version != ids[0]:
             report(f'{cfg.version_file} version {version!r} does not match the '
-                   f'building milestone(s) {", ".join(ids)} — bump at milestone '
-                   f'START, and the id IS the version (D8)')
+                   f'building milestone {ids[0]!r} — bump at milestone START, '
+                   f'and the id IS the version (D8)')
 
     for mid, branch, mfile in building:
         if 'D9' in enabled and not branch:
             report(f'building milestone {mid} declares no branch: — a fresh '
                    f'checkout cannot find where its work lives  [{cfg.rel(mfile)}]')
         if 'D10' in enabled and branch and branch not in cfg.trunk_branches:
-            trunk = model.trunk_checkout_branch(cfg)
-            if trunk is not None and trunk != branch:
+            trunk, why = model.trunk_checkout_branch(cfg)
+            if trunk is None:
+                # Named, not skipped: an unverifiable D10 must look different
+                # from a satisfied one.
+                print(f'  UNVERIFIED  D10 for milestone {mid}: {why}')
+            elif trunk != branch:
                 report(f'building milestone {mid} declares branch {branch!r} but '
                        f'the trunk tree is on {trunk!r} — the integration branch '
                        f'belongs in the trunk, checked out')
@@ -203,9 +213,10 @@ def run() -> int:
             # Named, never hidden: a ref into a pruned milestone is not a pass.
             census += (f' ({v_census["unverifiable"]} UNVERIFIABLE — the ref '
                        f'names a milestone no longer in the tree)')
+    what = 'status-drift / integrity violation(s)' if v_on else 'status-drift violation(s)'
     if findings:
-        print(f'[check:pm] FAIL — {len(findings)} status-drift violation(s) '
-              f'across {census}')
+        print(f'[check:pm] FAIL — {len(findings)} {what} across {census}')
         return 1
-    print(f'[check:pm] PASS — no PM-tree status drift; scanned {census}')
+    clean = 'no PM-tree drift or integrity problems' if v_on else 'no PM-tree status drift'
+    print(f'[check:pm] PASS — {clean}; scanned {census}')
     return 0

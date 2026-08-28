@@ -59,7 +59,7 @@ FLOW_CHECKS = ('D8', 'D9', 'D10')
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5')
-KNOWN_CHECKS = DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS
+KNOWN_CHECKS = tuple(dict.fromkeys(DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -155,13 +155,40 @@ def load() -> PmConfig:
             f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
             f'known rules are {" ".join(KNOWN_CHECKS)}')
 
+    # Compile here, not at use: an invalid regex or a missing capture group is
+    # a CONFIG error (exit 2), never a finding (exit 1). Deferring it meant CI
+    # read a devkit.toml typo as "PM drift found".
+    version_pattern = text('version_pattern', r'^config/version="(.*)"$')
+    try:
+        compiled = re.compile(version_pattern)
+    except re.error as err:
+        raise ConfigError(f'[pm] version_pattern is not a valid regex: {err}') from err
+    if compiled.groups < 1:
+        raise ConfigError('[pm] version_pattern needs one capture group around '
+                          'the version itself')
+
     scaffold = section.get('scaffold', {})
     if not isinstance(scaffold, dict):
         raise ConfigError('[pm] scaffold must be a table')
+    # MN4 — the un-fixed half of the checks fix. An unknown grain key or a
+    # non-table value was silently ignored, which is indistinguishable from a
+    # setting that did nothing.
+    known_grains = ('milestone', 'feature', 'story', 'bug')
+    for key, val in scaffold.items():
+        if key not in known_grains:
+            raise ConfigError(f'[pm.scaffold.{key}] is not a grain — expected '
+                              f'one of {", ".join(known_grains)}')
+        if not isinstance(val, dict):
+            raise ConfigError(f'[pm.scaffold.{key}] must be a table of '
+                              f'field = "default" pairs, got {val!r}')
+        for fk, fv in val.items():
+            if isinstance(fv, (dict, list)):
+                raise ConfigError(f'[pm.scaffold.{key}] {fk} must be a scalar, '
+                                  f'got {fv!r}')
 
     return PmConfig(
         root=repo_root(),
-        scaffold={k: v for k, v in scaffold.items() if isinstance(v, dict)},
+        scaffold=dict(scaffold),
         roadmap_dir=text('roadmap_dir', 'pm/roadmap'),
         review_dir=text('review_dir', 'docs/reviews'),
         review_min_content_bytes=num('review_min_content_bytes', 20),
@@ -175,7 +202,7 @@ def load() -> PmConfig:
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
         version_file=text('version_file', 'project.godot'),
-        version_pattern=text('version_pattern', r'^config/version="(.*)"$'),
+        version_pattern=version_pattern,
         trunk_branches=tup('trunk_branches', ('staging', 'main')),
     )
 
@@ -523,11 +550,15 @@ def shipped_version(cfg: PmConfig) -> str | None:
     return None
 
 
-def trunk_checkout_branch(cfg: PmConfig) -> str | None:
-    """The branch checked out in git's MAIN worktree — the trunk.
+def trunk_checkout_branch(cfg: PmConfig) -> tuple[str | None, str]:
+    """(branch, reason) for git's MAIN worktree — the trunk.
 
     Deliberately NOT the tree this happens to run from: D10 asks whether the
     integration branch is where a human following along would find it.
+
+    A None branch comes with a REASON, because the common case is a detached
+    HEAD — which is what CI checks out. Silently skipping there turned D10 off
+    in the one environment it exists to guard, and said nothing.
     """
     import subprocess
     try:
@@ -537,12 +568,16 @@ def trunk_checkout_branch(cfg: PmConfig) -> str | None:
         first = next((ln[len('worktree '):] for ln in listing.split('\n')
                       if ln.startswith('worktree ')), None)
         if first is None:
-            return None
-        return subprocess.run(['git', 'branch', '--show-current'], cwd=first,
-                              capture_output=True, text=True,
-                              check=True).stdout.strip() or None
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
+            return None, 'git reported no worktree'
+        branch = subprocess.run(['git', 'branch', '--show-current'], cwd=first,
+                                capture_output=True, text=True,
+                                check=True).stdout.strip()
+        if not branch:
+            return None, 'the trunk is on a DETACHED HEAD (a CI checkout looks '\
+                         'like this — D10 cannot verify placement here)'
+        return branch, ''
+    except (subprocess.CalledProcessError, FileNotFoundError) as err:
+        return None, f'git is unavailable ({type(err).__name__})'
 
 
 # --- shared drift predicates --------------------------------------------------

@@ -27,6 +27,9 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     godot-devkit pm feature done <feature-id> [--review-record <path>]
     godot-devkit pm milestone <ready|building|done> <milestone-id>
     godot-devkit pm status [<milestone>]
+    godot-devkit pm validate            # ids/parentage/refs/graph integrity
+    godot-devkit pm install-skills      # the shared rule + operations skill
+    godot-devkit pm init                # stand up a tree in a repo with none
     godot-devkit pm new <milestone|feature|story|bug> ...
     godot-devkit pm prune
     (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a

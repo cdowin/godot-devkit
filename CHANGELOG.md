@@ -2,6 +2,35 @@
 
 ## v0.9.0 — 2026-08-27 — the guidance ships with the tool
 
+**Hardening from the second pre-release review.** The headline was a false PASS in the *recommended*
+configuration: `[pm] story_ordinal_prefix = true` was meant to teach V2 about a story file's `NN-`
+prefix, and instead switched V2's story check off entirely — so a tree under the setting these notes
+mandate reported VALID over a story id of pure garbage, with nothing saying the check was disabled.
+It now strips the prefix and compares. Enabling the fix immediately surfaced two genuine id/path
+inconsistencies in a consumer that the broken check had been hiding.
+
+**An unreadable ref list is now a finding, not zero refs.** `depends_on` with a trailing comment, a
+YAML block sequence, a bare scalar, or nested brackets parsed to `[]` — which reads as "no refs to
+check", taking every ref out of V4's reach while reporting clean. Both consumers author only the flat
+inline form the scaffolder mints, so nothing was live, but the failure shape was the wrong one.
+
+**`pm new` refused nothing.** A slug was never slugified or validated, so
+`pm new bug 0.1 ../../../../pwned` wrote outside the repo root and exited 0. Slugs are now one path
+component or a refusal.
+
+**Also fixed:** a bad `version_pattern` regex (or one with no capture group) tracebacked and exited
+**1**, the findings code, for what is a config typo — it is exit 2 now, and the pattern is compiled at
+load. `[pm.scaffold.*]` accepted an unknown grain key or a non-table value silently, the un-fixed half
+of the earlier `checks` fix. D8 passed whenever *any* building milestone matched the version, masking
+exactly the drift it exists to catch; two building milestones is now itself the finding. D10 skipped
+silently on a detached HEAD — which is what CI checks out — and now says `UNVERIFIED` with the reason.
+The ref census counted differently depending on which rules ran. A numeric phase depending on a `seam`
+or unphased feature is no longer silently exempt. `pm validate` now honours `[pm] checks` like the gate
+does. `prune`'s ROADMAP write no longer translates line endings, and fails cleanly instead of
+tracebacking. `KNOWN_CHECKS` listed V1–V5 twice. The FAIL summary called integrity findings "status
+drift". The CLI docstring and the README's `check pm` row had both fallen behind the verbs.
+
+
 **On upgrade:** nothing changes until you run `godot-devkit pm install-skills`. Nothing is written to
 a consuming repo without that explicit command.
 
