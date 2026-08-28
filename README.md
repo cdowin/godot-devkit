@@ -150,7 +150,7 @@ Anything unresolvable is reported and left alone.
 | `check defaults` | `.tres` assignments that repeat the script's declared `@export` default. Hand-authored data spells every property out; Godot's writer omits the defaults — so the file diffs forever, and the mop-up is `git checkout --` every session. Judges the elision dimension ONLY (see below); anything outside a small closed value language is censused, never reported. |
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
-| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. Off by default in `check all` — a repo with no PM tree has no drift to find. |
+| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow and are opt-in via `[pm] checks`. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
 
 ### Project management (`godot-devkit pm <command>`)
@@ -239,6 +239,16 @@ review_min_content_bytes = 20   # anti-rubber-stamp floor (non-whitespace bytes)
 review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
 story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
 checks = ["D1","D2","D3","D4","D5","D6","D7"]   # which drift rules run
+# D8/D9/D10 are the FLOW rules — opt in by naming them here:
+#   D8  project version == the `building` milestone's id (bump at START; the id
+#       IS the version, exact string equality)
+#   D9  a `building` milestone declares `branch:`
+#   D10 that branch is checked out in the TRUNK worktree
+# A project that ships from the trunk and bumps at close is running a different
+# valid flow, so these stay off unless asked for.
+version_file = "project.godot"                  # D8: where the version lives
+version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
+trunk_branches = ["staging", "main"]            # D10: `branch: staging` = no integration branch
 # Vocabularies + graphs are overridable too: milestone_states, feature_states,
 # story_states, milestone_transitions, feature_transitions, story_transitions.
 # The stock graph is the STRICT one: the story terminal is `review` (`done`

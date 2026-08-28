@@ -358,7 +358,7 @@ class ConfigValidation(unittest.TestCase):
                'name': 'S0', 'status': 'banana'})
 
     def test_bad_checks_is_a_config_error_not_a_pass(self):
-        for bad in ('checks = "D1"', 'checks = ["D9"]', 'checks = ["d1","d4"]',
+        for bad in ('checks = "D1"', 'checks = ["D99"]', 'checks = ["d1","d4"]',
                     'checks = 7', 'checks = []', 'checks = { a = 1 }'):
             with self.subTest(bad=bad), tree(story_statuses=('todo',)) as root:
                 self._drifted(root)
@@ -381,6 +381,66 @@ class ConfigValidation(unittest.TestCase):
                 '[pm]\nchecks = ["D1","D2"]\n', encoding='utf-8')
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)   # D4 is off, so the bogus status is quiet
+
+
+class FlowChecks(unittest.TestCase):
+    """D8-D10 — branch-per-milestone + bump-at-start. Off unless opted into."""
+
+    ON = '[pm]\nchecks = ["D8","D9","D10"]\n'
+
+    def _building(self, root: Path, branch: str = '', version: str = '0.1.0'):
+        model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md', 'status', 'building')
+        if branch:
+            model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md', 'branch', branch)
+        if version:
+            (root / 'project.godot').write_text(
+                f'[application]\nconfig/version="{version}"\n', encoding='utf-8')
+
+    def test_off_by_default(self):
+        # A project bumping at close is running a different valid flow, not
+        # drifting — the stock gate must stay silent about it.
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, version='9.9.9')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_d8_version_must_equal_the_building_milestone_id(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='staging', version='9.9.9')
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('does not match the building milestone', out)
+
+    def test_d8_passes_on_an_exact_match(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='staging', version='0.1')
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_d9_requires_a_branch_stamp(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, version='0.1')
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('declares no branch:', out)
+
+    def test_d10_wants_the_integration_branch_in_the_trunk(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='feat/0.1-demo', version='0.1')
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('belongs in the trunk', out)
+
+    def test_d10_skips_a_milestone_built_on_the_trunk(self):
+        # `branch: staging` means "no integration branch" — not a violation.
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='staging', version='0.1')
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            self.assertEqual(run_gate(root)[0], 0)
 
 
 class WriteFidelity(unittest.TestCase):

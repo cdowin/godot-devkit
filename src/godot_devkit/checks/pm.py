@@ -19,6 +19,22 @@ DRIFT RULES (each FAILs, naming the offending path):
       is the valid historical closed state.)
   D6  a `building` milestone whose features are ALL `done` (the milestone
       analogue of D2).
+  D8  the shipped version equals the `building` milestone's id (bump-at-START:
+      the version names what is being built, so every crash report, save file
+      and dev build carries that fact for free). EXACT string equality — the
+      milestone id IS the version.
+  D9  a `building` milestone declares the `branch:` its work lives on. A fresh
+      checkout of the trunk sees the PM records but not the code; without the
+      stamp the only recourse is guessing at `git branch -a`.
+  D10 that branch is CHECKED OUT IN THE TRUNK. D9 proves a milestone says where
+      its code lives; D10 proves it is where a human can follow it. A milestone
+      declaring a trunk branch is skipped — it is not using an integration
+      branch at all.
+
+  D8-D10 encode the branch-per-milestone / bump-at-start flow and are OFF by
+  default; a project shipping from the trunk and bumping at close is running a
+  different valid flow, not drifting. Opt in via `[pm] checks`.
+
   D7  archive presence — git history IS the archive. A `zz_archive/` dir under
       the roadmap or the review dir, or MORE than one `done` milestone dir at
       the roadmap root (lag-by-one keeps exactly the most recently closed),
@@ -133,6 +149,31 @@ def run() -> int:
                 and feat_total > 0 and feat_done_n == feat_total):
             report(f'milestone {mid} is {mstat!r} but all {feat_total} features '
                    f'are done (should be done)  [{cfg.rel(mfile)}]')
+
+    # --- D8-D10: the flow checks, only when opted into --------------------
+    building = model.building_milestones(cfg) if enabled & set(model.FLOW_CHECKS) else []
+
+    if 'D8' in enabled and building:
+        version = model.shipped_version(cfg)
+        ids = [mid for mid, _, _ in building]
+        if version is None:
+            report(f'no version found in {cfg.version_file} — D8 cannot verify '
+                   f'the building milestone(s) {", ".join(ids)}')
+        elif version not in ids:
+            report(f'{cfg.version_file} version {version!r} does not match the '
+                   f'building milestone(s) {", ".join(ids)} — bump at milestone '
+                   f'START, and the id IS the version (D8)')
+
+    for mid, branch, mfile in building:
+        if 'D9' in enabled and not branch:
+            report(f'building milestone {mid} declares no branch: — a fresh '
+                   f'checkout cannot find where its work lives  [{cfg.rel(mfile)}]')
+        if 'D10' in enabled and branch and branch not in cfg.trunk_branches:
+            trunk = model.trunk_checkout_branch(cfg)
+            if trunk is not None and trunk != branch:
+                report(f'building milestone {mid} declares branch {branch!r} but '
+                       f'the trunk tree is on {trunk!r} — the integration branch '
+                       f'belongs in the trunk, checked out')
 
     if 'D7' in enabled:
         for archive in (cfg.roadmap / model.ARCHIVE_DIR_NAME,

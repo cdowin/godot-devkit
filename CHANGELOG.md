@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.0 — 2026-08-27 — the flow rules
+
+**On upgrade:** nothing changes unless you ask for it. The three new rules are **opt-in** — name them
+in `[pm] checks` to enable them. A project that ships from the trunk and bumps its version at
+milestone close is running a different, valid flow; failing it would make the gate a liar.
+
+**New rules — D8, D9, D10**, gating branch-per-milestone and bump-at-start:
+
+- **D8** — the project's shipped version equals the `building` milestone's id, by **exact string
+  equality**: the milestone id IS the version. Bumping at milestone START means the manifest always
+  answers "what am I working on?", a fact every crash report, save file and dev build then carries
+  for free. Configurable via `version_file` + `version_pattern`, so this is not Godot-specific.
+- **D9** — a `building` milestone declares the `branch:` its work lives on. A fresh checkout of the
+  trunk sees a milestone's PM records but not its code; without the stamp the only recourse is
+  guessing at `git branch -a`, and a wrong guess means reporting on the wrong milestone.
+- **D10** — that branch is checked out **in the trunk worktree**. D9 proves a milestone says where
+  its code lives; D10 proves it is where a human can actually follow it. Read from git's MAIN
+  worktree, not the tree the scan happens to run from. A milestone declaring a trunk branch
+  (`trunk_branches`, default `staging`/`main`) is skipped — it is not using an integration branch.
+
+**Config:** `version_file`, `version_pattern`, `trunk_branches`, and the three rule names in `checks`.
+
 ## v0.6.0 — 2026-08-27 — project management
 
 **On upgrade:** nothing a consumer must edit. Every existing subcommand, flag and output shape is

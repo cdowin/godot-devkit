@@ -49,7 +49,13 @@ DEFAULT_FEATURE_TRANSITIONS = (
 # nothing to build reaches review without passing through wip.
 DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review')
 
+# D8-D10 encode the branch-per-milestone / bump-at-start flow. They are OFF by
+# default: a project that ships from the trunk and bumps at close is not
+# drifting, it is running a different (valid) flow, and a gate that fails it
+# would be lying. Opt in with `[pm] checks`.
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7')
+FLOW_CHECKS = ('D8', 'D9', 'D10')
+KNOWN_CHECKS = DEFAULT_CHECKS + FLOW_CHECKS
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -70,6 +76,10 @@ class PmConfig:
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
     checks: tuple[str, ...] = DEFAULT_CHECKS
     scaffold: dict = field(default_factory=dict)
+    # D8 only: where the shipped version lives, and the line that carries it.
+    version_file: str = 'project.godot'
+    version_pattern: str = r'^config/version="(.*)"$'
+    trunk_branches: tuple[str, ...] = ('staging', 'main')
 
     @property
     def roadmap(self) -> Path:
@@ -133,13 +143,13 @@ def load() -> PmConfig:
         return val
 
     checks = tup('checks', DEFAULT_CHECKS)
-    unknown = [c for c in checks if c not in DEFAULT_CHECKS]
+    unknown = [c for c in checks if c not in KNOWN_CHECKS]
     if unknown:
         # An unknown name is indistinguishable from a disabled rule at runtime,
         # so a typo would quietly narrow the gate. Name it instead.
         raise ConfigError(
             f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
-            f'known rules are {" ".join(DEFAULT_CHECKS)}')
+            f'known rules are {" ".join(KNOWN_CHECKS)}')
 
     scaffold = section.get('scaffold', {})
     if not isinstance(scaffold, dict):
@@ -160,6 +170,9 @@ def load() -> PmConfig:
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
+        version_file=text('version_file', 'project.godot'),
+        version_pattern=text('version_pattern', r'^config/version="(.*)"$'),
+        trunk_branches=tup('trunk_branches', ('staging', 'main')),
     )
 
 
@@ -476,6 +489,56 @@ def review_record_for(cfg: PmConfig, fid: str) -> str | None:
                 if record_is_substantive(cfg, cand):
                     return cfg.rel(cand)
     return None
+
+
+# --- flow helpers (D8-D10) ----------------------------------------------------
+def building_milestones(cfg: PmConfig) -> list[tuple[str, str, Path]]:
+    """(id, branch, milestone.md) for every ACTIVE milestone at `building`."""
+    out = []
+    for mdir in milestone_dirs(cfg):
+        mfile = mdir / 'milestone.md'
+        if field_of(mfile, 'status') != 'building':
+            continue
+        out.append((field_of(mfile, 'id'), field_of(mfile, 'branch'), mfile))
+    return out
+
+
+def shipped_version(cfg: PmConfig) -> str | None:
+    """The version string from the project's own manifest, or None."""
+    path = cfg.root / cfg.version_file
+    if not path.is_file():
+        return None
+    pattern = re.compile(cfg.version_pattern)
+    try:
+        for line in _read(path).split('\n'):
+            m = pattern.match(line.strip())
+            if m:
+                return m.group(1)
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
+
+
+def trunk_checkout_branch(cfg: PmConfig) -> str | None:
+    """The branch checked out in git's MAIN worktree — the trunk.
+
+    Deliberately NOT the tree this happens to run from: D10 asks whether the
+    integration branch is where a human following along would find it.
+    """
+    import subprocess
+    try:
+        listing = subprocess.run(['git', 'worktree', 'list', '--porcelain'],
+                                 cwd=cfg.root, capture_output=True, text=True,
+                                 check=True).stdout
+        first = next((ln[len('worktree '):] for ln in listing.split('\n')
+                      if ln.startswith('worktree ')), None)
+        if first is None:
+            return None
+        return subprocess.run(['git', 'branch', '--show-current'], cwd=first,
+                              capture_output=True, text=True,
+                              check=True).stdout.strip() or None
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 # --- shared drift predicates --------------------------------------------------
