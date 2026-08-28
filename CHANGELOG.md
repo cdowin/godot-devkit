@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.11.0 — 2026-08-28 — `pm milestone building` can place the branch
+
+**New opt-in — `[pm] place_branch_on_building`.** `pm milestone building <id>` also checks that
+milestone's `branch:` out in the **trunk** worktree — the exact state D10 asserts. Nothing was
+putting it there before: the flip and the checkout were two steps a human did by hand, and the gap
+between them is where most D10 findings actually came from. Off by default; a project that does not
+run branch-per-milestone sees no change. The ordering is the contract — every refusal (no `branch:`,
+a branch that does not exist, a branch another worktree holds, a dirty or unreadable trunk, an
+unverifiable worktree listing) is decided **before** the flip, so a refused placement leaves
+`milestone.md` byte-identical, while a checkout that fails **after** the flip exits 2 naming the
+re-run: `pm milestone building <id>` is idempotent, and its already-building path re-runs the
+placement. A milestone declaring a trunk branch places nothing and says so.
+
+Note what it will NOT do: create the ref. A milestone declares *where* its work lives; it does not
+authorize minting a branch, so a missing `branch:` target refuses and names the `git checkout -b` to
+run.
+
+`model.git_worktrees()` is the one parse of `git worktree list --porcelain` behind both readers —
+`trunk_checkout_branch()` (D10) takes the trunk's branch, placement additionally needs to know
+whether some other worktree already holds the branch, since git allows exactly one.
+
 ## v0.10.0 — 2026-08-27 — templates, field mutation, execution lists, agent drift
 
 **On upgrade — two output changes a consumer may grep.** `check doc`'s verdict line moved from
