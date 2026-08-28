@@ -27,6 +27,7 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     godot-devkit pm feature done <feature-id> [--review-record <path>]
     godot-devkit pm milestone <ready|building|done> <milestone-id>
     godot-devkit pm status [<milestone>]
+    godot-devkit pm vocabulary --json   # the transition graph, for checkers
     godot-devkit pm validate            # ids/parentage/refs/graph integrity
     godot-devkit pm install-skills      # the shared rule + operations skill
     godot-devkit pm init                # stand up a tree in a repo with none
@@ -36,7 +37,8 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
      hand-edit would leave, off the SAME predicates)
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid | tres | props | defaults | doc | shell | repo-hygiene | pm
+    godot-devkit check uid | tres | props | defaults | doc | shell | repo-hygiene
+                      | pm | agents
     godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell).
                                     # `defaults` and `repo-hygiene` stay explicit:
                                     # the first is red until a tree is canonicalized
@@ -60,7 +62,7 @@ OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 # after the one-time cleanup pass. `repo-hygiene` is excluded for its own reason
 # (it is close-time and hits the network). `pm` is excluded because a repo with
 # no PM tree has no drift to find and must not be failed for its absence.
-EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm')
+EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents')
 
 
 def _usage() -> int:
@@ -102,6 +104,9 @@ def _dispatch_check(name: str) -> int:
     if name == 'pm':
         from godot_devkit.repo.checks import pm
         return pm.run()
+    if name == 'agents':
+        from godot_devkit.repo.checks import agents
+        return agents.run()
     if name == 'all':
         worst = 0
         for check in OFFLINE_CHECKS:

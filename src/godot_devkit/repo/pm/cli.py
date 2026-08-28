@@ -38,6 +38,7 @@ USAGE = """usage: godot-devkit pm <command>
   release <grain-id>                      (clear owner)
   templates [--force]                     (copy the templates into the project to edit)
   sync [--check]                          (re-render the execution lists)
+  vocabulary [--json]                     (the transition graph, for checkers)
   validate                                (structural + referential integrity)
   install-skills [--force]                (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
@@ -595,6 +596,52 @@ def cmd_sync(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
+    """Print the transition vocabulary, machine-readably with --json.
+
+    Exists so a checker never has to scrape help text. A tool that states its
+    own rules in a parseable form is the only way an external scanner can stay
+    honest when those rules change.
+    """
+    as_json = '--json' in args
+    for a in args:
+        if a != '--json':
+            raise Usage(f'unknown flag {a!r}')
+    grains = {
+        'milestone': (cfg.milestone_states, cfg.milestone_transitions),
+        'feature': (cfg.feature_states, cfg.feature_transitions),
+        'story': (cfg.story_states, cfg.story_transitions),
+    }
+    if as_json:
+        import json
+        print(json.dumps({
+            'grains': {g: {
+                'states': list(states),
+                'transitions': [dict(zip(('from', 'to'), t.split('->')))
+                                for t in trans],
+                'verbs': sorted({t.split('->')[1] for t in trans}
+                                | ({'blocked'} if g == 'story' else set())),
+            } for g, (states, trans) in grains.items()},
+            'notes': {
+                'story_terminal': 'review',
+                'story_done_via': 'pm feature done (cascade); there is no '
+                                  'per-story done transition',
+                'status_edits': 'the CLI is the only sanctioned path; never '
+                                'hand-edit a status: line',
+            },
+            'checks': list(model.KNOWN_CHECKS),
+        }, indent=2))
+        return 0
+    for g, (states, trans) in grains.items():
+        print(f'{g}:')
+        print(f'  states      {" ".join(states)}')
+        print(f'  transitions {" ".join(trans)}')
+    print()
+    print('A story\'s terminal is `review`. It reaches `done` ONLY through')
+    print('`pm feature done`\'s cascade — there is no per-story done transition.')
+    return 0
+
+
 def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
     """Structural + referential integrity. The same predicates `check pm` runs."""
     if args:
@@ -794,6 +841,7 @@ def main(argv: list[str]) -> int:
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
         'init': cmd_init, 'set': cmd_set, 'get': cmd_get, 'claim': cmd_claim,
         'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
+        'vocabulary': cmd_vocabulary,
     }
     fn = table.get(cmd)
     if fn is None:

@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased — templates, field mutation, execution lists
+## Unreleased — templates, field mutation, execution lists, agent-definition drift
+
+> **Not tagged.** Pin `v0.9.0` until this is released.
+
+**New gate — `check agents`.** An agent definition is prose, so nothing stops it describing a
+workflow the tooling refuses. That drift is invisible until an agent follows the instruction and the
+CLI says no — by which point a story sits in the wrong state and someone hand-edits around it, which
+is the exact failure the PM CLI exists to prevent. It catches a `pm <grain> <verb>` the CLI has no
+verb for, a `<state> -> <state>` the grain's graph rejects, a skill written as a flat `<name>.md`
+instead of `<name>/SKILL.md` (which never loads as a skill), and project-configured `[agents]
+forbidden` patterns.
+
+Run against the two live consumers on first build it found **10 and 8 real findings** — including
+agent definitions that had already been hand-corrected once, in files nobody had flagged. Grain
+context decides legality: `review -> done` is the feature close edge and a refusal for a story, so
+the checker reads the grain from the same line and censuses a line naming two grains as UNVERIFIED
+rather than guessing. Precision over reach, as everywhere: a false FAIL gets the gate switched off.
+
+**New — `pm vocabulary [--json]`.** The states, transitions and verbs, machine-readably. `check
+agents` reads the model directly, but an external scanner should never have to scrape help text; a
+tool that states its own rules in a parseable form is the only way a checker stays honest when those
+rules change.
 
 > **Not tagged.** Pin `v0.9.0` until this is released.
 

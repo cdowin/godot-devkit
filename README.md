@@ -274,6 +274,7 @@ Anything unresolvable is reported and left alone.
 | `check defaults` | `.tres` assignments that repeat the script's declared `@export` default. Hand-authored data spells every property out; Godot's writer omits the defaults — so the file diffs forever, and the mop-up is `git checkout --` every session. Judges the elision dimension ONLY (see below); anything outside a small closed value language is censused, never reported. |
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
+| `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
 | `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V5) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow and are opt-in via `[pm] checks`. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
 
@@ -296,6 +297,7 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from a template. Creation only — never overwrites. A new milestone also gets `HANDOFF.md` + `DECISIONS.md` |
 | `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex. `status` is refused — it has a transition graph behind it |
 | `pm claim <grain-id> <owner>` · `pm release <grain-id>` | Sugar over `owner:` — the field that was hand-edited everywhere `status:` was not |
+| `pm vocabulary [--json]` | The states, transitions and verbs, machine-readably. Exists so an external checker never has to scrape help text — a tool that states its own rules in a parseable form is the only way a scanner stays honest when the rules change |
 | `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file; **V6** fails when a rendered block drifts from the tree |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
 | `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
@@ -334,6 +336,12 @@ exclude_prefixes = ["addons/"]
 
 [props]
 exclude_prefixes = ["addons/"]
+
+[agents]
+# Definitions to scan (default: .claude/{agents,rules}/*.md + skills/**)
+scope = [".claude/agents/*.md", ".claude/rules/*.md", ".claude/skills/**/*.md"]
+# House rules, as regexes. An agent definition matching one is a finding.
+forbidden = ["godot --headless"]
 
 [pm]
 roadmap_dir  = "pm/roadmap"     # the tree, relative to the repo root

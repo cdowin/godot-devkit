@@ -1081,5 +1081,105 @@ class ExecutionList(unittest.TestCase):
             self.assertIn('keep me', mfile.read_text())
 
 
+class AgentDefinitions(unittest.TestCase):
+    """`check agents` — definitions that instruct what the tooling refuses."""
+
+    def _gate(self, root: Path):
+        from godot_devkit.repo.checks import agents
+        from godot_devkit.core.project import config_section, load_config, repo_root
+        repo_root.cache_clear()
+        load_config.cache_clear()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = agents.run()
+        return code, buf.getvalue()
+
+    def _def(self, root: Path, rel: str, body: str) -> None:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding='utf-8')
+
+    def test_a_legal_workflow_passes(self):
+        with tree() as root:
+            self._def(root, '.claude/agents/dev.md',
+                      'Claim with `pm story wip <id>`, then the reviewer runs\n'
+                      '`pm story review <id>`. A story goes wip -> review.\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_an_impossible_story_transition_is_caught(self):
+        # The real drift: a story reaching done outside the feature cascade.
+        with tree() as root:
+            self._def(root, '.claude/agents/po.md',
+                      'When the story is verified, flip `status: review -> done`.\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('review -> done', out)
+            self.assertIn('cascade', out)
+
+    def test_the_same_transition_is_legal_for_a_feature(self):
+        # review -> done IS the feature close edge. Grain context decides.
+        with tree() as root:
+            self._def(root, '.claude/agents/po.md',
+                      'Close the feature: it moves review -> done.\n')
+            self.assertEqual(self._gate(root)[0], 0)
+
+    def test_a_nonexistent_verb_is_caught(self):
+        with tree() as root:
+            self._def(root, '.claude/agents/dev.md', 'Run `pm story done <id>`.\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn("no 'done' verb", out)
+
+    def test_an_ambiguous_line_is_censused_not_guessed(self):
+        # Precision over reach: a false FAIL gets the gate switched off.
+        with tree() as root:
+            self._def(root, '.claude/agents/po.md',
+                      'The milestone is building; your stories go review -> done.\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('UNVERIFIED', out)
+
+    def test_a_flat_skill_file_is_caught(self):
+        with tree() as root:
+            self._def(root, '.claude/skills/planning.md', '# Planning\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('does NOT load as a skill', out)
+
+    def test_a_correctly_shaped_skill_passes(self):
+        with tree() as root:
+            self._def(root, '.claude/skills/planning/SKILL.md', '# Planning\n')
+            self.assertEqual(self._gate(root)[0], 0)
+
+    def test_a_configured_forbidden_pattern_fires(self):
+        with tree() as root:
+            self._def(root, '.claude/agents/dev.md', 'Run godot --headless yourself.\n')
+            (root / 'devkit.toml').write_text(
+                '[agents]\nforbidden = ["godot --headless"]\n', encoding='utf-8')
+            code, out = self._gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('forbidden pattern', out)
+
+    def test_scanning_nothing_fails_rather_than_passing(self):
+        with tree() as root:
+            code, out = self._gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('scanned 0 definitions', out)
+
+
+class Vocabulary(unittest.TestCase):
+    def test_json_states_the_story_terminal_machine_readably(self):
+        # The whole point: a checker must never scrape help text.
+        import json
+        with tree() as root:
+            code, out = run_cli(root, 'vocabulary', '--json')
+            self.assertEqual(code, 0)
+            data = json.loads(out)
+            self.assertEqual(data['notes']['story_terminal'], 'review')
+            self.assertNotIn('done', data['grains']['story']['verbs'])
+            self.assertIn('done', data['grains']['feature']['verbs'])
+
+
 if __name__ == '__main__':
     unittest.main()
