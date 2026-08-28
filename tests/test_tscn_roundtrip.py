@@ -12,8 +12,8 @@ import unittest
 
 from support import FIXTURES, available_consumers
 
-from godot_devkit.tscn import parse_text
-from godot_devkit.tscn_document import TscnDocument
+from godot_devkit.godot.format.tscn import parse_text
+from godot_devkit.godot.format.tscn_document import TscnDocument
 
 # Every one of these appears in real consumer scenes and breaks a naive parser.
 AWKWARD_CONSTRUCTS = (

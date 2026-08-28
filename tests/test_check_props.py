@@ -11,7 +11,7 @@ DRIFTED = CLEAN + ['scenes/drift.tscn']
 
 class DeadPropertyDetection(unittest.TestCase):
     def test_flags_an_assignment_to_a_renamed_export(self) -> None:
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         with temp_repo('props_repo', only=DRIFTED):
             code, out = run_check(props)
         self.assertEqual(code, 1, out)
@@ -21,7 +21,7 @@ class DeadPropertyDetection(unittest.TestCase):
         self.assertIn('node_paths', out)
 
     def test_passes_a_repo_with_no_drift(self) -> None:
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         with temp_repo('props_repo', only=CLEAN):
             code, out = run_check(props)
         self.assertEqual(code, 0, out)
@@ -30,14 +30,14 @@ class DeadPropertyDetection(unittest.TestCase):
     def test_does_not_flag_engine_builtins_or_export_groups(self) -> None:
         """`position` is a built-in; `flags`/`tint` come from a multi-line
         `@export_flags(...)` and from inside an `@export_group` — all legal."""
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         with temp_repo('props_repo', only=CLEAN):
             _, out = run_check(props)
         for name in ('position', 'flags', 'tint', 'background_layer'):
             self.assertNotIn(f'.{name} —', out)
 
     def test_census_balances(self) -> None:
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         with temp_repo('props_repo', only=CLEAN):
             _, out = run_check(props)
         self.assertIn('all accounted for', out)
@@ -45,7 +45,7 @@ class DeadPropertyDetection(unittest.TestCase):
 
     def test_empty_scope_fails_loudly(self) -> None:
         """Rule: a gate scanning nothing must say so, never print PASS."""
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         with temp_repo('props_repo', only=['project.godot']):
             code, out = run_check(props)
         self.assertEqual(code, 1)
@@ -61,7 +61,7 @@ class NoFalsePositivesOnRealRepos(unittest.TestCase):
     def test_findings_are_bounded(self) -> None:
         import os
 
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         for repo in available_consumers():
             previous = os.getcwd()
             os.chdir(repo)

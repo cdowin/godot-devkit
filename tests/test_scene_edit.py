@@ -15,8 +15,8 @@ from pathlib import Path
 
 from support import FIXTURES
 
-from godot_devkit import scene_edit
-from godot_devkit.tscn_document import TscnDocument
+from godot_devkit.godot.write import scene_edit
+from godot_devkit.godot.format.tscn_document import TscnDocument
 
 SINK = FIXTURES / 'kitchen_sink.tscn'
 

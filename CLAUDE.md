@@ -24,27 +24,31 @@ markdown-and-frontmatter project tracker). Consumed by (currently *The Appalachi
 ```
 src/godot_devkit/
   cli.py            # the ONE entry point; subcommand dispatch, no logic
-  project.py        # repo_root() (git toplevel of cwd), load_config(), git_lines()
-  tscn.py           # shared .tscn/.tres grammar (sections + line spans, refs, tile_map_data)
-  tscn_document.py  # the mutable document: span surgery, path map, NodePath retargeting
-  classdb.py        # data/classdb.json — Godot's built-in property table, snapshotted
-  uid_index.py      # where a resource's uid lives (.uid sidecar / header / .import / repo)
-  gdscript.py       # repo-wide index of what each .gd exports / extends / is named
-  gd_declarations.py# the DECLARATION half of an @export: type, initializer, accessor, enums, consts
-  resource_defaults.py # which .tres assignments equal the declared default (gate + fixer share it)
-  scene_summary.py  scene_diff.py  refs.py  orphans.py  autoloads.py
-  scene_edit.py     # write verbs: set / rename / add / rm / reparent
-  scene_canonicalize.py   # restore uid-in-refs, header uid, index=, [editable]
-  checks/           # uid.py  tres.py  props.py  defaults.py  doc.py  repo_hygiene.py  shell.py
-                    #   + pm.py — the PM drift gate (D1-D10) + integrity rules (V1-V5)
-  pm/               # ENGINE-AGNOSTIC. Nothing here parses a scene.
-    model.py        #   the invariants: vocabularies, transition graphs, id<->path,
-                    #   frontmatter IO, THE review-record definition, drift predicates
-    cli.py          #   the write side: transitions, scaffolding, status, prune, validate
-    validate.py     #   structural + referential integrity (V1-V5)
-tests/              # stdlib unittest; fixtures/ is hermetic, consumer-repo cases skip cleanly
+  data/classdb.json # Godot's built-in property table, snapshotted
+
+  core/             # engine-agnostic infrastructure. Knows about neither family.
+    project.py      #   repo_root(), load_config()
+    config.py       #   typed devkit.toml coercion + ConfigError (exit 2)
+
+  godot/            # FAMILY 1 — everything that knows what a .tscn is
+    format/         #   the grammar: tscn, tscn_document, classdb
+    index/          #   repo-wide indexes built by parsing: uid_index, gdscript,
+                    #   gd_declarations, resource_defaults
+    read/           #   read verbs: scene_summary, scene_diff, refs, orphans, autoloads
+    write/          #   write verbs: scene_edit, scene_canonicalize
+    checks/         #   Godot gates: uid, tres, props, defaults
+
+  repo/             # FAMILY 2 — repo discipline. No Godot in it; could leave tomorrow.
+    checks/         #   doc, shell, repo_hygiene, pm
+    pm/             #   model, cli, validate, execlist + templates/ and guidance/
+tests/              # stdlib unittest; fixtures/ is hermetic, consumer cases skip cleanly
 tools/gen_classdb.py    # regenerate the ClassDB snapshot from --dump-extension-api
 ```
+
+The tree IS the story rule 2 tells: two families, `core/` shared and knowing about
+neither, the Godot side layered grammar → index → verbs → gates. `repo/` has no
+Godot import in it, which is what makes rule 2's exit clause a real option rather
+than a sentiment.
 
 Tool modules own their behavior and expose `main(argv)` (introspection) or `run()` (checks); `cli.py` only routes.
 

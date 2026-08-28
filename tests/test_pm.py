@@ -20,8 +20,8 @@ from pathlib import Path
 
 from support import REPO_ROOT  # noqa: F401  (inserts src/ on sys.path)
 
-from godot_devkit.checks import pm as pm_check
-from godot_devkit.pm import cli, model
+from godot_devkit.repo.checks import pm as pm_check
+from godot_devkit.repo.pm import cli, model
 
 
 def write(path: Path, front: dict[str, str], body: str = 'x') -> None:
@@ -69,7 +69,7 @@ def cfg_for(root: Path) -> model.PmConfig:
 def run_cli(root: Path, *argv: str) -> tuple[int, str]:
     # repo_root()/load_config() are lru_cached on purpose in production, where
     # the cwd never moves mid-run. Tests move it every case.
-    from godot_devkit.project import load_config, repo_root
+    from godot_devkit.core.project import load_config, repo_root
     repo_root.cache_clear()
     load_config.cache_clear()
     buf = io.StringIO()
@@ -82,7 +82,7 @@ def run_cli(root: Path, *argv: str) -> tuple[int, str]:
 
 
 def run_gate(root: Path) -> tuple[int, str]:
-    from godot_devkit.project import load_config, repo_root
+    from godot_devkit.core.project import load_config, repo_root
     repo_root.cache_clear()
     load_config.cache_clear()
     buf = io.StringIO()
@@ -575,7 +575,7 @@ class Validate(unittest.TestCase):
     """
 
     def _run(self, root: Path):
-        from godot_devkit.pm import validate
+        from godot_devkit.repo.pm import validate
         return validate.run(model.PmConfig(root=root))
 
     def test_a_clean_tree_validates(self):
@@ -759,7 +759,7 @@ class OrdinalPrefix(unittest.TestCase):
         return p
 
     def _validate(self, root: Path):
-        from godot_devkit.pm import validate
+        from godot_devkit.repo.pm import validate
         return validate.run(model.PmConfig(root=root, story_ordinal_prefix=True))
 
     def test_a_prefixed_file_with_a_matching_id_is_valid(self):
@@ -778,7 +778,7 @@ class OrdinalPrefix(unittest.TestCase):
     def test_the_prefix_is_not_stripped_when_the_flag_is_off(self):
         with tree(story_statuses=()) as root:
             self._prefixed(root, '0.1/alpha/boots')
-            from godot_devkit.pm import validate
+            from godot_devkit.repo.pm import validate
             findings = validate.run(model.PmConfig(root=root))[0]
             self.assertTrue(any('does not match its path' in f for f in findings))
 
@@ -793,7 +793,7 @@ class RefParsing(unittest.TestCase):
     def _with(self, root: Path, raw: str):
         ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
         self.assertTrue(model.set_field(ff, 'depends_on', raw))
-        from godot_devkit.pm import validate
+        from godot_devkit.repo.pm import validate
         return validate.run(model.PmConfig(root=root))
 
     def test_a_dangling_ref_in_the_normal_shape_is_found(self):
@@ -820,7 +820,7 @@ class RefParsing(unittest.TestCase):
         with tree() as root:
             ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
             model.set_field(ff, 'depends_on', '["0.1/alpha"]')
-            from godot_devkit.pm import validate
+            from godot_devkit.repo.pm import validate
             cfg = model.PmConfig(root=root)
             self.assertEqual(validate.run(cfg, {'V1'})[1]['refs'],
                              validate.run(cfg, {'V4'})[1]['refs'])
@@ -908,7 +908,7 @@ class PhaseEdges(unittest.TestCase):
             model.set_field(fdir / 'alpha/feature.md', 'phase', '2')
             model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
             model.set_field(fdir / 'beta/feature.md', 'phase', 'seam')
-            from godot_devkit.pm import validate
+            from godot_devkit.repo.pm import validate
             findings = validate.run(model.PmConfig(root=root))[0]
             self.assertTrue(any('seam' in f for f in findings), findings)
 
@@ -917,7 +917,7 @@ class PhaseEdges(unittest.TestCase):
             run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
             fdir = root / 'pm/roadmap/0.1-demo/features'
             model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
-            from godot_devkit.pm import validate
+            from godot_devkit.repo.pm import validate
             self.assertEqual(validate.run(model.PmConfig(root=root))[0], [])
 
 
@@ -1026,7 +1026,7 @@ class FieldMutation(unittest.TestCase):
 
 class ExecutionList(unittest.TestCase):
     def _validate(self, root):
-        from godot_devkit.pm import validate
+        from godot_devkit.repo.pm import validate
         return validate.run(model.PmConfig(root=root))
 
     def test_sync_writes_a_block_and_validate_then_passes(self):

@@ -55,7 +55,7 @@ def temp_repo(fixture: str, only: list[str] | None = None):
 
 def run_check(module) -> tuple[int, str]:
     """Run a check's `run()` in the current repo; returns (exit code, stdout)."""
-    from godot_devkit.project import load_config, repo_root
+    from godot_devkit.core.project import load_config, repo_root
     repo_root.cache_clear()
     load_config.cache_clear()
     buffer = io.StringIO()

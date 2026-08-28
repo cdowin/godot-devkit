@@ -30,5 +30,5 @@ godot-devkit = "godot_devkit.cli:main"
 packages = ["src/godot_devkit"]
 # The guidance markdown is read at runtime via importlib.resources — it must be
 # in the wheel, not just the sdist.
-artifacts = ["src/godot_devkit/pm/guidance/*.md",
-             "src/godot_devkit/pm/templates/*.md"]
+artifacts = ["src/godot_devkit/repo/pm/guidance/*.md",
+             "src/godot_devkit/repo/pm/templates/*.md"]

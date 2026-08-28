@@ -51,7 +51,7 @@ from __future__ import annotations
 import sys
 
 from godot_devkit import __version__
-from godot_devkit.project import ConfigError
+from godot_devkit.core.project import ConfigError
 
 OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 # Deliberately OUT of `check all`: `defaults` reports thousands of findings on a
@@ -79,28 +79,28 @@ def _run_check(name: str) -> int:
 
 def _dispatch_check(name: str) -> int:
     if name == 'uid':
-        from godot_devkit.checks import uid
+        from godot_devkit.godot.checks import uid
         return uid.run()
     if name == 'tres':
-        from godot_devkit.checks import tres
+        from godot_devkit.godot.checks import tres
         return tres.run()
     if name == 'props':
-        from godot_devkit.checks import props
+        from godot_devkit.godot.checks import props
         return props.run()
     if name == 'defaults':
-        from godot_devkit.checks import defaults
+        from godot_devkit.godot.checks import defaults
         return defaults.run()
     if name == 'doc':
-        from godot_devkit.checks import doc
+        from godot_devkit.repo.checks import doc
         return doc.main([])
     if name == 'shell':
-        from godot_devkit.checks import shell
+        from godot_devkit.repo.checks import shell
         return shell.run()
     if name == 'repo-hygiene':
-        from godot_devkit.checks import repo_hygiene
+        from godot_devkit.repo.checks import repo_hygiene
         return repo_hygiene.run()
     if name == 'pm':
-        from godot_devkit.checks import pm
+        from godot_devkit.repo.checks import pm
         return pm.run()
     if name == 'all':
         worst = 0
@@ -126,28 +126,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f'godot-devkit {__version__}')
         return 0
     if cmd == 'scene':
-        from godot_devkit import scene_edit
+        from godot_devkit.godot.write import scene_edit
         if rest and rest[0] == 'canonicalize':
-            from godot_devkit import scene_canonicalize
+            from godot_devkit.godot.write import scene_canonicalize
             return scene_canonicalize.main(rest[1:])
         if rest and rest[0] in scene_edit.VERBS:
             return scene_edit.main(rest)
-        from godot_devkit import scene_summary
+        from godot_devkit.godot.read import scene_summary
         return scene_summary.main(rest)
     if cmd == 'scene-diff':
-        from godot_devkit import scene_diff
+        from godot_devkit.godot.read import scene_diff
         return scene_diff.main(rest)
     if cmd == 'refs':
-        from godot_devkit import refs
+        from godot_devkit.godot.read import refs
         return refs.main(rest)
     if cmd == 'orphans':
-        from godot_devkit import orphans
+        from godot_devkit.godot.read import orphans
         return orphans.main(rest)
     if cmd == 'autoloads':
-        from godot_devkit import autoloads
+        from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
     if cmd == 'pm':
-        from godot_devkit.pm import cli as pm_cli
+        from godot_devkit.repo.pm import cli as pm_cli
         return pm_cli.main(rest)
     if cmd == 'check':
         if not rest:

@@ -18,17 +18,17 @@ import unittest
 
 from support import FIXTURES, available_consumers, run_check, temp_repo
 
-from godot_devkit import scene_canonicalize
-from godot_devkit.checks import defaults as defaults_check
-from godot_devkit.gd_declarations import (
+from godot_devkit.godot.write import scene_canonicalize
+from godot_devkit.godot.checks import defaults as defaults_check
+from godot_devkit.godot.index.gd_declarations import (
     parse_declaration,
     parse_enum,
     scan_declarations,
 )
-from godot_devkit.gdscript import ScriptIndex
-from godot_devkit.project import repo_root
-from godot_devkit.resource_defaults import DefaultAnalyzer, literal
-from godot_devkit.tscn import parse, parse_text
+from godot_devkit.godot.index.gdscript import ScriptIndex
+from godot_devkit.core.project import repo_root
+from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer, literal
+from godot_devkit.godot.format.tscn import parse, parse_text
 
 REDUNDANT = 'data/redundant.tres'
 CLEAN = 'data/clean.tres'

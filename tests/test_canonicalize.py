@@ -13,8 +13,8 @@ import unittest
 
 from support import available_consumers, temp_repo
 
-from godot_devkit import scene_canonicalize
-from godot_devkit.project import repo_root
+from godot_devkit.godot.write import scene_canonicalize
+from godot_devkit.core.project import repo_root
 
 QUARANTINE = 'scenes/world/maps/quarantine.tscn'
 UID_ATTR = re.compile(r' uid="uid://[0-9a-z]+"')
