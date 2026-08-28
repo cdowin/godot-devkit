@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.6.0 — 2026-08-27 — project management
+
+**On upgrade:** nothing a consumer must edit. Every existing subcommand, flag and output shape is
+unchanged, and the new `check pm` is **opt-in** — it is deliberately excluded from `check all`,
+because a repo with no PM tree has no drift to find and must not be failed for its absence.
+
+**New tool family — `godot-devkit pm`.** Filesystem-backed milestone → feature → story tracking
+(markdown + YAML frontmatter under `pm/roadmap/`), with the transitions as a precondition-checked
+CLI rather than a convention: `pm story|feature|milestone <transition>`, `pm status`, `pm new`,
+`pm prune`. A `status:` is the one field a human should never hand-edit — free-text flips are how a
+lifecycle drifts, features reaching `done` without the review the flow requires. `pm feature done`
+cascade-closes every `review` story and the feature atomically, refuses without a *substantive*
+review record (the anti-rubber-stamp: it rejects emptiness, not brevity), and on refusal leaves
+`feature.md` byte-identical — a half-applied cascade is worse than no cascade.
+
+**New gate — `check pm`.** Seven drift rules: a `done` feature with no review record (D1), a feature
+whose stories are all done but which never advanced (D2), a `done` milestone with live children
+(D3), a status outside the schema (D4), a `done` story under a live feature (D5), a `building`
+milestone with everything closed (D6), an overdue archive prune (D7). Per rule 4 it prints its
+census and **fails rather than passing** when it finds no milestones at all — a misconfigured
+`roadmap_dir` used to be indistinguishable from a clean tree. Each rule is proven to fire by a
+deliberately-broken probe, and the gate's verdict was diffed against the shell implementation it
+replaces over a live consumer tree: identical, as is `pm status` byte-for-byte.
+
+**One definition, two readers.** The vocabularies, transition graphs, id↔path resolution,
+frontmatter IO, the review-record definition and the drift predicates live in
+`pm/model.py`, imported by both the CLI and the gate. That invariant is the reason this ships as one
+package instead of a tool and a separate linter — the two halves cannot describe "reviewed" or
+"drift" differently.
+
+**Engine-agnostic, and the README says so.** Nothing in `pm` parses a scene; it would work in a repo
+with no Godot in it. The § Scope boundary now names the two families this package actually holds —
+scene structure, and repo discipline (`check doc`, `check shell`, `check repo-hygiene` never parsed
+a scene either) — rather than implying everything here is `.tscn` tooling.
+
+**Config:** `[pm]` — `roadmap_dir`, `review_dir`, `review_min_content_bytes`, `review_slug_fallback`,
+`story_ordinal_prefix`, `checks`, the six vocabulary/graph lists, and `[pm.scaffold.<grain>]` for
+projects whose frontmatter schema differs. Stock defaults are the strict graph.
+
+**Fix — `__version__` had drifted from `pyproject.toml`** (`0.4.0` vs `0.5.0`), which rule 7 forbids.
+Both now read `0.6.0`.
+
 ## v0.5.0
 
 **New gate — `check defaults`.** A `.tres` assignment may not repeat the value its script already

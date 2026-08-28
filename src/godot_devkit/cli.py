@@ -21,8 +21,19 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # @export default (what the editor omits)
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
+Project management (engine-agnostic; the PM tree is markdown + frontmatter):
+    godot-devkit pm story <wip|review|blocked> <story-id>
+    godot-devkit pm feature <ready|building|review> <feature-id>
+    godot-devkit pm feature done <feature-id> [--review-record <path>]
+    godot-devkit pm milestone <ready|building|done> <milestone-id>
+    godot-devkit pm status [<milestone>]
+    godot-devkit pm new <milestone|feature|story|bug> ...
+    godot-devkit pm prune
+    (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a
+     hand-edit would leave, off the SAME predicates)
+
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid | tres | props | defaults | doc | shell | repo-hygiene
+    godot-devkit check uid | tres | props | defaults | doc | shell | repo-hygiene | pm
     godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell).
                                     # `defaults` and `repo-hygiene` stay explicit:
                                     # the first is red until a tree is canonicalized
@@ -43,8 +54,9 @@ OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 # tree that has never been canonicalized, so folding it into the aggregate would
 # turn every existing consumer's gate red on a version bump. Wire it explicitly,
 # after the one-time cleanup pass. `repo-hygiene` is excluded for its own reason
-# (it is close-time and hits the network).
-EXPLICIT_CHECKS = ('defaults', 'repo-hygiene')
+# (it is close-time and hits the network). `pm` is excluded because a repo with
+# no PM tree has no drift to find and must not be failed for its absence.
+EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm')
 
 
 def _usage() -> int:
@@ -74,6 +86,9 @@ def _run_check(name: str) -> int:
     if name == 'repo-hygiene':
         from godot_devkit.checks import repo_hygiene
         return repo_hygiene.run()
+    if name == 'pm':
+        from godot_devkit.checks import pm
+        return pm.run()
     if name == 'all':
         worst = 0
         for check in OFFLINE_CHECKS:
@@ -118,6 +133,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'autoloads':
         from godot_devkit import autoloads
         return autoloads.main(rest)
+    if cmd == 'pm':
+        from godot_devkit.pm import cli as pm_cli
+        return pm_cli.main(rest)
     if cmd == 'check':
         if not rest:
             return _usage()

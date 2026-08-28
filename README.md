@@ -68,10 +68,21 @@ These are not extra nice-to-haves — each one is a lesson from a real incident:
 
 ## Scope boundary
 
-This does **not** replace Godot for bulk content authoring. Painting a `TileMapLayer` cell-by-cell,
+Two things live here, and the second one is not about Godot at all.
+
+**Scene structure** is the origin and the bulk of the toolkit. This does **not** replace Godot for
+bulk content authoring. Painting a `TileMapLayer` cell-by-cell,
 baking navigation, importing art — those need the engine. This toolkit owns **structure**: nodes,
 properties, resource references, connections, and the gates that keep them honest. That is the
 majority of what changes in a scene file after it first exists.
+
+**Repo discipline** is the second half, and it was always here — `check doc`, `check shell` and
+`check repo-hygiene` never parsed a scene. `pm` (v0.6.0) is the largest member of that family: a
+markdown-and-frontmatter project tracker with a precondition-checked transition CLI and a drift
+gate. It is engine-agnostic and would work in a repo with no Godot in it. It ships here because
+this is the pinned-tag channel its consumers already share, and because splitting it out would
+mean a second version to pin for no benefit. If that ever stops being true, it leaves — the
+package name is the only thing arguing against it.
 
 ## Tools
 
@@ -139,7 +150,30 @@ Anything unresolvable is reported and left alone.
 | `check defaults` | `.tres` assignments that repeat the script's declared `@export` default. Hand-authored data spells every property out; Godot's writer omits the defaults — so the file diffs forever, and the mop-up is `git checkout --` every session. Judges the elision dimension ONLY (see below); anything outside a small closed value language is censused, never reported. |
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
+| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. Off by default in `check all` — a repo with no PM tree has no drift to find. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
+
+### Project management (`godot-devkit pm <command>`)
+
+Filesystem-backed milestone → feature → story tracking: markdown with YAML frontmatter under
+`pm/roadmap/`. The point of a CLI rather than a convention is that a `status:` is the one field a
+human should never hand-edit — free-text flips are how a lifecycle drifts, with features reaching
+`done` without the review the flow requires.
+
+| Command | What it does |
+|---|---|
+| `pm story <wip\|review\|blocked> <story-id>` | Legal story transitions. `review` is the story terminal — there is deliberately no `story done` |
+| `pm feature <ready\|building> <feature-id>` | The claim-side flips |
+| `pm feature review <feature-id>` | Refuses unless every story is at `review` |
+| `pm feature done <feature-id> [--review-record <path>]` | Cascade-closes every `review` story **and** the feature, atomically. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical |
+| `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done |
+| `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
+| `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain to the schema. Creation only — never overwrites |
+| `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
+
+Exit codes follow the house contract: `0` ok (including an idempotent no-op), `1` refused, `2` usage.
+The vocabularies, the transition graphs, the review-record definition and the drift predicates live
+in one module that both the CLI and `check pm` import — one definition, two readers.
 
 ## Install
 
@@ -197,6 +231,23 @@ exclude_prefixes = ["addons/"]
 
 [props]
 exclude_prefixes = ["addons/"]
+
+[pm]
+roadmap_dir = "pm/roadmap"      # the tree, relative to the repo root
+review_dir  = "docs/reviews"    # where review records live
+review_min_content_bytes = 20   # anti-rubber-stamp floor (non-whitespace bytes)
+review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
+story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
+checks = ["D1","D2","D3","D4","D5","D6","D7"]   # which drift rules run
+# Vocabularies + graphs are overridable too: milestone_states, feature_states,
+# story_states, milestone_transitions, feature_transitions, story_transitions.
+# The stock graph is the STRICT one: the story terminal is `review` (`done`
+# comes only from the feature cascade) and milestones have no `review` state.
+
+[pm.scaffold.feature]           # per-grain scaffold schema, if yours differs
+reviewed = ""
+risk = "medium"
+size = "m"
 
 [defaults]
 exclude_prefixes = ["addons/"]

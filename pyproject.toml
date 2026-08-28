@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "godot-devkit"
-version = "0.5.0"
-description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads) + static repo gates (uid, tres-format, doc, shell, repo-hygiene)."
+version = "0.6.0"
+description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads) + static repo gates (uid, tres-format, props, defaults, doc, shell, repo-hygiene) + a PM-tree tracker with its own drift gate."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
