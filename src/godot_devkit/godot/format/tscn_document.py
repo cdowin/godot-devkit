@@ -30,6 +30,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from godot_devkit.godot.format.tscn import (
+    NODE_KIND,
     NODE_PATH_LITERAL,
     PATH_SEP,
     PROP_ASSIGN,
@@ -45,7 +46,6 @@ from godot_devkit.godot.format.tscn import (
     split_path,
 )
 
-NODE_KIND = 'node'
 CONNECTION_KIND = 'connection'
 EDITABLE_KIND = 'editable'
 EXT_RESOURCE_KIND = 'ext_resource'

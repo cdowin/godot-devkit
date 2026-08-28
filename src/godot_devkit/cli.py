@@ -6,6 +6,10 @@ Introspection (pure parse, never boots Godot):
     godot-devkit refs <symbol> [--tests]
     godot-devkit orphans [--tests]
     godot-devkit autoloads
+    godot-devkit tiles <file.tscn> [--layer NAME]
+                       [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]
+                                    # a TileMapLayer's grid: cell count, bounds,
+                                    # tile-kind histogram, per-column/row counts
 
 Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene set      <file> <node-path> <prop> <value>
@@ -19,6 +23,12 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # instance children; --elide-defaults also
                                     # removes assignments equal to the script's
                                     # @export default (what the editor omits)
+    godot-devkit tiles paint <file> --layer NAME --region X0,Y0,X1,Y1
+                                    --tile SRC/AX,AY[/ALT]
+    godot-devkit tiles erase <file> --layer NAME --region X0,Y0,X1,Y1
+                                    # fill / clear a rectangle of one
+                                    # TileMapLayer; only that one property's
+                                    # base64 is regenerated
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 Project management (engine-agnostic; the PM tree is markdown + frontmatter):
@@ -139,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
             return scene_edit.main(rest)
         from godot_devkit.godot.read import scene_summary
         return scene_summary.main(rest)
+    if cmd == 'tiles':
+        from godot_devkit.godot.write import tiles_paint
+        if rest and rest[0] in tiles_paint.VERBS:
+            return tiles_paint.main(rest)
+        from godot_devkit.godot.read import tiles
+        return tiles.main(rest)
     if cmd == 'scene-diff':
         from godot_devkit.godot.read import scene_diff
         return scene_diff.main(rest)

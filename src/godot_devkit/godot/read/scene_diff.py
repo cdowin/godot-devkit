@@ -19,13 +19,13 @@ import argparse
 import subprocess
 from dataclasses import dataclass
 
+from godot_devkit.godot.format.tilemap import decode_tilemap_bounds
 from godot_devkit.godot.format.tscn import (
     PACKED_ARRAY,
     REF_ARROW,
     RESOURCE_REF,
     Section,
     _basename,
-    decode_tilemap_bounds,
     node_own_path,
     parse,
     parse_text,

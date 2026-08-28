@@ -24,9 +24,7 @@ multi-line dictionaries, inline `;` comments — all fall out of that scan.
 """
 from __future__ import annotations
 
-import base64
 import re
-import struct
 from dataclasses import dataclass, field
 
 # --- Godot .tscn grammar ----------------------------------------------------
@@ -34,12 +32,12 @@ SECTION_HEADER = re.compile(r'^\[(\w+)\s*(.*)\]\s*$')
 HEADER_ATTR = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\w+\("[^"]*"\)|[^\s\]]+)')
 PACKED_ARRAY = re.compile(r'^Packed\w+Array\(')
 RESOURCE_REF = re.compile(r'(Ext|Sub)Resource\("([^"]*)"\)')
-TILE_DATA_B64 = re.compile(r'PackedByteArray\("([^"]*)"\)')
 NODE_PATH_LITERAL = re.compile(r'(\^?)NodePath\("([^"]*)"\)')
 REF_ARROW = '→'
 
 EXT_RESOURCE_ONLY = re.compile(r'^ExtResource\("([^"]*)"\)$')
 EXT_RESOURCE_KIND = 'ext_resource'
+NODE_KIND = 'node'
 SCRIPT_PROP = 'script'
 
 COMMENT_CHAR = ';'
@@ -52,11 +50,8 @@ SELF_SEG = '.'
 SUBNAME_SEP = ':'
 ABSOLUTE_PATH_PREFIX = '/'
 PROP_ASSIGN = ' = '
-
-# --- TileMapLayer binary layout (Godot 4 `tile_map_data`) -------------------
-TILEMAP_HEADER_BYTES = 2     # leading uint16 format tag, before the cell stream
-TILEMAP_CELL_BYTES = 12      # per cell: x,y,source,atlas_x,atlas_y,alt (6 × int16)
-TILEMAP_CELL_XY = '<hh'      # we decode only each cell's leading x,y (for bounds)
+TILE_MAP_DATA_PROP = 'tile_map_data'
+TILEMAP_LAYER_TYPE = 'TileMapLayer'
 
 
 class TscnError(Exception):
@@ -197,24 +192,40 @@ def parse_text(text: str) -> list[Section]:
     return _parse_lines(text.split('\n'))
 
 
-def decode_tilemap_bounds(value: str) -> str:
-    """Decode a `tile_map_data` PackedByteArray to `<N> cells, x[..] y[..]` — the
-    used-cell count and tile bounds, without dumping the bytes."""
-    match = TILE_DATA_B64.search(value)
-    if not match:
-        return 'PackedByteArray (unparsed)'
-    data = base64.b64decode(match.group(1))
-    count = (len(data) - TILEMAP_HEADER_BYTES) // TILEMAP_CELL_BYTES
-    if count <= 0:
-        return '0 cells'
-    xs: list[int] = []
-    ys: list[int] = []
-    for cell in range(count):
-        offset = TILEMAP_HEADER_BYTES + cell * TILEMAP_CELL_BYTES
-        x, y = struct.unpack_from(TILEMAP_CELL_XY, data, offset)
-        xs.append(x)
-        ys.append(y)
-    return f'{count} cells, x[{min(xs)}..{max(xs)}] y[{min(ys)}..{max(ys)}]'
+def tilemap_layers(sections: list[Section]) -> list[Section]:
+    """Every TileMapLayer node in a scene, in file order.
+
+    A node qualifies by TYPE or by carrying `tile_map_data`: an instanced or
+    scripted layer has no `type=` of its own, and skipping it would let `tiles`
+    report a map as layer-less while its cells sit right there in the file.
+    """
+    return [s for s in sections
+            if s.kind == NODE_KIND and (s.attrs.get('type') == TILEMAP_LAYER_TYPE
+                                        or s.prop(TILE_MAP_DATA_PROP) is not None)]
+
+
+def find_tilemap_layer(sections: list[Section], name: str) -> Section:
+    """The one TileMapLayer addressed by `name` — a node name OR a full path.
+
+    A full PATH wins over a bare name, because a path is unique and a name is
+    not: that is what keeps `Sandbox/WallLayer` addressable in a scene that also
+    has a root-level `WallLayer`. Failing that, refuses on both failure modes
+    rather than picking — an unknown name, and a name two layers answer to
+    (legal in a scene, and exactly when a silent choice paints the wrong grid).
+    """
+    layers = tilemap_layers(sections)
+    exact = [s for s in layers if node_own_path(s) == name]
+    if len(exact) == 1:
+        return exact[0]
+    matches = [s for s in layers if s.attrs.get('name') == name]
+    if not matches:
+        known = ', '.join(node_own_path(s) for s in layers) or '(none)'
+        raise TscnError(f'no TileMapLayer named {name!r}; this scene has: {known}')
+    if len(matches) > 1:
+        paths = ', '.join(node_own_path(s) for s in matches)
+        raise TscnError(f'{name!r} is ambiguous — {len(matches)} layers answer to it '
+                        f'({paths}); address one by its full path')
+    return matches[0]
 
 
 def resolve_ref(value: str, ext: dict[str, dict]) -> str:

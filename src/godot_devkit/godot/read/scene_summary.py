@@ -14,13 +14,14 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 
+from godot_devkit.godot.format.tilemap import decode_tilemap_bounds
 from godot_devkit.godot.format.tscn import (
     PACKED_ARRAY,
     REF_ARROW,
     RESOURCE_REF,
+    TILE_MAP_DATA_PROP,
     Section,
     _basename,
-    decode_tilemap_bounds,
     node_own_path,
     parse,
     resolve_ref,
@@ -34,14 +35,14 @@ INDENT = '  '
 KEY_PROPS = frozenset((
     'position', 'facing', 'rotation', 'scale', 'definition', 'zone_type',
     'script', 'shape', 'tile_set', 'size', 'init_spawn', 'unlock_level',
-    'tile_map_data',
+    TILE_MAP_DATA_PROP,
 ))
 
 
 def format_prop(key: str, value: str, ext: dict[str, dict]) -> str:
     """Render one `key = value` for display: decode tile data, summarize packed
     arrays, resolve resource refs, elide long scalars; pass short scalars through."""
-    if key == 'tile_map_data':
+    if key == TILE_MAP_DATA_PROP:
         return f'{key}: {decode_tilemap_bounds(value)}'
     if PACKED_ARRAY.match(value):
         return f'{key}: <{value.split("(", 1)[0]}, elided>'

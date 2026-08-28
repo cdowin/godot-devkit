@@ -129,6 +129,17 @@ godot-devkit scene rm       <file> <node-path>
 godot-devkit scene reparent <file> <node-path> <new-parent>
 ```
 
+A TileMapLayer's grid is the extreme case of the same problem: the whole map is one base64 property,
+so *"how far does this wall go"* is unreadable and *"fill these twelve cells"* has no hand form at
+all. `tiles` answers the first and `tiles paint`/`erase` do the second, regenerating only that one
+property:
+
+```bash
+godot-devkit tiles <file.tscn> --layer WallLayer --cols       # per-column counts: where it stops
+godot-devkit tiles paint <file.tscn> --layer WallLayer --region 4,0,9,0 --tile 2/1,3
+godot-devkit tiles erase <file.tscn> --layer WallLayer --region 4,0,9,0
+```
+
 `rename` rewrites every reference to the node — descendants' `parent=`, `[connection]`,
 `[editable path=]`, and relative `NodePath("...")` literals resolved against the node that owns them.
 A verb that cannot guarantee a correct result **refuses and says why**; it never edits partially.
@@ -222,8 +233,10 @@ All subcommands of the one `godot-devkit` entry point:
 | `refs <symbol> [--tests]` | Reference-aware symbol search across `class_name` / methods / signals / `.gd`/`.tscn`/`.tres` paths / uids (word-boundary, comment-stripped) |
 | `orphans [--tests]` | Possible-orphan detector — files with zero inbound refs (a hint, never a hard claim) |
 | `autoloads` | Autoload census + naming-suffix vs. source-heuristic cross-check |
+| `tiles <file.tscn> [--layer NAME] [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]` | A TileMapLayer's grid, decoded: cell count, bounds, tile-kind histogram; `--cols`/`--rows` give per-column/row counts (how you find where a wall stops), `--at` the tile at one cell, `--region` the census inside an inclusive rectangle |
 
-A shared parser (`tscn.py`) all of them compose — sections, properties, resource-ref resolution, TileMapLayer binary decoding.
+A shared parser (`tscn.py`) all of them compose — sections, properties, resource-ref resolution — plus
+one `tile_map_data` codec (`tilemap.py`) shared by the read and write sides.
 
 ### Scene surgery (write verbs)
 
@@ -240,6 +253,8 @@ serialisation detail, not an address; nothing keys off it.)
 | `scene reparent <file> <node-path> <new-parent>` | Move a subtree and re-express the NodePaths that pointed into or out of it |
 | `scene canonicalize <file>...` | Restore what `PackedScene.pack()` + `ResourceSaver.save()` drop: uid-in-refs, the file's own header uid, `index=` on instance-child overrides, `[editable path=]` |
 | `scene canonicalize --elide-defaults <file>...` | Also **delete** `.tres` assignments proven equal to the script's `@export` default — the ones Godot's writer omits, so a hand-authored file stops diffing on every editor save. Opt-in, because it removes lines |
+| `tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` | Fill a rectangle of one TileMapLayer, replacing whatever was there. Only that one `tile_map_data` assignment is regenerated |
+| `tiles erase <file> --layer NAME --region X0,Y0,X1,Y1` | Delete every cell in a rectangle |
 
 Every verb takes `--dry-run` (prints a unified diff, writes nothing), is **idempotent** (a second run
 reports `unchanged`), and **refuses** — exit 1, with a reason — rather than write a result it cannot
