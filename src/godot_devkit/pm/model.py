@@ -53,9 +53,13 @@ DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review')
 # default: a project that ships from the trunk and bumps at close is not
 # drifting, it is running a different (valid) flow, and a gate that fails it
 # would be lying. Opt in with `[pm] checks`.
-DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7')
+DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7',
+                  'V1', 'V2', 'V3', 'V4', 'V5')
 FLOW_CHECKS = ('D8', 'D9', 'D10')
-KNOWN_CHECKS = DEFAULT_CHECKS + FLOW_CHECKS
+# Structural/referential integrity. ON by default: a tree that does not satisfy
+# these is malformed, not merely running a different flow.
+VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5')
+KNOWN_CHECKS = DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 

@@ -168,6 +168,7 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm feature done <feature-id> [--review-record <path>]` | Cascade-closes every `review` story **and** the feature, atomically. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical |
 | `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
+| `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain to the schema. Creation only — never overwrites |
 | `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
 
@@ -238,7 +239,8 @@ review_dir  = "docs/reviews"    # where review records live
 review_min_content_bytes = 20   # anti-rubber-stamp floor (non-whitespace bytes)
 review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
 story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
-checks = ["D1","D2","D3","D4","D5","D6","D7"]   # which drift rules run
+checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
+          "V1","V2","V3","V4","V5"]             # integrity rules (see `pm validate`)
 # D8/D9/D10 are the FLOW rules — opt in by naming them here:
 #   D8  project version == the `building` milestone's id (bump at START; the id
 #       IS the version, exact string equality)

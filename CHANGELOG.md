@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.8.0 — 2026-08-27 — validate
+
+**On upgrade:** `check pm` gains five integrity rules (V1–V5), on by default, so a tree with a
+dangling `depends_on` that previously passed will now fail. That is the point — but check with
+`pm validate` before you bump. Projects whose story FILES carry an ordering prefix (`01-slug.md`)
+while their story IDS do not **must** declare `[pm] story_ordinal_prefix = true`; without it every
+such story reads as an id/path mismatch. (Measured: one consumer went from 96 findings to 0 on that
+one line.)
+
+**New verb — `pm validate`, and the same predicates inside `check pm`.** A different question from
+drift. Drift asks whether statuses are consistent with each other; validation asks whether the tree
+is well-formed and its references are real. A milestone can be perfectly undrifted and still depend
+on a feature that does not exist — nothing checked that until now, in either consumer.
+
+- **V1** frontmatter is well-formed (a leading fence carrying `id:` and `status:`)
+- **V2** the id matches the path — the id==path convention every resolver relies on
+- **V3** parentage is consistent: a story's `feature:`/`milestone:` and a feature's `milestone:`
+  name the grains that actually own them
+- **V4** `depends_on` / `consumed_by` resolve
+- **V5** the feature dependency graph is **acyclic** and **phase-monotone** (no feature depends on
+  one in a LATER phase). Both were documented in a consumer's README as properties to uphold and
+  neither was implemented anywhere.
+
+**Pruned milestones are not errors.** Git history is the archive, so a ref naming a milestone no
+longer in the working tree is expected. V4 resolves only refs whose milestone is present and censuses
+the rest as UNVERIFIABLE — the discipline `check props` already uses. Failing them would punish the
+prune model; hiding them would conceal a typo, so they are counted and named in the summary.
+
+**`pm validate` refuses an empty tree** (exit 2) rather than printing VALID over zero grains — the
+same rule-4 guard `check pm` carries.
+
 ## v0.7.0 — 2026-08-27 — the flow rules
 
 **On upgrade:** nothing changes unless you ask for it. The three new rules are **opt-in** — name them

@@ -175,6 +175,15 @@ def run() -> int:
                        f'the trunk tree is on {trunk!r} — the integration branch '
                        f'belongs in the trunk, checked out')
 
+    # --- V1-V5: structural + referential integrity ------------------------
+    v_on = enabled & set(model.VALIDATE_CHECKS)
+    v_census = {}
+    if v_on:
+        from godot_devkit.pm import validate as _validate
+        v_findings, v_census = _validate.run(cfg, v_on)
+        for msg in v_findings:
+            report(msg)
+
     if 'D7' in enabled:
         for archive in (cfg.roadmap / model.ARCHIVE_DIR_NAME,
                         cfg.root / cfg.review_dir / model.ARCHIVE_DIR_NAME):
@@ -188,6 +197,12 @@ def run() -> int:
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
+    if v_census:
+        census += f', {v_census["refs"]} ref(s)'
+        if v_census['unverifiable']:
+            # Named, never hidden: a ref into a pruned milestone is not a pass.
+            census += (f' ({v_census["unverifiable"]} UNVERIFIABLE — the ref '
+                       f'names a milestone no longer in the tree)')
     if findings:
         print(f'[check:pm] FAIL — {len(findings)} status-drift violation(s) '
               f'across {census}')

@@ -567,5 +567,104 @@ class IdsAreLiterals(unittest.TestCase):
                     self.assertEqual(run_cli(root, 'milestone', 'ready', bad)[0], 2)
 
 
+class Validate(unittest.TestCase):
+    """Structural + referential integrity — a different question from drift.
+
+    A tree can be perfectly undrifted and still depend on a feature that does
+    not exist.
+    """
+
+    def _run(self, root: Path):
+        from godot_devkit.pm import validate
+        return validate.run(model.PmConfig(root=root))
+
+    def test_a_clean_tree_validates(self):
+        with tree(story_statuses=('todo',)) as root:
+            findings, census = self._run(root)
+            self.assertEqual(findings, [])
+            self.assertEqual(census['grains'], 3)
+
+    def test_v2_id_must_match_path(self):
+        with tree() as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            model.set_field(ff, 'id', '0.1/WRONG')
+            findings, _ = self._run(root)
+            self.assertTrue(any('does not match its path' in f for f in findings))
+
+    def test_v3_parentage_must_be_consistent(self):
+        with tree(story_statuses=('todo',)) as root:
+            sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
+            model.set_field(sf, 'feature', '0.1/somewhere-else')
+            findings, _ = self._run(root)
+            self.assertTrue(any('but it lives under feature' in f for f in findings))
+
+    def test_v4_a_dangling_ref_inside_the_tree_is_a_finding(self):
+        with tree() as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            model.set_field(ff, 'depends_on', '["0.1/no-such-feature"]')
+            findings, _ = self._run(root)
+            self.assertTrue(any('resolves to nothing' in f for f in findings))
+
+    def test_v4_a_ref_into_a_pruned_milestone_is_unverifiable_not_a_finding(self):
+        # Git history is the archive: depending on a milestone that has been
+        # pruned is expected, so it is censused rather than failed.
+        with tree() as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            model.set_field(ff, 'depends_on', '["0.0.9/long-gone"]')
+            findings, census = self._run(root)
+            self.assertEqual(findings, [])
+            self.assertEqual(census['unverifiable'], 1)
+
+    def test_v5_detects_a_dependency_cycle(self):
+        with tree() as root:
+            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
+            fdir = root / 'pm/roadmap/0.1-demo/features'
+            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
+            model.set_field(fdir / 'beta/feature.md', 'depends_on', '["0.1/alpha"]')
+            findings, _ = self._run(root)
+            self.assertTrue(any('CYCLE' in f for f in findings), findings)
+
+    def test_v5_phase_monotone(self):
+        with tree() as root:
+            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
+            fdir = root / 'pm/roadmap/0.1-demo/features'
+            model.set_field(fdir / 'alpha/feature.md', 'phase', '1')
+            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
+            model.set_field(fdir / 'beta/feature.md', 'phase', '2')
+            findings, _ = self._run(root)
+            self.assertTrue(any('LATER phase' in f for f in findings), findings)
+
+    def test_phase_monotone_is_satisfied_in_the_right_order(self):
+        with tree() as root:
+            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
+            fdir = root / 'pm/roadmap/0.1-demo/features'
+            model.set_field(fdir / 'alpha/feature.md', 'phase', '2')
+            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
+            model.set_field(fdir / 'beta/feature.md', 'phase', '1')
+            self.assertEqual(self._run(root)[0], [])
+
+    def test_the_verb_refuses_an_empty_tree_instead_of_saying_VALID(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            (root / 'pm' / 'roadmap').mkdir(parents=True)
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                code, _ = run_cli(root, 'validate')
+            finally:
+                os.chdir(previous)
+            self.assertEqual(code, 2)
+
+    def test_the_gate_runs_the_same_predicates(self):
+        # One definition, two readers: a dangling ref must fail `check pm` too.
+        with tree(story_statuses=('todo',)) as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            model.set_field(ff, 'depends_on', '["0.1/no-such-feature"]')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('resolves to nothing', out)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -32,6 +32,7 @@ USAGE = """usage: godot-devkit pm <command>
   feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
   milestone <ready|building|done> <milestone-id>       (done refuses unless all features done)
   status [<milestone>]
+  validate                                (structural + referential integrity)
   new milestone <ver> <name...>           (scaffold; statuses move via the commands above)
   new feature <milestone> <slug> <name...>
   new story <feature-id> <slug> <name...>
@@ -348,6 +349,31 @@ def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
+    """Structural + referential integrity. The same predicates `check pm` runs."""
+    if args:
+        raise Usage(USAGE)
+    from godot_devkit.pm import validate as _validate
+    findings, census = _validate.run(cfg)
+    for msg in findings:
+        print(f'  INVALID  {msg}')
+    if not census['grains']:
+        # Rule 4 again: a scan that saw nothing must say so, not print VALID.
+        print(f'[pm] ERROR — no grains found under {cfg.roadmap_dir}/ '
+              f'(wrong [pm] roadmap_dir, or an empty tree?)', file=sys.stderr)
+        return 2
+    summary = (f'{census["grains"]} grain(s), {census["refs"]} ref(s)')
+    if census['unverifiable']:
+        summary += (f' ({census["unverifiable"]} UNVERIFIABLE — the ref names a '
+                    f'milestone no longer in the tree; git history is the archive)')
+    print()
+    if findings:
+        print(f'[pm] INVALID — {len(findings)} problem(s) across {summary}')
+        return 1
+    print(f'[pm] VALID — {summary}')
+    return 0
+
+
 # --- new ----------------------------------------------------------------------
 def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if not args:
@@ -510,6 +536,7 @@ def main(argv: list[str]) -> int:
     table = {
         'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,
         'status': cmd_status, 'new': cmd_new, 'prune': cmd_prune,
+        'validate': cmd_validate,
     }
     fn = table.get(cmd)
     if fn is None:
