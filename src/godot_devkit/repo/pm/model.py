@@ -48,7 +48,13 @@ DEFAULT_FEATURE_TRANSITIONS = (
     'planning->ready', 'ready->building', 'building->review', 'review->done')
 # todo->review is the sanctioned no-build edge: a doc/decision story with
 # nothing to build reaches review without passing through wip.
-DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review')
+#
+# The `blocked->*` edges are the way OUT. `blocked` is reachable from any state,
+# and for a while had no exit at all — so the only way to unblock a story was to
+# hand-edit the `status:` line, which is the exact drift this tracker exists to
+# prevent. An entry from anywhere needs a return to anywhere.
+DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review',
+                             'blocked->todo', 'blocked->wip', 'blocked->review')
 
 # D8-D10 encode the branch-per-milestone / bump-at-start flow. They are OFF by
 # default: a project that ships from the trunk and bumps at close is not

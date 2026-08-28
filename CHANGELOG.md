@@ -1,8 +1,17 @@
 # Changelog
 
-## Unreleased — templates, field mutation, execution lists, agent-definition drift
+## v0.10.0 — 2026-08-27 — templates, field mutation, execution lists, agent drift
 
-> **Not tagged.** Pin `v0.9.0` until this is released.
+**On upgrade — two output changes a consumer may grep.** `check doc`'s verdict line moved from
+`[doc_scan]` to `[check:doc]`, bringing the last gate onto the `[check:x]` shape rule 6 declares
+contract. And a gate that scans **zero files now FAILs** rather than passing — `check shell` in a repo
+with no `tools/` scripts changes from exit 0 to exit 1, as do `uid`/`tres`/`doc` on an empty census.
+Both are deliberate: a gate that PASSes over nothing is the read-side cardinal sin, and four of eight
+gates were doing it.
+
+`[pm.scaffold.*]` is **replaced** by template files — set `[pm] template_dir`, run `pm templates`,
+edit the markdown. It is now refused rather than ignored, so a stale config says so instead of
+silently doing nothing.
 
 **New gate — `check agents`.** An agent definition is prose, so nothing stops it describing a
 workflow the tooling refuses. That drift is invisible until an agent follows the instruction and the

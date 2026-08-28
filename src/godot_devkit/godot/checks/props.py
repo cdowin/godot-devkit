@@ -39,7 +39,7 @@ from pathlib import Path
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.index.gdscript import RES_PREFIX, Resolution, ScriptIndex
 from godot_devkit.core.project import git_lines, load_config, repo_root
-from godot_devkit.core.config import config_section, str_tuple
+from godot_devkit.core.config import config_section, str_tuple, table
 from godot_devkit.godot.format.tscn import (
     Section,
     node_own_path,
@@ -269,7 +269,7 @@ def run() -> int:
     root = repo_root()
     config = config_section('props')
     exclude = str_tuple(config, 'props', 'exclude_prefixes', DEFAULT_EXCLUDE)
-    extra = config.get('extra_properties', {})
+    extra = table(config, 'props', 'extra_properties', {})
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])

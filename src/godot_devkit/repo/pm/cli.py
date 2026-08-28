@@ -668,6 +668,28 @@ def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
 
 
 # --- new ----------------------------------------------------------------------
+INITIAL_STATUS = {'milestone': 'planning', 'feature': 'planning',
+                  'story': 'todo', 'bug': 'open'}
+
+
+def _guard_initial_status(grain: str, body: str) -> None:
+    """A template may not mint a grain past its own starting state.
+
+    Otherwise `pm templates` + one edit is a supported path to a `done` story
+    that never passed a precondition — the transition graph enforced on every
+    move, bypassed at creation.
+    """
+    for line in body.split('\n'):
+        if line.startswith('status:'):
+            got = line[len('status:'):].strip().strip('"\'')
+            want = INITIAL_STATUS[grain]
+            if got and got != want:
+                raise Refused(
+                    f'the {grain} template sets `status: {got}` — a grain is '
+                    f'created at {want!r} and moves only through the CLI')
+            return
+
+
 def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if not args:
         raise Usage(USAGE)
@@ -687,8 +709,10 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         for tpl, dest in (('milestone', 'milestone.md'),
                           ('HANDOFF', 'HANDOFF.md'),
                           ('DECISIONS', 'DECISIONS.md')):
-            templates.write(mdir / dest,
-                            templates.render(templates.load(cfg, tpl), values))
+            body = templates.render(templates.load(cfg, tpl), values)
+            if tpl == 'milestone':
+                _guard_initial_status('milestone', body)
+            templates.write(mdir / dest, body)
             _ok(f'created {cfg.rel(mdir / dest)}')
         return 0
     if grain == 'feature':
@@ -704,9 +728,11 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             raise Refused(f'feature {mid}/{slug!r} already exists')
         (fdir / 'stories').mkdir(parents=True, exist_ok=True)
         (fdir / 'plans').mkdir(parents=True, exist_ok=True)
-        templates.write(fdir / 'feature.md', templates.render(
+        body = templates.render(
             templates.load(cfg, 'feature'),
-            {'id': f'{mid}/{slug}', 'milestone': mid, 'name': name}))
+            {'id': f'{mid}/{slug}', 'milestone': mid, 'name': name})
+        _guard_initial_status('feature', body)
+        templates.write(fdir / 'feature.md', body)
         _ok(f'created {cfg.rel(fdir / "feature.md")}')
         return 0
     if grain == 'story':
@@ -723,10 +749,12 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         sf = fdir / 'stories' / f'{slug}.md'
         if sf.exists():
             raise Refused(f'story {fid}/{slug!r} already exists')
-        templates.write(sf, templates.render(
+        body = templates.render(
             templates.load(cfg, 'story'),
             {'id': f'{fid}/{slug}', 'feature': fid, 'milestone': mid,
-             'name': name}))
+             'name': name})
+        _guard_initial_status('story', body)
+        templates.write(sf, body)
         _ok(f'created {cfg.rel(sf)}')
         return 0
     if grain == 'bug':
@@ -741,9 +769,11 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             raise Refused(f'bug {mid}/bugs/{slug!r} already exists')
         # Bugs anchor to where they were CAUGHT, not where they get fixed —
         # the file path preserves the catch history.
-        templates.write(bf, templates.render(
+        body = templates.render(
             templates.load(cfg, 'bug'),
-            {'id': f'{mid}/bugs/{slug}', 'milestone': mid, 'slug': slug}))
+            {'id': f'{mid}/bugs/{slug}', 'milestone': mid, 'slug': slug})
+        _guard_initial_status('bug', body)
+        templates.write(bf, body)
         _ok(f'created {cfg.rel(bf)}')
         return 0
     raise Usage(USAGE)

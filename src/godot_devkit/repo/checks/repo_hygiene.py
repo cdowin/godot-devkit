@@ -24,13 +24,14 @@ import subprocess
 import sys
 
 from godot_devkit.core.project import git_lines, load_config, repo_root
-from godot_devkit.core.config import config_section, str_tuple
+from godot_devkit.core.config import config_section, pattern, text
 
 
 def run() -> int:
     cfg = config_section('repo_hygiene')
-    mainline = cfg.get('mainline', 'origin/main')
-    protected = re.compile(cfg.get('protected', r'^(main|staging|archive/.*)$'))
+    mainline = text(cfg, 'repo_hygiene', 'mainline', 'origin/main')
+    protected = re.compile(
+        pattern(cfg, 'repo_hygiene', 'protected', r'^(main|staging|archive/.*)$'))
     hard = 0
     warn = 0
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from godot_devkit.core.markdown import non_fenced_lines
 from godot_devkit.core.project import load_config, repo_root
 from godot_devkit.core.config import config_section, str_tuple
 
@@ -36,7 +37,6 @@ SCOPE_GLOBS = str_tuple(_CFG, 'doc', 'scope', DEFAULT_SCOPE)
 MAKEFILE = REPO_ROOT / 'Makefile'
 ALLOW_MARKER = 'doc-scan:allow'
 
-FENCE = re.compile(r'^\s*```')
 INLINE_CODE = re.compile(r'`([^`]+)`')
 MD_LINK_TEXT = re.compile(r'`[^`]+`\]\(')  # a backtick span used as [`text`](href) link text —
                                             # its path claim is the link's real href, checked separately
@@ -72,20 +72,6 @@ def real_make_targets() -> set[str]:
         return set()
     text = MAKEFILE.read_text(encoding='utf-8', errors='replace')
     return set(MAKE_TARGET_RECIPE.findall(text))
-
-
-def non_fenced_lines(text: str) -> list[tuple[int, str]]:
-    """(1-indexed lineno, line) pairs with fenced ``` code-block bodies
-    dropped — those are illustrative examples, not precise claims."""
-    kept: list[tuple[int, str]] = []
-    in_fence = False
-    for lineno, line in enumerate(text.split('\n'), 1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if not in_fence:
-            kept.append((lineno, line))
-    return kept
 
 
 def is_allowed(line: str) -> bool:

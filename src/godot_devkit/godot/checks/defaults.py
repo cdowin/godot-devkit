@@ -46,7 +46,8 @@ MAX_LISTED = 40
 def run() -> int:
     root = repo_root()
     config = config_section(CONFIG_SECTION)
-    exclude = tuple(config.get('exclude_prefixes', DEFAULT_EXCLUDE))
+    exclude = str_tuple(config, CONFIG_SECTION, 'exclude_prefixes',
+                        DEFAULT_EXCLUDE)
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])

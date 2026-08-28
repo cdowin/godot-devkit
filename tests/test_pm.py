@@ -1182,5 +1182,162 @@ class Vocabulary(unittest.TestCase):
             self.assertIn('done', data['grains']['feature']['verbs'])
 
 
+class EveryConfigSection(unittest.TestCase):
+    """The gap that let a false PASS survive a refactor meant to remove it.
+
+    Every exit-2 config assertion lived in test_pm.py, so `[defaults]` kept the
+    literal `tuple(cfg.get(...))` CLAUDE.md forbids by name — and a bare-string
+    exclude hid two real findings while printing PASS.
+    """
+
+    SECTIONS = (
+        ('uid', 'exclude_prefixes'), ('tres', 'exclude_prefixes'),
+        ('props', 'exclude_prefixes'), ('defaults', 'exclude_prefixes'),
+        ('shell', 'roots'), ('doc', 'scope'), ('agents', 'scope'),
+        ('pm', 'checks'),
+    )
+    BAD = ('"a-string"', '5', '[]', '{ k = 1 }')
+
+    def test_no_section_accepts_a_malformed_list(self):
+        from godot_devkit.core.project import load_config, repo_root
+        for section, key in self.SECTIONS:
+            for bad in self.BAD:
+                with self.subTest(section=section, bad=bad), tree() as root:
+                    (root / 'devkit.toml').write_text(
+                        f'[{section}]\n{key} = {bad}\n', encoding='utf-8')
+                    repo_root.cache_clear()
+                    load_config.cache_clear()
+                    buf = io.StringIO()
+                    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                        from godot_devkit import cli as top
+                        code = top.main(['check', section.replace('_', '-')])
+                    # 2 = config error. Never 0 (a silent narrowed census) and
+                    # never 1 (which CI reads as "drift found").
+                    self.assertEqual(code, 2, f'[{section}] {key} = {bad}\n{buf.getvalue()}')
+
+    def test_a_non_table_section_is_refused(self):
+        from godot_devkit.core.project import load_config, repo_root
+        for section, _ in self.SECTIONS:
+            with self.subTest(section=section), tree() as root:
+                (root / 'devkit.toml').write_text(f'{section} = "nope"\n', encoding='utf-8')
+                repo_root.cache_clear()
+                load_config.cache_clear()
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    from godot_devkit import cli as top
+                    code = top.main(['check', section.replace('_', '-')])
+                self.assertEqual(code, 2, buf.getvalue())
+
+
+class FamilySeparation(unittest.TestCase):
+    def test_repo_never_imports_godot(self):
+        """CLAUDE.md states this invariant; nothing was enforcing it.
+
+        It is what makes rule 2's exit clause ("if pm stops belonging, it
+        leaves") a real option rather than a sentiment.
+        """
+        src = Path(__file__).resolve().parent.parent / 'src' / 'godot_devkit'
+        offenders = []
+        for path in (src / 'repo').rglob('*.py'):
+            text = path.read_text(encoding='utf-8')
+            if 'godot_devkit.godot' in text:
+                offenders.append(str(path.relative_to(src)))
+        self.assertEqual(offenders, [], 'repo/ must not import godot/')
+
+    def test_core_imports_neither_family(self):
+        src = Path(__file__).resolve().parent.parent / 'src' / 'godot_devkit'
+        offenders = []
+        for path in (src / 'core').rglob('*.py'):
+            text = path.read_text(encoding='utf-8')
+            if 'godot_devkit.godot' in text or 'godot_devkit.repo' in text:
+                offenders.append(str(path.relative_to(src)))
+        self.assertEqual(offenders, [], 'core/ must know about neither family')
+
+
+class AgentGatePrecision(unittest.TestCase):
+    """A false FAIL gets a gate switched off; these are the four that shipped."""
+
+    def _gate(self, root: Path):
+        from godot_devkit.repo.checks import agents
+        from godot_devkit.core.project import load_config, repo_root
+        repo_root.cache_clear()
+        load_config.cache_clear()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = agents.run()
+        return code, buf.getvalue()
+
+    def _write(self, root: Path, rel: str, body: str) -> None:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding='utf-8')
+
+    def test_a_supporting_file_in_a_real_skill_dir_is_not_a_flat_skill(self):
+        with tree() as root:
+            self._write(root, '.claude/skills/mine/SKILL.md', '# s\n')
+            self._write(root, '.claude/skills/mine/references/api.md', '# api\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_a_fenced_example_is_not_an_instruction(self):
+        with tree() as root:
+            self._write(root, '.claude/rules/r.md',
+                        '```\n[pm] REFUSED — story wip -> done\n```\n')
+            self.assertEqual(self._gate(root)[0], 0)
+
+    def test_prose_prohibiting_a_transition_is_not_instructing_it(self):
+        with tree() as root:
+            self._write(root, '.claude/rules/r.md',
+                        'Never flip a story wip -> done; the CLI refuses it.\n')
+            self.assertEqual(self._gate(root)[0], 0)
+
+    def test_unbackticked_prose_is_not_an_invocation(self):
+        with tree() as root:
+            self._write(root, '.claude/agents/a.md',
+                        'The pm feature and pm milestone verbs both take an id.\n')
+            self.assertEqual(self._gate(root)[0], 0)
+
+    def test_a_chained_arrow_does_not_hide_its_middle_edge(self):
+        # findall is non-overlapping: `a -> b -> c` silently dropped (b, c).
+        with tree() as root:
+            self._write(root, '.claude/rules/r.md',
+                        'The milestone lifecycle is planning -> ready -> done.\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('ready -> done', out)
+
+    def test_an_unknown_state_is_censused_not_dropped(self):
+        with tree() as root:
+            self._write(root, '.claude/rules/r.md',
+                        'A story goes todo -> reviewd (a typo in this doc).\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('UNVERIFIED', out)
+
+
+class BlockedIsNotATrap(unittest.TestCase):
+    def test_a_blocked_story_can_be_unblocked_through_the_cli(self):
+        # The only exit used to be the hand-edit the tracker exists to prevent.
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'blocked', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'review', '0.1/alpha/s0')[0], 0)
+
+
+class TemplateCannotMintPastTheGraph(unittest.TestCase):
+    def test_a_template_naming_a_later_status_is_refused(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            run_cli(root, 'templates')
+            t = root / 'pm/templates/feature.md'
+            t.write_text(t.read_text().replace('status: planning', 'status: done'),
+                         encoding='utf-8')
+            code, out = run_cli(root, 'new', 'feature', '0.1', 'sneaky', 'S')
+            self.assertEqual(code, 1)
+            self.assertIn('moves only through the CLI', out)
+
+
 if __name__ == '__main__':
     unittest.main()

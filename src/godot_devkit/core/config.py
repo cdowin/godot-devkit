@@ -44,6 +44,13 @@ def str_tuple(sect: dict, name: str, key: str,
         raise ConfigError(
             f'[{name}] {key} must be a list of strings, got {value!r}'
             + (f' — write {key} = [{value!r}]' if isinstance(value, str) else ''))
+    if not value:
+        # An empty list reads as "nothing", but downstream it usually means the
+        # opposite: `git ls-files` with no pathspec is the ENTIRE repo. Refuse
+        # rather than let a value mean the reverse of what it looks like.
+        raise ConfigError(
+            f'[{name}] {key} is empty — remove the key to take the default '
+            f'({" ".join(fallback) or "none"}) rather than declaring nothing')
     return tuple(value)
 
 
@@ -58,6 +65,25 @@ def flag(sect: dict, name: str, key: str, fallback: bool) -> bool:
     value = sect.get(key, fallback)
     if not isinstance(value, bool):
         raise ConfigError(f'[{name}] {key} must be true/false, got {value!r}')
+    return value
+
+
+def table(sect: dict, name: str, key: str, fallback: dict) -> dict:
+    """A table-of-tables setting. A string or list is REFUSED, never walked."""
+    value = sect.get(key, fallback)
+    if not isinstance(value, dict):
+        raise ConfigError(f'[{name}] {key} must be a table, got {value!r}')
+    return value
+
+
+def pattern(sect: dict, name: str, key: str, fallback: str) -> str:
+    """A regex setting, COMPILED at load so a bad one is exit 2, not a finding."""
+    import re as _re
+    value = text(sect, name, key, fallback)
+    try:
+        _re.compile(value)
+    except _re.error as err:
+        raise ConfigError(f'[{name}] {key} is not a valid regex: {err}') from err
     return value
 
 

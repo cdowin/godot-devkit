@@ -26,8 +26,9 @@ from __future__ import annotations
 import re
 import sys
 
-from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
+from godot_devkit.core.markdown import code_spans, non_fenced_lines
+from godot_devkit.core.project import repo_root
 from godot_devkit.repo.pm import model
 
 DEFAULT_SCOPE = ('.claude/agents/*.md', '.claude/rules/*.md', '.claude/skills/**/*.md')
@@ -35,9 +36,41 @@ SKILL_DIR = '.claude/skills'
 SKILL_FILENAME = 'SKILL.md'
 
 # `pm story wip <id>` / `tools/pm/pm feature done` / `godot-devkit pm milestone ready`
+# Matched only INSIDE a backtick span: prose that merely uses the words ("the pm
+# story lifecycle") is not an invocation, and reading it as one turns the gate
+# red on correct text — the failure this file's own docstring calls fatal.
 _INVOCATION = re.compile(r'\bpm\s+(milestone|feature|story)\s+([a-z][a-z-]*)')
-# `review -> done`, `review → done`, `wip → review`
-_TRANSITION = re.compile(r'\b([a-z]+)\s*(?:->|→)\s*([a-z]+)\b')
+# `review -> done`, `review → done`, `wip → review`. Split rather than findall:
+# a non-overlapping findall over `a -> b -> c` yields (a,b) and silently drops
+# (b,c), so a chained lifecycle line hid an illegal middle edge.
+_ARROW = re.compile(r'\s*(?:->|→)\s*')
+_WORD = re.compile(r'[a-z]+')
+
+
+def _transitions(line: str) -> list[tuple[str, str]]:
+    """Adjacent (from, to) pairs, including the middle of a chain.
+
+    `re.findall` is non-overlapping, so scanning `a -> b -> c` for pairs yields
+    (a, b) and resumes past b — silently dropping (b, c). A lifecycle line
+    written as a chain therefore hid an illegal middle edge. Split on the arrow
+    instead and take the word adjacent to each side of it.
+    """
+    parts = _ARROW.split(line)
+    if len(parts) < 2:
+        return []
+    lefts = [(_WORD.findall(p) or [''])[-1] for p in parts[:-1]]
+    rights = [(_WORD.findall(p) or [''])[0] for p in parts[1:]]
+    return [(a, b) for a, b in zip(lefts, rights) if a and b]
+
+
+# A line that PROHIBITS a transition is documenting the rule, not instructing
+# the breach — and flagging the doc that gets it right is the fastest way to get
+# a gate switched off. Conservative by design: these words are unambiguous, and
+# a missed real finding is survivable where a false one is not.
+_NEGATION = re.compile(
+    r"\b(never|not|no|refus\w*|reject\w*|illegal|invalid|cannot|can't|"
+    r"forbidden|prohibit\w*|doesn't|won't|wrong|hole|drift)\b", re.I)
+
 _GRAIN_WORDS = {'milestone': 'milestone', 'milestones': 'milestone',
                 'feature': 'feature', 'features': 'feature',
                 'story': 'story', 'stories': 'story'}
@@ -96,32 +129,47 @@ def run() -> int:
         except (OSError, UnicodeDecodeError):
             continue
 
-        # A3 — a flat skill file never loads as a skill.
-        if rel.startswith(SKILL_DIR) and path.name != SKILL_FILENAME:
+        # A3 — a flat skill file never loads as a skill. But `<name>/SKILL.md`
+        # legitimately sits beside references/, scripts/ and assets/, so only a
+        # .md at depth 1 under skills/ is the defect; anything deeper is a
+        # supporting file of a correctly-shaped skill.
+        parts = path.relative_to(root).parts
+        flat_skill = (len(parts) == 3 and parts[:2] == ('.claude', 'skills')
+                      and path.suffix == '.md')
+        if flat_skill:
             report(f'{rel}: a skill must be <name>/{SKILL_FILENAME}; a flat '
                    f'.md does NOT load as a skill (its description never fires)')
 
-        for n, line in enumerate(text.splitlines(), 1):
-            for grain, verb in _INVOCATION.findall(line):
+        # Fenced blocks are illustrations, not claims (core/markdown.py).
+        for n, line in non_fenced_lines(text):
+            for span in code_spans(line):
+              for grain, verb in _INVOCATION.findall(span):
                 if verb not in verbs[grain] and verb not in ('new', 'status'):
                     report(f'{rel}:{n}: `pm {grain} {verb}` — the CLI has no '
                            f'{verb!r} verb for a {grain} '
                            f'(it accepts: {", ".join(sorted(verbs[grain]))})')
-            for src, dst in _TRANSITION.findall(line):
+            for src, dst in _transitions(line):
                 grain = _grain_on_line(line)
                 if grain is None:
-                    if src in model.DEFAULT_STORY_STATES or dst in model.DEFAULT_STORY_STATES:
+                    if src in cfg.story_states or dst in cfg.story_states:
                         unverified += 1
                     continue
                 states = {'milestone': cfg.milestone_states,
                           'feature': cfg.feature_states,
                           'story': cfg.story_states}[grain]
                 if src not in states or dst not in states:
+                    # A determined grain but an unrecognised state: not a
+                    # finding, but it IS undecided, so it must be censused.
+                    unverified += 1
+                    continue
+                if _NEGATION.search(line):
+                    # Documenting the refusal, not instructing it.
+                    unverified += 1
                     continue
                 if not model.transition_legal(_graph(cfg, grain), src, dst):
-                    extra = ('' if grain != 'story' else
-                             ' — a story reaches `done` only through '
-                             '`pm feature done`\'s cascade')
+                    extra = (' — a story reaches `done` only through '
+                             '`pm feature done`\'s cascade'
+                             if grain == 'story' and dst == 'done' else '')
                     report(f'{rel}:{n}: describes a {grain} going '
                            f'{src} -> {dst}, which the CLI refuses{extra}')
             for pattern in forbidden:
@@ -138,7 +186,8 @@ def run() -> int:
     census = f'{len(files)} definition(s)'
     if unverified:
         census += (f', {unverified} transition mention(s) UNVERIFIED (the line '
-                   f'names no single grain)')
+                   f'names no single grain, an unknown state, or prohibits '
+                   f'rather than instructs)')
     if findings:
         print(f'[check:agents] FAIL — {len(findings)} definition(s) instruct '
               f'what the tooling refuses, across {census}')
