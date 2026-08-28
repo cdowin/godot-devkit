@@ -31,7 +31,8 @@ from __future__ import annotations
 from collections import Counter
 
 from godot_devkit.godot.index.gdscript import ScriptIndex
-from godot_devkit.core.project import git_lines, load_config, repo_root, config_section, str_tuple
+from godot_devkit.core.project import git_lines, load_config, repo_root
+from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import parse
 

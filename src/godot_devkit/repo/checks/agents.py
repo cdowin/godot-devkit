@@ -26,7 +26,8 @@ from __future__ import annotations
 import re
 import sys
 
-from godot_devkit.core.project import ConfigError, config_section, repo_root, str_tuple
+from godot_devkit.core.project import repo_root
+from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.repo.pm import model
 
 DEFAULT_SCOPE = ('.claude/agents/*.md', '.claude/rules/*.md', '.claude/skills/**/*.md')

@@ -26,7 +26,8 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from godot_devkit.core.project import load_config, repo_root, config_section, str_tuple
+from godot_devkit.core.project import load_config, repo_root
+from godot_devkit.core.config import config_section, str_tuple
 
 REPO_ROOT = repo_root()
 _CFG = config_section('doc')

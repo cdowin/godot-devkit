@@ -1086,7 +1086,8 @@ class AgentDefinitions(unittest.TestCase):
 
     def _gate(self, root: Path):
         from godot_devkit.repo.checks import agents
-        from godot_devkit.core.project import config_section, load_config, repo_root
+        from godot_devkit.core.config import config_section
+        from godot_devkit.core.project import load_config, repo_root
         repo_root.cache_clear()
         load_config.cache_clear()
         buf = io.StringIO()

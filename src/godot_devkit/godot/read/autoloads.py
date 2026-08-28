@@ -31,7 +31,8 @@ import re
 from pathlib import Path
 
 from godot_devkit.godot.format.tscn import parse_text, _strip_quotes
-from godot_devkit.core.project import load_config, repo_root, config_section, str_tuple
+from godot_devkit.core.project import load_config, repo_root
+from godot_devkit.core.config import config_section, str_tuple
 
 # --- Scope -------------------------------------------------------------------
 REPO_ROOT = repo_root()

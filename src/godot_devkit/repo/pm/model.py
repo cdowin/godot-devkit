@@ -32,8 +32,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from godot_devkit.core.project import (ConfigError, config_section, flag, number,
-                                  repo_root, str_tuple, text)
+from godot_devkit.core.project import repo_root
+from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
 
 # --- stock policy -------------------------------------------------------------
 # The story terminal is `review`: there is deliberately NO story `*->done` edge,

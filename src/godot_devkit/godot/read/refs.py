@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from godot_devkit.godot.format.tscn import parse, _basename
-from godot_devkit.core.project import repo_root, load_config
+from godot_devkit.core.project import load_config, repo_root
 
 # --- Scope -------------------------------------------------------------------
 REPO_ROOT = repo_root()

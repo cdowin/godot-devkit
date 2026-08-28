@@ -53,7 +53,7 @@ from __future__ import annotations
 import sys
 
 from godot_devkit import __version__
-from godot_devkit.core.project import ConfigError
+from godot_devkit.core.config import ConfigError
 
 OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 # Deliberately OUT of `check all`: `defaults` reports thousands of findings on a

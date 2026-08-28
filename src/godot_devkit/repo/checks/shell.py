@@ -12,7 +12,8 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from godot_devkit.core.project import git_lines, load_config, repo_root, config_section, str_tuple
+from godot_devkit.core.project import git_lines, load_config, repo_root
+from godot_devkit.core.config import config_section, str_tuple
 
 DEFAULT_ROOTS = ('tools',)
 SHEBANGS = ('#!/usr/bin/env bash', '#!/bin/bash', '#!/usr/bin/env sh', '#!/bin/sh')
