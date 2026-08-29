@@ -17,10 +17,16 @@ so a project overriding one grain does not inherit responsibility for the rest.
 """
 from __future__ import annotations
 
+import os
 from importlib import resources
 from pathlib import Path
 
 from godot_devkit.repo.pm import model
+
+# The halfway name a case-only rename passes through on a case-INSENSITIVE
+# filesystem. Named once because two places need it: the mover, and the pre-pass
+# that refuses a leftover one before anything moves.
+TEMP_RENAME_SUFFIX = '{name}.pm-case-rename'
 
 # grain -> template filename. The shared docs are addressed by their SLOT name
 # minus the extension, so `decisions.md` is minted by `decisions.md` and there
@@ -84,8 +90,15 @@ class ScaffoldRefused(Exception):
     """The scaffolder cannot guarantee a correct result, so it did nothing."""
 
 
-def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> None:
+def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> bool:
     """`DECISIONS.md` -> `decisions.md`, recorded by GIT when git tracks it.
+    True when git moved it — so the rename is also STAGED — and False when the
+    temp rename did, which stages nothing at all.
+
+    Which one ran is the whole of the advice a later refusal can give. Telling
+    an operator to unstage a rename that only ever touched the worktree sends
+    them to a `git status` showing nothing, and unactionable advice on a refusal
+    is its own defect.
 
     Two problems, one on each side of the filesystem. macOS is
     case-INSENSITIVE, so the rename is a no-op there and `open(new)` would
@@ -102,18 +115,33 @@ def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> None:
     """
     done, why = model.git_rename(cfg.root, old, new)
     if done:
-        return
+        return True
     if why:
         raise ScaffoldRefused(
             f'git tracks {cfg.rel(old)} and would not rename it to {new.name} '
             f'({why}) — nothing was written; run `git mv --force '
             f'{cfg.rel(old)} {cfg.rel(new)}` yourself, then re-run')
-    tmp = old.with_name(f'{old.name}.pm-case-rename')
-    if tmp.exists():
-        raise ScaffoldRefused(f'{cfg.rel(tmp)} is in the way of the {old.name} '
-                              f'-> {new.name} rename — move it aside')
+    # The squatter this would trip over is refused in the pre-pass, where the
+    # directory listing already showed it — a refusal raised here has an earlier
+    # slot's rename behind it and is no longer the "nothing was written" it says.
+    tmp = old.with_name(TEMP_RENAME_SUFFIX.format(name=old.name))
     old.rename(tmp)
     tmp.rename(new)
+    return False
+
+
+def _header_wanted(path: Path, slot: str) -> str:
+    """The instruction line this doc is MISSING, or '' when it needs none.
+
+    A file already opening with SOME known instruction line needs none, so a
+    future wording change can never stack two headers; D13 reports the mismatch
+    and a human decides.
+    """
+    want = model.SLOT_HEADER.get(slot)
+    if want is None:
+        return ''
+    got = model.header_of(path)
+    return '' if got == want or got in set(model.SLOT_HEADER.values()) else want
 
 
 def _fill_header(path: Path, slot: str, actions: list[tuple[str, Path]]) -> None:
@@ -124,15 +152,12 @@ def _fill_header(path: Path, slot: str, actions: list[tuple[str, Path]]) -> None
     scaffolder exists to avoid. The prepend is additive and reported — no
     existing byte moves except by one line.
 
-    A file already opening with SOME known instruction line is left alone, so a
-    future wording change can never stack two headers; D13 reports the mismatch
-    and a human decides.
+    Whether it CAN be written is settled in the pre-pass, not here: a
+    `PermissionError` out of this call used to escape as a traceback with the
+    grain half-filled behind it.
     """
-    want = model.SLOT_HEADER.get(slot)
-    if want is None:
-        return
-    got = model.header_of(path)
-    if got == want or got in set(model.SLOT_HEADER.values()):
+    want = _header_wanted(path, slot)
+    if not want:
         return
     try:
         body = model.read_raw(path)
@@ -178,57 +203,129 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     entries = model.dir_entries(gdir)
     renames: list[tuple[str, str]] = []
     for slot in file_slots:
+        variants = model.case_variants(entries, slot)
+        # A DIRECTORY or a SYMLINK is refused under EVERY spelling, not only the
+        # canonical one. `case_variants` reads names, not kinds, so a variant
+        # DIRECTORY was queued as a rename, renamed, and then opened as a file:
+        # an `IsADirectoryError` traceback with the move already done. And a
+        # symlinked slot is a slot whose bytes live somewhere else — following
+        # it would let a verb asked to fill THIS grain rewrite a file outside it.
+        for name in (slot, *variants):
+            if name not in entries:
+                continue
+            if entries[name] == 'dir':
+                # Refused, not crashed: exit 1 is reserved for findings, so a
+                # traceback out of here reads to a consumer's hook as "drift
+                # found".
+                raise ScaffoldRefused(
+                    f'{cfg.rel(gdir / name)} is a DIRECTORY and {slot} is a '
+                    f'file slot — nothing was written; move it aside')
+            if (gdir / name).is_symlink():
+                raise ScaffoldRefused(
+                    f'{cfg.rel(gdir / name)} is a SYMLINK to '
+                    f'{os.readlink(gdir / name)} — the scaffolder writes inside '
+                    f'the grain it was asked to fill and does not follow a link '
+                    f'out of it; nothing was written; replace it with the real '
+                    f'file')
         if entries.get(slot) == 'file':
             continue
-        if entries.get(slot) == 'dir':
-            # Refused, not crashed: exit 1 is reserved for findings, so a
-            # traceback out of here reads to a consumer's hook as "drift found".
-            raise ScaffoldRefused(
-                f'{cfg.rel(gdir / slot)} is a DIRECTORY and {slot} is a file '
-                f'slot — nothing was written; move it aside')
-        variants = model.case_variants(entries, slot)
         if len(variants) > 1:
             raise ScaffoldRefused(
                 f'{cfg.rel(gdir)}/ holds {len(variants)} spellings of {slot} '
                 f'({", ".join(variants)}) — nothing was written; keep one')
         if variants:
+            squat = TEMP_RENAME_SUFFIX.format(name=variants[0])
+            if squat in entries:
+                raise ScaffoldRefused(
+                    f'{cfg.rel(gdir / squat)} is in the way of the '
+                    f'{variants[0]} -> {slot} rename — nothing was written; '
+                    f'move it aside')
             renames.append((variants[0], slot))
 
-    for i, (variant, slot) in enumerate(renames):
-        try:
-            _rename_case(cfg, gdir / variant, gdir / slot)
-        except ScaffoldRefused as err:
-            # git refusing one `mv --force` cannot be inspected for in advance.
-            # What CAN be guaranteed is that the message stops claiming nothing
-            # happened once something has: an operator who is not told about a
-            # staged rename cannot undo it.
-            if not i:
-                raise
-            moved = ', '.join(f'{v} -> {s}' for v, s in renames[:i])
-            raise ScaffoldRefused(
-                f'{err} — NOTE: {i} earlier rename(s) in '
-                f'{cfg.rel(gdir)}/ already landed and are staged ({moved}); '
-                f'unstage or finish them before re-running') from err
-        actions.append((f'renamed {variant} ->', gdir / slot))
-    entries = model.dir_entries(gdir)
-
+    # What the fill phase will DO, decided here too, because a refusal raised
+    # after the first `write` is a refusal that already changed the tree. Both
+    # halves are inspectable now: every template the grain will need is loaded
+    # and DECODED (a latin-1 byte in a project's `template_dir` used to escape
+    # as `UnicodeDecodeError` two slots in), and every existing doc due a header
+    # prepend is proved writable (a read-only legacy `handoff.md` used to escape
+    # as `PermissionError` with the remaining slots never created).
+    by_slot = {slot: variant for variant, slot in renames}
     grain_slot = f'{kind}.md'
-    status = (model.field_of(gdir / grain_slot, 'status')
-              if entries.get(grain_slot) == 'file' else '')
+    grain_now = by_slot.get(grain_slot, grain_slot)
+    status = (model.field_of(gdir / grain_now, 'status')
+              if entries.get(grain_now) == 'file' else '')
+    bodies: dict[str, str] = {}
     for slot in file_slots:
-        if entries.get(slot) == 'file':
-            _fill_header(gdir / slot, slot, actions)
+        if entries.get(by_slot.get(slot, slot)) == 'file':
             continue
         if slot == model.REVIEW_FILE_NAME and status == 'done':
             continue
-        body = render(load(cfg, model.SLOT_TEMPLATE[slot]), values)
-        write(gdir / slot, body)
-        actions.append(('created', gdir / slot))
-    for slot in dir_slots:
-        if slot in entries:
+        name = model.SLOT_TEMPLATE[slot]
+        try:
+            bodies[slot] = render(load(cfg, name), values)
+        except (OSError, UnicodeDecodeError) as err:
+            raise ScaffoldRefused(
+                f'the {name} template cannot be read ({err}) — nothing was '
+                f'written' + (f'; fix it under {cfg.template_dir}/, or delete '
+                              f'it there to fall back to the packaged one'
+                              if cfg.template_dir else '')) from err
+    for slot in file_slots:
+        now = gdir / by_slot.get(slot, slot)
+        if slot in bodies or entries.get(now.name) != 'file':
             continue
-        (gdir / slot).mkdir(exist_ok=True)
-        actions.append(('created', gdir / slot))
+        want = _header_wanted(now, slot)
+        if want and not os.access(now, os.W_OK):
+            raise ScaffoldRefused(
+                f'{cfg.rel(now)} is missing its header line and is not '
+                f'writable — nothing was written; make it writable, or prepend '
+                f'the line yourself: {want!r}')
+
+    landed: list[tuple[str, str, bool]] = []
+    for variant, slot in renames:
+        try:
+            staged = _rename_case(cfg, gdir / variant, gdir / slot)
+        except ScaffoldRefused as err:
+            # git refusing one `mv --force` cannot be inspected for in advance.
+            # What CAN be guaranteed is that the message stops claiming nothing
+            # happened once something has — and says WHICH half happened: an
+            # operator told to unstage a worktree-only rename goes to a `git
+            # status` that shows nothing and cannot act on the advice at all.
+            if not landed:
+                raise
+            moved = ', '.join(
+                f'{v} -> {s} ({"staged by git mv" if g else "on disk, staged nowhere"})'
+                for v, s, g in landed)
+            raise ScaffoldRefused(
+                f'{err} — NOTE: {len(landed)} earlier rename(s) in '
+                f'{cfg.rel(gdir)}/ already landed: {moved}; undo or finish '
+                f'them before re-running') from err
+        landed.append((variant, slot, staged))
+        actions.append((f'renamed {variant} ->', gdir / slot))
+    entries = model.dir_entries(gdir)
+
+    # Whatever is left is a real write, and a real write can still fail on
+    # something no listing could show (a disk that fills, a mode changed under
+    # us). It becomes a REFUSAL naming what already landed, so exit 1 always
+    # reads as a finding a consumer's hook can print, never as a stack trace.
+    try:
+        for slot in file_slots:
+            if slot in bodies:
+                write(gdir / slot, bodies[slot])
+                actions.append(('created', gdir / slot))
+            elif entries.get(slot) == 'file':
+                _fill_header(gdir / slot, slot, actions)
+        for slot in dir_slots:
+            if slot in entries:
+                continue
+            (gdir / slot).mkdir(exist_ok=True)
+            actions.append(('created', gdir / slot))
+    except (OSError, UnicodeDecodeError) as err:
+        did = '; '.join(f'{what} {cfg.rel(p)}' for what, p in actions)
+        raise ScaffoldRefused(
+            f'{cfg.rel(gdir)}/ could not be filled ({err}) — this one could not '
+            f'be decided in advance, so the grain is PART-FILLED: '
+            + (did or 'nothing had been written yet')
+            + '; fix it and re-run, which fills only the gaps') from err
     return actions
 
 

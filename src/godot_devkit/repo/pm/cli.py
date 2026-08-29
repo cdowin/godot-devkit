@@ -821,7 +821,17 @@ def _scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     # The guard runs on the rendered grain template even when the grain already
     # exists: a project that edits its template into `status: done` must not be
     # able to mint one through the fill-gaps path either.
-    _guard_initial_status(kind, templates.render(templates.load(cfg, kind), values))
+    try:
+        head = templates.render(templates.load(cfg, kind), values)
+    except templates.MissingTemplate as err:
+        raise Usage(str(err)) from err
+    except (OSError, UnicodeDecodeError) as err:
+        # A template the project cannot even decode is a REFUSAL, not a
+        # traceback: rule 6 reserves exit 1 for findings a consumer's hook can
+        # print, and a stack trace is not one.
+        raise Refused(f'the {kind} template cannot be read ({err}) — nothing '
+                      f'was written') from err
+    _guard_initial_status(kind, head)
     try:
         actions = templates.scaffold(cfg, kind, gdir, values)
     except templates.ScaffoldRefused as err:
