@@ -33,3 +33,7 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C6 — 2026-08-29 — the review contract is installable
 **What:** `godot-devkit install-agents` drops the review and build contract into a repo — run adversarial input, ship a test that failed against HEAD, print before and after.
 **Evidence:** src/godot_devkit/repo/installables/verification-reviewer.md
+
+## C7 — 2026-08-29 — the release protocol points at the targets
+**What:** The release and consumer-smoke skills now start from `task verify` and `make smoke` instead of describing commands to retype, and name the collapse verb the close step needs.
+**Evidence:** .claude/skills/release/SKILL.md

@@ -5,6 +5,8 @@ description: Run every godot-devkit subcommand against the live consumer checkou
 
 # Consumer smoke
 
+**Run `make smoke` first.** It is this procedure's mechanical half as a target — every read verb against both checkouts, each printed census compared against an independent count, and a before/after dirty check. What is left below is the JUDGMENT half, which is why the skill still exists: the negative probes and the config-equivalence pass, neither of which can be written down once and rerun blindly.
+
 The consumers are the fixtures. For each available checkout (`~/workspace/trail`, `~/workspace/nullbound` — skip cleanly with a note if absent), run from INSIDE the consumer (tools resolve the repo from cwd), invoking the WORKING TREE build: `uvx --from ~/workspace/godot-devkit godot-devkit …` — never the published tag (that would smoke-test the previous release).
 
 1. **Introspection**: `scene` on a real .tscn; `scene-diff <file> --git HEAD` (expect "no structural differences" on a clean tree); `refs <a-known-class_name>`; `autoloads` (expect the census header count to equal `grep -c '=' project.godot`'s [autoload] section entries); `orphans` may be slow — run it last, `--tests` off.
