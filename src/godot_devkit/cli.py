@@ -55,6 +55,10 @@ Verification, in the project's own vocabulary (devkit.toml `[tasks]`):
                                     # dispatch never has to paste a regression
                                     # bar again.
     godot-devkit install-ci         # the workflow that runs `task verify`
+    godot-devkit install-agents     # the review + build contract, as agent
+                                    # definitions (a rules file never reaches
+                                    # a subagent's spawn context; a definition
+                                    # does)
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell

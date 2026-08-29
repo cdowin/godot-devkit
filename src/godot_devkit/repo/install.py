@@ -41,12 +41,19 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     'install-ci': (
         ('ci-verify.yml', '.github/workflows/verify.yml'),
     ),
+    'install-agents': (
+        ('verification-reviewer.md', '.claude/agents/verification-reviewer.md'),
+        ('verification-builder.md', '.claude/agents/verification-builder.md'),
+    ),
 }
 
 USAGE = """usage: godot-devkit install-ci [--force]
+       godot-devkit install-agents [--force]
 
-install-ci  .github/workflows/verify.yml — runs `godot-devkit task verify`,
-            which is whatever THIS repo declared for the `verify` role.
+install-ci      .github/workflows/verify.yml — runs `godot-devkit task verify`,
+                which is whatever THIS repo declared for the `verify` role.
+install-agents  the review and build contract, as AGENT DEFINITIONS under
+                .claude/agents/ — the one place a subagent actually reads.
 
 --force overwrites a destination this tool did not generate."""
 
@@ -114,4 +121,9 @@ def main(command: str, argv: list[str]) -> int:
         print(f'[install] the workflow runs `godot-devkit task verify` and '
               f'nothing else. What that executes is devkit.toml [tasks] '
               f'verify — run `godot-devkit check tasks` to confirm it resolves.')
+    if wrote and command == 'install-agents':
+        print(f'[install] godot-devkit v{__version__} — these carry the review '
+              f'and build contract only: run adversarial input, ship a test '
+              f'that failed against HEAD, verify through `task quick`. Your '
+              f'project\'s own agents, rosters and dispatch model stay yours.')
     return 0

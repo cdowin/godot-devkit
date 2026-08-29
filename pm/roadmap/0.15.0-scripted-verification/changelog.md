@@ -29,3 +29,7 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C5 — 2026-08-29 — closing a milestone no longer needs inside knowledge
 **What:** The close verb refuses a review record that the retention rule would delete, and `pm collapse` performs the close-time trim that used to be a hand edit.
 **Evidence:** tests/test_pm_close_protocol.py
+
+## C6 — 2026-08-29 — the review contract is installable
+**What:** `godot-devkit install-agents` drops the review and build contract into a repo — run adversarial input, ship a test that failed against HEAD, print before and after.
+**Evidence:** src/godot_devkit/repo/installables/verification-reviewer.md

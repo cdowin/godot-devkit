@@ -43,3 +43,9 @@ pointers, and everything that still explains a live constraint stays.
 **Over:** documenting how to hand-edit the append-only log at close
 **Because:** D18 demanded a collapse only a hand edit could perform, in a file whose first line says never by hand — a rule with no verb is a gap
 **Evidence:** src/godot_devkit/repo/pm/cli.py:1360
+
+## D7 — 2026-08-29 — the contract ships as agent definitions
+**Chose:** installing the review and build contract into .claude/agents/ with install-agents
+**Over:** writing it as a .claude/rules file, or hand-copying it into each repo
+**Because:** it is measured that a rules file never reaches a subagent spawn context while its definition does, so a contract written as a rule arrives nowhere
+**Evidence:** src/godot_devkit/repo/install.py:44

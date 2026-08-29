@@ -318,6 +318,7 @@ verify = "make milestone"    # the full gate, and what CI runs
 | `task --list` | The declared roles and their commands; exit 1 if a required role is missing. |
 | `check tasks` | Asserts every declared role resolves to a real target (see the gate table above). |
 | `install-ci` | Writes `.github/workflows/verify.yml` — a workflow that runs `godot-devkit task verify` and nothing else. Identical in every repo, so CI cannot drift from the local gate: they are the same target, named once. The one substituted value is where the toolkit is resolved from, filled with the installing build's own version so the pin is correct by construction. `--force` overwrites a file this tool did not generate. |
+| `install-agents` | Writes the review and build contract into `.claude/agents/` — construct adversarial input and RUN it, ship a test that failed against HEAD, print before AND after when probing a gate, never hand-roll verification. Written once here and installed, rather than hand-copied into every repo. It ships as AGENT DEFINITIONS deliberately: a rules file never reaches a subagent's spawn context, while its definition does. `--force` overwrites a file this tool did not generate. |
 
 Required roles are `quick` and `verify`; anything else in the table is yours and runs the
 same way. Those two values are real — the game repos that pin this package already had a
