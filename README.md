@@ -405,7 +405,11 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 #       per line, values <= 200 chars and the title <= 80. `Over:` is the
 #       load-bearing one — an entry that cannot name what it ruled out is a
 #       description, not a decision — and `Evidence:` must be a REFERENCE (a
-#       commit hash, a path[:line] or a number), never a sentence.
+#       commit hash, a path[:line] or a number), never a sentence. A `##`
+#       heading is an ENTRY if it carries an id or a date, or if any
+#       `**Word:**` field line appears beneath it — the field line is what a
+#       title-reading detector cannot see. A heading with neither is prose and
+#       is never checked, so a log may open with a preamble.
 bug_states      = ["open", "fixed", "closed"]   # D14: the bug vocabulary
 bug_open_states = ["open"]                      # D14: which of those are OPEN
 decision_grandfather = [                        # D12: logs that predate the schema

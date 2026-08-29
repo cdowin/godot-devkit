@@ -23,10 +23,18 @@ and it is **deleted at close** with anything durable promoted into `decisions.md
 **`pm new milestone` and `pm new feature` are now idempotent**, which is how a consumer migrates. Run
 against an existing grain they fill the missing slots, rename a slot present under another case, and
 leave every existing byte alone; `<name>` is optional there, since the name only ever mints the
-directory. The case rename goes through a temp name on purpose: macOS is case-INSENSITIVE, so
-`open('decisions.md', 'w')` next to an existing `DECISIONS.md` truncates the very content the
-migration exists to carry forward. Measured on scratch copies of both consumers, with a second full
-pass changing nothing:
+directory. The case rename goes through **`git mv --force`** when git tracks the path, and through a
+temp name when it does not. Both halves are load-bearing and neither is optional: macOS is
+case-INSENSITIVE, so `open('decisions.md', 'w')` next to an existing `DECISIONS.md` truncates the
+very content the migration exists to carry forward — and git's default there is
+`core.ignorecase = true`, under which a worktree-only rename leaves the INDEX on the old spelling.
+The worktree says `decisions.md`, `git ls-files` says `DECISIONS.md`, and an explicit `git add` of
+the new name stages nothing: the migration goes green on the laptop, gets committed, and CI on Linux
+checks out the old name with D13 reporting every renamed grain missing and D12 scanning nothing. If
+git tracks the path and refuses the move, the scaffolder **refuses too**, printing the exact command
+— a half-done rename is the one outcome worse than none. A file slot that exists as a DIRECTORY is
+likewise refused rather than crashed, because exit 1 is reserved for findings. Measured on scratch
+copies of both consumers, with a second full pass changing nothing:
 
 | | grain dirs | slots created | renamed | headers restored |
 |---|---|---|---|---|
@@ -101,13 +109,43 @@ The residual extras are the genuine inventions a human has to place: `plans/` (8
 `decisions.md` carries `**Chose:**` / `**Over:**` / `**Because:**` / `**Evidence:**`, in that order,
 one per line, values <= 200 chars and the title <= 80. `Over:` is the load-bearing field — an entry
 that cannot name what it ruled out is a description, not a decision — and `Evidence:` must be a
-REFERENCE (a commit hash, a `path[:line]`, a number), never a sentence. Entry DETECTION is
-deliberately looser than the schema: a heading carrying an id anywhere in it, or a date, is an entry,
-because an opens-with-an-id test read 28 of one consumer's 58 logs as prose and passed them in
-silence. Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` exempts a whole log,
+REFERENCE (a commit hash, a `path[:line]`, a number), never a sentence.
+
+Entry DETECTION reads the entry's BODY, never only its title: a `##` heading is an entry if it
+carries an id or a date **or** if any `**Word:**` field line appears beneath it. The field line is
+the positive signal, and it is what a title-reading detector cannot see — this package's own retired
+template told authors to write `## <short title>` with `**Decision:/Because:/Rejected:/Costs:**`
+underneath, and against trail's live corpus a heading-only test called 8 of 9 real decision blocks
+prose and passed the whole file, its single finding landing on the one heading that happened to
+contain a bug id. A heading with neither an id/date nor a field line is prose and is never
+schema-checked, so a log may open with a preamble; a `<!-- -->` block is not in the log at all.
+Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` exempts a whole log,
 `"<path>:<N>"` only its first N entries — whose size the gate PRINTS every run and which may only
 shrink: an exemption that suppresses nothing, a cap reaching past the end of its log, and a line
 naming no log all FAIL.
+
+**D12 prints its census — `N decision log(s), M entry/ies` — and carries both into the summary
+line,** the way D11 prints its done-grain count and D13/D14 print theirs. Without it "scanned 58 logs
+/ 294 entries", "scanned 1 log" and "scanned 2 logs / 0 entries" printed identically, which is what
+kept the two defects above invisible. The log census itself comes from a directory LISTING with an
+EXACT-name comparison, never `rglob('decisions.md')`: a glob whose final segment holds no wildcard
+resolves through `Path.exists()`, so macOS answers an on-disk `DECISIONS.md` with the path
+`x/decisions.md` — a path that does not exist, a `decision_grandfather` key authorable on exactly one
+platform, and, once ONE log of a tree has been migrated, a non-empty list that silences the
+scanned-nothing guard while every other log goes unopened (57 of nullbound's 58, carrying 1,467
+violations, printed `PASS` and exit 0). A case-variant log is now REPORTED, never folded in; a log
+that cannot be decoded is REPORTED rather than counted as scanned-with-zero-entries.
+
+**`pm templates` no longer writes past a case variant.** It reads the target directory by exact name,
+exactly as the template loader does, so a project holding a customised `DECISIONS.md` is told the
+spelling to port it to instead of silently rendering from the packaged template — and the packaged
+one is not written over it, since on a case-insensitive filesystem that write would truncate the
+customisation.
+
+**Known issues, all reported and none fixed here:** `pm decide --title` is not validated for a bare
+`\r`; D14 misses `bugs/*.MD` and `bugs/<subdir>/*.md`; a `decision_grandfather` cap names the wrong
+entry when one is inserted above it; `decision_grandfather = []` exits 2 though the docstring shows
+it as the default; `ScaffoldRefused` prints an absolute path rather than a repo-relative one.
 
 **Breaking for a tree that has one:** the decision log is `decisions.md`, not `DECISIONS.md`, and the
 handoff is `handoff.md`. `pm new milestone <id>` / `pm new feature <mid> <slug>` performs the rename.

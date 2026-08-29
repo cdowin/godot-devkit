@@ -75,7 +75,7 @@ DRIFT RULES (each FAILs, naming the offending path):
       logs migrate through `[pm] decision_grandfather` (see below), whose size
       the gate PRINTS every run so it stays visibly temporary. OFF by default.
 
-Which rules run is `[pm] checks` in devkit.toml (default: all seven).
+Which rules run is `[pm] checks` in devkit.toml (default: D1-D7 + V1-V6).
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
 MUST pass on the legitimate mid-build state: a building milestone with mixed
@@ -155,8 +155,14 @@ def _bug_lifetime(cfg, report) -> int:
     return scanned
 
 
-def _decision_schema(cfg, report) -> None:
+def _decision_schema(cfg, report) -> tuple[int, int]:
     """D12 — the decision-record schema, and the ledger that lets it ship.
+    Returns (logs scanned, entries scanned).
+
+    The census is not decoration. Without it "scanned 58 logs / 294 entries",
+    "scanned 1 log" and "scanned 2 logs / 0 entries" print identically, and that
+    is what let a case-folded census and a title-guessing detector both pass in
+    silence. A rule's population belongs on stdout beside its verdict.
 
     The ledger is the whole migration story: 57 logs in one consumer conform to
     none of this, and a rule that turns a consumer red on upgrade day is
@@ -166,25 +172,42 @@ def _decision_schema(cfg, report) -> None:
     entries it claims to cover, is itself reported.
     """
     ledger = dict(cfg.decision_grandfather)
-    logs = model.decision_files(cfg)
+    logs, variants = model.decision_files(cfg)
     whole = sum(1 for cap in ledger.values() if cap is None)
     print(f'[check:pm] D12 grandfather: {len(ledger)} decision log(s) exempt '
           f'({whole} whole, {len(ledger) - whole} capped) — this ledger may '
           f'only shrink')
+
+    # A log spelled another way is a log this rule cannot see. Never folded in:
+    # the two platforms would then emit opposite findings about the same file.
+    for path in variants:
+        report(f'{cfg.rel(path)} is a case variant of '
+               f'{model.DECISION_FILE_NAME} — D12 reads EXACT names, so this '
+               f'log is invisible to it; rename it via `pm new` (D12)')
 
     # Rule 4: a rule that scanned nothing must say so rather than print PASS.
     if not logs:
         report(f'D12 is enabled but no {model.DECISION_FILE_NAME} exists under '
                f'{cfg.roadmap_dir}/ — the rule scanned nothing')
 
+    n_entries = 0
     seen: set[str] = set()
     for log in logs:
         key = model.decision_relkey(cfg, log)
         cap = ledger.get(key, 0)  # 0 == not listed: nothing is exempt
         if key in ledger:
             seen.add(key)
+        try:
+            entries = model.decision_entries(log)
+        except (OSError, UnicodeDecodeError) as err:
+            # Reported, never counted as scanned-with-zero-entries: an
+            # unreadable log would otherwise be exempt from D12 for free.
+            report(f'{key} cannot be read ({err}) — a log D12 cannot open is '
+                   f'not a log D12 has checked (D12)')
+            continue
+        n_entries += len(entries)
         n_suppressed = 0
-        for ordinal, eid, why in model.decision_violations(log):
+        for ordinal, eid, why in model.decision_violations_in(entries):
             if cap is None or ordinal < cap:
                 n_suppressed += 1
                 continue
@@ -197,15 +220,18 @@ def _decision_schema(cfg, report) -> None:
         if not n_suppressed:
             report(f'{key} is in decision_grandfather but every entry conforms '
                    f'— drop it from the ledger (D12)')
-        n_entries = len(model.decision_entries(log))
-        if cap is not None and cap > n_entries:
+        if cap is not None and cap > len(entries):
             report(f'{key} is grandfathered to {cap} entries but the log has '
-                   f'{n_entries} — lower the cap (D12)')
+                   f'{len(entries)} — lower the cap (D12)')
 
     for key in ledger:
         if key not in seen:
             report(f'{key} is in decision_grandfather but no such log exists '
                    f'— drop it from the ledger (D12)')
+
+    print(f'[check:pm] D12: {len(logs)} decision log(s), {n_entries} entry/ies '
+          f'held to the schema')
+    return len(logs), n_entries
 
 
 def run() -> int:
@@ -362,8 +388,10 @@ def run() -> int:
     if 'D11' in enabled:
         n_done_grains = _retention(cfg, report)
 
+    n_logs = 0
+    n_entries = 0
     if 'D12' in enabled:
-        _decision_schema(cfg, report)
+        n_logs, n_entries = _decision_schema(cfg, report)
 
     n_grain_dirs = _structure(cfg, report) if 'D13' in enabled else 0
     n_bugs = _bug_lifetime(cfg, report) if 'D14' in enabled else 0
@@ -373,6 +401,8 @@ def run() -> int:
               f'{n_stories} story/ies')
     if 'D11' in enabled:
         census += f', {n_done_grains} done grain(s)'
+    if 'D12' in enabled:
+        census += f', {n_logs} decision log(s), {n_entries} entry/ies'
     if 'D13' in enabled:
         census += f', {n_grain_dirs} grain dir(s)'
     if 'D14' in enabled:

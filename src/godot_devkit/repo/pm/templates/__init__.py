@@ -84,18 +84,34 @@ class ScaffoldRefused(Exception):
     """The scaffolder cannot guarantee a correct result, so it did nothing."""
 
 
-def _rename_case(old: Path, new: Path) -> None:
-    """Rename through a temp name, because macOS is case-INSENSITIVE.
+def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> None:
+    """`DECISIONS.md` -> `decisions.md`, recorded by GIT when git tracks it.
 
-    `DECISIONS.md` -> `decisions.md` is a no-op rename there, and `open(new)`
-    would truncate the existing file: the migration would delete the very
-    content it exists to carry forward. Two steps make it a real rename on both
-    kinds of filesystem, and git records it as one.
+    Two problems, one on each side of the filesystem. macOS is
+    case-INSENSITIVE, so the rename is a no-op there and `open(new)` would
+    truncate the existing file — the migration deleting the very content it
+    exists to carry forward. And git on macOS defaults to
+    `core.ignorecase = true`, under which a worktree-only rename leaves the
+    INDEX on the old spelling: clean on the laptop, and CI on Linux checks out
+    `DECISIONS.md` with every gate red. `git mv --force` fixes both at once.
+
+    Untracked, or no git: the two-step temp rename is a real rename on both
+    kinds of filesystem. Tracked and git refused: this REFUSES, printing the
+    command that finishes the job, because a half-done rename is the one
+    outcome worse than none.
     """
+    done, why = model.git_rename(cfg.root, old, new)
+    if done:
+        return
+    if why:
+        raise ScaffoldRefused(
+            f'git tracks {cfg.rel(old)} and would not rename it to {new.name} '
+            f'({why}) — nothing was written; run `git mv --force '
+            f'{cfg.rel(old)} {cfg.rel(new)}` yourself, then re-run')
     tmp = old.with_name(f'{old.name}.pm-case-rename')
     if tmp.exists():
-        raise ScaffoldRefused(f'{tmp} is in the way of the {old.name} -> '
-                              f'{new.name} rename — move it aside')
+        raise ScaffoldRefused(f'{cfg.rel(tmp)} is in the way of the {old.name} '
+                              f'-> {new.name} rename — move it aside')
     old.rename(tmp)
     tmp.rename(new)
 
@@ -154,13 +170,20 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     for slot in file_slots:
         if entries.get(slot) == 'file':
             continue
+        if entries.get(slot) == 'dir':
+            # Refused BEFORE anything moves, not crashed: exit 1 is reserved for
+            # findings, so a traceback out of here reads to a consumer's hook as
+            # "drift found".
+            raise ScaffoldRefused(
+                f'{cfg.rel(gdir / slot)} is a DIRECTORY and {slot} is a file '
+                f'slot — nothing was written; move it aside')
         variants = model.case_variants(entries, slot)
         if len(variants) > 1:
             raise ScaffoldRefused(
                 f'{cfg.rel(gdir)}/ holds {len(variants)} spellings of {slot} '
                 f'({", ".join(variants)}) — nothing was written; keep one')
         if variants:
-            _rename_case(gdir / variants[0], gdir / slot)
+            _rename_case(cfg, gdir / variants[0], gdir / slot)
             actions.append((f'renamed {variants[0]} ->', gdir / slot))
     entries = model.dir_entries(gdir)
 
@@ -184,21 +207,44 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     return actions
 
 
-def install(cfg: model.PmConfig, force: bool = False) -> list[Path]:
-    """Copy the packaged templates into the project's `template_dir` to edit."""
+def install(cfg: model.PmConfig, force: bool = False) -> tuple[list[Path],
+                                                              list[tuple[str, str]]]:
+    """Copy the packaged templates into `template_dir`. (written, case variants).
+
+    EXACT names, from a listing, exactly as `load` reads them — `Path.is_file()`
+    on macOS answers `decisions.md` with a leftover `DECISIONS.md`, and the
+    install would then decline to write the very name `load` looks for: the
+    project's customised template is silently ignored in favour of the packaged
+    one, and the consumer cannot even SEE the new name to port it to. A variant
+    already present is REPORTED, never skipped in silence — this package's own
+    `load` rejects an unknown config key on the same grounds, that a thing which
+    silently does nothing is worse than one that errors.
+
+    Reported and NOT written past, `--force` included: on a case-insensitive
+    filesystem `open('decisions.md', 'w')` truncates the `DECISIONS.md` sitting
+    there, so an install that "helpfully" minted the new name would destroy the
+    customisation it exists to preserve. The consumer renames it, then re-runs.
+    """
     if not cfg.template_dir:
         raise MissingTemplate(
             'no [pm] template_dir configured — set one before installing '
             'templates to edit (e.g. template_dir = "pm/templates")')
-    out = []
+    out: list[Path] = []
+    variants: list[tuple[str, str]] = []
     target_dir = cfg.root / cfg.template_dir
+    entries = model.dir_entries(target_dir)
     for name in (*GRAINS, *DOCS):
         text = _packaged(name)
         if text is None:
             continue
-        target = target_dir / f'{name}.md'
-        if target.is_file() and not force:
+        slot = f'{name}.md'
+        others = model.case_variants(entries, slot)
+        if others:
+            variants.extend((other, slot) for other in others)
             continue
+        if entries.get(slot) == 'file' and not force:
+            continue
+        target = target_dir / slot
         write(target, text)
         out.append(target)
-    return out
+    return out, variants

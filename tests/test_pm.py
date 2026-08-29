@@ -371,13 +371,109 @@ class DriftGate(unittest.TestCase):
             self.assertIn('header is not', out)
             self.assertIn('missing **Chose:**', out)
 
-    def test_d12_a_prose_heading_is_not_an_entry(self):
+    def test_d12_a_heading_with_no_field_lines_under_it_is_not_an_entry(self):
+        # The exemption is NO FIELDS, not "an unremarkable title". A log may
+        # open with a preamble, and a preamble carries prose, never a
+        # `**Word:**` line — which is the whole discriminator (see the retired
+        # -template case below, where the title is just as unremarkable and the
+        # block IS a decision).
         with tree(story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
             self._log(root, '## The through-line, if you read nothing else\n\n'
                             'A log may have a preamble.\n\n' + self.ENTRY)
-            self.assertEqual(run_gate(root)[0], 0)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 decision log(s), 1 entry/ies', out)
+
+    def test_d12_sees_an_entry_in_the_retired_template_shape(self):
+        # The false PASS that shipped: this package's OWN retired template told
+        # authors to write `## <short title>` with `**Decision:/Because:/
+        # Rejected:/Costs:**` beneath, and a detector reading only the heading
+        # calls every such block prose. An entire real corpus — 9 blocks across
+        # two live logs, conforming to D12 in no respect — passed in silence.
+        # The FIELD LINE is the positive signal, id or date or neither.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root,
+                      '## The dead leave the table by REMOVAL, not by gating\n\n'
+                      '**Decision:** remove them from the roster\n'
+                      '**Because:** every consumer walks the roster\n'
+                      '**Rejected:** a `dead` flag on the row\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            # Named by its own title, because that is the only handle it has.
+            self.assertIn('The dead leave the table by REMOVAL, not by gating',
+                          out)
+            self.assertIn('missing **Chose:**', out)
+            self.assertIn('missing **Over:**', out)
+            self.assertIn('1 decision log(s), 1 entry/ies', out)
+
+    def test_d12_ignores_a_block_inside_an_html_comment(self):
+        # The retired template shipped its example COMMENTED OUT, field lines
+        # and all. A `<!-- -->` block renders as nothing, so it is not in the
+        # log — reporting it would be a finding against text no reader sees.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, '<!-- Template for a block:\n\n## <short title>\n\n'
+                            '**Decision:** <what was chosen>\n'
+                            '**Because:** <the constraint>\n\n-->\n\n'
+                            + self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 decision log(s), 1 entry/ies', out)
+
+    def test_d12_prints_its_census_and_carries_it_into_the_summary(self):
+        # D11 prints its done-grain count, D13 its grain dirs, D14 its bugs.
+        # Without D12's, "scanned 58 logs / 294 entries", "scanned 1 log" and
+        # "scanned 2 logs / 0 entries" print identically — which is exactly what
+        # kept a case-folded census and a title-guessing detector invisible.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, self.ENTRY)
+            (root / 'pm/roadmap/0.1-demo/features/alpha/decisions.md').write_text(
+                '# preamble only\n\n## no fields here\n\nprose\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('[check:pm] D12: 2 decision log(s), 1 entry/ies', out)
+            self.assertIn('PASS', out)
+            self.assertIn('2 decision log(s), 1 entry/ies', out.rsplit('PASS', 1)[1])
+
+    def test_d12_reports_a_case_variant_log_instead_of_folding_it_in(self):
+        # THE false PASS. `rglob('decisions.md')` resolves a literal final
+        # segment through `Path.exists()`, so macOS answers an on-disk
+        # `DECISIONS.md` with a path that does not exist — and once ONE log of a
+        # tree is migrated the list is non-empty, so the scanned-nothing guard
+        # never fires while every other log goes unopened. The census must not
+        # count it, and the two platforms must not disagree about it.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, self.ENTRY)  # the one migrated log
+            model.write_raw(
+                root / 'pm/roadmap/0.1-demo/features/alpha/DECISIONS.md',
+                '## a legacy block\n\n**Decision:** something\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is a case variant of decisions.md', out)
+            self.assertIn('1 decision log(s), 1 entry/ies', out)
+
+    def test_d12_reports_a_log_it_cannot_decode(self):
+        # Swallowing the decode error exempts the log from D12 for free and
+        # counts it as scanned-with-zero-entries — a silent exemption nobody
+        # authored and nobody can see.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, self.ENTRY)
+            log.write_bytes(b'## D1 \xff\xfe not utf-8\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('cannot be read', out)
+            self.assertIn('1 decision log(s), 0 entry/ies', out)
 
     def test_d12_a_grandfathered_log_passes_and_the_ledger_size_is_reported(self):
         rel = 'pm/roadmap/0.1-demo/decisions.md'
@@ -552,6 +648,47 @@ class Scaffolding(unittest.TestCase):
             self.assertTrue(body.endswith(LEGACY_LOG), body)
             self.assertEqual(model.header_of(mdir / 'decisions.md'),
                              model.SLOT_HEADER['decisions.md'])
+
+    def test_new_records_the_case_rename_in_git_not_only_the_worktree(self):
+        # git's default on macOS is `core.ignorecase = true`, and under it a
+        # worktree-only rename leaves the INDEX on the old spelling: the tree
+        # says decisions.md, `git ls-files` says DECISIONS.md, and an explicit
+        # `git add` of the new name stages NOTHING. The migration goes green on
+        # the laptop, gets committed, and CI on Linux checks out the old name —
+        # D13 then reports every renamed grain missing and D12 scans nothing.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
+            git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
+            subprocess.run([*git, 'add', '-A'], cwd=root, check=True)
+            subprocess.run([*git, 'commit', '-qm', 'fixture'], cwd=root, check=True)
+            tracked = subprocess.run(['git', 'ls-files'], cwd=root, check=True,
+                                     capture_output=True, text=True).stdout
+            self.assertIn('pm/roadmap/0.1-demo/DECISIONS.md', tracked)
+
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 0, out)
+            tracked = subprocess.run(['git', 'ls-files'], cwd=root, check=True,
+                                     capture_output=True, text=True).stdout
+            self.assertIn('pm/roadmap/0.1-demo/decisions.md', tracked)
+            self.assertNotIn('DECISIONS.md', tracked)
+            self.assertEqual(model.dir_entries(mdir).get('decisions.md'), 'file')
+            self.assertTrue(model.read_raw(mdir / 'decisions.md')
+                            .endswith(LEGACY_LOG))
+
+    def test_new_refuses_a_file_slot_that_exists_as_a_directory(self):
+        # Rule 6 reserves exit 1 for FINDINGS, so an uncaught IsADirectoryError
+        # reads to a consumer's hook as "drift found" with a traceback attached.
+        # ScaffoldRefused is the shape, and it refuses before anything moves.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            (mdir / model.DECISION_FILE_NAME).mkdir()
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('REFUSED', out)
+            self.assertIn('is a DIRECTORY', out)
+            self.assertIn('nothing was written', out)
+            self.assertFalse((mdir / 'handoff.md').exists())
 
     def test_new_never_stacks_a_second_header_on_a_doc_that_has_one(self):
         with tree(story_statuses=('todo',)) as root:
@@ -1347,12 +1484,44 @@ class Templates(unittest.TestCase):
             self.assertEqual(run_cli(root, 'validate')[0], 0)
 
     def test_a_new_milestone_gets_handoff_and_decisions(self):
+        # EXACT names, from a listing: `is_file()` here passed on macOS against
+        # the OLD uppercase spellings long after the rename landed, and would
+        # have failed in CI on Linux. The slot names are the assertion.
         with tree() as root:
             run_cli(root, 'new', 'milestone', '0.2', 'Second')
             mdir = root / 'pm/roadmap/0.2-second'
-            for f in ('milestone.md', 'HANDOFF.md', 'DECISIONS.md'):
-                self.assertTrue((mdir / f).is_file(), f)
-            self.assertIn('0.2 Second', (mdir / 'HANDOFF.md').read_text())
+            entries = model.dir_entries(mdir)
+            for f in model.MILESTONE_FILE_SLOTS:
+                self.assertEqual(entries.get(f), 'file', f)
+            self.assertIn('0.2 Second', (mdir / 'handoff.md').read_text())
+
+    def test_templates_command_refuses_to_write_past_a_case_variant(self):
+        # `is_file()` on macOS answers `decisions.md` with a leftover
+        # `DECISIONS.md`, so the install skipped the very name `load` reads —
+        # the project's customised template silently ignored, and no message
+        # naming the spelling to port it to. Writing it anyway is worse still:
+        # `open('decisions.md', 'w')` TRUNCATES the variant sitting there.
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            tdir = root / 'pm/templates'
+            tdir.mkdir(parents=True)
+            mine = 'MINE — a customised decisions template\n'
+            model.write_raw(tdir / 'DECISIONS.md', mine)
+            code, out = run_cli(root, 'templates')
+            self.assertEqual(code, 0, out)
+            self.assertIn('is a case variant of decisions.md', out)
+            self.assertIn('git mv --force', out)
+            self.assertEqual(model.read_raw(tdir / 'DECISIONS.md'), mine)
+            self.assertNotIn('decisions.md', model.dir_entries(tdir))
+
+            # Renamed, it is the template `new` renders from — the whole point.
+            # Through a temp name: a direct rename is a no-op on macOS.
+            (tdir / 'DECISIONS.md').rename(tdir / 'x.tmp')
+            (tdir / 'x.tmp').rename(tdir / 'decisions.md')
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.3', 'Third')[0], 0)
+            self.assertIn('MINE', model.read_raw(
+                root / 'pm/roadmap/0.3-third/decisions.md'))
 
     def test_a_project_template_overrides_the_packaged_one(self):
         with tree() as root:

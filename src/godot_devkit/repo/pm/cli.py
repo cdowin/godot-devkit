@@ -677,11 +677,16 @@ def cmd_templates(cfg: model.PmConfig, args: list[str]) -> int:
         if a != '--force':
             raise Usage(f'unknown flag {a!r}')
     try:
-        written = templates.install(cfg, force)
+        written, variants = templates.install(cfg, force)
     except templates.MissingTemplate as err:
         raise Usage(str(err)) from err
     for path in written:
         _ok(f'installed {cfg.rel(path)}')
+    for other, slot in variants:
+        _ok(f'{cfg.template_dir}/{other} is a case variant of {slot} and was '
+            f'NOT written past — the loader reads EXACT names, so that file is '
+            f'never used; `git mv --force {cfg.template_dir}/{other} '
+            f'{cfg.template_dir}/{slot}`, then re-run')
     if not written:
         _ok(f'{cfg.template_dir}/ already populated (--force to overwrite)')
     return 0

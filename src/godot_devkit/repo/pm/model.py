@@ -34,6 +34,7 @@ the milestone machine has no `review` state (nothing transitions into one).
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -117,7 +118,6 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 # tree out fresh. Files carry the requirement; directories carry permission.
 DECISION_FILE_NAME = 'decisions.md'
 REVIEW_FILE_NAME = 'review.md'
-HANDOFF_FILE_NAME = 'handoff.md'
 
 MILESTONE_FILE_SLOTS = ('milestone.md', 'handoff.md', 'decisions.md', 'review.md')
 MILESTONE_DIR_SLOTS = ('features', 'bugs', 'design')
@@ -166,6 +166,38 @@ def case_variants(entries: dict[str, str], name: str) -> list[str]:
     """Names in `entries` that differ from `name` only by case (excluding it)."""
     low = name.lower()
     return sorted(n for n in entries if n != name and n.lower() == low)
+
+
+def git_rename(root: Path, old: Path, new: Path) -> tuple[bool, str]:
+    """Rename THROUGH git when git tracks `old`. (did it, why it could not).
+
+    `(False, '')` means git does not track the path — a plain rename is then the
+    whole job. `(False, why)` means git tracks it and refused, which the caller
+    must surface rather than paper over.
+
+    An `os.rename` is not enough. git's default on macOS is
+    `core.ignorecase = true`, and under it a case-only rename leaves the INDEX
+    holding the old spelling: the worktree says `decisions.md`, `git ls-files`
+    says `DECISIONS.md`, and an explicit `git add` of the new name stages
+    nothing. The migration goes green on the laptop, gets committed, and CI on
+    Linux checks out the OLD name — D13 then reports every renamed grain
+    missing and D12 scans nothing. `git mv --force` is the one spelling that
+    moves the index with the file.
+    """
+    try:
+        tracked = subprocess.run(
+            ['git', 'ls-files', '--error-unmatch', '--', str(old)],
+            cwd=root, capture_output=True, text=True)
+        if tracked.returncode != 0:
+            return False, ''
+        moved = subprocess.run(['git', 'mv', '--force', '--', str(old), str(new)],
+                               cwd=root, capture_output=True, text=True)
+    except OSError:
+        return False, ''  # no git on PATH: the plain rename is all there is
+    if moved.returncode == 0:
+        return True, ''
+    return False, (moved.stderr.strip() or moved.stdout.strip()
+                   or f'git mv exited {moved.returncode}')
 
 
 @dataclass(frozen=True)
@@ -961,7 +993,10 @@ def decision_evidence_is_reference(value: str) -> bool:
 def decision_entry_label(heading_text: str) -> str:
     """How a finding NAMES this entry — its id, else its date, else ''.
 
-    '' means the heading is prose, not a decision entry.
+    NOT the detector. '' means only that the heading names itself neither way;
+    whether the block IS an entry is decided by its BODY (see
+    `decision_entries_in`), because a heuristic guessing which text is a record
+    from the record's title is the defect this rule exists to catch.
     """
     ident = _DECISION_ID.search(heading_text)
     if ident:
@@ -970,64 +1005,130 @@ def decision_entry_label(heading_text: str) -> str:
     return when.group(0) if when else ''
 
 
-def decision_files(cfg: PmConfig) -> list[Path]:
-    """Every DECISIONS.md in the ACTIVE tree (archived logs predate the schema)."""
+def decision_files(cfg: PmConfig) -> tuple[list[Path], list[Path]]:
+    """(the logs, the case-variant files) in the ACTIVE tree.
+
+    EXACT names, from a directory listing — never `rglob(DECISION_FILE_NAME)`.
+    A pattern whose final segment holds no wildcard resolves through
+    `Path.exists()`, so on macOS `rglob('decisions.md')` answers an on-disk
+    `DECISIONS.md` with the path `x/decisions.md`: a path that does not exist,
+    a `decision_grandfather` key authorable on exactly one platform, and — the
+    moment ONE log of a tree is migrated — a NON-EMPTY list, which is what
+    silences the scanned-nothing guard while every other log goes unopened.
+
+    A `.md` whose lowercased name is `decisions.md` but whose bytes differ is
+    returned separately to be REPORTED: never folded in (the two platforms
+    would emit opposite findings about the same file) and never dropped (a log
+    the rule cannot see is a log the rule has not checked).
+
+    Archived logs predate the schema and are skipped.
+    """
     if not cfg.roadmap.is_dir():
-        return []
-    return sorted(p for p in cfg.roadmap.rglob(DECISION_FILE_NAME)
-                  if p.is_file() and ARCHIVE_DIR_NAME not in p.parts)
+        return [], []
+    logs: list[Path] = []
+    variants: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(cfg.roadmap):
+        dirnames[:] = [d for d in dirnames if d != ARCHIVE_DIR_NAME]
+        for name in filenames:
+            if name == DECISION_FILE_NAME:
+                logs.append(Path(dirpath) / name)
+            elif name.lower() == DECISION_FILE_NAME:
+                variants.append(Path(dirpath) / name)
+    return sorted(logs), sorted(variants)
 
 
 def decision_entries(path: Path) -> list[DecisionEntry]:
-    """The decision entries in one log, in document order."""
-    try:
-        return decision_entries_in(read_raw(path))
-    except (OSError, UnicodeDecodeError):
-        return []
+    """The decision entries in one log, in document order.
+
+    Raises `OSError`/`UnicodeDecodeError` rather than answering []: a log D12
+    cannot open is not a log D12 has checked, and an empty answer here reads as
+    "scanned, nothing wrong" — a silent exemption the caller cannot see.
+    """
+    return decision_entries_in(read_raw(path))
+
+
+def _outside_comments(lines: list[str]) -> list[bool]:
+    """Per line: is it OUTSIDE an HTML comment at the point it starts?
+
+    A `<!-- ... -->` block renders as nothing, so what it holds is not in the
+    log. Load-bearing here because the RETIRED decisions template shipped its
+    example block commented out, `**Decision:**` field lines and all — and the
+    field line is exactly the signal entry detection keys on.
+    """
+    out: list[bool] = []
+    inside = False
+    for raw in lines:
+        out.append(not inside)
+        i = 0
+        while i < len(raw):
+            if inside:
+                j = raw.find('-->', i)
+                if j < 0:
+                    break
+                inside, i = False, j + 3
+            else:
+                j = raw.find('<!--', i)
+                if j < 0:
+                    break
+                inside, i = True, j + 4
+    return out
 
 
 def decision_entries_in(text: str) -> list[DecisionEntry]:
     """The same parse over log TEXT, so a candidate entry can be validated
-    against D12's own regexes BEFORE it is written rather than after."""
+    against D12's own regexes BEFORE it is written rather than after.
+
+    An ENTRY is a `##` heading that either NAMES itself (an id or an ISO date
+    anywhere in it) or carries at least one `**Word:**` field line beneath it.
+    The second half is the positive signal: a heading may be titled anything —
+    the retired template told authors to write `## <short title>` — and a
+    detector reading only the title passes an entire non-conforming corpus in
+    silence, which is rule 4's cardinal sin. A heading with NEITHER is prose and
+    is never schema-checked: a log may have a preamble.
+    """
     lines = _split(text)
-    starts: list[tuple[int, str]] = []
-    for i, raw in enumerate(lines):
-        m = _DECISION_HEADING.match(raw.rstrip('\r'))
-        if m:
-            label = decision_entry_label(m.group(1))
-            if label:
-                starts.append((i, label))
+    live = _outside_comments(lines)
     out: list[DecisionEntry] = []
-    for i, eid in starts:
+    for i, raw in enumerate(lines):
+        if not live[i]:
+            continue
+        m = _DECISION_HEADING.match(raw.rstrip('\r'))
+        if not m:
+            continue
         stop = len(lines)
         for j in range(i + 1, len(lines)):
-            if _DECISION_SECTION_END.match(lines[j].rstrip('\r')):
+            if live[j] and _DECISION_SECTION_END.match(lines[j].rstrip('\r')):
                 stop = j
                 break
         fields: list[tuple[str, str]] = []
-        for raw in lines[i + 1:stop]:
-            fm = _DECISION_FIELD.match(raw.rstrip('\r'))
+        for j in range(i + 1, stop):
+            if not live[j]:
+                continue
+            fm = _DECISION_FIELD.match(lines[j].rstrip('\r'))
             if fm:
                 fields.append((fm.group(1), fm.group(2)))
+        eid = decision_entry_label(m.group(1))
+        if not eid:
+            if not fields:
+                continue
+            # It IS an entry and still has to be named. Its own title is the
+            # only handle it has; a finding naming nothing cannot be acted on.
+            flat = ' '.join(m.group(1).split())
+            eid = (flat if len(flat) <= DECISION_TITLE_MAX
+                   else flat[:DECISION_TITLE_MAX - 1] + '…')
         out.append(DecisionEntry(eid=eid, line=i + 1,
                                  header=lines[i].rstrip('\r'),
                                  fields=tuple(fields)))
     return out
 
 
-def decision_violations(path: Path) -> list[tuple[int, str, str]]:
-    """[(ordinal, entry-id, what failed)] for one log, in document order.
-
-    The ordinal is the entry's 0-based position, which is what a `path:N`
-    grandfather caps: a log is append-only, so "the first N" is stable.
-    """
-    return decision_violations_in(decision_entries(path))
-
-
 def decision_violations_in(entries: list[DecisionEntry]) -> list[tuple[int, str, str]]:
-    """The schema predicates over already-parsed entries. ONE implementation:
-    `pm decide` validates its candidate through this, so the writer cannot
-    disagree with the gate about what conforms."""
+    """[(ordinal, entry-id, what failed)], in document order, over already-parsed
+    entries. The ordinal is the entry's 0-based position, which is what a
+    `path:N` grandfather caps: a log is append-only, so "the first N" is stable.
+
+    ONE implementation: `pm decide` validates its candidate through this, so the
+    writer cannot disagree with the gate about what conforms."""
     out: list[tuple[int, str, str]] = []
     for n, entry in enumerate(entries):
         def bad(msg: str, _n: int = n, _e: str = entry.eid) -> None:
