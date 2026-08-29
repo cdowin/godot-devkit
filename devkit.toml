@@ -1,0 +1,53 @@
+# godot-devkit's config for godot-devkit. The toolkit runs its own gates on its
+# own tree: a gate nobody points at its author is a gate nobody has tested at
+# the one place its defects are cheapest to find.
+#
+# Everything here is a SCOPE or an APPLICABILITY statement. Nothing weakens a
+# rule, and nothing is a fork — rule 5 is that per-project variation lives in
+# this file, and this file is the proof it can.
+
+[checks]
+# The roster `check all` runs HERE. Five of the eight gates read .tscn/.tres or
+# shell scripts, and this package holds neither outside its FIXTURES — so on the
+# default roster five gates report a 0-file census and rule 4 correctly reddens
+# every one. That is the roster being wrong for the repo, not a reason to soften
+# a gate: `check uid|tres|props|shell` still run here on demand and still say
+# exactly what they scanned. The repo-family three are the ones that apply.
+all = ["doc", "pm", "agents"]
+
+# The deliberately-drifted Godot corpus under tests/fixtures/ is the INPUT to
+# this package's tests, not content this repo maintains: a stale uid and a
+# path-only ext_resource are there on purpose, and the tests point each gate at
+# a temp copy of them to prove it fires. Excluded here so a gate run at the repo
+# root reports this repo, while the tests keep proving the gate works.
+[uid]
+exclude_prefixes = ["addons/", "tests/fixtures/"]
+
+[tres]
+exclude_prefixes = ["addons/", "tests/fixtures/"]
+
+[props]
+exclude_prefixes = ["addons/", "tests/fixtures/"]
+
+[pm]
+# Everything opt-in except D8. The rules this package ships OFF by default are
+# off because a consumer's legacy tree would go red on upgrade day — this tree
+# has no legacy, so it takes all of them and stays inside them from entry one.
+#
+# D8 (project version == the building milestone's id) is the one rule that does
+# not apply, and it says so itself: it encodes bump-at-START, and this package
+# bumps at CLOSE, in the release commit, per the release skill. Enabling it here
+# would mean publishing 0.14.0 in pyproject.toml before 0.14.0 exists. A rule
+# that fits a different valid flow is not a rule to switch on and pad around.
+#
+# D9/D10 DO apply: work lands on main and `branch: main` says so. main is a
+# trunk branch, so D10 recognises "no integration branch" and skips.
+checks = [
+    "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+    "D9", "D10",
+    "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18",
+    "V1", "V2", "V3", "V4", "V5", "V6",
+]
+# No grandfather ledger of any kind, in either direction. The tree was scaffolded
+# after the schemas existed, so every entry conforms and every document is inside
+# its cap. An empty debt ledger is the state the ratchets are aiming at.

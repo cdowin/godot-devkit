@@ -300,7 +300,11 @@ def run() -> int:
               f'accounted for {report.accounted}')
         return 2
     if report.files == 0:
-        print('[check:props] FAIL — scanned 0 files; check [props] exclude_prefixes')
+        # "0 of 0" is a repo with no Godot resources in it; "0 of 13" is an
+        # exclude that ate the whole census. The fix differs, so say which.
+        print(f'[check:props] FAIL — scanned 0 of '
+              f'{len(git_lines("ls-files", "*.tscn", "*.tres"))} tracked '
+              f'.tscn/.tres; check [props] exclude_prefixes')
         return 1
     if report.dead:
         print(f'[check:props] FAIL — {len(report.dead)} assignment(s) point at a property '

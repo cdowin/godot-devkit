@@ -52,6 +52,29 @@ class Reports(unittest.TestCase):
         self.assertIn('has NO .uid file', out)
         self.assertNotIn('re-run with --fix', out)
 
+    def test_the_configured_exclude_scopes_check_2_as_well_as_check_1(self) -> None:
+        """One documented key, one scope. `exclude_prefixes` read only in CHECK
+        1 meant an excluded tree still had every sidecar-less `.gd` in it
+        reported — the key a consumer set to scope this gate did not."""
+        with temp_repo('uid_repo', only=GHOST) as root:
+            (root / 'devkit.toml').write_text(
+                '[uid]\nexclude_prefixes = ["addons/", "systems/ghost"]\n',
+                encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertNotIn('systems/ghost.gd has no tracked', out)
+        # The .tscn referencing it is still in scope, so CHECK 1 still reports.
+        self.assertEqual(code, 1, out)
+        self.assertIn('ghost_ref.tscn', out)
+
+    def test_an_exclude_that_eats_the_census_says_how_many_it_ate(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'devkit.toml').write_text(
+                '[uid]\nexclude_prefixes = ["scenes/", "systems/"]\n',
+                encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn('scanned 0 of 1 tracked', out)
+
 
 class Repairs(unittest.TestCase):
     def test_rewrites_every_stale_ref_and_exits_clean(self) -> None:
@@ -154,6 +177,45 @@ class CliRouting(unittest.TestCase):
         with temp_repo('uid_repo', only=CLEAN):
             code, _ = self.run_cli('check', 'all', '--fix')
         self.assertEqual(code, 2)
+
+
+class AggregateRoster(unittest.TestCase):
+    """`[checks] all` — which gates apply to THIS repo. Five of the eight read
+    `.tscn`/`.tres`/shell, so a repo holding none of them gets five 0-file
+    censuses and rule 4 correctly reddens every one; that is the roster being
+    wrong for the repo, not a reason to weaken a gate."""
+
+    run_cli = CliRouting.run_cli
+
+    def test_default_roster_is_the_offline_set(self) -> None:
+        from godot_devkit import cli
+        with temp_repo('uid_repo', only=CLEAN):
+            self.assertEqual(cli.all_roster(), cli.OFFLINE_CHECKS)
+
+    def test_a_declared_roster_runs_exactly_what_it_names(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'devkit.toml').write_text(
+                '[checks]\nall = ["uid"]\n', encoding='utf-8')
+            code, out = self.run_cli('check', 'all')
+        self.assertEqual(code, 0, out)
+        self.assertIn('[check:uid]', out)
+        self.assertNotIn('[check:tres]', out)
+
+    def test_an_unknown_gate_name_is_exit_2_not_a_narrowed_run(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'devkit.toml').write_text(
+                '[checks]\nall = ["uid", "tres!"]\n', encoding='utf-8')
+            code, out = self.run_cli('check', 'all')
+        self.assertEqual(code, 2, out)
+        self.assertIn('unknown gate(s) tres!', out)
+
+    def test_a_bare_string_is_refused_rather_than_iterated(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'devkit.toml').write_text(
+                '[checks]\nall = "uid"\n', encoding='utf-8')
+            code, out = self.run_cli('check', 'all')
+        self.assertEqual(code, 2, out)
+        self.assertIn('must be a list of strings', out)
 
 
 def _snapshot(root: Path) -> dict[str, str]:

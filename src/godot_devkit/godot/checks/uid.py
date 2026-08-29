@@ -10,7 +10,8 @@ on fresh checkouts and CI. This makes that drift a failing gate instead.
 
 CHECK 1 (HARD): every Script ext_resource uid in every tracked .tres/.tscn
                 (addons/ exempt) matches the referenced .gd's sidecar .uid.
-CHECK 2 (HARD): every git-tracked .gd (addons/ exempt) has a tracked .gd.uid.
+CHECK 2 (HARD): every git-tracked .gd has a tracked .gd.uid. Both checks read
+                the SAME `[uid] exclude_prefixes` — one key, one scope.
 
 `--fix` APPLIES check 1's repair. The gate already knows the should-be value —
 it prints it in every DRIFT line — so making a human copy that string back into
@@ -147,8 +148,13 @@ def run(fix: bool = False) -> int:
     for drift in drifts:
         print(drift.report(id(drift) in was_repaired))
 
-    print('[check:uid] CHECK 2 — every tracked .gd has a tracked .gd.uid (addons/ exempt)')
-    untracked = _untracked_sidecars(set(git_lines('ls-files')), DEFAULT_EXCLUDE)
+    print(f'[check:uid] CHECK 2 — every tracked .gd has a tracked .gd.uid '
+          f'({", ".join(exclude)} exempt)')
+    # The CONFIGURED exclude, not DEFAULT_EXCLUDE. `[uid] exclude_prefixes` is
+    # one documented key and it scoped only half the gate: a tree excluded from
+    # CHECK 1 still had every .gd in it reported by CHECK 2, so the key a
+    # consumer set to scope this gate did not scope this gate.
+    untracked = _untracked_sidecars(set(git_lines('ls-files')), exclude)
     for gd in untracked:
         print(f'  UNTRACKED  {gd} has no tracked {gd}{UID_SUFFIX}')
     hard += len(untracked)
@@ -168,7 +174,12 @@ def run(fix: bool = False) -> int:
         # Rule 4 — a gate that scanned nothing must say so. A misconfigured
         # exclude or a wrong root is indistinguishable from a clean tree,
         # and that PASS is the most dangerous output this package emits.
-        print('[check:uid] FAIL — scanned 0 files; check [uid] exclude_prefixes')
+        # Say which of the two it was: "0 of 0" is a repo with no Godot
+        # resources in it, "0 of 13" is an exclude that ate the whole census,
+        # and the fix is different for each.
+        print(f'[check:uid] FAIL — scanned 0 of '
+              f'{len(git_lines("ls-files", "*.tres", "*.tscn"))} tracked '
+              f'.tres/.tscn; check [uid] exclude_prefixes')
         return 1
     print(f'[check:uid] PASS — {refs} Script ref(s) across {files} file(s), no .uid drift; '
           f'all tracked .gd have tracked .uid')

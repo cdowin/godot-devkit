@@ -56,7 +56,11 @@ Static gates (exit 1 on findings; run from anywhere inside the repo):
                                     # `defaults` and `repo-hygiene` stay explicit:
                                     # the first is red until a tree is canonicalized
                                     # once, the second is close-time and hits the
-                                    # network.
+                                    # network. `[checks] all` in devkit.toml names
+                                    # the roster for THIS repo — a repo with no
+                                    # Godot tree runs the repo-family gates instead
+                                    # of failing five Godot ones over a 0-file
+                                    # census.
 
 Per-project config: devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
@@ -66,7 +70,7 @@ from __future__ import annotations
 import sys
 
 from godot_devkit import __version__
-from godot_devkit.core.config import ConfigError
+from godot_devkit.core.config import ConfigError, config_section, str_tuple
 
 OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 FIX_FLAG = '--fix'
@@ -77,6 +81,32 @@ FIX_FLAG = '--fix'
 # (it is close-time and hits the network). `pm` is excluded because a repo with
 # no PM tree has no drift to find and must not be failed for its absence.
 EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents')
+KNOWN_CHECKS = (*OFFLINE_CHECKS, *EXPLICIT_CHECKS)
+
+
+def all_roster() -> tuple[str, ...]:
+    """Which gates `check all` runs HERE — `[checks] all`, default OFFLINE_CHECKS.
+
+    Applicability is per-repo and the aggregate is where it shows. Five of the
+    eight gates read `.tscn`/`.tres`/shell, so a repo holding none of those
+    (this package itself; a PM-tree-only consumer) gets five 0-file censuses,
+    and rule 4 correctly turns every one of them red. That is not drift and it
+    is not a reason to weaken a gate — it is the roster being wrong for the
+    repo, which is exactly the kind of variation rule 5 puts in devkit.toml.
+
+    An unknown name is REFUSED rather than skipped: a typo would otherwise
+    narrow the aggregate in silence, which is the cardinal sin with a config
+    file in front of it.
+    """
+    roster = str_tuple(config_section('checks'), 'checks', 'all', OFFLINE_CHECKS)
+    unknown = [c for c in roster if c not in KNOWN_CHECKS]
+    if unknown:
+        raise ConfigError(
+            f'[checks] all names unknown gate(s) {", ".join(unknown)} — '
+            f'known gates are {" ".join(KNOWN_CHECKS)}')
+    # `all` naming itself would recurse forever; it is the one name that cannot
+    # appear, and KNOWN_CHECKS already excludes it.
+    return tuple(dict.fromkeys(roster))
 
 
 def _usage() -> int:
@@ -131,7 +161,7 @@ def _dispatch_check(name: str, fix: bool = False) -> int:
         return agents.run()
     if name == 'all':
         worst = 0
-        for check in OFFLINE_CHECKS:
+        for check in all_roster():
             worst = max(worst, _dispatch_check(check))
             print()
         return worst

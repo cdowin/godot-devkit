@@ -295,6 +295,7 @@ Anything unresolvable is reported and left alone.
 | `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
 | `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V5) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires a `done` grain's transient `review.md`, D12 holds every `decisions.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`), D13 holds every grain dir to the canonical slots (missing is drift **and** extra is drift, headers included), D14 reports an open bug parked under a `done` milestone, D15 holds every `changelog.md` entry to the two-field release-note schema (`What`/`Evidence`), D16 fails a `done` milestone whose changelog is empty, D17 caps the PROSE of every grain document as a ratchet (a story, a `feature.md`, a bug, a feature's `decisions.md`, a milestone's `changelog.md`), and D18 fails a `done` milestone still carrying its raw decision trail — all opt-in via `[pm] checks`, with D12's, D15's and D17's legacy text migrating through the `decision_grandfather` / `changelog_grandfather` / `prose_grandfather` ledgers the gate prints the size of. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
+| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the eight gates read `.tscn`/`.tres` or shell scripts, so a repo holding none of them gets five 0-file censuses and rule 4 correctly reddens each one. That is the roster being wrong for the repo, not a reason to soften a gate — name the gates that apply and run the rest on demand. An unknown gate name is exit 2, never a quietly narrowed run. |
 
 ### Project management (`godot-devkit pm <command>`)
 
@@ -350,6 +351,12 @@ Optional, at the consuming repo root. Every tool works with stock defaults; a
 section overrides only what it names:
 
 ```toml
+[checks]
+# Which gates `check all` runs HERE. Default: uid, tres, props, doc, shell.
+# A repo with no Godot tree (a PM-tree-only consumer, this package itself) names
+# the ones that apply rather than absorbing five 0-file censuses.
+all = ["doc", "pm", "agents"]
+
 [autoloads]
 suffixes = { Manager = "emits", Tracker = "relays", Registry = "inert", Store = "inert", Service = "inert" }
 expected_prefixes = ["autoloads/core/", "autoloads/sim/", "autoloads/presentation/"]
@@ -359,7 +366,7 @@ scope = ["CLAUDE.md", ".claude/rules/*.md", ".claude/agents/*.md"]
 ephemeral = ["docs/reviews/"]
 
 [uid]
-exclude_prefixes = ["addons/"]
+exclude_prefixes = ["addons/"]   # scopes BOTH uid checks, not just the ref one
 
 [tres]
 exclude_prefixes = ["addons/"]

@@ -2871,6 +2871,83 @@ class StoryWalk(unittest.TestCase):
             self.assertIn('1 story/ies', out)
 
 
+class StoryResolution(unittest.TestCase):
+    """`story_file` and `story_files` must agree about what a story IS.
+
+    They did not: the gate walk went recursive while the ID RESOLVER still
+    globbed one directory level, so a story at `stories/parked/s2.md` was
+    reported by `check pm` and then refused by `pm story wip <id>` as a story
+    that does not exist. Each answer is defensible alone; together they leave
+    the author nothing to do.
+    """
+
+    FDIR = 'pm/roadmap/0.1-demo/features/alpha'
+
+    def test_a_nested_story_is_addressable_by_id(self):
+        with tree() as root:
+            write(root / self.FDIR / 'stories/parked/s2.md',
+                  {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S2', 'status': 'todo'})
+            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s2')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(
+                model.field_of(root / self.FDIR / 'stories/parked/s2.md', 'status'),
+                'wip')
+
+    def test_the_gate_and_the_verb_now_see_the_same_story(self):
+        with tree() as root:
+            write(root / self.FDIR / 'stories/parked/s2.md',
+                  {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S2', 'status': 'todo'})
+            _, gate = run_gate(root)
+            self.assertIn('2 story/ies', gate)
+            self.assertIsNotNone(model.story_file(cfg_for(root), '0.1/alpha/s2'))
+
+    @unittest.skipUnless(CASE_SENSITIVE_TMP, 'case-insensitive filesystem')
+    def test_an_uppercase_extension_resolves(self):
+        with tree() as root:
+            write(root / self.FDIR / 'stories/S3.MD',
+                  {'id': '0.1/alpha/S3', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S3', 'status': 'todo'})
+            self.assertEqual(model.story_file(cfg_for(root), '0.1/alpha/S3').name,
+                             'S3.MD')
+
+    def test_two_files_claiming_one_id_refuse_rather_than_pick(self):
+        with tree() as root:
+            for where in ('stories/dup.md', 'stories/parked/dup.md'):
+                write(root / self.FDIR / where,
+                      {'id': '0.1/alpha/dup', 'feature': '0.1/alpha',
+                       'milestone': '"0.1"', 'name': 'Dup', 'status': 'todo'})
+            with self.assertRaises(model.AmbiguousStory):
+                model.story_file(cfg_for(root), '0.1/alpha/dup')
+
+    def test_an_exact_stem_still_beats_an_ordinal_prefixed_sibling(self):
+        cfg = None
+        with tree() as root:
+            cfg = model.PmConfig(root=root, story_ordinal_prefix=True)
+            for where in ('stories/s9.md', 'stories/07-s9.md'):
+                write(root / self.FDIR / where,
+                      {'id': '0.1/alpha/s9', 'feature': '0.1/alpha',
+                       'milestone': '"0.1"', 'name': 'S9', 'status': 'todo'})
+            self.assertEqual(model.story_file(cfg, '0.1/alpha/s9').name, 's9.md')
+
+    def test_an_ordinal_prefixed_story_one_directory_down_resolves(self):
+        with tree() as root:
+            cfg = model.PmConfig(root=root, story_ordinal_prefix=True)
+            write(root / self.FDIR / 'stories/parked/03-s4.md',
+                  {'id': '0.1/alpha/s4', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S4', 'status': 'todo'})
+            self.assertEqual(model.story_file(cfg, '0.1/alpha/s4').name, '03-s4.md')
+
+    def test_a_note_beside_the_stories_is_not_addressable_as_one(self):
+        # The same definition the walk uses: a grain IS its frontmatter, so a
+        # README parked in `stories/` is not a story with an empty status.
+        with tree() as root:
+            (root / self.FDIR / 'stories/README.md').write_text(
+                '# how stories are written here\n', encoding='utf-8')
+            self.assertIsNone(model.story_file(cfg_for(root), '0.1/alpha/README'))
+
+
 class Decide(unittest.TestCase):
     """`pm decide` — the writer that cannot produce what the gate rejects.
 

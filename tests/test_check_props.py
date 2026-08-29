@@ -49,7 +49,19 @@ class DeadPropertyDetection(unittest.TestCase):
         with temp_repo('props_repo', only=['project.godot']):
             code, out = run_check(props)
         self.assertEqual(code, 1)
-        self.assertIn('scanned 0 files', out)
+        self.assertIn('scanned 0 of 0 tracked', out)
+
+    def test_empty_scope_names_what_the_exclude_ate(self) -> None:
+        """A census emptied by an exclude reads differently from an empty repo:
+        "0 of 0" is a tree with no Godot resources, "0 of 2" is a misconfigured
+        `exclude_prefixes`, and the fix is different for each."""
+        from godot_devkit.godot.checks import props
+        with temp_repo('props_repo', only=DRIFTED) as root:
+            (root / 'devkit.toml').write_text(
+                '[props]\nexclude_prefixes = ["scenes/"]\n', encoding='utf-8')
+            code, out = run_check(props)
+        self.assertEqual(code, 1)
+        self.assertIn('scanned 0 of 2 tracked', out)
 
 
 class NoFalsePositivesOnRealRepos(unittest.TestCase):

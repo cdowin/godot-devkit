@@ -92,6 +92,14 @@ A, B, C. When nothing needs him, say "nothing needs you" explicitly.
   version number serves stale code and a fixed bug still reproduces. Run `PYTHONPATH=src python3 -m
   godot_devkit.cli …`, or `uv cache clean godot-devkit` first.
 
+## Self-hosting
+
+This package runs its own tooling on its own tree, and that is a gate, not a demo.
+
+- `pm/roadmap/` is a real PM tree scaffolded by `pm new`, and `devkit.toml` turns on **every** rule this package ships except D8 (which encodes bump-at-START; we bump at close). Both `godot-devkit check all` and `godot-devkit check pm` must exit 0 here.
+- **`CHANGELOG.md` above the frozen boundary is GENERATED** by `pm changelog --render`. Write a release note with `pm changelog <milestone-id> --what … --evidence …` as the work lands; never type into the file. Rationale with a rejected alternative is a decision — `pm decide` — not a release note.
+- If a rule fails when pointed at this repo, the finding gets fixed. Turning the rule off is only right when the rule encodes a flow this package does not run, and that goes in `decisions.md` with what was rejected.
+
 ## Releases
 
 Use the `/release` skill — it owns the bump/tag/push sequence and the consumer-pin reminder. Never tag by hand; never let `__init__.py` and `pyproject.toml` versions diverge.

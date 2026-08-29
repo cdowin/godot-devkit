@@ -566,14 +566,26 @@ def feature_file(cfg: PmConfig, fid: str) -> Path | None:
     return f if f.is_file() else None
 
 
+_ORDINAL_STEM = re.compile(r'^[0-9][0-9]-(?P<slug>.*)$')
+
+
 def story_file(cfg: PmConfig, sid: str) -> Path | None:
     """Resolve <milestone>/<feature-slug>/<story-slug> to its .md.
 
+    Resolves over `story_files` — the SAME walk the gates use — so the two can
+    never disagree about what a story is. They did: this resolver globbed one
+    directory level while the walk went recursive, so a story at
+    `stories/parked/s2.md` was SEEN by every rule in `check pm` and addressable
+    by none of them. The gate reported a story `pm story wip <id>` then said did
+    not exist, which is the worst possible pair of answers: each is defensible
+    alone and together they leave nothing to do.
+
     With `story_ordinal_prefix`, a story FILE may carry an ordering prefix
     (`01-the-state.md`) that its ID does not — the number sequences the build,
-    it is not identity. Exact stem first, then the prefixed form. Two files
-    claiming one id is an authoring error, so that REFUSES rather than silently
-    taking the first.
+    it is not identity. Exact stem first, then the prefixed form, so a tree
+    holding both `s2.md` and `07-s2.md` resolves to the one whose name IS the
+    id rather than refusing. Two files claiming one id at the same precedence
+    is an authoring error and REFUSES rather than silently taking the first.
     """
     mid, _, rest = sid.partition('/')
     fslug, _, sslug = rest.partition('/')
@@ -582,16 +594,21 @@ def story_file(cfg: PmConfig, sid: str) -> Path | None:
     fdir = feature_dir(cfg, f'{mid}/{fslug}')
     if fdir is None:
         return None
-    exact = fdir / 'stories' / f'{sslug}.md'
-    if exact.is_file():
-        return exact
-    if cfg.story_ordinal_prefix:
-        matches = sorted(p for p in (fdir / 'stories').glob(f'[0-9][0-9]-{sslug}.md')
-                         if p.is_file())
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            raise AmbiguousStory(sid, [cfg.rel(p) for p in matches])
+    exact: list[Path] = []
+    prefixed: list[Path] = []
+    for path in grain_docs(fdir / 'stories'):
+        stem = path.name[:-len(path.suffix)]
+        if stem == sslug:
+            exact.append(path)
+        elif cfg.story_ordinal_prefix:
+            m = _ORDINAL_STEM.match(stem)
+            if m is not None and m.group('slug') == sslug:
+                prefixed.append(path)
+    matches = exact or prefixed
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise AmbiguousStory(sid, [cfg.rel(p) for p in matches])
     return None
 
 

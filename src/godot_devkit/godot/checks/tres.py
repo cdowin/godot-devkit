@@ -49,7 +49,11 @@ def run() -> int:
         # Rule 4 — a gate that scanned nothing must say so. A misconfigured
         # exclude or a wrong root is indistinguishable from a clean tree,
         # and that PASS is the most dangerous output this package emits.
-        print('[check:tres] FAIL — scanned 0 files; check [tres] exclude_prefixes')
+        # "0 of 0" is a repo with no Godot resources in it; "0 of 13" is an
+        # exclude that ate the whole census. The fix differs, so say which.
+        print(f'[check:tres] FAIL — scanned 0 of '
+              f'{len(git_lines("ls-files", "*.tres", "*.tscn"))} tracked '
+              f'.tres/.tscn; check [tres] exclude_prefixes')
         return 1
     print(f'[check:tres] PASS — all ext_resource refs canonical across {checked} .tres/.tscn')
     return 0
