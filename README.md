@@ -290,7 +290,7 @@ Anything unresolvable is reported and left alone.
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
-| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V5) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires findings docs whose FEATURE has closed (excluding any the tree still points at via `reviewed:`), and D12 holds every `DECISIONS.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`) — all opt-in via `[pm] checks`, with D12's legacy logs migrating through the `decision_grandfather` ledger the gate prints the size of. |
+| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V5) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires a `done` grain's transient `review.md`, D12 holds every `decisions.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`), D13 holds every grain dir to the canonical slots (missing is drift **and** extra is drift, headers included), and D14 reports an open bug parked under a `done` milestone — all opt-in via `[pm] checks`, with D12's legacy logs migrating through the `decision_grandfather` ledger the gate prints the size of. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
 
 ### Project management (`godot-devkit pm <command>`)
@@ -309,7 +309,8 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
-| `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from a template. Creation only — never overwrites. A new milestone also gets `HANDOFF.md` + `DECISIONS.md` |
+| `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from templates — every canonical slot, all lowercase (`milestone.md`/`handoff.md`/`decisions.md`/`review.md` + `features/ bugs/ design/`; a feature gets `feature.md`/`decisions.md`/`review.md` + `stories/ design/`). `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. `review.md` is never minted on a `done` grain |
+| `pm decide <grain-id> --chose … --over … --because … --evidence … [--title …]` | Append a D12-conforming entry to that milestone's or feature's `decisions.md`. The tool stamps the ISO date and the next ordinal in the log's own id prefix. `--over` is **required** — a decision with no rejected alternative is a description — and every value is validated by re-parsing the composed entry through D12's own predicates, so a non-conforming entry is refused with the log byte-identical rather than written and then reported |
 | `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex. `status` is refused — it has a transition graph behind it |
 | `pm claim <grain-id> <owner>` · `pm release <grain-id>` | Sugar over `owner:` — the field that was hand-edited everywhere `status:` was not |
 | `pm vocabulary [--json]` | The states, transitions and verbs, machine-readably. Exists so an external checker never has to scrape help text — a tool that states its own rules in a parseable form is the only way a scanner stays honest when the rules change |
@@ -383,21 +384,33 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 #   D10 that branch is checked out in the TRUNK worktree
 # A project that ships from the trunk and bumps at close is running a different
 # valid flow, so these stay off unless asked for.
-# D11 (review-dir retention) and D12 (decision-record schema) opt in the same way:
-#   D11 a findings doc in review_dir whose FEATURE is `done` is dead weight a
-#       grep still finds. Features only: `reviewed:` lives on feature.md and
-#       nowhere else, so a milestone-scoped record has no green state to reach.
-#       A doc the tree still points at via `reviewed:` is exempt, and a doc
-#       naming no feature is not a finding — git history still names it.
-#   D12 every `## <ID> — <ISO date> — <title>` entry in a DECISIONS.md carries
+# D11-D14 opt in the same way:
+#   D11 a `done` grain must not have a `review.md`. The slot is the TRANSIENT
+#       half of the pair: reviewer and simplifier append to it while the grain
+#       is open, and at close anything durable moves into decisions.md and the
+#       file goes. Co-located, so there is no filename to resolve.
+#   D13 every milestone/feature dir carries exactly its canonical slots, and
+#       each shared doc still opens with its instruction header. MISSING is
+#       drift AND EXTRA is drift — `plans/`, `findings/` and a hand-named
+#       AUDIT-REPORT.md exist because nothing ever flagged the invention.
+#       Directory slots are permitted, not required: git stores no empty dir.
+#       `pm new milestone|feature <id>` is idempotent and fills the gaps.
+#   D14 an OPEN bug under a `done` milestone. A bug lives in the milestone that
+#       will FIX it (`caught_in:` keeps provenance, `fix_milestone:` names the
+#       decision), and prune's lag-by-one deletes a closed milestone's dir — so
+#       this rule is what makes prune safe by construction. Also reports a bug
+#       status outside bug_states, which D4 does not cover.
+#   D12 every `## <ID> — <ISO date> — <title>` entry in a decisions.md carries
 #       **Chose:** / **Over:** / **Because:** / **Evidence:**, in that order, one
 #       per line, values <= 200 chars and the title <= 80. `Over:` is the
 #       load-bearing one — an entry that cannot name what it ruled out is a
 #       description, not a decision — and `Evidence:` must be a REFERENCE (a
 #       commit hash, a path[:line] or a number), never a sentence.
+bug_states      = ["open", "fixed", "closed"]   # D14: the bug vocabulary
+bug_open_states = ["open"]                      # D14: which of those are OPEN
 decision_grandfather = [                        # D12: logs that predate the schema
-    "pm/roadmap/0.9-old/DECISIONS.md",          #   the whole log is exempt
-    "pm/roadmap/0.10-mid/DECISIONS.md:12",      #   its first 12 entries are
+    "pm/roadmap/0.9-old/decisions.md",          #   the whole log is exempt
+    "pm/roadmap/0.10-mid/decisions.md:12",      #   its first 12 entries are
 ]                                               # The gate PRINTS the ledger size
 # every run, and the ledger may only SHRINK: an exemption that suppresses nothing,
 # a cap reaching past the end of its log, and a line naming no log all FAIL. The

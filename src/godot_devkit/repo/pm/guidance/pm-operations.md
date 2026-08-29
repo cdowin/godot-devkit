@@ -21,23 +21,36 @@ pm/roadmap/
   ROADMAP.md                     the permanent index — one row per shipped milestone
   <id>-<slug>/
     milestone.md                 id, name, status, + your project's own fields
-    bugs/<slug>.md
+    handoff.md                   cold-start only — never what `pm status` computes
+    decisions.md                 DURABLE, append-only; survives close
+    review.md                    TRANSIENT — deleted at close
+    bugs/<slug>.md               lives in the milestone that will FIX it
+    design/                      design notes for this milestone
     features/<slug>/
       feature.md                 id: <milestone>/<slug>
-      plans/                     execution-phase plans (free-form)
+      decisions.md               DURABLE
+      review.md                  TRANSIENT — deleted at close
+      design/
       stories/<slug>.md          id: <milestone>/<feature-slug>/<story-slug>
 ```
 
-**Scaffold, never hand-create** — `pm new milestone|feature|story|bug` renders the
-grain from a template, refuses to overwrite, and starts it at its initial status. A
-hand-made file is how a tree grows a field the resolvers do not read.
+**Scaffold, never hand-create** — `pm new milestone|feature|story|bug` renders each
+grain from a template and starts it at its initial status. A hand-made file is how a
+tree grows a field the resolvers do not read, and a hand-made sibling directory is
+how it grows a slot nothing knows about. `new milestone` and `new feature` are
+idempotent: re-run one on an existing grain and it fills the missing slots without
+touching an existing byte.
+
+**decisions.md is durable, review.md is transient.** Append a decision with
+`pm decide <grain-id> --chose … --over … --because … --evidence …` — never by hand;
+the command stamps the date and the next ordinal, and `--over` is required because a
+decision that cannot name what it ruled out is a description. At close, promote
+anything durable out of `review.md` into `decisions.md` and delete `review.md`.
 
 To change what a grain looks like here, set `[pm] template_dir`, run
 `pm templates` to copy the packaged templates out, and edit the markdown. A file
 present there wins; anything missing falls back, so overriding one grain does not
-make this project responsible for the rest. A new milestone also gets a `HANDOFF.md`
-(the cold-start doc) and a `DECISIONS.md` (append-only, one block per decision that
-would otherwise be re-litigated).
+make this project responsible for the rest.
 
 ## Status vocabularies
 

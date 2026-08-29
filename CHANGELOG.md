@@ -2,39 +2,103 @@
 
 ## Unreleased
 
-**`check pm` D11 — a findings doc dies when the feature it names closes.** A `*.md` in `review_dir`
-is legitimate while the feature it NAMES is still open, and dead weight the moment that feature is
-`done`: the durable record is then the feature's own review record, while the transient doc stays
-findable by `grep` forever. A file the tree still points at via `reviewed:` is exempt, so a project
-whose durable records live in `review_dir` satisfies the rule trivially rather than being punished
-for the layout the setting is named for.
+**One uniform grain structure, all lowercase.** Every milestone and feature dir carries the same
+slots, and the split that makes it worth having is durable vs transient:
 
-Scoped down from its first cut, on the evidence of running it against both consumer trees:
+```
+<milestone>/                       <feature>/
+  milestone.md                       feature.md
+  handoff.md                         —          (milestone-only)
+  decisions.md                       decisions.md
+  review.md                          review.md
+  bugs/                              —          (milestone-only)
+  design/                            design/
+  features/                          stories/
+```
 
-- **Features only.** `reviewed:` exists on `feature.md` and nowhere else, so a milestone-scoped
-  record has no green state to reach and the finding ordered a repair the schema cannot accept.
-- **A doc naming no feature is not a finding.** That class was 116 of 117 findings on one consumer,
-  and its claim — nothing can reach the file — is false: the archived `feature.md` in git history
-  still names it. A 117-line wall on day one is what trains people to ignore a gate.
-- **The exemption compares resolved paths**, built from the raw `reviewed:` pointer. It used to
-  compare display strings against `review_record_for()`, which flagged the tree's own durable record
-  whenever the pointer was written `./`-prefixed, absolute or with Windows separators — and, because
-  that function applies the substantive-content floor, made a short-but-legitimate record get D1
-  saying "stamp a record" and D11 saying "delete this record". Whether a record says enough is D1's
-  business. With `review_slug_fallback`, every candidate the glob would accept is exempt, not just
-  the first sorted one.
-- **Rule 4.** The census carries the review-doc count; a `review_dir` that is absent (a typo used to
-  exit 0 with a serene PASS over the real directory) or configured empty (it would sweep the repo
-  root) now FAILS; an existing-but-empty one is named in the output rather than passing in silence.
+`decisions.md` is **durable** — appended during the grain's life, it survives close and collapses to
+pointers when a milestone closes. `review.md` is **transient** — simplifier and reviewer both append,
+and it is **deleted at close** with anything durable promoted into `decisions.md` first.
 
-**KNOWN LIMITATION.** Filename→feature resolution is a bare substring match, so a slug embedded in a
-longer word resolves: a closed feature `den` claims `hidden-room-audit.md`. Do not enable D11 against
-a tree nobody has eyeballed. `tests/test_pm.py::Retention::test_KNOWN_DEFECT_a_slug_inside_a_word_still_resolves`
-pins it; the fix is anchoring the match, or moving review docs inside the feature folder so there is
-no guess to anchor.
+**`pm new milestone` and `pm new feature` are now idempotent**, which is how a consumer migrates. Run
+against an existing grain they fill the missing slots, rename a slot present under another case, and
+leave every existing byte alone; `<name>` is optional there, since the name only ever mints the
+directory. The case rename goes through a temp name on purpose: macOS is case-INSENSITIVE, so
+`open('decisions.md', 'w')` next to an existing `DECISIONS.md` truncates the very content the
+migration exists to carry forward. Measured on scratch copies of both consumers, with a second full
+pass changing nothing:
+
+| | grain dirs | slots created | renamed | headers restored |
+|---|---|---|---|---|
+| nullbound | 158 | 469 | 60 | 60 |
+| trail | 32 | 132 | 4 | 4 |
+
+**Each shared doc opens with a one-line instruction**, and D13 asserts it is still there. `.claude/
+rules/*` never reach a dispatched subagent — measured — so a file's own first line is the one
+delivery channel with a 100% hit rate for the action its reader is about to take. Each line is an
+instruction for that action, not an explanation of what the file is:
+
+- `decisions.md` — *Append with `godot-devkit pm decide <grain-id>` — never by hand; the command
+  stamps the date and the next ordinal.* It points at the command rather than restating D12's four
+  fields: the gate already owns that schema, and a second copy in 178 files is a drift generator.
+- `review.md` — *Transient. Deleted at close — promote anything durable into decisions.md first.*
+- `handoff.md` — *Cold-start only. Never restate what `pm status` computes.*
+- `milestone.md` / `feature.md` get none. V1–V6 already validate their frontmatter.
+
+**New — `pm decide <grain-id> --chose … --over … --because … --evidence … [--title …]`.** Appends a
+D12-conforming entry to that milestone's or feature's `decisions.md`, stamping the two things authors
+get wrong: the ISO date, and the next ordinal (in the log's OWN id prefix, so a tree numbering `M27`
+keeps numbering `M`). `--over` is **required** — a decision with no rejected alternative is a
+description, and a required flag enforces that at write time, where the author still remembers the
+alternative, instead of at gate time weeks later. Every value is validated by re-parsing the composed
+entry through D12's own predicates, so the writer refuses exactly what the gate would report and the
+two cannot drift; prose evidence, an over-long value and a `--chose` too long to serve as the header
+title are all refused with the log left byte-identical.
+
+**`check pm` D11 is rewritten around the co-located `review.md`: a `done` grain must not have one.**
+No `review_dir`, no filename matching, no exemption, no ambiguity. What it replaces resolved a
+findings-doc FILENAME back to the grain it "named", and a real corpus got that exactly backwards — on
+trail it resolved 6 of 123 docs, and those 6 were precisely the durable ones `reviewed:` already
+points at, so after the previous release's fixes trail reported **0 findings over 123 stale docs**.
+Anchoring the match could only ever remove matches. `grain_named_by()` and the `KNOWN_DEFECT` test
+that pinned its substring bug are gone. The rule-4 loudness stays: a tree with no `done` grain is
+NAMED in the output rather than passing in silence, and the census carries the done-grain count.
+
+**`check pm` D13 — the canonical structure.** Every grain dir carries exactly its slots: **missing is
+drift AND extra is drift**, and each templated file must still open with its instruction header so
+the breadcrumb cannot rot. The extra half is the one that earns the rule — `plans/`, `findings/`,
+`AUDIT-REPORT.md`, `audit-prompt.md` and `DELETED-SCENARIO-LEDGER.md` all exist in a real tree
+because no slot was scaffolded *and* nothing flagged the invention, and a missing-only check leaves
+every one of them there forever. Existence is decided from a directory LISTING, never `Path.is_file`:
+macOS resolves `decisions.md` to an existing `DECISIONS.md` and Linux does not, so the same tree
+would be clean on a laptop and drifting in CI. Directory slots are permitted, never required — git
+does not store an empty directory, so requiring `design/` would mean 178 placeholder files.
+`review.md` is required exactly while the grain is open and forbidden once it is done, D11 owning
+that half, so a closed grain is never told both to have it and to delete it.
+
+**`check pm` D14 — bug lifetime.** A bug lives in the milestone that will FIX it: `caught_in:` keeps
+the provenance, `fix_milestone:` names the decision, and the directory is that decision made real. An
+**open bug under a `done` milestone** is therefore drift, and not cosmetically: `prune`'s lag-by-one
+deletes a done milestone's directory the moment the next one closes, so those bugs are already
+scheduled for deletion. This rule is what makes prune safe by construction. It also reports a bug
+status outside `[pm] bug_states` — D4 does not cover bugs, so a typo would otherwise read as "closed"
+and pass in silence. Two new config keys, `bug_states` (default `open`/`fixed`/`closed`) and
+`bug_open_states` (default `open`); naming an open state the vocabulary lacks is a config error.
+
+D11, D13 and D14 are OFF by default like D8–D12 — a tree predating the canonical slots is missing
+most of them, and a rule that turns a consumer red on upgrade day is unshippable. Scaffold first,
+then hold the line. Measured on scratch copies:
+
+| after scaffolding | D13 missing | D13 extra | D13 header | D11 stale | D14 open-bug-under-done |
+|---|---|---|---|---|---|
+| nullbound | 0 | 12 | 0 | 0 | 28 of 91 bugs |
+| trail | 0 | 10 | 0 | 0 | 8 of 13 bugs |
+
+The residual extras are the genuine inventions a human has to place: `plans/` (8 + 10),
+`AUDIT-REPORT.md`, `audit-prompt.md`, `findings/` and `DELETED-SCENARIO-LEDGER.md`.
 
 **`check pm` D12 — the decision-record schema.** Every `## <ID> — <ISO date> — <title>` entry in a
-`DECISIONS.md` carries `**Chose:**` / `**Over:**` / `**Because:**` / `**Evidence:**`, in that order,
+`decisions.md` carries `**Chose:**` / `**Over:**` / `**Because:**` / `**Evidence:**`, in that order,
 one per line, values <= 200 chars and the title <= 80. `Over:` is the load-bearing field — an entry
 that cannot name what it ruled out is a description, not a decision — and `Evidence:` must be a
 REFERENCE (a commit hash, a `path[:line]`, a number), never a sentence. Entry DETECTION is
@@ -45,7 +109,10 @@ silence. Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` 
 shrink: an exemption that suppresses nothing, a cap reaching past the end of its log, and a line
 naming no log all FAIL.
 
-Both are OFF by default, like D8-D10. Opt in via `[pm] checks`.
+**Breaking for a tree that has one:** the decision log is `decisions.md`, not `DECISIONS.md`, and the
+handoff is `handoff.md`. `pm new milestone <id>` / `pm new feature <mid> <slug>` performs the rename.
+`pm new feature` scaffolds `design/`, not `plans/`. The bug template carries `fix_milestone:` in
+place of `fixed_in:`.
 
 ## v0.12.0 — 2026-08-28 — `tiles`, and a `check uid` that repairs what it reports
 
