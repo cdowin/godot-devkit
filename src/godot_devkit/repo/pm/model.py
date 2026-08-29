@@ -66,10 +66,16 @@ DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review',
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7',
                   'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 FLOW_CHECKS = ('D8', 'D9', 'D10')
+# D11 is review-dir RETENTION. Opt-in for the same reason D8-D10 are: a project
+# whose durable review records live IN review_dir satisfies it trivially, while
+# a project that keeps transient findings docs there on purpose is not drifting
+# by its own lights. Opt in with `[pm] checks`.
+RETENTION_CHECKS = ('D11',)
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
-KNOWN_CHECKS = tuple(dict.fromkeys(DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS))
+KNOWN_CHECKS = tuple(dict.fromkeys(
+    DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -624,3 +630,36 @@ def read_feature(ffile: Path) -> FeatureView:
     )
     view.done_n = sum(1 for s in view.stories if field_of(s, 'status') == 'done')
     return view
+
+# --- retention helper (D11) ---------------------------------------------------
+def review_dir_files(cfg: PmConfig) -> list[Path]:
+    """Every `*.md` directly under review_dir, minus README and the archive."""
+    rdir = cfg.root / cfg.review_dir
+    if not rdir.is_dir():
+        return []
+    return sorted(f for f in rdir.glob('*.md') if f.name.lower() != 'readme.md')
+
+
+def grain_named_by(cfg: PmConfig, path: Path) -> tuple[str, str] | None:
+    """(grain-id, status) for the feature or milestone a review file NAMES.
+
+    Filename-slug resolution, because a transient findings doc is by definition
+    not pointed at by any `reviewed:` field — that is what makes it transient.
+    Longest slug wins so `health-as-composition` beats a stem that merely
+    contains a shorter sibling's slug.
+    """
+    stem = path.stem
+    best: tuple[int, str, str] | None = None
+    for mdir in milestone_dirs(cfg):
+        mfile = mdir / 'milestone.md'
+        mid = field_of(mfile, 'id')
+        for fdir in sorted((mdir / 'features').glob('*')):
+            ffile = fdir / 'feature.md'
+            if not ffile.is_file() or fdir.name not in stem:
+                continue
+            cand = (len(fdir.name), field_of(ffile, 'id'), field_of(ffile, 'status'))
+            if best is None or cand[0] > best[0]:
+                best = cand
+        if mid and mid in stem and (best is None or len(mid) > best[0]):
+            best = (len(mid), mid, field_of(mfile, 'status'))
+    return (best[1], best[2]) if best else None

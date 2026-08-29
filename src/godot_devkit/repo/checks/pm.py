@@ -40,6 +40,13 @@ DRIFT RULES (each FAILs, naming the offending path):
       the roadmap root (lag-by-one keeps exactly the most recently closed),
       means a prune is due.
 
+  D11 review-dir RETENTION — a findings doc outlives its purpose. A `*.md` in
+      the review dir is legitimate while the grain it NAMES is still open; once
+      that feature or milestone is `done` the durable record is the grain's own
+      review record and the transient doc is dead weight a `grep` still finds.
+      A file naming NO grain is reported separately: it is unreachable by
+      definition. OFF by default (see RETENTION_CHECKS).
+
 Which rules run is `[pm] checks` in devkit.toml (default: all seven).
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
@@ -90,6 +97,7 @@ def run() -> int:
     n_features = 0
     n_stories = 0
     done_milestone_dirs = 0
+    all_feature_ids: list[str] = []
 
     for mdir in mdirs:
         mfile = mdir / 'milestone.md'
@@ -109,6 +117,7 @@ def run() -> int:
             frel = cfg.rel(ffile)
             feat_total += 1
             n_features += 1
+            all_feature_ids.append(view.fid)
             n_stories += view.total
             if view.status == 'done':
                 feat_done_n += 1
@@ -203,6 +212,24 @@ def run() -> int:
         if done_milestone_dirs > 1:
             report(f'{done_milestone_dirs} done milestone dirs at the roadmap '
                    f'root — lag-by-one allows 1; a prune is due')
+
+    if 'D11' in enabled:
+        # A file the tree still POINTS at is durable by definition, so resolve
+        # the pointers once and exempt them: a project whose review records
+        # live in review_dir must satisfy this trivially, or the rule would be
+        # punishing the layout the setting is named for.
+        pointed = {model.review_record_for(cfg, fid) for fid in all_feature_ids}
+        pointed.discard(None)
+        for rfile in model.review_dir_files(cfg):
+            if cfg.rel(rfile) in pointed:
+                continue
+            named = model.grain_named_by(cfg, rfile)
+            if named is None:
+                report(f'{cfg.rel(rfile)} names no grain in the tree — nothing '
+                       f'can reach it, and a grep still can (D11)')
+            elif named[1] == 'done':
+                report(f'{cfg.rel(rfile)} is transient and {named[0]} is done '
+                       f'— its durable record is the grain\'s own (D11)')
 
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '

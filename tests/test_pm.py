@@ -289,6 +289,41 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('a prune is due', out)
 
+    def test_d11_a_review_doc_outliving_its_done_feature_is_drift(self):
+        # The point: the same file is legitimate WHILE the feature is open and
+        # dead weight the moment it closes. A gate that merely flagged
+        # "unreferenced" would be wrong in the first half of that.
+        with tree(feature_status='building', story_statuses=('review',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D11"]\n', encoding='utf-8')
+            transient = root / 'docs' / 'reviews' / '2026-01-01-alpha.md'
+            transient.write_text('findings\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+            ffile = root / 'pm' / 'roadmap' / '0.1-demo' / 'features' / 'alpha' / 'feature.md'
+            ffile.write_text(
+                ffile.read_text(encoding='utf-8').replace(
+                    'status: building', 'status: done'), encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('is transient and', out)
+            # The pointed-at record is durable by definition and never flagged,
+            # or the rule would punish the layout `review_dir` is named for.
+            self.assertNotIn('reviews/alpha.md is transient', out)
+
+    def test_d11_a_review_doc_naming_nothing_is_unreachable(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D11"]\n', encoding='utf-8')
+            rdir = root / 'docs' / 'reviews'
+            (rdir / 'README.md').write_text('index\n', encoding='utf-8')
+            (rdir / '2026-01-01-nothing-here.md').write_text('x\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('names no grain', out)
+            self.assertNotIn('README', out)
+
     def test_a_disabled_rule_does_not_fire(self):
         # `[pm] checks` is the knob. This fixture trips D2 AND D5, so turning
         # D2 off must silence D2's message specifically while D5 still fires —
