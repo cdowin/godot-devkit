@@ -48,7 +48,7 @@ to solve quietly. Tool modules own their behavior and expose `main(argv)` or `ru
   mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`) —
   Godot addresses them that way; format-4 `unique_id` is not the addressing key.
   Read output must be valid write input.
-- **Every config value goes through `core/config.py`.** Never `tuple(cfg.get(...))` —
+- **Every config value goes through `src/godot_devkit/core/config.py`.** Never `tuple(cfg.get(...))` —
   a bare string is iterable, and that is how seven gates shipped a silent PASS over an
   empty census in v0.9.0.
 
