@@ -101,3 +101,27 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C23 — 2026-08-29 — a release heading names its tag and its date
 **What:** A rendered release heading is now `## v<id> — <actual_date>`, matching the git tag it maps to; a milestone that has not shipped renders `## v<id>` with no invented date.
 **Evidence:** src/godot_devkit/repo/pm/cli.py:1218
+
+## C24 — 2026-08-29 — a broken grain is reported, not dropped
+**What:** A story or bug whose frontmatter is damaged — a BOM, a blank line above the fence, no closing fence — stays in the census and is reported, instead of leaving the scan in silence.
+**Evidence:** src/godot_devkit/repo/pm/model.py:706
+
+## C25 — 2026-08-29 — the census says how far it looked
+**What:** check pm now names how many .md files the grain walk skipped as notes, so a zero bug count is never mistaken for an empty directory.
+**Evidence:** src/godot_devkit/repo/checks/pm.py:540
+
+## C26 — 2026-08-29 — a milestone stamps its release date at close
+**What:** pm milestone done writes actual_date, which is what puts the date in the changelog render's '## v<id> — <date>' heading; the render still never reads a clock.
+**Evidence:** src/godot_devkit/repo/pm/cli.py:425
+
+## C27 — 2026-08-29 — pm prose-ledger names what it absorbs
+**What:** Regenerating the prose debt ledger prints every newly absorbed document on stderr with a count, so new debt can no longer enter the ratchet unannounced.
+**Evidence:** src/godot_devkit/repo/pm/cli.py:1394
+
+## C28 — 2026-08-29 — a version-shaped changelog heading is not an entry id
+**What:** A preamble heading like '## v0.9 release notes' no longer reads as entry 'v0', so the next appended note is allocated C1 rather than v1.
+**Evidence:** src/godot_devkit/repo/pm/model.py:1138
+
+## C29 — 2026-08-29 — one fact, one finding, in the right vocabulary
+**What:** An over-cap finding names the grain kind it is about, and a ledgered document back inside its cap is reported once — drop the entry — rather than twice.
+**Evidence:** src/godot_devkit/repo/pm/model.py:1900

@@ -25,6 +25,12 @@
 - **an empty census says what it was out of** — A `uid`/`tres`/`props` run that scans nothing now reports "0 of N tracked", so an empty repo and an over-broad exclude stop reading identically. (src/godot_devkit/godot/checks/tres.py:54)
 - **the toolkit runs its own gates on itself** — godot-devkit carries its own PM tree at `pm/roadmap/`, with every rule it ships enabled, and its own CHANGELOG rendered from it. (devkit.toml:1)
 - **a release heading names its tag and its date** — A rendered release heading is now `## v<id> — <actual_date>`, matching the git tag it maps to; a milestone that has not shipped renders `## v<id>` with no invented date. (src/godot_devkit/repo/pm/cli.py:1218)
+- **a broken grain is reported, not dropped** — A story or bug whose frontmatter is damaged — a BOM, a blank line above the fence, no closing fence — stays in the census and is reported, instead of leaving the scan in silence. (src/godot_devkit/repo/pm/model.py:706)
+- **the census says how far it looked** — check pm now names how many .md files the grain walk skipped as notes, so a zero bug count is never mistaken for an empty directory. (src/godot_devkit/repo/checks/pm.py:540)
+- **a milestone stamps its release date at close** — pm milestone done writes actual_date, which is what puts the date in the changelog render's '## v<id> — <date>' heading; the render still never reads a clock. (src/godot_devkit/repo/pm/cli.py:425)
+- **pm prose-ledger names what it absorbs** — Regenerating the prose debt ledger prints every newly absorbed document on stderr with a count, so new debt can no longer enter the ratchet unannounced. (src/godot_devkit/repo/pm/cli.py:1394)
+- **a version-shaped changelog heading is not an entry id** — A preamble heading like '## v0.9 release notes' no longer reads as entry 'v0', so the next appended note is allocated C1 rather than v1. (src/godot_devkit/repo/pm/model.py:1138)
+- **one fact, one finding, in the right vocabulary** — An over-cap finding names the grain kind it is about, and a ledgered document back inside its cap is reported once — drop the entry — rather than twice. (src/godot_devkit/repo/pm/model.py:1900)
 
 ---
 

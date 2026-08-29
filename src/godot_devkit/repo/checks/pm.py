@@ -80,8 +80,12 @@ DRIFT RULES (each FAILs, naming the offending path):
       milestone's changelog.md each have a line cap, and two finding classes:
       OVERCAP (over cap, not on the ledger) and GREW (on the ledger, larger
       than its recorded ceiling). `[pm] prose_grandfather` is a DEBT ledger —
-      its length is the metric, it may only shrink, and `pm prose-ledger`
-      REFUSES to raise a ceiling. Without that refusal the gate is decorative.
+      its length is the metric, and `pm prose-ledger` REFUSES TO RAISE AN
+      EXISTING CEILING. Without that refusal the gate is decorative. Newly
+      over-cap documents ARE absorbed on a regeneration (a ledger that could
+      gain no line could not be regenerated on a growing tree), but never
+      silently: the verb names each one on stderr with a count, and the entry
+      is a `devkit.toml` diff a human pastes.
       The caps are CONFIG (`[pm] *_lines_max`); the defaults are one consumer's
       measured p90, not a law. The mandated instruction header D13 asserts is
       excluded from every count — it is a constant an author cannot trim, so
@@ -182,7 +186,10 @@ def _bug_lifetime(cfg, report) -> int:
     findings, scanned = model.open_bugs_under_done(cfg)
     if not scanned:
         # This rule's own success state, like D11's: a tree with no bugs filed
-        # is not a tree whose bug lifetime is broken.
+        # is not a tree whose bug lifetime is broken. A bug whose frontmatter
+        # is DAMAGED is still a bug and still counts here — answering "this
+        # grain is broken" with "there is no such grain" is how an open bug
+        # sat under a done milestone with prune scheduled to delete it.
         print(f'[check:pm] D14: no bug files under {cfg.roadmap_dir}/ — '
               f'nothing to place')
         return 0
@@ -304,7 +311,7 @@ def _prose(cfg, report, enabled) -> tuple[int, int, int]:
     docs = model.prose_docs(cfg)
     ledger_rule = 'D17' if 'D17' in enabled else 'D18'
     print(f'[check:pm] {ledger_rule} ledger: {len(cfg.prose_grandfather)} '
-          f'document(s) carrying prose debt — this ledger may only shrink')
+          f'document(s) carrying prose debt — no recorded ceiling ever rises')
     for rule, msg in model.prose_findings(cfg, docs):
         if rule == model.LEDGER_FINDING:
             # One `[pm]` key serves both rules, so its hygiene is reported
@@ -492,7 +499,7 @@ def run() -> int:
                        f'the trunk tree is on {trunk!r} — the integration branch '
                        f'belongs in the trunk, checked out')
 
-    # --- V1-V5: structural + referential integrity ------------------------
+    # --- V1-V6: structural + referential integrity ------------------------
     v_on = enabled & set(model.VALIDATE_CHECKS)
     v_census = {}
     if v_on:
@@ -536,6 +543,16 @@ def run() -> int:
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
+    # A census must never assert the opposite of the filesystem. The grain walk
+    # narrows `stories/` and `bugs/` to documents that OPEN frontmatter — a
+    # README parked beside a bug is a note, not a bug — and a scan that narrows
+    # has to say by how much, or "0 bug(s)" reads as a fact about the directory
+    # when it is a fact about the filter. Printed only when it is non-zero:
+    # a walk that skipped nothing has nothing to disclose.
+    n_notes = len(model.notes_skipped(cfg))
+    if n_notes:
+        census += (f', {n_notes} note(s) skipped (no frontmatter — not a '
+                   f'grain)')
     if 'D11' in enabled:
         census += f', {n_done_grains} done grain(s)'
     if 'D12' in enabled:

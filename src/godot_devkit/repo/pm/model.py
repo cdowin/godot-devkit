@@ -28,7 +28,8 @@ the milestone machine has no `review` state (nothing transitions into one).
     milestone_transitions = [...]  # "from->to" edges
     feature_transitions   = [...]
     story_transitions     = [...]
-    checks = ["D1","D2","D3","D4","D5","D6","D7"]   # which drift rules run
+    checks = ["D1","D2","D3","D4","D5","D6","D7",   # which rules run — this
+              "V1","V2","V3","V4","V5","V6"]        #   IS the stock default
     decision_grandfather = []      # D12: logs whose legacy entries predate the
                                    # schema — "<path>" or "<path>:<N entries>"
     changelog_grandfather = []     # D15: the same ledger for changelog.md
@@ -676,9 +677,36 @@ def version_key(name: str) -> tuple:
     return tuple(parts)
 
 
+BOM = '﻿'
+
+
+def _opens_frontmatter(lines: list[str]) -> bool:
+    """True when this text ATTEMPTS a leading `---` frontmatter block.
+
+    LENIENT on purpose, and it is the only lenient reader in this module. It
+    answers "did the author mean this to be a grain?", not "is the block
+    valid?" — so it steps over a UTF-8 BOM and any run of blank lines before
+    the fence, and tolerates leading spaces on the fence itself. `_fence_bounds`
+    answers the second question and stays exactly as strict as it was: a BOM'd
+    file is a grain whose frontmatter is DAMAGED, never a grain quietly
+    accepted.
+
+    The one thing it will not step over is PROSE. A `---` after a paragraph is
+    a thematic break in a note, not a frontmatter fence, so the first non-blank
+    line decides and nothing later does.
+    """
+    for line in lines:
+        probe = line.lstrip(BOM)
+        if not probe.strip():
+            continue
+        return _FENCE.match(probe.lstrip(' \t')) is not None
+    return False
+
+
 def _is_grain_doc(path: Path) -> bool:
     """True when this file is a GRAIN document rather than a note parked beside
-    one — i.e. it opens with the `---` frontmatter block `field_of` reads.
+    one — i.e. it OPENS a `---` frontmatter block, whether or not that block
+    turns out to be well-formed.
 
     A grain IS its frontmatter: every template mints the block, and every rule
     asks its questions through `field_of`, which reads nothing else. A `.md`
@@ -686,19 +714,28 @@ def _is_grain_doc(path: Path) -> bool:
     explaining how bugs are filed came out of D14 as a bug with an illegal
     status.
 
-    A file that cannot be READ stays IN scope rather than being dropped: "this
-    is not a grain" and "this cannot be opened" are different facts, and
-    answering the second with the first is how a document leaves a census in
-    silence. In scope it reaches the rule, and the rule reports it.
+    THE TWO QUESTIONS ARE NOT THE SAME QUESTION. "This has no frontmatter" is a
+    note and is out of scope; "this frontmatter is broken" is a grain and is a
+    FINDING. Deciding scope with the strict parser answered the second with the
+    first: a BOM before the `---`, a blank line before it, or a missing closing
+    fence dropped the document out of the census entirely — D4, D5, V1, D14 and
+    D17 all went blind at once, and D14's silence is a `prune` deleting an open
+    bug with the milestone it sits in. So detection is lenient
+    (`_opens_frontmatter`) and parsing stays strict (`_fence_bounds`), and the
+    damage is reported by the rules rather than resolved here.
+
+    A file that cannot be READ stays IN scope for the same reason: "this is not
+    a grain" and "this cannot be opened" are different facts. In scope it
+    reaches the rule, and the rule reports it.
     """
     try:
-        return _fence_bounds(_split(read_raw(path))) is not None
+        return _opens_frontmatter(_split(read_raw(path)))
     except (OSError, UnicodeDecodeError):
         return True
 
 
-def grain_docs(gdir: Path) -> list[Path]:
-    """Every grain document under one slot directory, in reading order.
+def _slot_docs(gdir: Path) -> list[Path]:
+    """Every `.md` one slot directory holds, in reading order.
 
     RECURSIVE, and the extension compared case-insensitively. A `glob('*.md')`
     saw neither `<slot>/<topic>/<doc>.md` nor `<DOC>.MD`, and neither `bugs/`
@@ -706,15 +743,38 @@ def grain_docs(gdir: Path) -> list[Path]:
     every rule at once — and the census printed the smaller number without
     saying it had looked less far.
 
-    One definition, every reader (D2/D4's story walk, D14's bug lifetime, D17's
-    prose cap, every census): a second walk would be a second chance to
-    disagree about which documents the tree even holds.
+    DOTTED names are skipped, files and directories alike, exactly as
+    `structure_findings` skips them for D13: one walk cannot hold a
+    `stories/.hidden/d.md` to a rule the structure gate has already declared
+    out of scope.
     """
     if not gdir.is_dir():
         return []
     return sorted(p for p in gdir.rglob('*')
                   if p.is_file() and p.suffix.lower() == '.md'
-                  and _is_grain_doc(p))
+                  and not any(part.startswith('.')
+                              for part in p.relative_to(gdir).parts))
+
+
+def grain_docs(gdir: Path) -> list[Path]:
+    """Every grain document under one slot directory, in reading order.
+
+    One definition, every reader (D2/D4's story walk, D14's bug lifetime, D17's
+    prose cap, every census): a second walk would be a second chance to
+    disagree about which documents the tree even holds.
+    """
+    return [p for p in _slot_docs(gdir) if _is_grain_doc(p)]
+
+
+def note_docs(gdir: Path) -> list[Path]:
+    """The `.md` files under one slot directory that `grain_docs` SKIPPED.
+
+    The other half of the same walk, and it exists so the census can say how
+    far it looked. A census that reports only what it kept asserts the tree is
+    what it scanned; naming the skips is what keeps "0 bugs" distinguishable
+    from "0 bugs and a README nobody counted".
+    """
+    return [p for p in _slot_docs(gdir) if not _is_grain_doc(p)]
 
 
 def feature_files(mdir: Path) -> list[Path]:
@@ -727,6 +787,22 @@ def feature_files(mdir: Path) -> list[Path]:
 def story_files(ffile: Path) -> list[Path]:
     """Every story document under one feature, in reading order."""
     return grain_docs(ffile.parent / 'stories')
+
+
+def notes_skipped(cfg: PmConfig) -> list[Path]:
+    """Every `.md` the grain walk skipped across the ACTIVE tree.
+
+    A census must never assert the opposite of the filesystem. The grain walk
+    narrows `stories/` and `bugs/` to the documents that open frontmatter, and
+    a scan that narrows must say by how much — otherwise "0 bug(s)" reads as a
+    fact about the directory when it is a fact about the filter.
+    """
+    out: list[Path] = []
+    for mdir in milestone_dirs(cfg):
+        out += note_docs(mdir / 'bugs')
+        for ffile in feature_files(mdir):
+            out += note_docs(ffile.parent / 'stories')
+    return out
 
 
 # --- THE review-record definition --------------------------------------------
@@ -1135,8 +1211,14 @@ CHANGELOG_SCHEMA = LogSchema(
 # sin). A heading with neither ("## The through-line") IS prose and is never
 # schema-checked: a log may have a preamble.
 _ENTRY_HEADING = re.compile(r'^##[ \t]+(\S.*?)[ \t]*$')
+# A VERSION is not an id. `v0.9` opens with a token shaped exactly like one, so
+# a changelog preamble reading `## v0.9 release notes` was read as entry `v0`
+# and `next_entry_id` then allocated `v1` into a log numbering `C`. D15 makes
+# version-shaped headings MORE likely, not less, so the trailing `.` is
+# admitted only when no digit follows it: `D1.` ends a sentence, `v0.9` names a
+# release.
 _ENTRY_ID = re.compile(
-    r'(?:^|[\s([{`"\'/—-])([A-Za-z]{1,4}\d+)(?=[\s.,:;)\]}`"\'—-]|$)')
+    r'(?:^|[\s([{`"\'/—-])([A-Za-z]{1,4}\d+)(?=\.(?!\d)|[\s,:;)\]}`"\'—-]|$)')
 _ISO_DATE = re.compile(r'\d{4}-\d{2}-\d{2}')
 # The full header. The separator is an em dash BOTH times, exactly as the schema
 # reads. A hyphen renders near-identically to a human and differently to a
@@ -1693,10 +1775,19 @@ def milestones_without_notes(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int
 # A RATCHET, not a big bang. Every already-over-cap document is recorded in
 # `[pm] prose_grandfather` at its CURRENT size, and the gate fails only when a
 # ledgered document GROWS past its recorded ceiling (GREW) or a new one crosses
-# its cap (OVERCAP). The ledger is a DEBT ledger: its length is the metric, it
-# may only ever shrink, and `pm prose-ledger` REFUSES to raise a ceiling.
-# Without that refusal the gate is decorative — every growth would be absorbed
-# by a regeneration.
+# its cap (OVERCAP). The ledger is a DEBT ledger: its length is the metric, and
+# `pm prose-ledger` REFUSES TO RAISE AN EXISTING CEILING. Without that refusal
+# the gate is decorative — every growth would be absorbed by a regeneration.
+#
+# WHAT IS ENFORCED, EXACTLY: no recorded ceiling ever rises, and a document
+# back inside its cap is dropped rather than re-recorded. A document that has
+# newly crossed its cap DOES come out as a new ledger line — a regeneration
+# that could not record new debt could not be run on a growing tree at all. It
+# is not silent: `pm prose-ledger` names every newly absorbed document on
+# stderr with a count, and the line itself is a `devkit.toml` diff a human has
+# to paste. "The ledger may only ever shrink" would be a stronger claim than
+# the code makes, and a gate whose docstring overstates it is a gate people
+# stop reading.
 #
 # THREE THINGS THAT ARE NOT OBVIOUS AND ARE LOAD-BEARING:
 #
@@ -1819,6 +1910,22 @@ def prose_docs(cfg: PmConfig) -> list[ProseDoc]:
 # one `[pm]` key serves both rules, so its integrity is one fact, not two.
 LEDGER_FINDING = 'LEDGER'
 
+# What an over-cap document of THIS kind is usually carrying. A finding that
+# tells a decisions.md "a story over its cap is usually two stories" is naming
+# the wrong grain and the reader has to translate it; the whole value of the
+# sentence is that it says where the lines went.
+OVERCAP_ADVICE = {
+    'story': 'a story over its cap is usually two stories',
+    'feature': 'a feature.md over its cap is carrying design that belongs in '
+               'a design/ note',
+    'bug': 'a bug over its cap is carrying a repro transcript — link it '
+           'rather than paste it',
+    'decisions': 'a decisions.md over its cap is carrying narrative in its '
+                 'entries — a decision is four fields',
+    'changelog': 'a changelog.md over its cap is carrying a devlog — an entry '
+                 'is what shipped and the reference proving it',
+}
+
 
 def prose_findings(cfg: PmConfig,
                    docs: list[ProseDoc]) -> list[tuple[str, str]]:
@@ -1853,8 +1960,7 @@ def prose_findings(cfg: PmConfig,
                 out.append((doc.rule, (
                     f'OVERCAP     {doc.key} — {doc.lines} lines, over the '
                     f'{doc.kind} cap of {doc.cap} and not on the ledger; '
-                    f'a story over its cap is usually two stories, and a '
-                    f'feature.md over its cap is carrying design')))
+                    + OVERCAP_ADVICE[doc.kind])))
             continue
         seen.add(doc.key)
         if doc.lines > ceiling:
@@ -1867,12 +1973,17 @@ def prose_findings(cfg: PmConfig,
         # entry that suppresses nothing has done its job and must go, and a
         # ceiling reaching past the end of the file is a claim the file no
         # longer supports.
+        #
+        # ONE FACT, ONE FINDING. A document back inside its cap is ALSO smaller
+        # than its ceiling, so reporting both told the reader to lower a
+        # ceiling on a line they were being told to delete. The drop subsumes
+        # the lower, so the drop is the only finding.
         if doc.lines <= doc.cap:
             out.append((LEDGER_FINDING, (
                 f'{doc.key} is in prose_grandfather but {doc.lines} lines is '
                 f'inside the {doc.kind} cap of {doc.cap} — drop it from the '
                 f'ledger')))
-        if ceiling > doc.lines:
+        elif ceiling > doc.lines:
             out.append((LEDGER_FINDING, (
                 f'{doc.key} is ledgered at {ceiling} lines but the document '
                 f'has {doc.lines} — lower the ceiling')))
@@ -1884,15 +1995,24 @@ def prose_findings(cfg: PmConfig,
     return out
 
 
-def regenerate_prose_ledger(cfg: PmConfig,
-                            docs: list[ProseDoc]) -> tuple[list[str], list[str]]:
-    """(the ledger's `"<path>:<lines>"` entries, the growths it REFUSES).
+def regenerate_prose_ledger(
+        cfg: PmConfig,
+        docs: list[ProseDoc]) -> tuple[list[str], list[str], list[str]]:
+    """(the `"<path>:<lines>"` entries, the growths REFUSED, the ABSORPTIONS).
 
-    The refusal is the whole point. A regeneration that absorbed growth would
-    make the ratchet decorative: every over-cap document would simply be
-    re-recorded at its new size and the gate would never fail. So a document
-    larger than its recorded ceiling is refused, and the only way to regenerate
-    is after a genuine trim.
+    The refusal is the load-bearing half. A regeneration that raised an
+    existing ceiling would make the ratchet decorative: every over-cap document
+    would simply be re-recorded at its new size and the gate would never fail.
+    So a document larger than its recorded ceiling is refused, and the only way
+    past it is a genuine trim.
+
+    What this does NOT refuse is a document that has newly crossed its cap and
+    is on no ledger line yet — it comes out as a new entry, because a
+    regeneration that could not record new debt could never be run on a growing
+    tree at all. That absorption is not silent and it is not this function's to
+    approve: the new keys come back NAMED, the verb prints them, and the entry
+    itself is a visible diff in `devkit.toml` that a human has to paste. The
+    ratchet is "no ceiling ever rises", not "the ledger never gains a line".
 
     What comes out is gate-clean by construction — a document back inside its
     cap is DROPPED rather than re-recorded, which is the same shrink the
@@ -1901,6 +2021,7 @@ def regenerate_prose_ledger(cfg: PmConfig,
     ledger = dict(cfg.prose_grandfather)
     body: list[str] = []
     refused: list[str] = []
+    absorbed: list[str] = []
     for doc in docs:
         ceiling = ledger.get(doc.key)
         if ceiling is not None and doc.lines > ceiling:
@@ -1909,4 +2030,7 @@ def regenerate_prose_ledger(cfg: PmConfig,
             continue
         if doc.lines > doc.cap:
             body.append(f'{doc.key}:{doc.lines}')
-    return body, refused
+            if ceiling is None:
+                absorbed.append(f'{doc.key}:{doc.lines} ({doc.kind} cap '
+                                f'{doc.cap})')
+    return body, refused, absorbed

@@ -47,6 +47,30 @@ def _case_sensitive_tmp() -> bool:
 CASE_SENSITIVE_TMP = _case_sensitive_tmp()
 
 
+# The three ways a real editor breaks a frontmatter block WITHOUT removing it:
+# a Windows editor writes the BOM, a paste lands a blank line above the fence,
+# a hand-edit eats the closing one. All three still OPEN a `---` block, so all
+# three are grains whose frontmatter is DAMAGED — never notes.
+DAMAGE_FORMS = ('bom', 'blank-line', 'no-closing-fence')
+STORY_REL = 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
+
+
+def damage(path: Path, form: str) -> None:
+    raw = path.read_text(encoding='utf-8')
+    if form == 'bom':
+        raw = '﻿' + raw
+    elif form == 'blank-line':
+        raw = '\n' + raw
+    elif form == 'no-closing-fence':
+        lines = raw.split('\n')
+        close = next(i for i in range(1, len(lines)) if lines[i] == '---')
+        del lines[close]
+        raw = '\n'.join(lines)
+    else:  # pragma: no cover - a typo in a fixture is not a fixture
+        raise AssertionError(f'unknown damage form {form!r}')
+    path.write_text(raw, encoding='utf-8')
+
+
 def write(path: Path, front: dict[str, str], body: str = 'x') -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ['---'] + [f'{k}: {v}' for k, v in front.items()] + ['---', '', body, '']
@@ -2871,6 +2895,175 @@ class StoryWalk(unittest.TestCase):
             self.assertIn('1 story/ies', out)
 
 
+class DamagedFrontmatter(unittest.TestCase):
+    """A broken grain stays IN the census and is REPORTED.
+
+    "This has no frontmatter" and "this frontmatter is broken" are different
+    facts, and the grain walk answered the second with the first: scope was
+    decided by the STRICT parser, so a BOM before the fence, a blank line above
+    it or a missing closing fence dropped the document out of every rule at
+    once — D4, D5, V1, D14 and D17 went blind together and the gate printed
+    PASS. The D14 half is data loss: `prune`'s lag-by-one deletes a done
+    milestone's directory, and the open bug inside it went unreported because
+    the census said there was no bug there at all.
+
+    Detection is lenient, parsing is strict. That split is the whole rule, and
+    the controls below are the other half of it: a genuine note must stay out.
+    """
+
+    BUG_TOML = '[pm]\nchecks = ["D4","D14","V1"]\n'
+
+    @staticmethod
+    def _bug(root: Path, slug: str, status: str) -> Path:
+        p = root / 'pm/roadmap/0.1-demo/bugs' / f'{slug}.md'
+        write(p, {'id': f'0.1/bugs/{slug}', 'milestone': '"0.1"',
+                  'status': status, 'caught_in': '"0.1"'})
+        return p
+
+    def test_a_damaged_story_is_reported_not_dropped(self):
+        for form in DAMAGE_FORMS:
+            with self.subTest(form=form):
+                with tree(feature_status='building',
+                          story_statuses=('todo',)) as root:
+                    damage(root / STORY_REL, form)
+                    code, out = run_gate(root)
+                    self.assertEqual(code, 1, out)
+                    self.assertIn("status '' not in", out)
+                    self.assertIn('missing id: or status:', out)
+                    self.assertIn('1 story/ies', out)
+
+    def test_a_damaged_bug_is_reported_not_dropped(self):
+        for form in DAMAGE_FORMS:
+            with self.subTest(form=form):
+                with tree(milestone_status='building') as root:
+                    (root / 'devkit.toml').write_text(self.BUG_TOML,
+                                                      encoding='utf-8')
+                    damage(self._bug(root, 'seed-is-zero', 'open'), form)
+                    code, out = run_gate(root)
+                    self.assertEqual(code, 1, out)
+                    self.assertIn("bug status '' is not in", out)
+                    self.assertIn('1 bug(s)', out)
+                    self.assertNotIn('no bug files under', out)
+
+    def test_d14_still_has_a_bug_to_place_when_that_bug_is_damaged(self):
+        # The data-loss case, exactly. An OPEN bug under a DONE milestone whose
+        # frontmatter carries a BOM used to make D14 announce "no bug files
+        # under pm/roadmap/ — nothing to place" while the file sat there
+        # waiting for `prune` to delete it with the milestone.
+        for form in DAMAGE_FORMS:
+            with self.subTest(form=form):
+                with tree(milestone_status='done', feature_status='done',
+                          story_statuses=('done',)) as root:
+                    (root / 'devkit.toml').write_text(self.BUG_TOML,
+                                                      encoding='utf-8')
+                    damage(self._bug(root, 'leaky', 'open'), form)
+                    code, out = run_gate(root)
+                    self.assertEqual(code, 1, out)
+                    self.assertNotIn('nothing to place', out)
+                    self.assertIn('bugs/leaky.md', out)
+                    self.assertIn('1 bug(s)', out)
+
+    def test_the_resolver_names_the_damage_not_a_missing_story(self):
+        # `story_file` walks the same grain walk, so it went blind with the
+        # gate: `pm story wip <id>` answered "no story resolves from id" about
+        # a file sitting right there. Each answer is defensible alone; together
+        # they leave nothing to do.
+        for form in DAMAGE_FORMS:
+            with self.subTest(form=form):
+                with tree(feature_status='building',
+                          story_statuses=('todo',)) as root:
+                    damage(root / STORY_REL, form)
+                    self.assertIsNotNone(
+                        model.story_file(cfg_for(root), '0.1/alpha/s0'))
+                    code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+                    self.assertEqual(code, 2, out)
+                    self.assertNotIn('no story resolves', out)
+                    self.assertIn('unknown current status', out)
+
+    def test_a_damaged_grain_is_never_quietly_accepted(self):
+        # Lenient DETECTION must not become a lenient PARSER. A BOM'd file is a
+        # grain whose frontmatter is broken, so `field_of` still reads nothing
+        # out of it and `set_field` still refuses to write into it.
+        for form in DAMAGE_FORMS:
+            with self.subTest(form=form):
+                with tree(story_statuses=('todo',)) as root:
+                    sfile = root / STORY_REL
+                    damage(sfile, form)
+                    self.assertTrue(model._is_grain_doc(sfile))
+                    self.assertEqual(model.field_of(sfile, 'status'), '')
+                    before = sfile.read_bytes()
+                    self.assertFalse(model.set_field(sfile, 'status', 'wip'))
+                    self.assertEqual(sfile.read_bytes(), before)
+
+    # --- the controls: a genuine note stays OUT --------------------------
+    def test_a_readme_with_no_frontmatter_under_bugs_is_still_silent(self):
+        with tree(milestone_status='building') as root:
+            (root / 'devkit.toml').write_text(self.BUG_TOML, encoding='utf-8')
+            (root / 'pm/roadmap/0.1-demo/bugs').mkdir(parents=True,
+                                                      exist_ok=True)
+            (root / 'pm/roadmap/0.1-demo/bugs/README.md').write_text(
+                '# how bugs are filed here\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('README.md', out)
+            self.assertIn('no bug files under', out)
+
+    def test_a_readme_with_no_frontmatter_under_stories_is_still_silent(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'pm/roadmap/0.1-demo/features/alpha/stories/README.md'
+             ).write_text('# how stories are written\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 story/ies', out)
+
+    def test_a_thematic_break_after_prose_does_not_make_a_note_a_grain(self):
+        # The one thing leniency will NOT step over is prose. A `---` under a
+        # paragraph is a thematic break in a note, not a frontmatter fence.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'pm/roadmap/0.1-demo/features/alpha/stories/notes.md'
+             ).write_text('Some prose\n\n---\n\nmore prose\n',
+                          encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 story/ies', out)
+
+    def test_the_census_says_how_many_documents_the_walk_skipped(self):
+        # A census must never assert the opposite of the filesystem. "0 bug(s)"
+        # is a fact about the filter, not about the directory, unless the scan
+        # says how far it looked.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'pm/roadmap/0.1-demo/features/alpha/stories/README.md'
+             ).write_text('# notes\n', encoding='utf-8')
+            (root / 'pm/roadmap/0.1-demo/bugs').mkdir(parents=True,
+                                                      exist_ok=True)
+            (root / 'pm/roadmap/0.1-demo/bugs/README.md').write_text(
+                '# notes\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('2 note(s) skipped', out)
+
+    def test_a_clean_tree_discloses_nothing_because_it_skipped_nothing(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('note(s) skipped', out)
+
+    def test_the_grain_walk_skips_dotted_names_exactly_as_D13_does(self):
+        # `structure_findings` skips a dotted entry, so a `stories/.hidden/d.md`
+        # held to D4 was one walk enforcing a rule the structure gate had
+        # already declared out of scope. Two walks, one tree, one answer.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            write(sdir / '.hidden/d.md',
+                  {'id': '0.1/alpha/d', 'status': 'NOT-A-REAL-STATUS'})
+            write(sdir / '.dotfile.md',
+                  {'id': '0.1/alpha/dot', 'status': 'NOT-A-REAL-STATUS'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 story/ies', out)
+            self.assertNotIn('NOT-A-REAL-STATUS', out)
+
+
 class StoryResolution(unittest.TestCase):
     """`story_file` and `story_files` must agree about what a story IS.
 
@@ -3168,6 +3361,33 @@ class Changelog(unittest.TestCase):
             self.assertIn(f'## C1 — {today} — ', log.read_text(encoding='utf-8'))
             self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
             self.assertIn('## C2 — ', log.read_text(encoding='utf-8'))
+
+    def test_a_version_shaped_preamble_heading_is_not_an_entry_id(self):
+        # `## v0.9 release notes` opens with a token shaped exactly like an id,
+        # and the detector read `v0` — so a preamble a changelog is entitled to
+        # have made the next append allocate `v1` into a log numbering `C`.
+        # D15 makes version-shaped headings MORE likely, not less.
+        from datetime import datetime, timezone
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            log.write_text(log.read_text(encoding='utf-8')
+                           + '\n## v0.9 release notes\n\nProse about the '
+                             'release.\n', encoding='utf-8')
+            self.assertEqual(model.log_entries_in(model.read_raw(log)), [])
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            today = datetime.now(timezone.utc).date().isoformat()
+            self.assertIn(f'## C1 — {today} — ', log.read_text(encoding='utf-8'))
+            self.assertNotIn('## v1 — ', log.read_text(encoding='utf-8'))
+
+    def test_a_real_id_ending_a_sentence_is_still_an_id(self):
+        # The control on that tightening: a trailing `.` is admitted when no
+        # DIGIT follows it, so `D1.` still names an entry and only a version
+        # (`v0.9`, `v1.0.0`) is refused.
+        self.assertEqual(model.entry_label('Reverting D1.'), 'D1')
+        self.assertEqual(model.entry_label('C12 — a note'), 'C12')
+        self.assertEqual(model.entry_label('v0.9 release notes'), '')
+        self.assertEqual(model.entry_label('v1.0.0 notes'), '')
 
     def test_what_it_writes_passes_the_D15_gate(self):
         # The load-bearing round trip, and the reason `append_entry` re-parses:
@@ -3477,6 +3697,45 @@ class Changelog(unittest.TestCase):
             self.assertIn('\n## v0.1 — 2026-08-29\n', out)
             # The milestone NAME is metadata, not release-note content.
             self.assertNotIn('Demo', out)
+
+    def test_milestone_done_is_what_mints_the_dated_heading(self):
+        # `actual_date:` was minted empty by the template and written by
+        # NOTHING — no verb set it and the release skill never mentioned it —
+        # so the dated heading was unreachable through the documented path and
+        # every released section rendered bare. Close is the moment a milestone
+        # acquires a date, so the clock lives in the VERB; the render stays a
+        # pure function of the tree.
+        from datetime import datetime, timezone
+        with tree(milestone_status='building', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            mfile = root / self.MDIR / 'milestone.md'
+            self.assertEqual(model.field_of(mfile, 'actual_date'), '')
+            code, out = run_cli(root, 'milestone', 'done', '0.1')
+            self.assertEqual(code, 0, out)
+            today = datetime.now(timezone.utc).date().isoformat()
+            self.assertEqual(model.field_of(mfile, 'actual_date'), today)
+            self.assertIn(f'actual_date {today}', out)
+            rendered = run_cli_split(root, 'changelog', '--render')[1]
+            self.assertIn(f'\n## v0.1 — {today}\n', rendered)
+
+    def test_a_re_run_repairs_a_missing_stamp_and_never_moves_a_recorded_one(self):
+        # The same no-op-is-the-repair shape `place_branch_on_building` has: a
+        # milestone closed before this existed has no date, and re-running the
+        # verb stamps it. A date already recorded is history and never moves.
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat()
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            mfile = root / self.MDIR / 'milestone.md'
+            self.assertEqual(model.field_of(mfile, 'actual_date'), '')
+            self.assertEqual(run_cli(root, 'milestone', 'done', '0.1')[0], 0)
+            self.assertEqual(model.field_of(mfile, 'actual_date'), today)
+
+            model.set_field(mfile, 'actual_date', '2020-01-01')
+            self.assertEqual(run_cli(root, 'milestone', 'done', '0.1')[0], 0)
+            self.assertEqual(model.field_of(mfile, 'actual_date'), '2020-01-01')
 
     def test_an_unshipped_milestone_heads_its_section_with_v_and_no_date(self):
         # No `actual_date` means it has not shipped, and the render may not
@@ -4035,7 +4294,7 @@ class ProseRatchet(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
             self.assertIn('1 document(s) carrying prose debt', out)
-            self.assertIn('may only shrink', out)
+            self.assertIn('no recorded ceiling ever rises', out)
 
             # One line more, and the ratchet catches it.
             self._lines(root / rel, 141)
@@ -4061,7 +4320,7 @@ class ProseRatchet(unittest.TestCase):
             code, out = run_cli(root, 'prose-ledger')
             self.assertEqual(code, 1)
             self.assertIn('REFUSED', out)
-            self.assertIn('only shrinks', out)
+            self.assertIn('a recorded ceiling never rises', out)
             self.assertNotIn(f'"{rel}:141"', out)
 
             # After a genuine TRIM it regenerates, lower.
@@ -4069,6 +4328,31 @@ class ProseRatchet(unittest.TestCase):
             code, out = run_cli(root, 'prose-ledger')
             self.assertEqual(code, 0, out)
             self.assertIn(f'"{rel}:130"', out)
+
+    def test_regeneration_names_every_document_it_newly_absorbs(self):
+        # What the ratchet enforces is "no recorded ceiling rises", NOT "the
+        # ledger never gains a line" — a regeneration that could record no new
+        # debt could not be run on a growing tree at all. So a fresh OVERCAP is
+        # absorbed, and it is the NAMING that keeps this a ratchet: a debt
+        # ledger that grows in silence has stopped being one.
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 130)
+            self._cfg(root)  # nothing ledgered yet
+            code, out = run_cli(root, 'prose-ledger')
+            self.assertEqual(code, 0, out)
+            self.assertIn(f'"{rel}:130"', out)
+            self.assertIn('1 document(s) NEWLY ABSORBED', out)
+            self.assertIn(f'+ {rel}:130 (story cap 120)', out)
+
+    def test_regeneration_is_silent_about_absorption_when_there_is_none(self):
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 130)
+            self._cfg(root, f'prose_grandfather = ["{rel}:130"]\n')
+            code, out = run_cli(root, 'prose-ledger')
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('NEWLY ABSORBED', out)
 
     def test_regeneration_drops_a_document_back_inside_its_cap(self):
         # The output is gate-clean by construction: a document no longer in
@@ -4093,6 +4377,58 @@ class ProseRatchet(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('inside the story cap of 120', out)
             self.assertIn('drop it from the ledger', out)
+
+    def test_one_fact_gets_one_finding_when_a_document_comes_back_in_cap(self):
+        # A document back inside its cap is ALSO smaller than its ceiling, and
+        # reporting both told the reader to lower a ceiling on the very line
+        # they were being told to delete. The drop subsumes the lower.
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 100)
+            self._cfg(root, f'prose_grandfather = ["{rel}:140"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('drop it from the ledger', out)
+            self.assertNotIn('lower the ceiling', out)
+            self.assertIn('1 status-drift', out)
+
+    def test_an_overcap_finding_names_the_grain_kind_it_is_about(self):
+        # "A story over its cap is usually two stories" told a decisions.md and
+        # a changelog.md about a grain they are not, and the reader had to
+        # translate. The sentence's whole value is saying where the lines went.
+        cases = (
+            ('stories/s0.md', 130, 'two stories'),
+            ('feature.md', 210, 'carrying design'),
+            ('decisions.md', 160, 'a decision is four fields'),
+        )
+        for name, n, phrase in cases:
+            with self.subTest(doc=name), tree() as root:
+                self._cfg(root)
+                header = model.SLOT_HEADER.get(name, '')
+                self._lines(root / self.FDIR / name, n, header)
+                code, out = run_gate(root)
+                self.assertEqual(code, 1, out)
+                self.assertIn('OVERCAP', out)
+                self.assertIn(phrase, out)
+
+    def test_an_overcap_changelog_is_told_about_changelogs(self):
+        with tree() as root:
+            self._cfg(root)
+            self._lines(root / self.MDIR / 'changelog.md', 160,
+                        model.SLOT_HEADER['changelog.md'])
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('carrying a devlog', out)
+            self.assertNotIn('two stories', out)
+
+    def test_an_overcap_bug_is_told_about_bugs(self):
+        with tree() as root:
+            self._cfg(root)
+            self._lines(root / self.MDIR / 'bugs/leaky.md', 140)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('repro transcript', out)
+            self.assertNotIn('two stories', out)
 
     def test_a_ceiling_reaching_past_the_end_of_its_file_fails(self):
         rel = self.FDIR + '/stories/s0.md'

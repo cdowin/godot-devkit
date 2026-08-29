@@ -30,7 +30,9 @@ USAGE = """usage: godot-devkit pm <command>
   feature <ready|building> <feature-id>
   feature review <feature-id>
   feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
-  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done;
+  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done,
+                                                        and stamps actual_date: — the date the
+                                                        changelog render puts in its heading;
                                                         building also places branch: in the trunk
                                                         when [pm] place_branch_on_building)
   status [<milestone>]
@@ -422,6 +424,33 @@ def _place_branch(cfg: model.PmConfig, mid: str, trunk: Path, branch: str) -> No
 
 
 # --- milestone ----------------------------------------------------------------
+def _stamp_actual_date(cfg: model.PmConfig, mf: Path, mid: str) -> None:
+    """Stamp `actual_date:` at close — the moment a milestone acquires one.
+
+    The template mints the field empty and, until this, nothing ever wrote it:
+    `pm changelog --render`'s `## v<id> — <date>` heading was unreachable
+    through the documented path, so every released section rendered as a bare
+    `## v<id>` and a reader could not map it to the tag carrying it.
+
+    The clock belongs HERE and not in the render. The render is a pure function
+    of the tree; a date read at render time would make "two consecutive renders
+    are byte-identical" false the moment one crossed midnight.
+
+    Written only when EMPTY, so re-running `milestone done` repairs a missing
+    stamp — the same no-op-is-the-repair shape `place_branch_on_building` has —
+    without ever moving a date already recorded.
+    """
+    if model.field_of(mf, 'actual_date'):
+        return
+    when = datetime.now(timezone.utc).date().isoformat()
+    if not model.set_field(mf, 'actual_date', when):
+        raise Usage(f'could not write actual_date in {cfg.rel(mf)} '
+                    f'(malformed frontmatter, or the file is not writable). '
+                    f'The status stands at done — re-run this command to stamp '
+                    f'the date once the file is repaired')
+    _ok(f'milestone {mid}: actual_date {when}')
+
+
 def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     if len(args) != 2:
         raise Usage(USAGE)
@@ -445,6 +474,8 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
             target = _placement_target(cfg, mid, mf)
             if target is not None:
                 _place_branch(cfg, mid, *target)
+        if to == 'done':
+            _stamp_actual_date(cfg, mf, mid)
         return 0
     if not model.transition_legal(cfg.milestone_transitions, cur, to):
         raise Refused(f'illegal milestone transition {cur} -> {to} for {mid!r}')
@@ -462,6 +493,8 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     _ok(f'milestone {mid}: {cur} -> {to}')
     if target is not None:
         _place_branch(cfg, mid, *target)
+    if to == 'done':
+        _stamp_actual_date(cfg, mf, mid)
     return 0
 
 
@@ -1353,10 +1386,17 @@ def cmd_prose_ledger(cfg: model.PmConfig, args: list[str]) -> int:
     `devkit.toml`, so the block goes to stdout to be pasted or redirected and
     every count goes to stderr, where redirecting the block cannot swallow it.
 
-    The refusal is the feature. A regeneration that absorbed growth would make
-    the whole ratchet decorative: every over-cap document would be re-recorded
-    at its new size and the gate would never fail again. The only way to
-    regenerate is after a genuine trim.
+    The refusal is the feature: an EXISTING ceiling never rises. A regeneration
+    that raised one would make the whole ratchet decorative — every over-cap
+    document would be re-recorded at its new size and the gate would never fail
+    again. The only way past a growth is a genuine trim.
+
+    A document that has newly crossed its cap is a different case and IS
+    absorbed, because a ledger that could not gain a line could not be
+    regenerated on a growing tree at all. Every one of them is NAMED on stderr
+    with a count: a debt ledger that grows in silence has stopped being a
+    ratchet, and naming them is what makes the `devkit.toml` diff a decision
+    somebody makes rather than a paste nobody reads.
     """
     if args:
         raise Usage('prose-ledger takes no arguments')
@@ -1364,14 +1404,14 @@ def cmd_prose_ledger(cfg: model.PmConfig, args: list[str]) -> int:
     if not docs:
         raise Usage(f'no grain documents found under {cfg.roadmap_dir}/ '
                     f'(wrong [pm] roadmap_dir, or an empty tree?)')
-    body, refused = model.regenerate_prose_ledger(cfg, docs)
+    body, refused, absorbed = model.regenerate_prose_ledger(cfg, docs)
     if refused:
         raise Refused(
-            'the ledger is a DEBT ledger and only shrinks — '
+            'the ledger is a DEBT ledger and a recorded ceiling never rises — '
             + '; '.join(refused)
             + '. Trim the document(s) back under the recorded ceiling, or make '
-              'the case for the growth and lower something else. Absorbing a '
-              'growth is the one thing this will not do (nothing was written)')
+              'the case for the growth and lower something else. Raising a '
+              'ceiling is the one thing this will not do (nothing was written)')
     print('prose_grandfather = [')
     for entry in body:
         print(f'    "{entry}",')
@@ -1379,6 +1419,11 @@ def cmd_prose_ledger(cfg: model.PmConfig, args: list[str]) -> int:
     print(f'[pm] {len(body)} document(s) over cap, from '
           f'{len(cfg.prose_grandfather)} ledgered; paste this into [pm] in '
           f'devkit.toml', file=sys.stderr)
+    if absorbed:
+        print(f'[pm] {len(absorbed)} document(s) NEWLY ABSORBED into the '
+              f'ledger — new debt, not a trim:', file=sys.stderr)
+        for entry in absorbed:
+            print(f'[pm]   + {entry}', file=sys.stderr)
     return 0
 
 
