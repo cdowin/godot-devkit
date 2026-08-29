@@ -290,7 +290,7 @@ Anything unresolvable is reported and left alone.
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
-| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V5) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires findings docs whose grain has closed, and D12 holds every `DECISIONS.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`) — all opt-in via `[pm] checks`, with D12's legacy logs migrating through the `decision_grandfather` ledger the gate prints the size of. |
+| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V5) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires findings docs whose FEATURE has closed (excluding any the tree still points at via `reviewed:`), and D12 holds every `DECISIONS.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`) — all opt-in via `[pm] checks`, with D12's legacy logs migrating through the `decision_grandfather` ledger the gate prints the size of. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
 
 ### Project management (`godot-devkit pm <command>`)
@@ -384,8 +384,11 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 # A project that ships from the trunk and bumps at close is running a different
 # valid flow, so these stay off unless asked for.
 # D11 (review-dir retention) and D12 (decision-record schema) opt in the same way:
-#   D11 a findings doc in review_dir whose feature/milestone is `done` (or which
-#       names no grain at all) is dead weight a grep still finds
+#   D11 a findings doc in review_dir whose FEATURE is `done` is dead weight a
+#       grep still finds. Features only: `reviewed:` lives on feature.md and
+#       nowhere else, so a milestone-scoped record has no green state to reach.
+#       A doc the tree still points at via `reviewed:` is exempt, and a doc
+#       naming no feature is not a finding — git history still names it.
 #   D12 every `## <ID> — <ISO date> — <title>` entry in a DECISIONS.md carries
 #       **Chose:** / **Over:** / **Because:** / **Evidence:**, in that order, one
 #       per line, values <= 200 chars and the title <= 80. `Over:` is the

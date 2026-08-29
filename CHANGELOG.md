@@ -1,5 +1,52 @@
 # Changelog
 
+## Unreleased
+
+**`check pm` D11 — a findings doc dies when the feature it names closes.** A `*.md` in `review_dir`
+is legitimate while the feature it NAMES is still open, and dead weight the moment that feature is
+`done`: the durable record is then the feature's own review record, while the transient doc stays
+findable by `grep` forever. A file the tree still points at via `reviewed:` is exempt, so a project
+whose durable records live in `review_dir` satisfies the rule trivially rather than being punished
+for the layout the setting is named for.
+
+Scoped down from its first cut, on the evidence of running it against both consumer trees:
+
+- **Features only.** `reviewed:` exists on `feature.md` and nowhere else, so a milestone-scoped
+  record has no green state to reach and the finding ordered a repair the schema cannot accept.
+- **A doc naming no feature is not a finding.** That class was 116 of 117 findings on one consumer,
+  and its claim — nothing can reach the file — is false: the archived `feature.md` in git history
+  still names it. A 117-line wall on day one is what trains people to ignore a gate.
+- **The exemption compares resolved paths**, built from the raw `reviewed:` pointer. It used to
+  compare display strings against `review_record_for()`, which flagged the tree's own durable record
+  whenever the pointer was written `./`-prefixed, absolute or with Windows separators — and, because
+  that function applies the substantive-content floor, made a short-but-legitimate record get D1
+  saying "stamp a record" and D11 saying "delete this record". Whether a record says enough is D1's
+  business. With `review_slug_fallback`, every candidate the glob would accept is exempt, not just
+  the first sorted one.
+- **Rule 4.** The census carries the review-doc count; a `review_dir` that is absent (a typo used to
+  exit 0 with a serene PASS over the real directory) or configured empty (it would sweep the repo
+  root) now FAILS; an existing-but-empty one is named in the output rather than passing in silence.
+
+**KNOWN LIMITATION.** Filename→feature resolution is a bare substring match, so a slug embedded in a
+longer word resolves: a closed feature `den` claims `hidden-room-audit.md`. Do not enable D11 against
+a tree nobody has eyeballed. `tests/test_pm.py::Retention::test_KNOWN_DEFECT_a_slug_inside_a_word_still_resolves`
+pins it; the fix is anchoring the match, or moving review docs inside the feature folder so there is
+no guess to anchor.
+
+**`check pm` D12 — the decision-record schema.** Every `## <ID> — <ISO date> — <title>` entry in a
+`DECISIONS.md` carries `**Chose:**` / `**Over:**` / `**Because:**` / `**Evidence:**`, in that order,
+one per line, values <= 200 chars and the title <= 80. `Over:` is the load-bearing field — an entry
+that cannot name what it ruled out is a description, not a decision — and `Evidence:` must be a
+REFERENCE (a commit hash, a `path[:line]`, a number), never a sentence. Entry DETECTION is
+deliberately looser than the schema: a heading carrying an id anywhere in it, or a date, is an entry,
+because an opens-with-an-id test read 28 of one consumer's 58 logs as prose and passed them in
+silence. Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` exempts a whole log,
+`"<path>:<N>"` only its first N entries — whose size the gate PRINTS every run and which may only
+shrink: an exemption that suppresses nothing, a cap reaching past the end of its log, and a line
+naming no log all FAIL.
+
+Both are OFF by default, like D8-D10. Opt in via `[pm] checks`.
+
 ## v0.12.0 — 2026-08-28 — `tiles`, and a `check uid` that repairs what it reports
 
 **New family — `tiles`.** A TileMapLayer serialises its entire map into one base64 property, so every

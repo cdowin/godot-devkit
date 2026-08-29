@@ -654,28 +654,71 @@ def review_dir_files(cfg: PmConfig) -> list[Path]:
     return sorted(f for f in rdir.glob('*.md') if f.name.lower() != 'readme.md')
 
 
+def pointed_review_paths(cfg: PmConfig, fids: list[str]) -> set[Path]:
+    """Every review file the TREE points at, as a resolved `Path`.
+
+    Deliberately NOT `review_record_for()`. That applies `record_is_substantive`,
+    which is D1's business: a short-but-legitimate record would be told by D1 to
+    exist and by D11 to be deleted — two rules ordering opposite repairs on one
+    file. Whether a record says enough is D1's question; whether the tree still
+    points at the file is this one's.
+
+    Resolved paths, never the `reviewed:` string as a human typed it: `./docs/
+    reviews/x.md`, an absolute path and a Windows-separator spelling all name the
+    same file, and comparing the raw text flags the tree's own durable record.
+
+    `review_slug_fallback` accepts a GLOB, so every candidate it would accept is
+    exempt — not just the first sorted one, which is all `review_record_for`
+    returns.
+    """
+    out: set[Path] = set()
+    rdir = cfg.root / cfg.review_dir
+    for fid in fids:
+        ffile = feature_file(cfg, fid)
+        if ffile is None:
+            continue
+        pointer = unquote(field_of(ffile, 'reviewed'))
+        if pointer and pointer != 'null':
+            p = Path(pointer.replace('\\', '/'))
+            out.add((p if p.is_absolute() else cfg.root / p).resolve())
+        if cfg.review_slug_fallback:
+            slug = fid.partition('/')[2]
+            if slug and rdir.is_dir():
+                out.update(c.resolve() for c in rdir.glob(f'{slug}*.md'))
+    return out
+
+
 def grain_named_by(cfg: PmConfig, path: Path) -> tuple[str, str] | None:
-    """(grain-id, status) for the feature or milestone a review file NAMES.
+    """(feature-id, status) for the FEATURE a review file NAMES, or None.
 
     Filename-slug resolution, because a transient findings doc is by definition
     not pointed at by any `reviewed:` field — that is what makes it transient.
     Longest slug wins so `health-as-composition` beats a stem that merely
     contains a shorter sibling's slug.
+
+    FEATURES ONLY. `reviewed:` exists on `feature.md` and nowhere else, so a
+    milestone-scoped record has no green state to reach and the finding would
+    order a repair the schema cannot accept.
+
+    KNOWN DEFECT, do not enable D11 against a tree you have not eyeballed: the
+    match is a bare substring, so a slug embedded in a longer word resolves
+    (a feature `den` claims `hidden-room-audit.md`). Anchoring it is deferred
+    pending the co-located-`reviews/` decision, which removes the guess
+    entirely.
     """
     stem = path.stem
     best: tuple[int, str, str] | None = None
     for mdir in milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
-        mid = field_of(mfile, 'id')
         for fdir in sorted((mdir / 'features').glob('*')):
             ffile = fdir / 'feature.md'
             if not ffile.is_file() or fdir.name not in stem:
                 continue
-            cand = (len(fdir.name), field_of(ffile, 'id'), field_of(ffile, 'status'))
+            # The dir slug is the fallback id: a feature.md with no `id:` would
+            # otherwise render as "is transient and  is done".
+            cand = (len(fdir.name), field_of(ffile, 'id') or fdir.name,
+                    field_of(ffile, 'status'))
             if best is None or cand[0] > best[0]:
                 best = cand
-        if mid and mid in stem and (best is None or len(mid) > best[0]):
-            best = (len(mid), mid, field_of(mfile, 'status'))
     return (best[1], best[2]) if best else None
 
 

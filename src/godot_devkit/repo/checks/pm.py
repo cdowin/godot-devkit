@@ -41,11 +41,14 @@ DRIFT RULES (each FAILs, naming the offending path):
       means a prune is due.
 
   D11 review-dir RETENTION — a findings doc outlives its purpose. A `*.md` in
-      the review dir is legitimate while the grain it NAMES is still open; once
-      that feature or milestone is `done` the durable record is the grain's own
+      the review dir is legitimate while the FEATURE it NAMES is still open;
+      once that feature is `done` the durable record is the feature's own
       review record and the transient doc is dead weight a `grep` still finds.
-      A file naming NO grain is reported separately: it is unreachable by
-      definition. OFF by default (see RETENTION_CHECKS).
+      Features only — `reviewed:` exists on `feature.md` and nowhere else, so a
+      milestone-scoped record has no green state to reach. A file naming no
+      feature is not a finding: git history still names it. OFF by default (see
+      RETENTION_CHECKS), and see `model.grain_named_by` for the resolution
+      defect that keeps it unsafe to enable blind.
 
   D12 decision-record SCHEMA — a decision log rots into description. Every
       `## <ID> — <ISO date> — <title>` entry in a DECISIONS.md carries exactly
@@ -70,6 +73,55 @@ from __future__ import annotations
 import sys
 
 from godot_devkit.repo.pm import model
+
+
+def _retention(cfg, report, all_feature_ids) -> int:
+    """D11 — a transient findings doc outliving the feature it names.
+
+    Returns the number of review docs scanned, so the census can carry it:
+    rule 4 wants the file count of every scoping decision, and this one scopes
+    on a CONFIG value nothing else reads.
+
+    One finding class, not two. "Names no grain" was dropped: it produced 116 of
+    117 findings on one consumer, and its claim — nothing can reach the file —
+    is false, because the archived `feature.md` in git history still names it.
+    """
+    rdir = cfg.root / cfg.review_dir
+
+    # Loud, both ways. A typo'd review_dir used to exit 0 with a serene PASS
+    # while the real directory sat there full of stale docs — rule 4's read-side
+    # cardinal sin, produced by a config typo rather than a bug.
+    if not cfg.review_dir.strip():
+        report('[pm] review_dir is empty — D11 would sweep the repo root; '
+               'name the directory or drop D11 from [pm] checks')
+        return 0
+    if not rdir.is_dir():
+        report(f'D11 is enabled but {cfg.review_dir}/ does not exist — the rule '
+               f'scanned nothing (a [pm] review_dir typo?)')
+        return 0
+
+    files = model.review_dir_files(cfg)
+    if not files:
+        # Printed, NOT reported. An empty review dir is this rule's own success
+        # state; D12 fails on a zero census because a missing DECISIONS.md means
+        # it can never fire, which is the opposite situation.
+        print(f'[check:pm] D11: {cfg.rel(rdir)}/ holds no review doc — nothing '
+              f'to retire')
+        return 0
+
+    # A file the tree still POINTS at is durable by definition, so resolve the
+    # pointers once and exempt them: a project whose review records live in
+    # review_dir must satisfy this trivially, or the rule would be punishing the
+    # layout the setting is named for.
+    pointed = model.pointed_review_paths(cfg, all_feature_ids)
+    for rfile in files:
+        if rfile.resolve() in pointed:
+            continue
+        named = model.grain_named_by(cfg, rfile)
+        if named and named[1] == 'done':
+            report(f'{cfg.rel(rfile)} is transient and {named[0]} is done '
+                   f'— its durable record is the grain\'s own (D11)')
+    return len(files)
 
 
 def _decision_schema(cfg, report) -> None:
@@ -277,23 +329,9 @@ def run() -> int:
             report(f'{done_milestone_dirs} done milestone dirs at the roadmap '
                    f'root — lag-by-one allows 1; a prune is due')
 
+    n_review = 0
     if 'D11' in enabled:
-        # A file the tree still POINTS at is durable by definition, so resolve
-        # the pointers once and exempt them: a project whose review records
-        # live in review_dir must satisfy this trivially, or the rule would be
-        # punishing the layout the setting is named for.
-        pointed = {model.review_record_for(cfg, fid) for fid in all_feature_ids}
-        pointed.discard(None)
-        for rfile in model.review_dir_files(cfg):
-            if cfg.rel(rfile) in pointed:
-                continue
-            named = model.grain_named_by(cfg, rfile)
-            if named is None:
-                report(f'{cfg.rel(rfile)} names no grain in the tree — nothing '
-                       f'can reach it, and a grep still can (D11)')
-            elif named[1] == 'done':
-                report(f'{cfg.rel(rfile)} is transient and {named[0]} is done '
-                       f'— its durable record is the grain\'s own (D11)')
+        n_review = _retention(cfg, report, all_feature_ids)
 
     if 'D12' in enabled:
         _decision_schema(cfg, report)
@@ -301,6 +339,8 @@ def run() -> int:
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
+    if 'D11' in enabled:
+        census += f', {n_review} review doc(s)'
     if v_census:
         census += f', {v_census["refs"]} ref(s)'
         if v_census['unverifiable']:

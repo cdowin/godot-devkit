@@ -289,40 +289,6 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('a prune is due', out)
 
-    def test_d11_a_review_doc_outliving_its_done_feature_is_drift(self):
-        # The point: the same file is legitimate WHILE the feature is open and
-        # dead weight the moment it closes. A gate that merely flagged
-        # "unreferenced" would be wrong in the first half of that.
-        with tree(feature_status='building', story_statuses=('review',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D11"]\n', encoding='utf-8')
-            transient = root / 'docs' / 'reviews' / '2026-01-01-alpha.md'
-            transient.write_text('findings\n', encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-            ffile = root / 'pm' / 'roadmap' / '0.1-demo' / 'features' / 'alpha' / 'feature.md'
-            ffile.write_text(
-                ffile.read_text(encoding='utf-8').replace(
-                    'status: building', 'status: done'), encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('is transient and', out)
-            # The pointed-at record is durable by definition and never flagged,
-            # or the rule would punish the layout `review_dir` is named for.
-            self.assertNotIn('reviews/alpha.md is transient', out)
-
-    def test_d11_a_review_doc_naming_nothing_is_unreachable(self):
-        with tree(story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D11"]\n', encoding='utf-8')
-            rdir = root / 'docs' / 'reviews'
-            (rdir / 'README.md').write_text('index\n', encoding='utf-8')
-            (rdir / '2026-01-01-nothing-here.md').write_text('x\n', encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('names no grain', out)
-            self.assertNotIn('README', out)
 
     # --- D12: the decision-record schema ---------------------------------
     # ENTRY is the conforming record from the schema; the mutations below each
@@ -1708,6 +1674,235 @@ class TemplateCannotMintPastTheGraph(unittest.TestCase):
             code, out = run_cli(root, 'new', 'feature', '0.1', 'sneaky', 'S')
             self.assertEqual(code, 1)
             self.assertIn('moves only through the CLI', out)
+
+
+class Retention(unittest.TestCase):
+    """D11 — a transient findings doc outliving the FEATURE it names.
+
+    The shipped rule has one finding class and one exemption, and both halves
+    have burned us: the "names no grain" class was 116 of 117 findings on a real
+    consumer, and the exemption compared display STRINGS, which flagged the
+    tree's own durable record whenever a human typed the pointer any other way.
+    """
+
+    TOML = '[pm]\nchecks = ["D11"]\n'
+    FFILE = 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+
+    @staticmethod
+    def _feature(root: Path, slug: str, status: str, **extra) -> Path:
+        f = root / 'pm/roadmap/0.1-demo/features' / slug / 'feature.md'
+        front = {'id': f'0.1/{slug}', 'milestone': '"0.1"', 'name': slug,
+                 'status': status, 'reviewed': ''}
+        front.update(extra)
+        write(f, front)
+        return f
+
+    @staticmethod
+    def _doc(root: Path, name: str, body: str = 'findings enough to be real\n') -> Path:
+        d = root / 'docs' / 'reviews' / name
+        d.parent.mkdir(parents=True, exist_ok=True)
+        d.write_text(body, encoding='utf-8')
+        return d
+
+    @staticmethod
+    def _close(root: Path, rel: str = FFILE) -> None:
+        f = root / rel
+        f.write_text(f.read_text(encoding='utf-8').replace(
+            'status: building', 'status: done'), encoding='utf-8')
+
+    # --- the finding that is the whole rule -------------------------------
+    def test_a_doc_outliving_its_done_feature_is_drift_and_not_before(self):
+        # The same file is legitimate WHILE the feature is open and dead weight
+        # the moment it closes. A gate that merely flagged "unreferenced" would
+        # be wrong in the first half of that.
+        with tree(feature_status='building', story_statuses=('review',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._doc(root, '2026-01-01-alpha.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+            self._close(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('2026-01-01-alpha.md is transient and 0.1/alpha is done', out)
+            # The pointed-at record is durable by definition and never flagged,
+            # or the rule would punish the layout `review_dir` is named for.
+            self.assertNotIn('reviews/alpha.md is transient', out)
+
+    # --- the two classes that were DROPPED --------------------------------
+    def test_a_doc_naming_no_feature_is_not_a_finding(self):
+        # Dropped: 116 of one consumer's 117 findings, and the claim ("nothing
+        # can reach it") is false — the archived feature.md in git history does.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._doc(root, 'README.md', 'index\n')
+            self._doc(root, '2026-01-01-nothing-here.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('DRIFT', out)
+
+    def test_a_milestone_scoped_doc_is_not_a_finding(self):
+        # Dropped: `reviewed:` exists only on feature.md, so a milestone-scoped
+        # record has NO green state and the finding ordered an impossible repair.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._doc(root, '0.1-milestone-review.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    # --- the exemption ----------------------------------------------------
+    def test_the_pointer_is_exempt_in_every_spelling_a_human_types(self):
+        # The bug: the exemption compared cfg.rel() against the `reviewed:`
+        # string verbatim, so each of these flagged the tree's OWN durable
+        # record for deletion.
+        for spelling in ('docs/reviews/alpha.md', './docs/reviews/alpha.md',
+                         'docs\\reviews\\alpha.md', '<ABS>'):
+            with self.subTest(spelling=spelling):
+                with tree(feature_status='done', story_statuses=('done',)) as root:
+                    (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+                    value = (str((root / 'docs/reviews/alpha.md').resolve())
+                             if spelling == '<ABS>' else spelling)
+                    f = root / self.FFILE
+                    f.write_text(f.read_text(encoding='utf-8').replace(
+                        'reviewed: docs/reviews/alpha.md', f'reviewed: {value}'),
+                        encoding='utf-8')
+                    code, out = run_gate(root)
+                    self.assertEqual(code, 0, out)
+                    self.assertNotIn('alpha.md is transient', out)
+
+    def test_a_short_record_is_exempt_from_d11_while_d1_still_reports_it(self):
+        # Whether a record says ENOUGH is D1's question. Resolving the exemption
+        # through review_record_for() applied record_is_substantive, so one file
+        # got D1 saying "stamp a record" and D11 saying "delete this record" —
+        # two rules ordering opposite repairs on the same path.
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D1", "D11"]\n', encoding='utf-8')
+            (root / 'docs/reviews/alpha.md').write_text('ok\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('done w/o review record', out)
+            self.assertNotIn('is transient', out)
+
+    def test_slug_fallback_exempts_every_candidate_not_just_the_first(self):
+        # review_record_for() returns the FIRST sorted match, so a second
+        # legitimate record was flagged for deletion by the same config that
+        # made the first one durable.
+        with tree(feature_status='done', story_statuses=('done',),
+                  with_record=False) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D11"]\nreview_slug_fallback = true\n',
+                encoding='utf-8')
+            self._doc(root, 'alpha-first.md')
+            self._doc(root, 'alpha-second.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    # --- rule 4: the rule must say what it scanned ------------------------
+    def test_an_absent_review_dir_is_loud(self):
+        # Confirmed on a real tree: `review_dir = "docs/review"` (a typo) exited
+        # 0 with a serene PASS while three stale docs sat in docs/reviews/.
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D11"]\nreview_dir = "docs/review"\n',
+                encoding='utf-8')
+            self._doc(root, '2026-01-01-alpha.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('does not exist', out)
+
+    def test_an_empty_review_dir_setting_is_loud(self):
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D11"]\nreview_dir = ""\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('sweep the repo root', out)
+
+    def test_an_empty_review_dir_is_named_rather_than_silently_passed(self):
+        # Not a FINDING — an empty review dir is this rule's own success state,
+        # unlike D12, whose missing log means it can never fire at all.
+        with tree(feature_status='building', story_statuses=('todo',),
+                  with_record=False) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            (root / 'docs' / 'reviews').mkdir(parents=True)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('holds no review doc', out)
+
+    def test_the_census_carries_the_review_doc_count(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._doc(root, '2026-01-01-alpha.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            # alpha.md (the record) + the transient doc; README is excluded.
+            self.assertIn('2 review doc(s)', out)
+
+    # --- resolution -------------------------------------------------------
+    def test_a_feature_with_no_id_is_named_by_its_directory_slug(self):
+        # Was: "is transient and  is done" — a blank grain and a double space.
+        with tree(feature_status='building', story_statuses=('todo',),
+                  with_record=False) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            f = root / self.FFILE
+            f.write_text(f.read_text(encoding='utf-8').replace(
+                'id: 0.1/alpha\n', ''), encoding='utf-8')
+            self._close(root)
+            self._doc(root, '2026-01-01-alpha.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is transient and alpha is done', out)
+
+    def test_longest_wins_resolves_the_sibling_case_in_both_directions(self):
+        # The real pair. Whichever of the two is `done`, the doc must resolve to
+        # the LONGER slug it actually names — not to the shorter one embedded
+        # in it, and not to whichever directory happens to sort first.
+        for long_status, short_status, expect in (
+                ('done', 'building', 1), ('building', 'done', 0)):
+            with self.subTest(long=long_status):
+                with tree(feature_status='building', story_statuses=('todo',),
+                          with_record=False) as root:
+                    (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+                    self._feature(root, 'hit-feedback', short_status)
+                    self._feature(root, 'hit-feedback-rides-the-host', long_status)
+                    self._doc(root, '2026-01-01-hit-feedback-rides-the-host.md')
+                    code, out = run_gate(root)
+                    self.assertEqual(code, expect, out)
+                    if expect:
+                        self.assertIn('0.1/hit-feedback-rides-the-host is done', out)
+
+    def test_KNOWN_DEFECT_a_slug_inside_a_word_still_resolves(self):
+        """PINS A BUG, does not bless it. Delete this test with the defect.
+
+        `den` is a real feature slug in a real consumer, and the match is a bare
+        substring, so a closed `den` claims `hidden-room-audit.md` and
+        `enemy-density-tuning.md` and confidently instructs their deletion.
+        D11 must not be enabled against a tree nobody has eyeballed until the
+        match is anchored — or until review docs live inside the feature folder,
+        which removes the guess rather than narrowing it.
+        """
+        with tree(feature_status='building', story_statuses=('todo',),
+                  with_record=False) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._feature(root, 'den', 'done')
+            self._doc(root, '2026-08-28-hidden-room-audit.md')
+            self._doc(root, '2026-08-28-enemy-density-tuning.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('hidden-room-audit.md is transient and 0.1/den is done', out)
+            self.assertIn('enemy-density-tuning.md is transient and 0.1/den is done', out)
+
+    def test_d11_is_silent_when_not_enabled(self):
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D4"]\n', encoding='utf-8')
+            self._doc(root, '2026-01-01-alpha.md')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('is transient', out)
+            self.assertNotIn('review doc(s)', out)
 
 
 if __name__ == '__main__':
