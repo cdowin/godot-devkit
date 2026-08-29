@@ -83,6 +83,32 @@ class Codec(unittest.TestCase):
             tilemap.parse_region('-30000,-30000,30000,30000')
 
 
+class SignedValueGlue(unittest.TestCase):
+    """The argv rewrite, on its own — version-independent, unlike the bug.
+
+    argparse fixed `_negative_number_matcher` in 3.14, so the end-to-end cases
+    above only fail on 3.11/3.12/3.13. These pin the rule itself: what gets
+    glued, and everything that must not.
+    """
+
+    def test_glues_only_a_value_that_opens_negative(self) -> None:
+        for argv, want in (
+                (['--region', '-2,-2,1,1'], ['--region=-2,-2,1,1']),
+                (['--at', '-1,-1'], ['--at=-1,-1']),
+                # Already unambiguous, or not a value argparse chokes on.
+                (['--region', '0,0,1,1'], ['--region', '0,0,1,1']),
+                (['--region=-2,-2,1,1'], ['--region=-2,-2,1,1']),
+                # A flag where a value belongs stays the usage error it is.
+                (['--region', '--tile', '9/0,0'], ['--region', '--tile', '9/0,0']),
+                # Not one of the signed-value flags, and not a value at all.
+                (['--layer', '-Floor'], ['--layer', '-Floor']),
+                (['--region'], ['--region']),
+                # `--` ends option parsing; nothing after it is rewritten.
+                (['--', '--region', '-1,-1,0,0'], ['--', '--region', '-1,-1,0,0'])):
+            with self.subTest(argv=argv):
+                self.assertEqual(tilemap.glue_signed_values(argv), want)
+
+
 class ReadCase(unittest.TestCase):
     def read(self, *argv: str) -> int:
         self.output = io.StringIO()
@@ -115,6 +141,15 @@ class ReadsTheGrid(ReadCase):
         self.assertIn('(0,0)  src=1 atlas=(2,1) alt=0', self.text)
         self.read('--layer', FLOOR, '--at', '2,1')
         self.assertIn('(2,1)  empty', self.text)
+
+    def test_at_and_region_reach_the_negative_quadrants(self) -> None:
+        # The read side of the same argparse blind spot: on 3.11/3.12/3.13 both
+        # of these died with `expected one argument` before the parser ever saw
+        # the coordinate, so the whole upper-left quadrant was unaddressable.
+        self.read('--layer', FLOOR, '--at', '-2,5')
+        self.assertIn('(-2,5)  src=1 atlas=(0,0) alt=0', self.text)
+        self.read('--layer', FLOOR, '--region', '-2,4,-1,5')
+        self.assertIn('region x[-2..-1] y[4..5]  1/4 cells', self.text)
 
     def test_region_counts_the_cells_inside_it(self) -> None:
         self.read('--layer', FLOOR, '--region', '0,0,3,2')
@@ -224,6 +259,28 @@ class PaintFills(PaintCase):
     def test_reports_the_new_bounds(self) -> None:
         self.run_verb('erase', '--layer', FLOOR, '--region', '-2,5,-2,5')
         self.assertIn('layer now 11 cells, x[0..3] y[0..2]', self.output.getvalue())
+
+    def test_paints_the_upper_left_quadrant(self) -> None:
+        # `--region -3,-3,-2,-2` is an ordinary rectangle: `CELL_STRUCT` signs
+        # x and y precisely because the grid has negative quadrants. argparse
+        # before 3.14 excuses a leading `-` only for a BARE number, so this
+        # died with `argument --region: expected one argument` on 3.11/3.12/3.13
+        # — every Python a consumer's `uvx` actually selects today.
+        code = self.run_verb('paint', '--layer', EMPTY,
+                             '--region', '-3,-3,-2,-2', '--tile', '4/1,2/3')
+        self.assertEqual(code, tiles_paint.EXIT_OK, self.output.getvalue())
+        self.assertEqual(self.cells(EMPTY),
+                         {(x, y): Tile(4, 1, 2, 3)
+                          for y in (-3, -2) for x in (-3, -2)})
+
+    def test_a_flag_where_a_region_belongs_is_still_a_usage_error(self) -> None:
+        # The glue is narrow on purpose: only a token opening `-<digit>` is
+        # rewritten, so a genuinely malformed invocation keeps exiting 2 rather
+        # than becoming a REFUSED about a region named `--tile`.
+        with self.assertRaises(SystemExit) as caught, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.run_verb('paint', '--layer', EMPTY, '--region', '--tile', '4/1,2/3')
+        self.assertEqual(caught.exception.code, 2)
 
 
 class PaintIsSurgical(PaintCase):

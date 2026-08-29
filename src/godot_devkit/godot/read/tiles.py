@@ -30,6 +30,7 @@ from godot_devkit.godot.format.tilemap import (
     TileMapError,
     bounds,
     decode_or_empty,
+    glue_signed_values,
     parse_coord,
     parse_region,
 )
@@ -129,7 +130,9 @@ def main(argv: list[str] | None = None) -> int:
                         help='the tile at one cell, or `empty`')
     parser.add_argument('--region', metavar=REGION_SPEC,
                         help='cell count + tile kinds inside an inclusive rectangle')
-    args = parser.parse_args(argv)
+    # `--at -1,-1` and `--region -2,-2,1,1` are ordinary grid coordinates and
+    # argparse before 3.14 reads them as options. See `glue_signed_values`.
+    args = parser.parse_args(glue_signed_values(argv) if argv is not None else None)
     try:
         sections = parse(args.file)
     except OSError as err:

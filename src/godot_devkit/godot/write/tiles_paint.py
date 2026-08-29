@@ -37,6 +37,7 @@ from godot_devkit.godot.format.tilemap import (
     bounds,
     decode_or_empty,
     encode,
+    glue_signed_values,
     parse_region,
     parse_tile,
 )
@@ -145,7 +146,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    # `--region -2,-2,1,1` is an ordinary rectangle in the upper-left quadrant,
+    # and argparse before 3.14 reads it as an option. See `glue_signed_values`.
+    args = parser.parse_args(glue_signed_values(argv))
     path = Path(args.file)
     if not path.is_file():
         print(f'godot-devkit tiles {args.verb}: no such file: {path}')

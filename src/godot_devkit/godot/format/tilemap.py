@@ -52,6 +52,17 @@ VALUE_SEP = ','
 # than allowed to allocate the whole int16 plane (4.3 billion cells).
 MAX_REGION_CELLS = 1_000_000
 
+# The flags whose values may open with `-`, and argparse's blind spot around
+# them. Before 3.14, argparse excuses a leading `-` only for a BARE number
+# (`_negative_number_matcher` is `^-\d+$|^-\d*\.\d+$`), so `-2,-2,1,1` reads as
+# an option and the run dies with `argument --region: expected one argument`.
+# The grid's negative quadrants are not an edge case — `CELL_STRUCT` signs x
+# and y precisely because the upper-left quadrant is ordinary — so on the
+# declared 3.11 floor `tiles paint/erase` could not address a quarter of the
+# plane, and `uvx` picks the interpreter, not the consumer.
+SIGNED_VALUE_FLAGS = ('--region', '--at')
+_OPENS_NEGATIVE = re.compile(r'^-\d')
+
 
 class TileMapError(Exception):
     """A `tile_map_data` value this module refuses to guess at."""
@@ -196,6 +207,36 @@ def parse_coord(spec: str) -> tuple[int, int]:
     coord = (_int(parts[0], 'coordinate x'), _int(parts[1], 'coordinate y'))
     _check_range('cell coordinate', coord, COORD_MIN, COORD_MAX)
     return coord
+
+
+def glue_signed_values(argv: list[str],
+                       flags: tuple[str, ...] = SIGNED_VALUE_FLAGS) -> list[str]:
+    """`--region -2,-2,1,1` -> `--region=-2,-2,1,1`, which every version reads.
+
+    Applied to the ARGV, not to the parser: the private matcher argparse keys on
+    was rewritten in 3.14, and a tool whose behaviour depends on which patch of
+    CPython a consumer's `uvx` happened to pick is not a tool.
+
+    Deliberately narrow. Only a token that OPENS with a minus and a digit is
+    glued, so `--region --tile 9/0,0` still reaches argparse as the malformed
+    invocation it is and still exits 2. `--region=…` and anything already
+    positive are untouched, and so is everything after `--`.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == '--':
+            out.extend(argv[i:])
+            break
+        if (arg in flags and i + 1 < len(argv)
+                and _OPENS_NEGATIVE.match(argv[i + 1])):
+            out.append(f'{arg}={argv[i + 1]}')
+            i += 2
+            continue
+        out.append(arg)
+        i += 1
+    return out
 
 
 def parse_region(spec: str) -> Region:

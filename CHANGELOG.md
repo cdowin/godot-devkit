@@ -157,6 +157,18 @@ customisation.
 entry when one is inserted above it; `decision_grandfather = []` exits 2 though the docstring shows
 it as the default; `ScaffoldRefused` prints an absolute path rather than a repo-relative one.
 
+**`tiles --region` and `tiles --at` can address the negative quadrants again.** `--region -2,-2,1,1`
+died with `argument --region: expected one argument` on **every Python a consumer actually runs**:
+argparse before 3.14 excuses a leading `-` only for a bare number, so a coordinate list read as an
+option. Godot cell coordinates are routinely negative — `tile_map_data` signs x and y precisely
+because the upper-left quadrant is ordinary — so `tiles paint` / `tiles erase` / `tiles --at` could
+not reach a quarter of the plane on the declared 3.11 floor, while passing on 3.14. Fixed in the
+argv, not the parser (the private matcher argparse keys on was rewritten in 3.14, and a tool whose
+behaviour depends on which interpreter `uvx` picked is not a tool): a token opening `-<digit>` after
+one of those flags is glued into `--flag=value`. Narrow on purpose — `--region --tile 9/0,0` is still
+a usage error with exit 2, and nothing after `--` is touched. Predates v0.12.0. The suite now runs
+green on 3.11, 3.12, 3.13 and 3.14; it was 296 passed / 1 failed below 3.14.
+
 **Breaking for a tree that has one:** the decision log is `decisions.md`, not `DECISIONS.md`, and the
 handoff is `handoff.md`. `pm new milestone <id>` / `pm new feature <mid> <slug>` performs the rename.
 `pm new feature` scaffolds `design/`, not `plans/`. The bug template carries `fix_milestone:` in
