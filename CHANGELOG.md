@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.14.0
+## v0.14.0 — 2026-08-29
 
 - **a milestone has release notes** — `pm changelog <milestone-id> --what … --evidence …` appends a release note to that milestone's own log. (e432831)
 - **the whole log, newest release first** — `pm changelog --render` prints the union of every milestone's notes to stdout, newest release first. (e432831)

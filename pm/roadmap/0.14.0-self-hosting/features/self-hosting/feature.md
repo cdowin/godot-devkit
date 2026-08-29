@@ -2,8 +2,8 @@
 id: 0.14.0/self-hosting
 milestone: "0.14.0"
 name: devkit runs its own gates on its own tree
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.14.0-self-hosting/features/self-hosting/decisions.md
 risk: medium
 size: m
 phase:

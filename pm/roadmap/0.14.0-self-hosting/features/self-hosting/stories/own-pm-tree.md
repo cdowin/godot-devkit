@@ -3,7 +3,7 @@ id: 0.14.0/self-hosting/own-pm-tree
 feature: 0.14.0/self-hosting
 milestone: "0.14.0"
 name: devkit grows a PM tree
-status: wip
+status: done
 owner:
 estimate:
 depends_on: []

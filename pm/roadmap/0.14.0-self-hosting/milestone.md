@@ -1,10 +1,10 @@
 ---
 id: "0.14.0"
 name: self hosting
-status: building
+status: done
 theme: devkit uses its own system
 target_date:
-actual_date:
+actual_date: 2026-08-29
 depends_on: []
 risk: low
 track:

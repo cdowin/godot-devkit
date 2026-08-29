@@ -3,7 +3,7 @@ id: 0.14.0/self-hosting/sharded-changelog
 feature: 0.14.0/self-hosting
 milestone: "0.14.0"
 name: the CHANGELOG is rendered from the tree
-status: wip
+status: done
 owner:
 estimate:
 depends_on: []

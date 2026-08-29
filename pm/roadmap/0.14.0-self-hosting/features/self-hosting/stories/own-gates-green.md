@@ -3,7 +3,7 @@ id: 0.14.0/self-hosting/own-gates-green
 feature: 0.14.0/self-hosting
 milestone: "0.14.0"
 name: check all is green inside godot-devkit
-status: wip
+status: done
 owner:
 estimate:
 depends_on: []

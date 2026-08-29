@@ -3,7 +3,7 @@ id: 0.14.0/self-hosting/story-id-recursion
 feature: 0.14.0/self-hosting
 milestone: "0.14.0"
 name: a nested story is addressable by id
-status: wip
+status: done
 owner:
 estimate:
 depends_on: []

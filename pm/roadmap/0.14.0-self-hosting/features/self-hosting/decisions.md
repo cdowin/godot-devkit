@@ -55,3 +55,9 @@ pointers, and everything that still explains a live constraint stays.
 **Over:** deleting every historical section uniformly
 **Because:** v0.13.0 is the only written notice of the DECISIONS.md rename, and trail is pinned at v0.10.0 and has not migrated
 **Evidence:** CHANGELOG.md:1
+
+## D9 — 2026-08-29 — the toolkit runs its own gates
+**Chose:** Point every gate devkit ships at devkit's own tree
+**Over:** Ship gates that only ever run in consumer repos
+**Because:** Enabling uid on its own tree is the only thing that surfaced exclude_prefixes scoping just half the gate — a config key that silently half-applied through three releases
+**Evidence:** 0c40c20
