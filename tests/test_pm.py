@@ -425,6 +425,102 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('1 decision log(s), 1 entry/ies', out)
 
+    # --- the comment scan is not a one-way toggle -------------------------
+    # A single-pass `inside = True` with no terminator requirement turns one
+    # stray marker into a silent exemption for every line after it. All three
+    # cases below were real: a PASS over a violation, a FAIL over a conforming
+    # entry, and a census that undercounted while printing PASS.
+
+    SECOND = (
+        '## D2 — 2026-08-28 — the second decision, plainly conforming\n'
+        '**Chose:** keep the second entry visible\n'
+        '**Over:** losing it to a stray marker\n'
+        '**Because:** the census must be honest\n'
+        '**Evidence:** `abc1234`\n')
+
+    def test_d12_reads_a_fenced_block_as_a_sample_not_as_log_text(self):
+        # A fenced block is verbatim text: `<!--` inside it opens nothing and
+        # `## <short title>` inside it is not a heading. Before the fix the
+        # unterminated marker inside the fence marked the REAL `## D2` below it
+        # dead, and the gate printed `1 entry/ies … PASS` over a 2-entry log.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, self.ENTRY + '\n```html\n'
+                            '<!-- the retired template block\n'
+                            '## <short title>\n'
+                            '**Decision:** <what was chosen>\n'
+                            '```\n\n'
+                            '## D2 — a real decision that violates the schema\n'
+                            '**Chose:** something\n'
+                            '**Because:** we discussed it and agreed\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('D2 — missing **Over:**', out)
+            # The fenced sample is neither an entry nor an unclosed comment.
+            self.assertNotIn('<short title>', out)
+            self.assertNotIn('never closed', out)
+            self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+    def test_d12_reads_a_marker_in_backticks_as_a_marker_being_named(self):
+        # The entry that broke the parser by being ABOUT it. Before the fix its
+        # own `**Chose:**` opened a comment that ate its remaining three fields
+        # — a false FAIL against a conforming entry — and swallowed the next
+        # entry whole, so the census said 1 over a 2-entry log.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root,
+                      '## D1 — 2026-08-28 — ignore comment blocks when parsing\n'
+                      '**Chose:** ignore `<!--` blocks when parsing a log\n'
+                      '**Over:** treating them as live text\n'
+                      '**Because:** a comment renders as nothing\n'
+                      '**Evidence:** `64e89ad5b`\n\n' + self.SECOND)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+    def test_d12_reports_an_unclosed_comment_instead_of_truncating_the_log(self):
+        # Rule 4, read side: a marker with no terminator is a MALFORMED log,
+        # and D12 cannot honestly claim to have scanned what it cannot
+        # delimit. Before the fix it printed `1 entry/ies … PASS` over three
+        # entries. It must now suppress nothing and say what is wrong.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, self.ENTRY +
+                            '\nProse that mentions <!-- and never closes it.\n\n'
+                            + self.SECOND)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('opens an HTML comment `<!--` that is never closed', out)
+            self.assertIn('line 11', out)  # the marker's own line, to jump to
+            self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+            # Closing it clears the finding and changes no count.
+            log.write_text(log.read_text(encoding='utf-8').replace(
+                'and never closes it.', 'and closes it. -->'), encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+    def test_pm_decide_appends_past_a_stray_comment_marker(self):
+        # The user-visible half of the same bug: with the rest of the log
+        # marked dead, `pm decide` re-parsed its own composed entry, could not
+        # see it, and refused with `does not parse as a decision entry` —
+        # naming no cause an author could act on.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, self.ENTRY +
+                            '\nProse that mentions <!-- and never closes it.\n\n'
+                            + self.SECOND)
+            code, out = run_cli(root, 'decide', '0.1', '--chose', 'x',
+                                '--over', 'y', '--because', 'z',
+                                '--evidence', '`deadbee`')
+            self.assertEqual(code, 0, out)
+            self.assertIn('## D3 — ', log.read_text(encoding='utf-8'))
+
     def test_d12_prints_its_census_and_carries_it_into_the_summary(self):
         # D11 prints its done-grain count, D13 its grain dirs, D14 its bugs.
         # Without D12's, "scanned 58 logs / 294 entries", "scanned 1 log" and
@@ -2251,7 +2347,7 @@ class Decide(unittest.TestCase):
             self.assertIn('## D1 — ', log.read_text(encoding='utf-8'))
             self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
             self.assertIn('## D2 — ', log.read_text(encoding='utf-8'))
-            self.assertEqual(len(model.decision_entries(log)), 2)
+            self.assertEqual(len(model.decision_entries_in(model.read_raw(log))), 2)
 
     def test_it_keeps_the_logs_own_id_prefix(self):
         # A tree that numbers `M27` keeps numbering `M`. The prefix is the
@@ -2364,7 +2460,7 @@ class Decide(unittest.TestCase):
             raw = model.read_raw(log)
             self.assertNotIn('\r\r', raw)
             self.assertEqual(raw.count('\n'), raw.count('\r\n'))
-            self.assertEqual(len(model.decision_entries(log)), 1)
+            self.assertEqual(len(model.decision_entries_in(model.read_raw(log))), 1)
 
 
 if __name__ == '__main__':

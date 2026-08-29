@@ -198,13 +198,20 @@ def _decision_schema(cfg, report) -> tuple[int, int]:
         if key in ledger:
             seen.add(key)
         try:
-            entries = model.decision_entries(log)
+            text = model.read_raw(log)
         except (OSError, UnicodeDecodeError) as err:
             # Reported, never counted as scanned-with-zero-entries: an
             # unreadable log would otherwise be exempt from D12 for free.
             report(f'{key} cannot be read ({err}) — a log D12 cannot open is '
                    f'not a log D12 has checked (D12)')
             continue
+        # Reported whatever the ledger says: a grandfather caps the first N
+        # ENTRIES, and an unclosed comment is a defect of the file, not of an
+        # entry — it is the reason the entry count below may be a lie.
+        defect = model.decision_comment_defect(text)
+        if defect:
+            report(f'{key}: {defect} (D12)')
+        entries = model.decision_entries_in(text)
         n_entries += len(entries)
         n_suppressed = 0
         for ordinal, eid, why in model.decision_violations_in(entries):

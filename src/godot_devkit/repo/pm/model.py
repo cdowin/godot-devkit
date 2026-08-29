@@ -1037,41 +1037,130 @@ def decision_files(cfg: PmConfig) -> tuple[list[Path], list[Path]]:
     return sorted(logs), sorted(variants)
 
 
-def decision_entries(path: Path) -> list[DecisionEntry]:
-    """The decision entries in one log, in document order.
+_CODE_FENCE = re.compile(r'^[ ]{0,3}(`{3,}|~{3,})[ \t]*(\S*)')
 
-    Raises `OSError`/`UnicodeDecodeError` rather than answering []: a log D12
-    cannot open is not a log D12 has checked, and an empty answer here reads as
-    "scanned, nothing wrong" — a silent exemption the caller cannot see.
+
+def _mask_code_spans(raw: str) -> str:
+    """The line with every inline `code span` blanked to spaces.
+
+    Offsets are preserved, so the caller can go on searching the masked line
+    and still report positions from the real one. A marker inside backticks is
+    a marker being NAMED, not a comment being opened — which is exactly how a
+    log documenting comment handling swallowed its own next three fields.
     """
-    return decision_entries_in(read_raw(path))
+    out = list(raw)
+    i, n = 0, len(raw)
+    while i < n:
+        if raw[i] != '`':
+            i += 1
+            continue
+        j = i
+        while j < n and raw[j] == '`':
+            j += 1
+        close = raw.find(raw[i:j], j)
+        if close < 0:  # an unpaired run opens no span
+            i = j
+            continue
+        end = close + (j - i)
+        for k in range(i, end):
+            out[k] = ' '
+        i = end
+    return ''.join(out)
 
 
-def _outside_comments(lines: list[str]) -> list[bool]:
-    """Per line: is it OUTSIDE an HTML comment at the point it starts?
+def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool]]:
+    """(each line with inline code spans blanked, which lines are FENCED).
+
+    A fenced block is a code sample the reader sees verbatim: `## <short title>`
+    inside one is not a heading and `<!--` inside one is a marker being quoted,
+    not a comment being opened. Fenced lines are blanked here and excluded from
+    entry detection by the caller — counting a template's example block as a
+    real entry is the same lie in the other direction.
+
+    Blanking preserves length, so a marker OUTSIDE the masked ranges still lands
+    at its real offset.
+    """
+    out: list[str] = []
+    fenced: list[bool] = []
+    fence = ''
+    for raw in lines:
+        body = raw.rstrip('\r')
+        m = _CODE_FENCE.match(body)
+        if fence:
+            out.append(' ' * len(raw))
+            fenced.append(True)
+            # A closing fence is the same character, at least as long, and
+            # carries no info string.
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                    and not m.group(2):
+                fence = ''
+            continue
+        if m:
+            fence = m.group(1)
+            out.append(' ' * len(raw))
+            fenced.append(True)
+            continue
+        out.append(_mask_code_spans(raw))
+        fenced.append(False)
+    return out, fenced
+
+
+def _comment_scan(lines: list[str]) -> tuple[list[bool], int]:
+    """(per line: is it LIVE log text — outside any HTML comment at the point it
+    starts, and outside any fenced code block?, the 1-based line of an `<!--`
+    that is never closed, or 0).
 
     A `<!-- ... -->` block renders as nothing, so what it holds is not in the
     log. Load-bearing here because the RETIRED decisions template shipped its
     example block commented out, `**Decision:**` field lines and all — and the
     field line is exactly the signal entry detection keys on.
+
+    Only a CLOSED block suppresses anything. A single-pass toggle would let one
+    stray `<!--` mark the whole rest of the file dead and still print PASS over
+    the entries it ate — rule 4's cardinal sin, from a log that looks fine to
+    every reader. So spans are collected first and an unterminated marker
+    suppresses nothing at all; it is returned to be REPORTED, because a log
+    whose comments D12 cannot delimit is a log D12 has not honestly scanned.
     """
-    out: list[bool] = []
-    inside = False
-    for raw in lines:
-        out.append(not inside)
+    masked, fenced = _mask_markup(lines)
+    live = [not f for f in fenced]
+    spans: list[tuple[int, int]] = []
+    inside, start = False, 0
+    for idx, body in enumerate(masked):
         i = 0
-        while i < len(raw):
+        while i < len(body):
             if inside:
-                j = raw.find('-->', i)
+                j = body.find('-->', i)
                 if j < 0:
                     break
+                spans.append((start, idx))
                 inside, i = False, j + 3
             else:
-                j = raw.find('<!--', i)
+                j = body.find('<!--', i)
                 if j < 0:
                     break
-                inside, i = True, j + 4
-    return out
+                inside, start, i = True, idx, j + 4
+    for opened, closed in spans:
+        # The opening line itself stays live: the marker may sit after real
+        # content on it, and that content is in the log.
+        for k in range(opened + 1, closed + 1):
+            live[k] = False
+    return live, (start + 1 if inside else 0)
+
+
+def decision_comment_defect(text: str) -> str:
+    """'' when the log's HTML comments are all closed, else what is wrong.
+
+    Separate from the entry list on purpose: this is a defect of the LOG, not
+    of any entry, so no grandfather ordinal caps it and no entry name carries
+    it.
+    """
+    _, unclosed = _comment_scan(_split(text))
+    if not unclosed:
+        return ''
+    return (f'line {unclosed} opens an HTML comment `<!--` that is never '
+            f'closed — the log is malformed and D12 cannot say what it holds; '
+            f'close it, or put the marker in backticks if you meant to name it')
 
 
 def decision_entries_in(text: str) -> list[DecisionEntry]:
@@ -1087,7 +1176,7 @@ def decision_entries_in(text: str) -> list[DecisionEntry]:
     is never schema-checked: a log may have a preamble.
     """
     lines = _split(text)
-    live = _outside_comments(lines)
+    live, _ = _comment_scan(lines)
     out: list[DecisionEntry] = []
     for i, raw in enumerate(lines):
         if not live[i]:

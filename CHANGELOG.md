@@ -118,7 +118,11 @@ template told authors to write `## <short title>` with `**Decision:/Because:/Rej
 underneath, and against trail's live corpus a heading-only test called 8 of 9 real decision blocks
 prose and passed the whole file, its single finding landing on the one heading that happened to
 contain a bug id. A heading with neither an id/date nor a field line is prose and is never
-schema-checked, so a log may open with a preamble; a `<!-- -->` block is not in the log at all.
+schema-checked, so a log may open with a preamble. A CLOSED `<!-- -->` block is not in the log at
+all, and neither is a fenced code block — both are text the entry parser steps over. An UNCLOSED
+`<!--` suppresses nothing and is itself reported: a marker with no terminator would otherwise mark
+every line after it dead, and D12 would print PASS over the entries it ate. A marker inside backticks
+or a fence is a marker being named, not a comment being opened.
 Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` exempts a whole log,
 `"<path>:<N>"` only its first N entries — whose size the gate PRINTS every run and which may only
 shrink: an exemption that suppresses nothing, a cap reaching past the end of its log, and a line
