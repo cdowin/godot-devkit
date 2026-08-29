@@ -166,14 +166,23 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
 
     # Resolve every case-variant FIRST, so the status read below and the writes
     # after it both see the canonical names.
+    #
+    # Every refusal for the WHOLE grain is raised before the first rename runs.
+    # Deciding slot-by-slot inside the moving loop meant an earlier slot's
+    # rename was already on disk — and, through `git mv --force`, already in the
+    # INDEX — while the message said "nothing was written". Rule 3: a write verb
+    # refuses whole or not at all. The staged half is the worse harm of the two:
+    # on a shared tree it rides out on the next `git commit` under someone
+    # else's message, which is exactly what a consumer's commit hook exists to
+    # stop.
     entries = model.dir_entries(gdir)
+    renames: list[tuple[str, str]] = []
     for slot in file_slots:
         if entries.get(slot) == 'file':
             continue
         if entries.get(slot) == 'dir':
-            # Refused BEFORE anything moves, not crashed: exit 1 is reserved for
-            # findings, so a traceback out of here reads to a consumer's hook as
-            # "drift found".
+            # Refused, not crashed: exit 1 is reserved for findings, so a
+            # traceback out of here reads to a consumer's hook as "drift found".
             raise ScaffoldRefused(
                 f'{cfg.rel(gdir / slot)} is a DIRECTORY and {slot} is a file '
                 f'slot — nothing was written; move it aside')
@@ -183,8 +192,24 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                 f'{cfg.rel(gdir)}/ holds {len(variants)} spellings of {slot} '
                 f'({", ".join(variants)}) — nothing was written; keep one')
         if variants:
-            _rename_case(cfg, gdir / variants[0], gdir / slot)
-            actions.append((f'renamed {variants[0]} ->', gdir / slot))
+            renames.append((variants[0], slot))
+
+    for i, (variant, slot) in enumerate(renames):
+        try:
+            _rename_case(cfg, gdir / variant, gdir / slot)
+        except ScaffoldRefused as err:
+            # git refusing one `mv --force` cannot be inspected for in advance.
+            # What CAN be guaranteed is that the message stops claiming nothing
+            # happened once something has: an operator who is not told about a
+            # staged rename cannot undo it.
+            if not i:
+                raise
+            moved = ', '.join(f'{v} -> {s}' for v, s in renames[:i])
+            raise ScaffoldRefused(
+                f'{err} — NOTE: {i} earlier rename(s) in '
+                f'{cfg.rel(gdir)}/ already landed and are staged ({moved}); '
+                f'unstage or finish them before re-running') from err
+        actions.append((f'renamed {variant} ->', gdir / slot))
     entries = model.dir_entries(gdir)
 
     grain_slot = f'{kind}.md'

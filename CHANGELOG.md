@@ -33,7 +33,13 @@ the new name stages nothing: the migration goes green on the laptop, gets commit
 checks out the old name with D13 reporting every renamed grain missing and D12 scanning nothing. If
 git tracks the path and refuses the move, the scaffolder **refuses too**, printing the exact command
 — a half-done rename is the one outcome worse than none. A file slot that exists as a DIRECTORY is
-likewise refused rather than crashed, because exit 1 is reserved for findings. Measured on scratch
+likewise refused rather than crashed, because exit 1 is reserved for findings. Every refusal the
+grain can raise is decided **before the first rename runs**, so `nothing was written` is a claim
+about the whole grain rather than about the slot the refusal happened to land on: the slot order is
+`milestone.md, handoff.md, decisions.md, review.md`, and a refusal keyed on `decisions.md` used to
+leave `HANDOFF.md -> handoff.md` on disk and staged, where it rides out on the next commit under
+somebody else's message. The one refusal that cannot be inspected for in advance — git declining a
+`git mv --force` — now names what already landed instead of claiming nothing did. Measured on scratch
 copies of both consumers, with a second full pass changing nothing:
 
 | | grain dirs | slots created | renamed | headers restored |

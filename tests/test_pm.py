@@ -27,6 +27,25 @@ from godot_devkit.repo.pm import cli, model
 LEGACY_LOG = '# legacy log\n\nM1 said something.\n'
 
 
+def _case_sensitive_tmp() -> bool:
+    """Can two names differing only by case coexist where tests build trees?
+
+    macOS is case-INSENSITIVE by default, so the two-spellings case cannot be
+    STAGED there at all. Reported as a skip rather than asserted away: a test
+    that quietly passes because its fixture could not be built is rule 4's sin
+    wearing a test's clothes.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        lower = Path(tmp) / 'casetest.md'
+        lower.write_text('x', encoding='utf-8')
+        upper = Path(tmp) / 'CASETEST.md'
+        upper.write_text('y', encoding='utf-8')
+        return lower.read_text(encoding='utf-8') == 'x'
+
+
+CASE_SENSITIVE_TMP = _case_sensitive_tmp()
+
+
 def write(path: Path, front: dict[str, str], body: str = 'x') -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ['---'] + [f'{k}: {v}' for k, v in front.items()] + ['---', '', body, '']
@@ -785,6 +804,54 @@ class Scaffolding(unittest.TestCase):
             self.assertIn('is a DIRECTORY', out)
             self.assertIn('nothing was written', out)
             self.assertFalse((mdir / 'handoff.md').exists())
+
+    # `nothing was written` is a claim about the WHOLE grain, and the slot order
+    # is milestone.md, handoff.md, decisions.md, review.md — so every refusal
+    # that keys on decisions.md is reached with handoff.md's rename already
+    # decided. Deciding inside the moving loop put that rename on disk and, via
+    # `git mv --force`, in the INDEX, where it rides out on the next commit
+    # under someone else's message.
+
+    def _committed_legacy_grain(self, root: Path, extra: dict) -> Path:
+        mdir = root / 'pm/roadmap/0.1-demo'
+        (mdir / 'HANDOFF.md').write_text('# legacy handoff\n', encoding='utf-8')
+        for name, body in extra.items():
+            if body is None:
+                (mdir / name).mkdir()
+            else:
+                model.write_raw(mdir / name, body)
+        git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
+        subprocess.run([*git, 'add', '-A'], cwd=root, check=True)
+        subprocess.run([*git, 'commit', '-qm', 'fixture'], cwd=root, check=True)
+        return mdir
+
+    def _porcelain(self, root: Path) -> str:
+        return subprocess.run(['git', 'status', '--porcelain'], cwd=root,
+                              check=True, capture_output=True, text=True).stdout
+
+    def test_new_refuses_a_dir_slot_without_staging_an_earlier_rename(self):
+        with tree(story_statuses=('todo',)) as root:
+            mdir = self._committed_legacy_grain(root, {'decisions.md': None})
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('is a DIRECTORY', out)
+            self.assertIn('nothing was written', out)
+            # The claim, checked: nothing on disk and nothing in the index.
+            self.assertEqual(self._porcelain(root), '')
+            self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
+
+    @unittest.skipUnless(CASE_SENSITIVE_TMP,
+                         'two spellings of one name need a case-sensitive FS')
+    def test_new_refuses_two_spellings_without_staging_an_earlier_rename(self):
+        with tree(story_statuses=('todo',)) as root:
+            mdir = self._committed_legacy_grain(
+                root, {'DECISIONS.md': LEGACY_LOG, 'Decisions.md': LEGACY_LOG})
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('2 spellings of decisions.md', out)
+            self.assertIn('nothing was written', out)
+            self.assertEqual(self._porcelain(root), '')
+            self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
 
     def test_new_never_stacks_a_second_header_on_a_doc_that_has_one(self):
         with tree(story_statuses=('todo',)) as root:
