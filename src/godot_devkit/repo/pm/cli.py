@@ -18,6 +18,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,7 +30,11 @@ USAGE = """usage: godot-devkit pm <command>
   story <wip|review|blocked> <story-id>   (review is the story terminal — no story done)
   feature <ready|building> <feature-id>
   feature review <feature-id>
-  feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
+  feature done <feature-id> [--review-record <path>]   (cascade-closes review stories;
+                                                        REFUSES a record pointing at the
+                                                        transient review.md — D11 deletes
+                                                        that at close, so the durable record
+                                                        is the decision log it fed)
   milestone <ready|building|done> <milestone-id>       (done refuses unless all features done,
                                                         and stamps actual_date: — the date the
                                                         changelog render puts in its heading;
@@ -63,6 +68,12 @@ USAGE = """usage: godot-devkit pm <command>
                                            newest release first, to stdout)
   prose-ledger                            (regenerate `[pm] prose_grandfather`, D17's debt
                                            ledger, to stdout — REFUSES to raise a ceiling)
+  collapse <milestone-id> [--keep <ids>] [--note <sentence>]
+                                          (D18's close step: rewrite a `done` milestone's
+                                           raw decision trail to one generated pointer,
+                                           keeping the entries named by --keep. The one
+                                           sanctioned edit of an append-only log, and it
+                                           refuses to emit a file D18 would still fail)
   prune                                   (delete cooled archives; stamp the prune log)"""
 
 
@@ -234,6 +245,34 @@ def cmd_feature_review(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+def _resolve_record(cfg: model.PmConfig, rec: str) -> Path:
+    return Path(rec) if rec.startswith('/') else cfg.root / rec
+
+
+def _refuse_transient_record(cfg: model.PmConfig, fid: str, rec: str) -> None:
+    """Refuse a `reviewed:` pointer aimed at the TRANSIENT `review.md` slot.
+
+    The close protocol contradicted itself and the contradiction was only
+    resolvable by knowing a rule nobody had written down: stamp `reviewed:` at
+    `review.md`, obey D11 and delete it, and the feature is `done w/o review
+    record`. Enforced here rather than documented, because the whole point of
+    the CLI owning `status:` is that a human never has to hold the protocol in
+    their head to close something correctly.
+    """
+    if not model.is_transient_review_slot(cfg, _resolve_record(cfg, rec)):
+        return
+    durable = model.durable_record_for(cfg, fid)
+    where = cfg.rel(durable) if durable else 'the feature\'s decisions.md'
+    raise Refused(
+        f'feature {fid} -> done: review record {rec!r} is the TRANSIENT '
+        f'{model.REVIEW_FILE_NAME} slot, which D11 deletes at close — pointing '
+        f'`reviewed:` at it closes the feature and then strands it '
+        f'"done w/o review record". The durable record of a review is the '
+        f'decision log it fed: promote what the review settled with '
+        f'`{PROG} decide {fid} --chose … --over … --because … --evidence …`, '
+        f'then close with --review-record {where}. feature.md left untouched.')
+
+
 def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     fid = ''
     rec = ''
@@ -256,6 +295,11 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     if not fid:
         raise Usage(USAGE)
     ff, cur = _feature_or_usage(cfg, fid)
+    if rec:
+        # Before ANY write, and before the already-done shortcut: a late
+        # correction that re-points `reviewed:` at the transient slot is the
+        # same defect arriving by the other door.
+        _refuse_transient_record(cfg, fid, rec)
 
     # Idempotent no-op, but still allow a late --review-record correction on an
     # already-done feature without re-transitioning it.
@@ -278,8 +322,15 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
         raise Refused(f'feature {fid} -> done: stories not at review: {" ".join(pending)}')
     to_close = [p for p, st in states if st == 'review']
 
+    # An EXISTING `reviewed:` aimed at the transient slot is refused too, and
+    # before the stories cascade: a hand-edited pointer reaches `done` by the
+    # same route as a flagged one, and would strand the feature identically.
+    standing = model.unquote(model.field_of(ff, 'reviewed'))
+    if not rec and standing and standing != 'null':
+        _refuse_transient_record(cfg, fid, standing)
+
     if rec:
-        target = Path(rec) if rec.startswith('/') else cfg.root / rec
+        target = _resolve_record(cfg, rec)
         if not model.record_is_substantive(cfg, target):
             raise Refused(
                 f'feature {fid} -> done: review record {rec!r} is missing/empty/'
@@ -1304,6 +1355,136 @@ def cmd_changelog(cfg: model.PmConfig, args: list[str]) -> int:
                           values, title, '--what', 'What')
 
 
+# --- collapse (D18) -----------------------------------------------------------
+# THE missing verb. D18 requires a `done` milestone to collapse its raw decision
+# trail to pointers — but decisions.md is append-only and written ONLY by
+# `pm decide`, so the collapse could be performed exactly one way: by hand, in a
+# file whose own first line says never by hand. One rule demanding an edit
+# another rule forbids is not a policy, it is a gap, and it was closed by a
+# human deleting 66 lines and hoping the result still conformed.
+#
+# The verb makes the collapse the same kind of act as every other status move:
+# preconditions first, all-or-nothing, idempotent, and its OUTPUT is gate-clean
+# by construction — it refuses rather than emit a file D18 would still fail.
+COLLAPSE_FLAGS = {'--keep': 'keep', '--note': 'note'}
+COLLAPSE_MARKER = 'Collapsed at close'
+
+
+def _collapsed_block(collapsed: list[model.LogEntry], when: str,
+                     note: str) -> list[str]:
+    """The pointer that replaces a run of entries. Generated, never typed.
+
+    Names WHAT was collapsed (every id, so nothing goes missing without saying
+    so) and WHERE it went: git history holds the full text, and the design
+    detail that produced each choice lives at the feature grain. That is what
+    D18 means by "close evidence is pointers, a line and a link".
+    """
+    ids = ', '.join(entry.eid for entry in collapsed)
+    body = (f'{COLLAPSE_MARKER}, {when}. {len(collapsed)} decision(s) — {ids} — '
+            f'collapsed to this pointer; the full text is in git history '
+            f'(`git log -p` on this file), and the design detail behind each '
+            f'lives at the feature grain.')
+    # Wrapped, because the line count IS the budget D18 measures and an
+    # unwrapped paragraph spends it on one line nobody can read in a diff.
+    out = textwrap.wrap(body, width=79)
+    if note:
+        out += [''] + textwrap.wrap(note, width=79)
+    return out
+
+
+def cmd_collapse(cfg: model.PmConfig, args: list[str]) -> int:
+    mid, values, _ = _parse_flags(args, COLLAPSE_FLAGS)
+    if not mid:
+        raise Usage(USAGE)
+    if '/' in mid:
+        raise Refused(
+            f'{mid!r} names a feature, story or bug — D18 collapses a '
+            f'MILESTONE log. A feature\'s decisions.md is capped by D17 and '
+            f'stays whole: it is where the collapsed detail is pointing.')
+    mdir = model.milestone_dir(cfg, mid)
+    if mdir is None:
+        raise Usage(f'no milestone resolves from id {mid!r}')
+    mfile = mdir / 'milestone.md'
+    status = model.field_of(mfile, 'status')
+    if status != 'done':
+        raise Refused(
+            f'milestone {mid} is {status!r} — the collapse is a CLOSE step, '
+            f'and an open milestone\'s trail is still being appended to. Close '
+            f'it first (`{PROG} milestone done {mid}`).')
+    log = mdir / model.DECISION_FILE_NAME
+    if not log.is_file():
+        raise Refused(f'{cfg.rel(mdir)}/ has no {model.DECISION_FILE_NAME} — '
+                      f'nothing to collapse')
+    try:
+        text = model.read_raw(log)
+    except (OSError, UnicodeDecodeError) as err:
+        raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
+    defect = model.log_fence_defect(text, 'D18')
+    if defect:
+        raise Refused(f'{cfg.rel(log)}: {defect}')
+
+    entries = model.log_entries_in(text)
+    if not entries:
+        raise Refused(f'{cfg.rel(log)} holds no entries — a milestone that '
+                      f'recorded no decision has no trail to collapse')
+    keep = [k.strip() for k in values.get('keep', '').split(',') if k.strip()]
+    known = {entry.eid for entry in entries}
+    unknown = [k for k in keep if k not in known]
+    if unknown:
+        raise Refused(
+            f'--keep names {", ".join(unknown)}, which {cfg.rel(log)} does not '
+            f'hold (it has: {" ".join(entry.eid for entry in entries)})')
+    collapsed = [entry for entry in entries if entry.eid not in keep]
+    if not collapsed:
+        if COLLAPSE_MARKER in text:
+            _ok(f'milestone {mid}: {cfg.rel(log)} already collapsed (no-op)')
+            return 0
+        raise Refused(
+            f'--keep names every entry in {cfg.rel(log)} — a collapse that '
+            f'collapses nothing is a no-op with a rewrite behind it')
+
+    lines = text.split('\n')
+    # The preamble is everything before the FIRST entry heading — the mandated
+    # header, the title, the slot's own explanation. It is not trail and it is
+    # not this verb's to touch.
+    first = min(entry.line for entry in entries)
+    head = lines[:first - 1]
+    while head and not head[-1].strip():
+        head.pop()
+    kept_blocks: list[list[str]] = []
+    bounds = [entry.line for entry in entries] + [len(lines) + 1]
+    for n, entry in enumerate(entries):
+        if entry.eid not in keep:
+            continue
+        block = lines[entry.line - 1:bounds[n + 1] - 1]
+        while block and not block[-1].strip():
+            block.pop()
+        kept_blocks.append(block)
+
+    when = datetime.now(timezone.utc).date().isoformat()
+    body = list(head) + ['']
+    body += _collapsed_block(collapsed, when, values.get('note', '').strip())
+    for block in kept_blocks:
+        body += [''] + block
+    out = '\n'.join(body) + '\n'
+
+    # Gate-clean by construction, exactly as `prose-ledger` refuses to raise a
+    # ceiling: a verb that emitted a file its own rule still fails would leave
+    # the human back where they started, hand-editing an append-only log.
+    produced = len(out.rstrip('\n').split('\n'))
+    if produced > cfg.closed_log_lines_max:
+        raise Refused(
+            f'the collapse would leave {cfg.rel(log)} at {produced} lines, '
+            f'still over D18\'s {cfg.closed_log_lines_max}-line close budget — '
+            f'keep fewer entries (--keep currently holds '
+            f'{len(keep)}), or shorten --note. {cfg.rel(log)} left untouched.')
+    model.write_raw(log, out)
+    _ok(f'milestone {mid}: {cfg.rel(log)} collapsed — '
+        f'{len(collapsed)} entry/ies to a pointer, {len(keep)} kept, '
+        f'{len(text.rstrip(chr(10)).split(chr(10)))} -> {produced} lines')
+    return 0
+
+
 # --- prune --------------------------------------------------------------------
 def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     if args:
@@ -1446,7 +1627,7 @@ def main(argv: list[str]) -> int:
         'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
         'decisions': cmd_decisions, 'changelog': cmd_changelog,
-        'prose-ledger': cmd_prose_ledger,
+        'prose-ledger': cmd_prose_ledger, 'collapse': cmd_collapse,
     }
     fn = table.get(cmd)
     if fn is None:

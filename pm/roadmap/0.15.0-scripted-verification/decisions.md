@@ -31,3 +31,15 @@ pointers, and everything that still explains a live constraint stays.
 **Over:** diffing behaviour against an older git revision of the code
 **Because:** an old revision stops being buildable, while a checksum makes a change to the GENERATOR report itself instead of silently redescribing different inputs
 **Evidence:** tests/corpus/log_schema.golden.txt:1
+
+## D5 — 2026-08-29 — the durable record is the decision log
+**Chose:** refusing a --review-record that names a grain's transient review.md, and naming the decisions.md repair in the refusal
+**Over:** letting D11 and the close verb keep contradicting each other, with a human knowing which to break
+**Because:** a review.md is scratch the retention rule deletes at close, so a pointer at it strands the feature done-without-record
+**Evidence:** src/godot_devkit/repo/pm/model.py:864
+
+## D6 — 2026-08-29 — collapse is a verb, not a hand edit
+**Chose:** pm collapse <milestone-id> --keep, which refuses to emit a log D18 would still fail
+**Over:** documenting how to hand-edit the append-only log at close
+**Because:** D18 demanded a collapse only a hand edit could perform, in a file whose first line says never by hand — a rule with no verb is a gap
+**Evidence:** src/godot_devkit/repo/pm/cli.py:1360

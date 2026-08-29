@@ -860,6 +860,44 @@ def record_is_substantive(cfg: PmConfig, path: Path) -> bool:
     return len(''.join(body.split())) >= cfg.review_min_content_bytes
 
 
+def is_transient_review_slot(cfg: PmConfig, path: Path) -> bool:
+    """True when `path` is a grain's TRANSIENT `review.md`, not a durable record.
+
+    THE close protocol used to contradict itself here. `pm feature done
+    --review-record <path>` stamps `reviewed:` at whatever it is handed; D11
+    then requires a `done` grain to have NO `review.md`. Point the pointer at
+    the transient slot and both rules cannot hold: delete the file exactly as
+    D11 says and D1 reports the feature `done w/o review record`.
+
+    The resolution is that a review.md is scratch — reviewer and simplifier
+    append to it while the grain is open — and the DURABLE record of a review is
+    the decision log it fed. So the pointer must name the durable half, and this
+    predicate is how the close verb refuses the transient one instead of leaving
+    a human to know the rule.
+
+    Decidable without a guess: D13 permits `review.md` only as a grain slot, so
+    a file with that name anywhere inside the roadmap IS the transient slot. A
+    project storing durable records as `docs/reviews/<something>.md` is
+    untouched — that path is outside the tree and is not this slot.
+    """
+    if path.name.lower() != REVIEW_FILE_NAME:
+        return False
+    try:
+        path.resolve().relative_to(cfg.roadmap.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def durable_record_for(cfg: PmConfig, fid: str) -> Path | None:
+    """Where a feature's review record BELONGS — its own `decisions.md`.
+
+    Named so the refusal can point at a path rather than at a principle.
+    """
+    ffile = feature_file(cfg, fid)
+    return None if ffile is None else ffile.parent / DECISION_FILE_NAME
+
+
 def review_record_for(cfg: PmConfig, fid: str) -> str | None:
     """The feature's resolved review record, or None if it has none.
 

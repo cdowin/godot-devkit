@@ -25,3 +25,7 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C4 — 2026-08-29 — the fuzzers are code now
 **What:** The CommonMark differential (60,000 documents), the log-schema differential (692 logs) and the migration replay run from `make fuzz` in two seconds, instead of being rebuilt on demand.
 **Evidence:** tests/test_fuzz_markdown.py
+
+## C5 — 2026-08-29 — closing a milestone no longer needs inside knowledge
+**What:** The close verb refuses a review record that the retention rule would delete, and `pm collapse` performs the close-time trim that used to be a hand edit.
+**Evidence:** tests/test_pm_close_protocol.py
