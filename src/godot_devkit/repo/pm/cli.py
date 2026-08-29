@@ -1187,6 +1187,15 @@ def _render_changelog(cfg: model.PmConfig, only: str) -> int:
     `milestones_newest_first` (declared version, component-wise) and entries
     come out in the order their append-only log holds them, so the same tree
     renders the same bytes on every filesystem and every run.
+
+    The heading is `## v<id> — <actual_date>`, and it is that shape so a reader
+    can map a section to the tag that carries it (`v0.13.0`) without guessing.
+    A milestone with no `actual_date` has not shipped, and renders `## v<id>`
+    alone: the render is a pure function of the tree, so it may not reach for
+    today's date — a clock in here turns "three consecutive renders are
+    byte-identical" into a lie the moment one crosses midnight. The milestone
+    NAME is deliberately absent: it is tree metadata, not release-note content,
+    and the entries carry the meaning.
     """
     milestones = model.milestones_newest_first(cfg)
     if not milestones:
@@ -1206,9 +1215,9 @@ def _render_changelog(cfg: model.PmConfig, only: str) -> int:
         if why:
             quiet.append(f'{mid} ({why})')
             continue
-        name = model.unquote(model.field_of(mdir / 'milestone.md', 'name'))
+        shipped = model.field_of(mdir / 'milestone.md', 'actual_date')
         print()
-        print(f'## {mid}{" — " + name if name else ""}')
+        print(f'## v{mid}{" — " + shipped if shipped else ""}')
         print()
         for entry in entries:
             fields = dict(entry.fields)

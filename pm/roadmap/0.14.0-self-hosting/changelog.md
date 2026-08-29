@@ -97,3 +97,7 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C22 — 2026-08-29 — the toolkit runs its own gates on itself
 **What:** godot-devkit carries its own PM tree at `pm/roadmap/`, with every rule it ships enabled, and its own CHANGELOG rendered from it.
 **Evidence:** devkit.toml:1
+
+## C23 — 2026-08-29 — a release heading names its tag and its date
+**What:** A rendered release heading is now `## v<id> — <actual_date>`, matching the git tag it maps to; a milestone that has not shipped renders `## v<id>` with no invented date.
+**Evidence:** src/godot_devkit/repo/pm/cli.py:1218

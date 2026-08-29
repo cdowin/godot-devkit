@@ -3457,10 +3457,43 @@ class Changelog(unittest.TestCase):
                 run_cli(root, 'changelog', ver, '--what', f'Shipped {ver}.',
                         '--evidence', '64e89ad5b')[0], 0)
 
+    def _ship(self, root: Path, mdir: str, when: str) -> None:
+        """Stamp `actual_date` on a milestone — what makes it a RELEASE."""
+        path = root / mdir / 'milestone.md'
+        text = path.read_text(encoding='utf-8')
+        self.assertIn('\nstatus:', text)
+        path.write_text(text.replace('\nstatus:', f'\nactual_date: {when}\nstatus:',
+                                     1), encoding='utf-8')
+
+    def test_a_shipped_milestone_heads_its_section_with_v_and_its_date(self):
+        # The heading has to map to the tag that carries it (`v0.13.0`) and
+        # tell a consumer WHEN it shipped — that is the whole question a
+        # changelog section answers before anyone reads its entries.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self._ship(root, self.MDIR, '2026-08-29')
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            out = run_cli_split(root, 'changelog', '--render')[1]
+            self.assertIn('\n## v0.1 — 2026-08-29\n', out)
+            # The milestone NAME is metadata, not release-note content.
+            self.assertNotIn('Demo', out)
+
+    def test_an_unshipped_milestone_heads_its_section_with_v_and_no_date(self):
+        # No `actual_date` means it has not shipped, and the render may not
+        # invent one: reaching for today's date would break the byte-identical
+        # property the moment a run crossed midnight.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            out = run_cli_split(root, 'changelog', '--render')[1]
+            self.assertIn('\n## v0.1\n', out)
+            self.assertNotIn('## v0.1 —', out)
+
     def test_the_render_orders_milestones_by_version_not_by_string(self):
         # THE proof case. Sorted as STRINGS, descending, these read
         # 0.90.3, 0.9, 0.10, 0.1 — 0.9 published as newer than 0.10, which is
-        # wrong in the one place a reader trusts a changelog most.
+        # wrong in the one place a reader trusts a changelog most. The `v` is
+        # a PREFIX ON THE HEADING, never part of the sort key.
         with tree(story_statuses=('todo',)) as root:
             self._scaffolded(root)
             self.assertEqual(
@@ -3470,7 +3503,7 @@ class Changelog(unittest.TestCase):
             code, out, _ = run_cli_split(root, 'changelog', '--render')
             self.assertEqual(code, 0)
             heads = [ln.split()[1] for ln in out.split('\n') if ln.startswith('## ')]
-            self.assertEqual(heads, ['0.90.3', '0.10', '0.9', '0.1'])
+            self.assertEqual(heads, ['v0.90.3', 'v0.10', 'v0.9', 'v0.1'])
             self.assertNotEqual(heads, sorted(heads, reverse=True))
 
     def test_the_render_is_byte_identical_across_runs(self):
@@ -3483,7 +3516,7 @@ class Changelog(unittest.TestCase):
             for _ in range(3):
                 self.assertEqual(run_cli_split(root, 'changelog', '--render')[1],
                                  first)
-            self.assertIn('## 0.10', first)
+            self.assertIn('## v0.10', first)
 
     def test_the_render_puts_the_document_on_stdout_and_the_census_on_stderr(self):
         # It is a RENDER the consumer redirects, so a count printed into the
@@ -3506,8 +3539,8 @@ class Changelog(unittest.TestCase):
             code, out, _ = run_cli_split(root, 'changelog', '--render',
                                          '--milestone', '0.10')
             self.assertEqual(code, 0)
-            self.assertIn('## 0.10', out)
-            self.assertNotIn('## 0.9', out)
+            self.assertIn('## v0.10', out)
+            self.assertNotIn('## v0.9', out)
             self.assertEqual(run_cli(root, 'changelog', '--render',
                                      '--milestone', 'nope')[0], 2)
 
