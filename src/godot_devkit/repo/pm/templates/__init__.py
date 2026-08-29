@@ -112,6 +112,15 @@ def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> bool:
     kinds of filesystem. Tracked and git refused: this REFUSES, printing the
     command that finishes the job, because a half-done rename is the one
     outcome worse than none.
+
+    Every failure out of here is a ScaffoldRefused naming WHERE THE BYTES ARE.
+    The two `rename` calls sat outside any handler, so a grain directory the
+    process cannot write (its FILES being writable proves nothing about it)
+    came out as a `PermissionError` traceback under exit 1 — the one code this
+    package reserves for findings. And the second call failing is worse than
+    the first: the log is then parked under a temp name that no later run looks
+    for, so a message saying only "the rename failed" leaves an operator
+    hunting for content that is sitting right there.
     """
     done, why = model.git_rename(cfg.root, old, new)
     if done:
@@ -119,14 +128,27 @@ def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> bool:
     if why:
         raise ScaffoldRefused(
             f'git tracks {cfg.rel(old)} and would not rename it to {new.name} '
-            f'({why}) — nothing was written; run `git mv --force '
-            f'{cfg.rel(old)} {cfg.rel(new)}` yourself, then re-run')
+            f'({why}) — its content is untouched, still at {cfg.rel(old)}; run '
+            f'`git mv --force {cfg.rel(old)} {cfg.rel(new)}` yourself, then '
+            f're-run')
     # The squatter this would trip over is refused in the pre-pass, where the
     # directory listing already showed it — a refusal raised here has an earlier
     # slot's rename behind it and is no longer the "nothing was written" it says.
     tmp = old.with_name(TEMP_RENAME_SUFFIX.format(name=old.name))
-    old.rename(tmp)
-    tmp.rename(new)
+    try:
+        old.rename(tmp)
+    except OSError as err:
+        raise ScaffoldRefused(
+            f'{cfg.rel(old)} could not be renamed to {new.name} ({err}); its '
+            f'content is untouched, still at {cfg.rel(old)}') from err
+    try:
+        tmp.rename(new)
+    except OSError as err:
+        raise ScaffoldRefused(
+            f'{cfg.rel(old)} was renamed halfway to {new.name} and the second '
+            f'step failed ({err}) — ITS CONTENT IS NOW AT {cfg.rel(tmp)}, '
+            f'where nothing looks for it; finish the move with `mv '
+            f'{cfg.rel(tmp)} {cfg.rel(new)}`, then re-run') from err
     return False
 
 
@@ -213,13 +235,11 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
         for name in (slot, *variants):
             if name not in entries:
                 continue
-            if entries[name] == 'dir':
-                # Refused, not crashed: exit 1 is reserved for findings, so a
-                # traceback out of here reads to a consumer's hook as "drift
-                # found".
-                raise ScaffoldRefused(
-                    f'{cfg.rel(gdir / name)} is a DIRECTORY and {slot} is a '
-                    f'file slot — nothing was written; move it aside')
+            # The LINK before the kind. `dir_entries` classifies with
+            # `is_dir()`, which follows the link, so a symlink pointing at a
+            # directory read as 'dir' and got the DIRECTORY refusal: correctly
+            # refused, but told to "move the directory aside" when the thing in
+            # the grain is a link and the directory is somewhere else entirely.
             if (gdir / name).is_symlink():
                 raise ScaffoldRefused(
                     f'{cfg.rel(gdir / name)} is a SYMLINK to '
@@ -227,6 +247,13 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                     f'the grain it was asked to fill and does not follow a link '
                     f'out of it; nothing was written; replace it with the real '
                     f'file')
+            if entries[name] == 'dir':
+                # Refused, not crashed: exit 1 is reserved for findings, so a
+                # traceback out of here reads to a consumer's hook as "drift
+                # found".
+                raise ScaffoldRefused(
+                    f'{cfg.rel(gdir / name)} is a DIRECTORY and {slot} is a '
+                    f'file slot — nothing was written; move it aside')
         if entries.get(slot) == 'file':
             continue
         if len(variants) > 1:
@@ -241,6 +268,19 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                     f'{variants[0]} -> {slot} rename — nothing was written; '
                     f'move it aside')
             renames.append((variants[0], slot))
+
+    # A rename writes the DIRECTORY, not the file, and the two permissions are
+    # independent: a 0555 grain dir holding a 0644 decisions.md passes every
+    # per-file check below and then fails inside `os.rename`. Directory
+    # writability is trivially inspectable, so it is inspected here, where a
+    # refusal is still whole-or-nothing.
+    if renames and not os.access(gdir, os.W_OK):
+        under = ', '.join(f'{variant} -> {slot}' for variant, slot in renames)
+        raise ScaffoldRefused(
+            f'{cfg.rel(gdir)}/ needs {len(renames)} case rename(s) ({under}) '
+            f'and the DIRECTORY is not writable — a writable file in it proves '
+            f'nothing, the rename writes the directory; nothing was written, '
+            f'make it writable and re-run')
 
     # What the fill phase will DO, decided here too, because a refusal raised
     # after the first `write` is a refusal that already changed the tree. Both
@@ -290,6 +330,12 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
             # happened once something has — and says WHICH half happened: an
             # operator told to unstage a worktree-only rename goes to a `git
             # status` that shows nothing and cannot act on the advice at all.
+            #
+            # `_rename_case` states what became of the file IT was moving, and
+            # this adds what became of the ones before it. Neither half claims
+            # anything about the other, which is how the composed sentence stops
+            # saying "nothing was written" and "1 earlier rename already landed"
+            # at the same time.
             if not landed:
                 raise
             moved = ', '.join(

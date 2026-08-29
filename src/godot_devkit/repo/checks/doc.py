@@ -14,7 +14,9 @@ fenced ``` code blocks are skipped entirely (they're illustrative command
 examples full of `<placeholder>` syntax, not precise claims; the project's
 own docs confirm this split empirically: every real `make <target>`
 invocation in-repo is backtick-wrapped, every bare "make sense"/"make it"
-false-positive is prose). A line ending in `<!-- doc-scan:allow -->` is
+false-positive is prose). An UNTERMINATED fence skips nothing and is
+REPORTED: a marker that hides the rest of a file must never do it in
+silence. A line ending in `<!-- doc-scan:allow -->` is
 never flagged (the capability-scan inline-marker doctrine, applied here).
 Pure parse — never writes, never boots Godot.
 
@@ -136,27 +138,51 @@ def check_backtick_paths(doc: Path, lines: list[tuple[int, str]]) -> list[str]:
 def run() -> int:
     real_targets = real_make_targets()
     findings: list[str] = []
-    for doc in scope_files():
-        lines = non_fenced_lines(doc.read_text(encoding='utf-8', errors='replace'))
+    defects: list[str] = []
+    skipped = 0
+    docs = scope_files()
+    for doc in docs:
+        text = doc.read_text(encoding='utf-8', errors='replace')
+        lines, unterminated = non_fenced_lines(text)
+        skipped += len(text.split('\n')) - len(lines)
+        if unterminated:
+            # The fence masked nothing (core/markdown.py), so the claims below
+            # are still checked — but a document whose fences this gate cannot
+            # delimit is a document it has not honestly scanned, and saying so
+            # is the whole difference between this and the silent PASS a stray
+            # marker used to buy.
+            defects.append(
+                f'{doc.relative_to(REPO_ROOT)}:{unterminated}  opens a code '
+                f'fence that is never terminated — the rest of the file was '
+                f'scanned UNMASKED; close the fence, or shorten the run of '
+                f'backticks if you meant an inline span')
         findings.extend(check_links(doc, lines))
         findings.extend(check_make_targets(doc, lines, real_targets))
         findings.extend(check_backtick_paths(doc, lines))
 
-    if findings:
-        print(f'[check:doc] FAIL — {len(findings)} unresolved claim(s)')
-        for finding in sorted(findings):
+    if findings or defects:
+        counts = ', '.join(
+            part for part in (
+                f'{len(findings)} unresolved claim(s)' if findings else '',
+                f'{len(defects)} malformed doc(s)' if defects else '') if part)
+        print(f'[check:doc] FAIL — {counts}')
+        for finding in sorted(defects) + sorted(findings):
             print(f'  {finding}')
         print(f'\nA genuine exception (a deliberate retired-thing citation) gets a trailing '
               f'<!-- {ALLOW_MARKER} --> on its line, not a code change.')
         return 1
 
-    if not scope_files():
+    if not docs:
         # Rule 4 — a gate that scanned nothing must say so. A misconfigured
         # exclude or a wrong root is indistinguishable from a clean tree,
         # and that PASS is the most dangerous output this package emits.
         print('[check:doc] FAIL — scanned 0 docs; check [doc] scope')
         return 1
-    print(f'[check:doc] PASS — {len(scope_files())} doc(s), 0 unresolved claims')
+    # The census counts FILES, and files are not what a fence hides. What was
+    # SKIPPED is the other half of "what did this gate actually read", and a
+    # PASS that never says it is a PASS over an unknown amount of unread text.
+    print(f'[check:doc] PASS — {len(docs)} doc(s), {skipped} fenced line(s) '
+          f'skipped, 0 unresolved claims')
     return 0
 
 

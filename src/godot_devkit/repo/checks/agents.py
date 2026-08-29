@@ -107,11 +107,20 @@ def run() -> int:
     root = repo_root()
 
     findings: list[str] = []
+    defects: list[str] = []
     unverified = 0
+    skipped = 0
 
     def report(msg: str) -> None:
         findings.append(msg)
         print(f'  INSTRUCTS  {msg}')
+
+    def defect(msg: str) -> None:
+        # Not an INSTRUCTS: the definition contradicts nothing, the SCAN of it
+        # is what cannot be trusted. Separated so the FAIL line can say which
+        # of the two it found.
+        defects.append(msg)
+        print(f'  MALFORMED  {msg}')
 
     files = sorted({p for glob in scope for p in root.glob(glob) if p.is_file()})
     print(f'[check:agents] scanning {len(files)} definition(s) against the pm CLI '
@@ -140,8 +149,17 @@ def run() -> int:
             report(f'{rel}: a skill must be <name>/{SKILL_FILENAME}; a flat '
                    f'.md does NOT load as a skill (its description never fires)')
 
-        # Fenced blocks are illustrations, not claims (core/markdown.py).
-        for n, line in non_fenced_lines(text):
+        # Fenced blocks are illustrations, not claims (core/markdown.py). An
+        # unterminated one illustrates nothing and hides everything after it,
+        # so it skips no line here and is reported instead.
+        lines, unterminated = non_fenced_lines(text)
+        skipped += len(text.split('\n')) - len(lines)
+        if unterminated:
+            defect(f'{rel}:{unterminated}: opens a code fence that is never '
+                   f'terminated — the rest of the file was scanned UNMASKED; '
+                   f'close the fence, or shorten the run of backticks if you '
+                   f'meant an inline span')
+        for n, line in lines:
             for span in code_spans(line):
               for grain, verb in _INVOCATION.findall(span):
                 if verb not in verbs[grain] and verb not in ('new', 'status'):
@@ -183,14 +201,21 @@ def run() -> int:
                         f'regex: {err}') from err
 
     print()
-    census = f'{len(files)} definition(s)'
+    # The census counts FILES, and files are not what a fence hides — so it
+    # also says how much text was skipped, or a PASS is a PASS over an unknown
+    # amount of unread definition.
+    census = f'{len(files)} definition(s), {skipped} fenced line(s) skipped'
     if unverified:
         census += (f', {unverified} transition mention(s) UNVERIFIED (the line '
                    f'names no single grain, an unknown state, or prohibits '
                    f'rather than instructs)')
-    if findings:
-        print(f'[check:agents] FAIL — {len(findings)} definition(s) instruct '
-              f'what the tooling refuses, across {census}')
+    if findings or defects:
+        what = ', '.join(part for part in (
+            f'{len(findings)} definition(s) instruct what the tooling refuses'
+            if findings else '',
+            f'{len(defects)} definition(s) this gate cannot honestly scan'
+            if defects else '') if part)
+        print(f'[check:agents] FAIL — {what}, across {census}')
         return 1
     print(f'[check:agents] PASS — no definition contradicts the pm CLI; '
           f'scanned {census}')

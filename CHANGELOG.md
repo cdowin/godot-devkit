@@ -53,7 +53,21 @@ escape as tracebacks with two slots already created. What genuinely cannot be in
 git declining a `git mv --force`, a mode changed underneath the run — becomes a refusal that names
 what already landed instead of claiming nothing did, and says whether a landed rename was **staged by
 `git mv`** or only moved on disk: advice to unstage a worktree-only rename sends an operator to a
-`git status` that shows them nothing. Exit 1 is always a finding, never a stack trace. Measured on
+`git status` that shows them nothing. The two halves of that composed sentence no longer contradict
+each other either: the inner refusal states what became of ITS OWN file (*its content is untouched,
+still at …*) and the NOTE states what became of the ones before it, where one message used to say
+both `nothing was written` and `1 earlier rename(s) already landed`.
+
+**Exit 1 is always a finding, never a stack trace** — and the last two paths out from under that are
+closed. A rename writes the DIRECTORY, not the file, and the pre-pass checked only the file: a `0555`
+grain dir holding a `0644` `DECISIONS.md` passed every inspection and came out of `os.rename` as a
+raw `PermissionError` traceback. Directory writability is trivially inspectable, so it is inspected,
+and anything still escaping the two-step temp rename becomes a refusal that **names where the bytes
+actually are** — the second step failing parks the log at `decisions.md.pm-case-rename`, which no
+later run looks for, so a message saying only that the rename failed left an operator hunting for
+content sitting right there. A SYMLINK in a file slot is also identified as a link before its kind is
+read: `is_dir()` follows the link, so one pointing at a directory got the DIRECTORY refusal — the
+right answer with advice aimed at the wrong problem. Measured on
 scratch copies of both consumers, with a second full pass changing nothing:
 
 | | grain dirs | slots created | renamed | headers restored |
@@ -112,6 +126,11 @@ scheduled for deletion. This rule is what makes prune safe by construction. It a
 status outside `[pm] bug_states` — D4 does not cover bugs, so a typo would otherwise read as "closed"
 and pass in silence. Two new config keys, `bug_states` (default `open`/`fixed`/`closed`) and
 `bug_open_states` (default `open`); naming an open state the vocabulary lacks is a config error.
+The bug census is **recursive and case-insensitive in the extension**: a `glob('*.md')` saw neither
+`bugs/<topic>/<bug>.md` nor `<BUG>.MD`, and since `bugs/` is a permitted slot that D13 never descends
+into, both were invisible to every rule at once while the census printed the smaller number without
+saying it had looked less far. D14 is the rule that stops `prune` deleting an open bug along with its
+done milestone, so one that undercounts is not a weaker safety net — it is a false one.
 
 D11, D13 and D14 are OFF by default like D8–D12 — a tree predating the canonical slots is missing
 most of them, and a rule that turns a consumer red on upgrade day is unshippable. Scaffold first,
@@ -152,6 +171,23 @@ already refuses to commit; the fence masking added to stop a quoted `<!--` eatin
 it by the other route, silently, and `pm decide` then refused every append to that log forever with
 `the composed entry does not parse as a decision entry`. A marker inside backticks or a terminated
 fence is a marker being named, not a comment being opened.
+
+**And `check doc` / `check agents` now answer an unterminated fence the same way**, because it was
+the same defect wearing the other gate's clothes: their fence scan was a parity toggle, so an ODD
+number of fence-looking lines dropped every remaining line of the document and the gate printed PASS
+over them. Two dead claims that FAIL normally — `[check:doc] FAIL — 2 unresolved claim(s)` — became
+`PASS — 1 doc(s), 0 unresolved claims` the moment one stray ` ``` ` was prepended above them, and
+`check agents` did it too. Both are in a consumer's `check all`. An unterminated fence now masks
+nothing and is REPORTED (`malformed doc(s)` / `MALFORMED`) while a terminated one still masks, since
+a rule file quoting the CLI's own refusal is documenting it. **One scanner** answers where the fences
+are — `core.markdown.fenced_flags`, which D12's own mask now calls rather than keeping a second copy
+— so the two families cannot drift into disagreeing about which lines a document even has. That also
+brings the CommonMark rules the toggle never had: a closing fence must be the same character, at
+least as long and carry no info string (so `~~~` no longer "closes" a ` ``` `), and a fence indented
+four spaces is INDENTED CODE — a doc showing how a fence is written no longer opens one. Both
+censuses now print **how much they skipped** (`22 doc(s), 223 fenced line(s) skipped`): the count was
+of FILES, and files are not what a fence hides.
+
 Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` exempts a whole log,
 `"<path>:<N>"` only its first N entries — whose size the gate PRINTS every run and which may only
 shrink: an exemption that suppresses nothing, a cap reaching past the end of its log, and a line
@@ -175,10 +211,16 @@ spelling to port it to instead of silently rendering from the packaged template 
 one is not written over it, since on a case-insensitive filesystem that write would truncate the
 customisation.
 
+**`decision_grandfather = []` is now legal**, and means what it looks like. Every `[pm]` key is
+written so that a repo declaring the documented defaults behaves identically to one with no
+`devkit.toml`; this was the single key that broke that contract, exiting 2 with *remove the key to
+take the default* because an empty list usually means the reverse of what it looks like (`git
+ls-files` with no pathspec is the entire repo). It does not here: this key is a LEDGER of exemptions,
+so `[]` and the absent key both say "none exempt".
+
 **Known issues, all reported and none fixed here:** `pm decide --title` is not validated for a bare
-`\r`; D14 misses `bugs/*.MD` and `bugs/<subdir>/*.md`; a `decision_grandfather` cap names the wrong
-entry when one is inserted above it; `decision_grandfather = []` exits 2 though the docstring shows
-it as the default; `ScaffoldRefused` prints an absolute path rather than a repo-relative one.
+`\r`; a `decision_grandfather` cap names the wrong entry when one is inserted above it;
+`ScaffoldRefused` prints an absolute path rather than a repo-relative one.
 
 **`tiles --region` and `tiles --at` can address the negative quadrants again.** `--region -2,-2,1,1`
 died with `argument --region: expected one argument` on **every Python a consumer actually runs**:

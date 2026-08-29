@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from godot_devkit.core.markdown import fenced_flags
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
 
@@ -312,8 +313,12 @@ def load() -> PmConfig:
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
+        # The one `[pm]` list whose default is EMPTY: it is a ledger of
+        # exemptions, so `[]` means "none exempt" — the same thing the absent
+        # key means — and refusing it made the documented default the one value
+        # a repo could not write down.
         decision_grandfather=parse_decision_grandfather(
-            str_tuple(sect, 'pm', 'decision_grandfather', ())),
+            str_tuple(sect, 'pm', 'decision_grandfather', (), allow_empty=True)),
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
@@ -901,9 +906,15 @@ def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
         bdir = mdir / 'bugs'
         if not bdir.is_dir():
             continue
-        for bfile in sorted(bdir.glob('*.md')):
-            if not bfile.is_file():
-                continue
+        # RECURSIVE, and the extension compared case-insensitively. A
+        # `glob('*.md')` saw neither `bugs/<topic>/<bug>.md` nor `<BUG>.MD`, and
+        # `bugs/` is a permitted slot that D13 never descends into, so both were
+        # invisible to every rule at once — and the census printed the smaller
+        # number without saying it had looked less far. D14 is what stops
+        # `prune` deleting an open bug with its done milestone; a D14 that
+        # undercounts is not a weaker safety net, it is a false one.
+        for bfile in sorted(p for p in bdir.rglob('*')
+                            if p.is_file() and p.suffix.lower() == '.md'):
             scanned += 1
             bstat = field_of(bfile, 'status')
             if bstat not in cfg.bug_states:
@@ -1037,9 +1048,6 @@ def decision_files(cfg: PmConfig) -> tuple[list[Path], list[Path]]:
     return sorted(logs), sorted(variants)
 
 
-_CODE_FENCE = re.compile(r'^[ ]{0,3}(`{3,}|~{3,})[ \t]*(\S*)')
-
-
 def _mask_code_spans(raw: str) -> str:
     """The line with every inline `code span` blanked to spaces.
 
@@ -1087,35 +1095,16 @@ def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool], int]:
 
     Blanking preserves length, so a marker OUTSIDE the masked ranges still lands
     at its real offset.
+
+    WHERE the fences are is `core.markdown.fenced_flags`' answer, not a second
+    one: `check doc` and `check agents` read the same markdown under the same
+    CommonMark rules, and two scanners would drift into disagreeing about which
+    lines a document even has.
     """
-    out: list[str] = []
-    fenced: list[bool] = []
-    fence, opened = '', 0
-    for idx, raw in enumerate(lines):
-        body = raw.rstrip('\r')
-        m = _CODE_FENCE.match(body)
-        if fence:
-            out.append(' ' * len(raw))
-            fenced.append(True)
-            # A closing fence is the same character, at least as long, and
-            # carries no info string.
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
-                    and not m.group(2):
-                fence = ''
-            continue
-        if m:
-            fence, opened = m.group(1), idx
-            out.append(' ' * len(raw))
-            fenced.append(True)
-            continue
-        out.append(_mask_code_spans(raw))
-        fenced.append(False)
-    if not fence:
-        return out, fenced, 0
-    for k in range(opened, len(lines)):  # never terminated: unmask it all
-        out[k] = _mask_code_spans(lines[k])
-        fenced[k] = False
-    return out, fenced, opened + 1
+    fenced, unfenced = fenced_flags(lines)
+    out = [' ' * len(raw) if hidden else _mask_code_spans(raw)
+           for raw, hidden in zip(lines, fenced)]
+    return out, fenced, unfenced
 
 
 def _comment_scan(lines: list[str]) -> tuple[list[bool], list[str], int, int]:

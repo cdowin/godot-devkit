@@ -980,6 +980,75 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             self.assertTrue((mdir / 'review.md').is_file())
 
+    def test_new_refuses_an_unwritable_grain_DIRECTORY_before_a_rename(self):
+        # A rename writes the DIRECTORY; the FILE's mode says nothing about it.
+        # The pre-pass checked only the file, so a 0555 grain holding a 0644
+        # DECISIONS.md sailed through it and came out of `os.rename` as a
+        # PermissionError traceback under exit 1 — the code this package
+        # reserves for findings.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
+            mdir.chmod(0o555)
+            try:
+                code, out = run_cli(root, 'new', 'milestone', '0.1')
+                self.assertEqual(code, 1, out)
+                self.assertNotIn('Traceback', out)
+                self.assertIn('DIRECTORY is not writable', out)
+                self.assertIn('nothing was written', out)
+                self.assertEqual(model.read_raw(mdir / 'DECISIONS.md'), LEGACY_LOG)
+            finally:
+                mdir.chmod(0o755)
+            # And it goes through once the mode allows it.
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            self.assertIn(LEGACY_LOG, model.read_raw(mdir / 'decisions.md'))
+
+    def test_a_rename_that_fails_HALFWAY_says_where_the_bytes_are(self):
+        # The two-step temp rename can fail on its second step, parking the log
+        # under a name no later run looks for. "The rename failed" would send an
+        # operator hunting for content that is sitting right there.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
+            real = Path.rename
+
+            def flaky(path: Path, target):
+                if Path(target).name == 'decisions.md':
+                    raise OSError(13, 'Permission denied')
+                return real(path, target)
+
+            with unittest.mock.patch.object(Path, 'rename', flaky):
+                code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertNotIn('Traceback', out)
+            self.assertIn('DECISIONS.md.pm-case-rename', out)
+            parked = mdir / 'DECISIONS.md.pm-case-rename'
+            self.assertEqual(model.read_raw(parked), LEGACY_LOG)
+            self.assertNotIn('nothing was written', out)
+
+    def test_a_refusal_behind_a_landed_rename_does_not_also_claim_nothing_moved(self):
+        # One sentence said BOTH "nothing was written" AND "1 earlier rename
+        # already landed". The NOTE half was the true one, so the inner half
+        # goes: each half now states only what became of its own file.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            (mdir / 'HANDOFF.md').write_text('# legacy handoff\n', encoding='utf-8')
+            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
+            real = model.git_rename
+
+            def refuse(root_: Path, old: Path, new: Path):
+                if old.name == 'DECISIONS.md':
+                    return False, 'index.lock exists'
+                return real(root_, old, new)
+
+            with unittest.mock.patch.object(model, 'git_rename', refuse):
+                code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('already landed: HANDOFF.md -> handoff.md', out)
+            self.assertNotIn('nothing was written', out)
+            self.assertIn('its content is untouched, still at', out)
+            self.assertEqual(model.read_raw(mdir / 'DECISIONS.md'), LEGACY_LOG)
+
     def test_new_refuses_an_undecodable_template_before_the_first_write(self):
         # A latin-1 byte in a project's `template_dir` raised
         # `UnicodeDecodeError` from inside the slot loop, two files in. Every
@@ -1035,6 +1104,20 @@ class Scaffolding(unittest.TestCase):
             self.assertIn('nothing was written', out)
             self.assertEqual(model.read_raw(outside), 'OUTSIDE\n')
             self.assertFalse((mdir / 'review.md').exists())
+
+    def test_a_symlinked_slot_is_named_a_LINK_even_when_it_points_at_a_dir(self):
+        # `dir_entries` classifies with `is_dir()`, which FOLLOWS the link, so a
+        # link to a directory got the DIRECTORY refusal: refused correctly, and
+        # then told to move aside a directory that is not in the grain at all.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            outside = root / 'outside'
+            outside.mkdir()
+            (mdir / 'decisions.md').symlink_to(outside)
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('is a SYMLINK', out)
+            self.assertNotIn('is a DIRECTORY', out)
 
     def test_new_never_stacks_a_second_header_on_a_doc_that_has_one(self):
         with tree(story_statuses=('todo',)) as root:
@@ -1118,6 +1201,18 @@ class ConfigValidation(unittest.TestCase):
             with self.subTest(bad=bad), tree() as root:
                 (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')
                 self.assertEqual(run_gate(root)[0], 2)
+
+    def test_declaring_a_documented_default_behaves_as_the_absent_key(self):
+        # The contract the whole `[pm]` section is written to: a repo that
+        # writes the documented defaults down behaves identically to one with
+        # no devkit.toml. `decision_grandfather = []` was the single key that
+        # broke it — a LEDGER of exemptions, whose default IS empty, refused
+        # for "declaring nothing" when [] is exactly what it means.
+        with tree(story_statuses=('todo',)) as root:
+            bare = run_gate(root)
+            (root / 'devkit.toml').write_text(
+                '[pm]\ndecision_grandfather = []\n', encoding='utf-8')
+            self.assertEqual(run_gate(root), bare)
 
     def test_a_valid_subset_still_narrows_correctly(self):
         with tree(story_statuses=('todo',)) as root:
@@ -2560,6 +2655,49 @@ class BugLifetime(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('no bug files under', out)
 
+    def test_a_bug_in_a_bugs_SUBDIR_is_not_invisible(self):
+        # `bugs/` is a permitted slot and D13 never descends into it, so a
+        # `glob('*.md')` made a nested bug invisible to every rule at once —
+        # and the census printed the smaller number without saying it had
+        # looked less far. D14 is what stops `prune` deleting an open bug with
+        # its done milestone; one that undercounts is a FALSE safety net.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            nested = root / 'pm/roadmap/0.1-demo/bugs/spatial'
+            write(nested / 'seed-is-zero.md',
+                  {'id': '0.1/bugs/seed-is-zero', 'milestone': '"0.1"',
+                   'status': 'open', 'caught_in': '"0.1"'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('bugs/spatial/seed-is-zero.md', out)
+            self.assertIn('1 bug(s)', out)
+
+    def test_an_uppercase_MD_extension_is_not_invisible(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            write(root / 'pm/roadmap/0.1-demo/bugs/SEED-IS-ZERO.MD',
+                  {'id': '0.1/bugs/seed-is-zero', 'milestone': '"0.1"',
+                   'status': 'open', 'caught_in': '"0.1"'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('SEED-IS-ZERO.MD', out)
+
+    def test_the_census_counts_every_bug_file_it_opened(self):
+        with tree(milestone_status='building') as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'flat', 'fixed')
+            write(root / 'pm/roadmap/0.1-demo/bugs/deep/nested.md',
+                  {'id': '0.1/bugs/nested', 'milestone': '"0.1"',
+                   'status': 'fixed', 'caught_in': '"0.1"'})
+            write(root / 'pm/roadmap/0.1-demo/bugs/UPPER.MD',
+                  {'id': '0.1/bugs/upper', 'milestone': '"0.1"',
+                   'status': 'fixed', 'caught_in': '"0.1"'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('3 bug(s)', out)
+
     def test_d14_is_silent_when_not_enabled(self):
         with tree(milestone_status='done', feature_status='done',
                   story_statuses=('done',)) as root:
@@ -2711,6 +2849,123 @@ class Decide(unittest.TestCase):
             self.assertNotIn('\r\r', raw)
             self.assertEqual(raw.count('\n'), raw.count('\r\n'))
             self.assertEqual(len(model.decision_entries_in(model.read_raw(log))), 1)
+
+
+class MarkdownFences(unittest.TestCase):
+    """`check doc` / `check agents` — what a fence may and may not hide.
+
+    A fence masks because a quoted refusal message is an ILLUSTRATION, not an
+    instruction. An UNTERMINATED one illustrates nothing and hides the rest of
+    the file, and a parity toggle let it do that in silence: two claims that
+    FAIL normally printed PASS the moment one stray ``` was prepended above
+    them. Same defect `decision_fence_defect` reports for a decision log,
+    reached the other way round, so it gets the same answer — report it.
+    """
+
+    DEAD = ('See [the missing spec](docs/specs/nope.md).\n'
+            'Run `make no-such-target` to do it.\n')
+    INSTRUCTS = ('Flip it with `pm story done <id>`.\n'
+                 'A story goes review -> done once accepted.\n')
+
+    def _doc(self, root: Path, body: str) -> tuple[int, str]:
+        import importlib
+        from godot_devkit.repo.checks import doc
+        (root / 'CLAUDE.md').write_text(body, encoding='utf-8')
+        from godot_devkit.core.project import load_config, repo_root
+        repo_root.cache_clear()
+        load_config.cache_clear()
+        # `doc` binds its root and scope at IMPORT, where production resolves
+        # them once per process and the cwd never moves. Tests move it.
+        importlib.reload(doc)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = doc.run()
+        return code, buf.getvalue()
+
+    def _agents(self, root: Path, body: str) -> tuple[int, str]:
+        from godot_devkit.repo.checks import agents
+        p = root / '.claude/agents/dev.md'
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding='utf-8')
+        from godot_devkit.core.project import load_config, repo_root
+        repo_root.cache_clear()
+        load_config.cache_clear()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = agents.run()
+        return code, buf.getvalue()
+
+    def test_doc_still_fails_on_the_claims_without_any_fence(self):
+        with tree() as root:
+            code, out = self._doc(root, self.DEAD)
+            self.assertEqual(code, 1, out)
+            self.assertIn('dead link target', out)
+            self.assertIn('unknown make target', out)
+
+    def test_an_unterminated_fence_cannot_hide_a_doc_claim(self):
+        with tree() as root:
+            code, out = self._doc(root, '```\n' + self.DEAD)
+            self.assertEqual(code, 1, out)
+            self.assertIn('dead link target', out)
+            self.assertIn('unknown make target', out)
+            self.assertIn('never terminated', out)
+            self.assertIn('malformed doc(s)', out)
+
+    def test_an_unterminated_fence_cannot_hide_an_agent_instruction(self):
+        with tree() as root:
+            code, out = self._agents(root, '```\n' + self.INSTRUCTS)
+            self.assertEqual(code, 1, out)
+            self.assertIn('review -> done', out)
+            self.assertIn('MALFORMED', out)
+            self.assertIn('never terminated', out)
+
+    def test_a_terminated_fence_still_masks_both_gates(self):
+        # The fix is not "stop masking": a rule file quoting the CLI's own
+        # refusal is documenting it, and flagging that is how a gate gets
+        # switched off.
+        with tree() as root:
+            code, out = self._doc(root, '```\n' + self.DEAD + '```\n')
+            self.assertEqual(code, 0, out)
+            code, out = self._agents(root, '```\n' + self.INSTRUCTS + '```\n')
+            self.assertEqual(code, 0, out)
+
+    def test_an_indented_fence_is_content_not_a_fence(self):
+        # CommonMark: four spaces is INDENTED CODE, so what it holds is text. A
+        # doc showing how a fence is written indents the sample, and reading it
+        # as real opened a block that never closed.
+        with tree() as root:
+            code, out = self._doc(root, 'Opening a block:\n\n    ```gdscript\n\n'
+                                        + self.DEAD)
+            self.assertEqual(code, 1, out)
+            self.assertIn('dead link target', out)
+            self.assertNotIn('never terminated', out)
+
+    def test_a_tilde_run_does_not_close_a_backtick_fence(self):
+        # A parity toggle counted any fence-looking line, so the `~~~` "closed"
+        # the block and the `````` that really closed it opened a new one —
+        # every line after it dropped.
+        with tree() as root:
+            code, out = self._doc(root, '```\n~~~\n```\n' + self.DEAD)
+            self.assertEqual(code, 1, out)
+            self.assertIn('dead link target', out)
+
+    def test_both_censuses_say_how_much_they_skipped(self):
+        # The census counts FILES, and files are not what a fence hides.
+        with tree() as root:
+            code, out = self._doc(root, '```\nhidden\n```\nfine.\n')
+            self.assertEqual(code, 0, out)
+            self.assertIn('3 fenced line(s) skipped', out)
+            code, out = self._agents(root, '```\nhidden\n```\nfine.\n')
+            self.assertEqual(code, 0, out)
+            self.assertIn('3 fenced line(s) skipped', out)
+
+    def test_the_decision_log_scanner_reads_the_same_fences(self):
+        # One scanner, or the two drift into disagreeing about which lines a
+        # document even has.
+        self.assertEqual(model.decision_fence_defect('```\n## D1 — x\n'),
+                         model.decision_fence_defect('```\n## D1 — x\n'))
+        self.assertIn('line 1', model.decision_fence_defect('```\n## D1 — x\n'))
+        self.assertEqual(model.decision_fence_defect('```\nx\n```\n'), '')
 
 
 if __name__ == '__main__':
