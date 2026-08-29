@@ -3491,5 +3491,424 @@ class MarkdownFences(unittest.TestCase):
         self.assertEqual(model.log_fence_defect('```\nx\n```\n', 'D12'), '')
 
 
+class ProseRatchet(unittest.TestCase):
+    """D17 / D18 — the prose caps, the debt ledger, and the ratchet.
+
+    The controls carry as much weight as the violations here. A gate that reds
+    on a live milestone's append-only decision trail, or on a median-sized
+    story, gets switched off — and a cap that counts the instruction header
+    D13 mandates is a budget nobody can comply with.
+    """
+
+    MDIR = 'pm/roadmap/0.1-demo'
+    FDIR = MDIR + '/features/alpha'
+
+    @staticmethod
+    def _lines(path: Path, n: int, header: str = '') -> Path:
+        """A document whose MEASURED length is exactly `n`.
+
+        With a header the file is two lines longer on disk — the mandated line
+        and the blank after it — and `doc_lines` must not see them.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = [f'line {i}' for i in range(n)]
+        pre = [header, ''] if header else []
+        path.write_text('\n'.join(pre + body) + '\n', encoding='utf-8')
+        return path
+
+    def _cfg(self, root: Path, extra: str = '',
+             checks: str = '"D17", "D18"') -> None:
+        (root / 'devkit.toml').write_text(
+            f'[pm]\nchecks = [{checks}]\n{extra}', encoding='utf-8')
+
+    # --- measurement ------------------------------------------------------
+    def test_the_mandated_instruction_header_is_excluded_from_every_count(self):
+        # The subtlety that makes the budget compliable: D13 asserts the header
+        # is there, so it is a constant an author cannot trim. Each file below
+        # crosses its cap ONLY if the header and its blank line are counted.
+        with tree() as root:
+            self._cfg(root)
+            dec = self._lines(root / self.FDIR / 'decisions.md', 150,
+                              model.SLOT_HEADER['decisions.md'])
+            log = self._lines(root / self.MDIR / 'changelog.md', 150,
+                              model.SLOT_HEADER['changelog.md'])
+            # 152 lines on disk, 150 measured — for BOTH slot headers, not just
+            # the decisions one.
+            for path in (dec, log):
+                self.assertEqual(
+                    len(path.read_text(encoding='utf-8').split('\n')) - 1, 152)
+                self.assertEqual(model.doc_lines(path), 150)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+            # One real line of prose past the cap, and both fail.
+            for path in (dec, log):
+                path.write_text(path.read_text(encoding='utf-8') + 'one more\n',
+                                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertEqual(out.count('OVERCAP'), 2)
+            self.assertIn('151 lines', out)
+
+    def test_only_the_grain_documents_are_measured(self):
+        # milestone.md, handoff.md, review.md and design/ are not prose
+        # budgets. design/ especially: it is where an over-cap feature.md is
+        # told to put the design it is carrying, so capping the destination
+        # would leave the author nowhere to go.
+        with tree() as root:
+            self._cfg(root)
+            for rel in ('milestone.md', 'handoff.md', 'review.md',
+                        'design/layout.md'):
+                self._lines(root / self.MDIR / rel, 900)
+            self._lines(root / self.FDIR / 'design/notes.md', 900)
+            self._lines(root / self.FDIR / 'review.md', 900)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_a_bug_in_a_bugs_subdir_is_measured_like_D14_sees_it(self):
+        # ONE walk (`bug_files`) behind D14 and D17, so a bug the lifetime rule
+        # can see is never one the prose cap cannot.
+        with tree() as root:
+            self._cfg(root)
+            self._lines(root / self.MDIR / 'bugs/rendering/flicker.md', 126)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('bugs/rendering/flicker.md', out)
+            self.assertIn('bug cap of 125', out)
+
+    # --- the caps ---------------------------------------------------------
+    def test_a_document_over_its_cap_is_OVERCAP_and_one_under_is_silent(self):
+        with tree() as root:
+            self._cfg(root)
+            self._lines(root / self.FDIR / 'stories/s0.md', 120)
+            self._lines(root / self.FDIR / 'feature.md', 200)
+            self._lines(root / self.MDIR / 'bugs/b.md', 125)
+            self._lines(root / self.FDIR / 'decisions.md', 150)
+            self._lines(root / self.MDIR / 'changelog.md', 150)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+            self._lines(root / self.FDIR / 'stories/s0.md', 121)
+            self._lines(root / self.FDIR / 'feature.md', 201)
+            self._lines(root / self.MDIR / 'bugs/b.md', 126)
+            self._lines(root / self.FDIR / 'decisions.md', 151)
+            self._lines(root / self.MDIR / 'changelog.md', 151)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertEqual(out.count('OVERCAP'), 5)
+            for kind in ('story cap of 120', 'feature cap of 200',
+                         'bug cap of 125', 'decisions cap of 150',
+                         'changelog cap of 150'):
+                self.assertIn(kind, out)
+
+    def test_every_cap_is_config_not_a_constant(self):
+        # The defaults are ONE consumer's measured p90. Another tree's
+        # distribution is its own, so each is a `[pm]` key.
+        with tree() as root:
+            self._lines(root / self.FDIR / 'stories/s0.md', 60)
+            self._cfg(root, 'story_lines_max = 59\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('story cap of 59', out)
+
+            self._cfg(root, 'story_lines_max = 60\n')
+            self.assertEqual(run_gate(root)[0], 0)
+
+    def test_a_cap_under_one_is_a_config_error_not_a_finding(self):
+        with tree() as root:
+            self._cfg(root, 'bug_lines_max = 0\n')
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            with self.assertRaises(model.ConfigError) as caught:
+                model.load()
+            self.assertIn('bug_lines_max', str(caught.exception))
+
+    # --- the open/closed decision trail (D18) -----------------------------
+    def test_an_open_milestones_own_decision_trail_is_never_capped(self):
+        # THE control the whole special case exists for. The milestone-level
+        # decisions.md is the append-only autonomous-mode trail by design, and
+        # it is routinely the largest file in the tree. Capping it while the
+        # milestone is open fights the process.
+        with tree(milestone_status='building') as root:
+            self._cfg(root)
+            self._lines(root / self.MDIR / 'decisions.md', 1800,
+                        model.SLOT_HEADER['decisions.md'])
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('no `done` milestone with a decisions.md', out)
+
+    def test_a_done_milestone_still_carrying_its_raw_trail_is_CLOSED_LOG(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._cfg(root)
+            self._lines(root / self.MDIR / 'decisions.md', 1800,
+                        model.SLOT_HEADER['decisions.md'])
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('CLOSED-LOG', out)
+            self.assertIn('a line and a link', out)
+            self.assertIn('(D18)', out)
+
+            # Collapsed to pointers, it passes — the threshold comes from the
+            # close rule, not from any distribution.
+            self._lines(root / self.MDIR / 'decisions.md', 60,
+                        model.SLOT_HEADER['decisions.md'])
+            self.assertEqual(run_gate(root)[0], 0)
+
+    # --- the ratchet ------------------------------------------------------
+    def test_a_ledgered_document_is_silent_at_its_ceiling_and_GREWs_past_it(self):
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            story = self._lines(root / rel, 140)
+            self._cfg(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('OVERCAP', out)
+
+            # Adopted as DEBT at its current size: silent, and the ledger's
+            # length is printed every run so it stays visibly temporary.
+            self._cfg(root, f'prose_grandfather = ["{rel}:140"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 document(s) carrying prose debt', out)
+            self.assertIn('may only shrink', out)
+
+            # One line more, and the ratchet catches it.
+            self._lines(root / rel, 141)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('GREW', out)
+            self.assertIn('ceiling of 140', out)
+            self.assertIn('(D17)', out)
+            self.assertEqual(model.doc_lines(story), 141)
+
+    def test_regeneration_refuses_to_raise_a_ceiling(self):
+        # Without this the gate is decorative: every growth would be absorbed
+        # by a regeneration and nothing would ever fail.
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 140)
+            self._cfg(root, f'prose_grandfather = ["{rel}:140"]\n')
+            code, out = run_cli(root, 'prose-ledger')
+            self.assertEqual(code, 0, out)
+            self.assertIn(f'"{rel}:140"', out)
+
+            self._lines(root / rel, 141)
+            code, out = run_cli(root, 'prose-ledger')
+            self.assertEqual(code, 1)
+            self.assertIn('REFUSED', out)
+            self.assertIn('only shrinks', out)
+            self.assertNotIn(f'"{rel}:141"', out)
+
+            # After a genuine TRIM it regenerates, lower.
+            self._lines(root / rel, 130)
+            code, out = run_cli(root, 'prose-ledger')
+            self.assertEqual(code, 0, out)
+            self.assertIn(f'"{rel}:130"', out)
+
+    def test_regeneration_drops_a_document_back_inside_its_cap(self):
+        # The output is gate-clean by construction: a document no longer in
+        # debt is not re-recorded, which is the same shrink the
+        # "suppresses nothing" finding asks for by hand.
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 100)
+            self._cfg(root, f'prose_grandfather = ["{rel}:140"]\n')
+            code, out = run_cli(root, 'prose-ledger')
+            self.assertEqual(code, 0, out)
+            self.assertIn('prose_grandfather = [\n]', out)
+            self.assertIn('0 document(s) over cap, from 1 ledgered', out)
+
+    # --- ledger integrity -------------------------------------------------
+    def test_a_ledger_entry_that_suppresses_nothing_fails(self):
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 100)
+            self._cfg(root, f'prose_grandfather = ["{rel}:140"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('inside the story cap of 120', out)
+            self.assertIn('drop it from the ledger', out)
+
+    def test_a_ceiling_reaching_past_the_end_of_its_file_fails(self):
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 130)
+            self._cfg(root, f'prose_grandfather = ["{rel}:900"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('ledgered at 900 lines but the document has 130', out)
+            self.assertIn('lower the ceiling', out)
+
+    def test_a_ledger_entry_naming_no_document_fails(self):
+        with tree() as root:
+            self._cfg(root, 'prose_grandfather = '
+                            f'["{self.FDIR}/stories/gone.md:200"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('no such grain document exists', out)
+
+    def test_a_ledger_entry_with_no_ceiling_is_a_config_error(self):
+        # A whole-file exemption is a permanent uncapped pass, and a ratchet
+        # with a permanent pass in it is decorative.
+        with tree() as root:
+            self._cfg(root, 'prose_grandfather = '
+                            f'["{self.FDIR}/stories/s0.md"]\n')
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            with self.assertRaises(model.ConfigError) as caught:
+                model.load()
+            self.assertIn('records no line ceiling', str(caught.exception))
+
+    def test_a_ledger_line_naming_no_file_is_a_config_error(self):
+        for spec, why in (('""', 'names no path'),
+                          ('"pm/roadmap/0.1-demo/features:12"',
+                           'does not name a .md')):
+            with self.subTest(spec=spec), tree() as root:
+                self._cfg(root, f'prose_grandfather = [{spec}]\n')
+                from godot_devkit.core.project import load_config, repo_root
+                repo_root.cache_clear()
+                load_config.cache_clear()
+                with self.assertRaises(model.ConfigError) as caught:
+                    model.load()
+                self.assertIn(why, str(caught.exception))
+                self.assertIn('prose_grandfather', str(caught.exception))
+
+    def test_the_ledger_is_checked_under_whichever_prose_rule_is_on(self):
+        # ONE `[pm]` key serves both rules, so its hygiene is one fact — not
+        # something that goes unchecked because the consumer enabled the other
+        # rule. Measurement is likewise independent of `checks`: a story's
+        # ledger entry still suppresses a story finding with D17 off.
+        rel = self.FDIR + '/stories/s0.md'
+        with tree() as root:
+            self._lines(root / rel, 130)
+            self._cfg(root, f'prose_grandfather = ["{rel}:900"]\n',
+                      checks='"D18"')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('lower the ceiling', out)
+            self.assertIn('(D18)', out)
+
+    # --- census + enablement ----------------------------------------------
+    def test_the_census_carries_the_corpus_and_the_ledger_size(self):
+        with tree() as root:
+            self._cfg(root)
+            self._lines(root / self.FDIR / 'stories/s0.md', 40)
+            self._lines(root / self.FDIR / 'feature.md', 60)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('[check:pm] D17: 2 grain document(s), 100 line(s) of '
+                          'capped prose', out)
+            self.assertIn('2 capped document(s), 100 line(s) of prose',
+                          out.rsplit('PASS', 1)[1])
+
+    def test_d17_scanning_nothing_is_loud(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            write(root / 'pm/roadmap/0.1-demo/milestone.md',
+                  {'id': '"0.1"', 'status': 'building'})
+            (root / 'devkit.toml').write_text('[pm]\nchecks = ["D17"]\n',
+                                              encoding='utf-8')
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                code, out = run_gate(root)
+            finally:
+                os.chdir(previous)
+            self.assertEqual(code, 1)
+            self.assertIn('the rule scanned nothing', out)
+
+    def test_d17_and_d18_are_silent_when_not_enabled(self):
+        # Both halves, or the test passes on a tree where the rules do not
+        # exist at all: the SAME documents are silent off and reported on.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._lines(root / self.FDIR / 'stories/s0.md', 400)
+            self._lines(root / self.MDIR / 'decisions.md', 400,
+                        model.SLOT_HEADER['decisions.md'])
+            (root / 'devkit.toml').write_text('[pm]\nchecks = ["D1"]\n',
+                                              encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('D17', out)
+            self.assertNotIn('D18', out)
+
+            self._cfg(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('(D17)', out)
+            self.assertIn('(D18)', out)
+
+
+class EvidenceReference(unittest.TestCase):
+    """A too-short reference is a different mistake from prose.
+
+    `aaa111` is a real commit hash git printed one character short of what the
+    schema accepts. Telling its author it is prose is wrong about the cause and
+    names nothing they can do — and this codebase's standard is that a refusal
+    names the change that resolves it.
+    """
+
+    SHORT = 'aaa111'
+
+    def test_a_short_hex_reference_says_so_and_states_the_minimum(self):
+        got = model.evidence_defect(self.SHORT)
+        self.assertIn('6 chars', got)
+        self.assertIn(f'at least {model.REF_HASH_MIN}', got)
+        self.assertIn(f'git rev-parse --short={model.REF_HASH_MIN} '
+                      f'{self.SHORT}', got)
+        self.assertNotIn('is prose', got)
+
+    def test_real_prose_is_still_called_prose(self):
+        # Including a sentence whose first bad word happens to be hex: the
+        # same misdiagnosis in the other direction.
+        for value in ('we discussed it and agreed', 'added a cafe', ''):
+            with self.subTest(value=value):
+                self.assertIn('is prose', model.evidence_defect(value))
+
+    def test_a_real_reference_has_no_defect(self):
+        for value in ('64e89ad5b', 'src/x.py:12', '`aaa111a`', '250'):
+            with self.subTest(value=value):
+                self.assertEqual(model.evidence_defect(value), '')
+
+    def test_pm_decide_and_pm_changelog_share_the_predicate(self):
+        # ONE implementation behind both writers and both gates, so fixing the
+        # message in one place fixes it everywhere it is read.
+        with tree() as root:
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
+            log = root / 'pm/roadmap/0.1-demo/changelog.md'
+            before = log.read_text(encoding='utf-8')
+            code, out = run_cli(root, 'changelog', '0.1', '--what', 'six.',
+                                '--evidence', self.SHORT)
+            self.assertEqual(code, 1)
+            self.assertIn('REFUSED', out)
+            self.assertIn('a commit hash needs at least 7', out)
+            self.assertNotIn('is prose', out)
+            self.assertEqual(log.read_text(encoding='utf-8'), before)
+
+            code, out = run_cli(root, 'decide', '0.1', '--chose', 'a',
+                                '--over', 'b', '--because', 'c',
+                                '--evidence', self.SHORT)
+            self.assertEqual(code, 1)
+            self.assertIn('a commit hash needs at least 7', out)
+
+    def test_the_gate_reports_the_same_thing_the_writer_refuses(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text('[pm]\nchecks = ["D12"]\n',
+                                              encoding='utf-8')
+            log = root / 'pm/roadmap/0.1-demo/features/alpha/decisions.md'
+            log.write_text(
+                '## D1 — 2026-08-29 — a short hash\n'
+                '**Chose:** a\n**Over:** b\n**Because:** c\n'
+                f'**Evidence:** {self.SHORT}\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('a commit hash needs at least 7', out)
+
+
 if __name__ == '__main__':
     unittest.main()

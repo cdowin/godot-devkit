@@ -66,6 +66,60 @@ nothing else, and the passes after it are clean no-ops with every file byte-iden
 implementation of the parser, the validator, the writer, the ledger parser and the gate serves both.
 The `decision_*` names generalised to `log_*` / `entry_*` accordingly.
 
+**The PM tree now has a prose budget, and it is a ratchet.** Everything written into a PM tree is
+grep-reachable, so every line of prose is context some future agent pays for — the scaffolding
+should not be twice the size of the thing it scaffolds. **D17** caps a story, a `feature.md`, a bug,
+a feature's `decisions.md` and a milestone's `changelog.md`, with two finding classes: **OVERCAP**
+(over its grain's cap and not on the ledger) and **GREW** (on the ledger and larger than its recorded
+ceiling). **D18** is the other half: a `done` milestone still carrying its **raw decision trail**.
+Milestone close evidence is pointers — "a line and a link" — so a done milestone with a 1,600-line
+trail was not closed, it was abandoned, and D18's threshold comes from that rule rather than from any
+distribution.
+
+Both live **inside `check pm`**, not in a gate of their own, because the ledger needs the same grain
+vocabulary D13/D14 already own — splitting them would mean two implementations that have to agree
+about what a grain document even is. The walk reuses `milestone_dirs` / `feature_files` /
+`story_files` / `dir_entries`, and D14's recursive bug walk became a shared `bug_files`, so a bug the
+lifetime rule can see is never one the prose cap cannot. Both are **OFF by default**, like D8–D16.
+
+**`[pm] prose_grandfather` is a DEBT ledger — its length is the metric and it may only ever shrink.**
+Same `"<path>:<N>"` shape `decision_grandfather` and `changelog_grandfather` already use (one parser
+serves all three), with the number reading as a **line ceiling** and being **required**: an entry
+with no ceiling would be a permanent uncapped pass, which is the one thing a ratchet cannot have. The
+same integrity rules apply — an entry that suppresses nothing, a ceiling reaching past the end of its
+file, and a line naming no document each **FAIL**. **`pm prose-ledger`** regenerates the block to
+stdout and **REFUSES to raise** an existing ceiling; without that refusal every growth would be
+absorbed by a regeneration and the gate would be decorative. A document back inside its cap is
+dropped rather than re-recorded, so what it prints is gate-clean by construction.
+
+**Three things that are load-bearing and easy to lose.** *One:* a **milestone's own `decisions.md` is
+not capped while its milestone is open** — it is the append-only autonomous-mode trail by design, and
+capping it fights the process; only a **closed** milestone's raw log is a finding, which is D18.
+*Two:* the **tool-mandated instruction header is excluded from every line count**. D13 asserts that
+header is present, so it is a constant an author cannot trim, and counting it against a prose budget
+would make the budget uncompliable and silently shrink every cap by two — `doc_lines` drops it for
+**every** slot header, not just the decisions one, off the same `SLOT_HEADER` table D13 reads.
+*Three:* **the caps are config, not constants** — `story_lines_max` (120), `feature_lines_max` (200),
+`bug_lines_max` (125), `decisions_lines_max` (150), `changelog_lines_max` (150) and
+`closed_log_lines_max` (60). The defaults sit at roughly the p90 of **one** consumer's measured
+distribution, so the median document is untouched and only the outliers must shrink; they are that
+consumer's numbers, not a law, and a cap under 1 is a config error rather than a finding.
+`changelog.md` gets its own cap class because it accumulates by design exactly as a decision log
+does.
+
+Verified against that consumer's live 45,849-line corpus with its 58-entry ledger translated into the
+config form: same corpus total, same zero OVERCAP / GREW / CLOSED-LOG findings its own scanner
+reports. The one difference is deliberate — devkit's shrink-only ledger rule reports the single entry
+whose document has since fallen back inside its cap, and dropping it leaves 57.
+
+**A too-short reference is no longer called prose.** `--evidence aaa111` is a real commit hash git
+printed one character short of the seven this accepts, and the refusal said it "is prose, not a
+reference" — wrong about the cause and naming nothing the author could do. It now says how many
+characters it got, states the minimum, and prints the `git rev-parse --short=7` that lengthens it.
+One predicate behind both writers and both gates, so `pm decide`, `pm changelog`, D12 and D15 all say
+the same thing. Real prose is still called prose, including a sentence whose first bad word happens
+to be hex.
+
 ## v0.13.0 — 2026-08-29
 
 **One uniform grain structure, all lowercase.** Every milestone and feature dir carries the same

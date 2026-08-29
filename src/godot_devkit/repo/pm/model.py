@@ -32,6 +32,13 @@ the milestone machine has no `review` state (nothing transitions into one).
     decision_grandfather = []      # D12: logs whose legacy entries predate the
                                    # schema — "<path>" or "<path>:<N entries>"
     changelog_grandfather = []     # D15: the same ledger for changelog.md
+    story_lines_max      = 120     # D17: the per-grain prose caps
+    feature_lines_max    = 200
+    bug_lines_max        = 125
+    decisions_lines_max  = 150
+    changelog_lines_max  = 150
+    closed_log_lines_max = 60      # D18: a `done` milestone's decision trail
+    prose_grandfather    = []      # D17/D18: "<path>:<N lines>", debt only
 """
 from __future__ import annotations
 
@@ -99,12 +106,17 @@ STRUCTURE_CHECKS = ('D13', 'D14')
 # can ship with a perfectly conforming empty log.
 SCHEMA_CHECKS = ('D12', 'D15')
 RELEASE_CHECKS = ('D16',)
+# D17 is the prose RATCHET and D18 the closed-milestone decision trail. Opt-in
+# like the rest: the caps default to one consumer's measured p90, and another
+# tree's distribution is its own — a cap that fits one repo misfires on the
+# next, so a consumer sets its numbers and then turns the rules on.
+PROSE_CHECKS = ('D17', 'D18')
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
     DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + SCHEMA_CHECKS
-    + STRUCTURE_CHECKS + RELEASE_CHECKS + VALIDATE_CHECKS))
+    + STRUCTURE_CHECKS + RELEASE_CHECKS + PROSE_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -165,6 +177,13 @@ SLOT_HEADER = {
                  'decisions.md first.',
     'handoff.md': 'Cold-start only. Never restate what `pm status` computes.',
 }
+
+# The same lines as a SET, for the one reader that does not know which slot it
+# is holding: D17 excludes the mandated header from every prose budget, and it
+# has to do that for EVERY slot header rather than the one it was written
+# against. Derived from SLOT_HEADER, never retyped — a second copy of these
+# strings is a second thing to keep in step with D13.
+SLOT_HEADERS = frozenset(SLOT_HEADER.values())
 
 
 def dir_entries(path: Path) -> dict[str, str]:
@@ -242,6 +261,19 @@ class PmConfig:
     # is exit 2. (repo-relative log path, entries exempted or None for all).
     decision_grandfather: tuple[tuple[str, int | None], ...] = ()
     changelog_grandfather: tuple[tuple[str, int | None], ...] = ()
+    # D17/D18 only: the prose caps, and the debt ledger that lets a tree over
+    # them ship. Every cap is CONFIG rather than a constant — the defaults are
+    # one consumer's measured p90, not a law (see PROSE_CAPS).
+    story_lines_max: int = 120
+    feature_lines_max: int = 200
+    bug_lines_max: int = 125
+    decisions_lines_max: int = 150
+    changelog_lines_max: int = 150
+    closed_log_lines_max: int = 60
+    # (repo-relative doc path, its recorded line CEILING). Never None: a
+    # whole-file exemption would be a permanent uncapped pass, which is the one
+    # thing a ratchet cannot have.
+    prose_grandfather: tuple[tuple[str, int], ...] = ()
     # D8 only: where the shipped version lives, and the line that carries it.
     template_dir: str = ''
     version_file: str = 'project.godot'
@@ -316,6 +348,17 @@ def load() -> PmConfig:
             'the markdown (a template can change a grain\'s whole shape, not '
             'just its frontmatter defaults)')
 
+    def cap(key: str, fallback: int) -> int:
+        got = number(sect, 'pm', key, fallback)
+        if got < 1:
+            # A cap of 0 fails every document including an empty one, so the
+            # gate would be unsatisfiable rather than strict. Refuse the value
+            # instead of shipping a rule nothing can pass.
+            raise ConfigError(
+                f'[pm] {key} is {got} — a line cap under 1 fails every '
+                f'document, including an empty one')
+        return got
+
     return PmConfig(
         root=repo_root(),
         roadmap_dir=text(sect, 'pm', 'roadmap_dir', 'pm/roadmap'),
@@ -339,10 +382,19 @@ def load() -> PmConfig:
         # a repo could not write down.
         decision_grandfather=parse_grandfather(
             str_tuple(sect, 'pm', 'decision_grandfather', (), allow_empty=True),
-            DECISION_SCHEMA),
+            DECISION_SCHEMA.ledger_key, DECISION_SCHEMA.file_name),
         changelog_grandfather=parse_grandfather(
             str_tuple(sect, 'pm', 'changelog_grandfather', (), allow_empty=True),
-            CHANGELOG_SCHEMA),
+            CHANGELOG_SCHEMA.ledger_key, CHANGELOG_SCHEMA.file_name),
+        story_lines_max=cap('story_lines_max', 120),
+        feature_lines_max=cap('feature_lines_max', 200),
+        bug_lines_max=cap('bug_lines_max', 125),
+        decisions_lines_max=cap('decisions_lines_max', 150),
+        changelog_lines_max=cap('changelog_lines_max', 150),
+        closed_log_lines_max=cap('closed_log_lines_max', 60),
+        prose_grandfather=parse_grandfather(
+            str_tuple(sect, 'pm', 'prose_grandfather', (), allow_empty=True),
+            'prose_grandfather', '.md', cap_required=True),
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
@@ -918,6 +970,26 @@ def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
 # is therefore drift twice over — the fix is not scheduled anywhere a reader
 # would look, and `prune`'s lag-by-one deletes the file the moment the next
 # milestone closes. This rule is what makes prune safe by construction.
+def bug_files(mdir: Path) -> list[Path]:
+    """Every bug document under one milestone, in reading order.
+
+    RECURSIVE, and the extension compared case-insensitively. A `glob('*.md')`
+    saw neither `bugs/<topic>/<bug>.md` nor `<BUG>.MD`, and `bugs/` is a
+    permitted slot that D13 never descends into, so both were invisible to
+    every rule at once — and the census printed the smaller number without
+    saying it had looked less far.
+
+    One definition, three readers (D14's lifetime rule, D17's prose cap, any
+    census): a second walk would be a second chance to disagree about which
+    files the tree even has.
+    """
+    bdir = mdir / 'bugs'
+    if not bdir.is_dir():
+        return []
+    return sorted(p for p in bdir.rglob('*')
+                  if p.is_file() and p.suffix.lower() == '.md')
+
+
 def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
     """(findings, bugs scanned) — open bugs under a done milestone, plus any
     bug whose status is outside the vocabulary (which D4 does not cover, and
@@ -927,18 +999,10 @@ def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
     for mdir in milestone_dirs(cfg):
         mstat = field_of(mdir / 'milestone.md', 'status')
         mid = unquote(field_of(mdir / 'milestone.md', 'id')) or mdir.name
-        bdir = mdir / 'bugs'
-        if not bdir.is_dir():
-            continue
-        # RECURSIVE, and the extension compared case-insensitively. A
-        # `glob('*.md')` saw neither `bugs/<topic>/<bug>.md` nor `<BUG>.MD`, and
-        # `bugs/` is a permitted slot that D13 never descends into, so both were
-        # invisible to every rule at once — and the census printed the smaller
-        # number without saying it had looked less far. D14 is what stops
-        # `prune` deleting an open bug with its done milestone; a D14 that
-        # undercounts is not a weaker safety net, it is a false one.
-        for bfile in sorted(p for p in bdir.rglob('*')
-                            if p.is_file() and p.suffix.lower() == '.md'):
+        # D14 is what stops `prune` deleting an open bug with its done
+        # milestone; a D14 that undercounts is not a weaker safety net, it is a
+        # false one — which is why the walk it shares with D17 is recursive.
+        for bfile in bug_files(mdir):
             scanned += 1
             bstat = field_of(bfile, 'status')
             if bstat not in cfg.bug_states:
@@ -1047,6 +1111,12 @@ _ENTRY_SECTION_END = re.compile(r'^#{1,2}[ \t]')
 # to be a commit hash, a path (optionally `:line`), or a number; prose fails on
 # its first word.
 _REF_HASH = re.compile(r'^[0-9a-f]{7,40}$')
+# The SAME vocabulary one abbreviation short. `aaa111` is a valid hash that git
+# simply printed at six characters, and calling it prose is wrong about the
+# cause and silent about the fix — so it gets its own refusal, naming the
+# minimum and the command that lengthens it.
+REF_HASH_MIN = 7
+_REF_SHORT_HASH = re.compile(r'^[0-9a-f]{1,6}$')
 _REF_NUMBER = re.compile(r'^[+-]?\d[\d,._%/x×→-]*$')
 _REF_PATH = re.compile(r'^[\w./~@+-]+(?::\d+(?:-\d+)?)?$')
 
@@ -1059,22 +1129,44 @@ class LogEntry:
     fields: tuple[tuple[str, str], ...]
 
 
-def evidence_is_reference(value: str) -> bool:
-    """True if every token in `value` is a hash, a path[:line], or a number."""
-    tokens = value.replace('`', ' ').split()
+_EVIDENCE_PROSE = ('**Evidence:** is prose, not a reference — want a commit '
+                   'hash, a path[:line], or a number')
+
+
+def evidence_defect(value: str) -> str:
+    """'' when every token in `value` is a hash, a path[:line] or a number,
+    else the reason — NAMING the change that resolves it.
+
+    Returns the reason rather than a bool because the two ways a reference
+    fails are not the same mistake. A six-character `aaa111` is a real commit
+    hash git abbreviated one character short of what this accepts, and the
+    prose refusal misidentifies the cause AND leaves the author with nothing to
+    do about it. The too-short refusal names the minimum and prints the
+    `git rev-parse` that lengthens the hash, the way the scaffolder's refusals
+    print the exact `git mv --force` to run.
+    """
+    tokens = [raw.strip('[]()<>,;.:"\'')
+              for raw in value.replace('`', ' ').split()]
     if not tokens:
-        return False
-    for raw in tokens:
-        tok = raw.strip('[]()<>,;.:"\'')
+        return _EVIDENCE_PROSE
+    for tok in tokens:
         if not tok:
-            return False
+            return _EVIDENCE_PROSE
         if _REF_HASH.match(tok) or _REF_NUMBER.match(tok):
             continue
         # A path must LOOK like one. Without this, any bare word matches.
         if _REF_PATH.match(tok) and ('/' in tok or '.' in tok):
             continue
-        return False
-    return True
+        # Only when the WHOLE value is that one token. A sentence whose first
+        # bad word happens to be hex — "added a cafe" — is prose, and telling
+        # its author about commit-hash length would be the same misdiagnosis
+        # in the other direction.
+        if len(tokens) == 1 and _REF_SHORT_HASH.match(tok):
+            return (f'**Evidence:** {tok!r} is {len(tok)} chars — a commit '
+                    f'hash needs at least {REF_HASH_MIN}; lengthen it with '
+                    f'`git rev-parse --short={REF_HASH_MIN} {tok}`')
+        return _EVIDENCE_PROSE
+    return ''
 
 
 def entry_label(heading_text: str) -> str:
@@ -1382,9 +1474,9 @@ def entry_violations_in(entries: list[LogEntry],
         for name, value in entry.fields:
             if name != 'Evidence':
                 continue
-            if not evidence_is_reference(value):
-                bad('**Evidence:** is prose, not a reference — want a commit '
-                    'hash, a path[:line], or a number')
+            defect = evidence_defect(value)
+            if defect:
+                bad(defect)
             break
     return out
 
@@ -1444,23 +1536,29 @@ def append_entry(text: str, eid: str, when: str, title: str,
                   in entry_violations_in(entries, schema) if n == last]
 
 
-def parse_grandfather(specs: tuple[str, ...],
-                      schema: LogSchema) -> tuple[tuple[str, int | None], ...]:
-    """`"<path>"` (whole log) or `"<path>:<N>"` (its first N entries only).
+def parse_grandfather(specs: tuple[str, ...], key_name: str, suffix: str,
+                      cap_required: bool = False
+                      ) -> tuple[tuple[str, int | None], ...]:
+    """`"<path>"` (the whole file) or `"<path>:<N>"` (its first N / its first N
+    lines, depending on which ledger is reading).
 
     The capped form is the point: a grandfathered log keeps its legacy entries
     and every entry ADDED past the cap still has to conform, so the log stops
     growing badly without anyone rewriting old text. A malformed spec is a
     CONFIG error (exit 2), never a finding.
 
-    One implementation over both ledgers: `decision_grandfather` and
-    `changelog_grandfather` differ only in which file name a key must end with,
-    and two copies of this would be two chances to accept a spec the other
-    rejects.
+    ONE implementation over all three ledgers. `decision_grandfather`,
+    `changelog_grandfather` and `prose_grandfather` differ in which file name a
+    key must end with and in whether the number is optional — data, passed in.
+    Three copies of this would be three chances to accept a spec the others
+    reject, and the ledger form is the thing a consumer hand-writes.
+
+    `cap_required` is the RATCHET's half: D17's ledger records a line ceiling,
+    and an entry without one would be a permanent uncapped pass — exactly what
+    a ratchet cannot have.
     """
     out: list[tuple[str, int | None]] = []
     seen: set[str] = set()
-    key_name = schema.ledger_key
     for spec in specs:
         raw, cap = spec.strip(), None
         head, sep, tail = raw.rpartition(':')
@@ -1479,20 +1577,30 @@ def parse_grandfather(specs: tuple[str, ...],
             key = key[2:]
         if not key:
             raise ConfigError(f'[pm] {key_name} {spec!r} names no path')
-        if not key.endswith(schema.file_name):
+        if not key.endswith(suffix):
             raise ConfigError(
                 f'[pm] {key_name} {spec!r} does not name a '
-                f'{schema.file_name} — the ledger exempts logs, not directories')
+                f'{suffix} — the ledger names files, not directories')
+        if cap is None and cap_required:
+            raise ConfigError(
+                f'[pm] {key_name} {spec!r} records no line ceiling — write '
+                f'"<path>:<N lines>"; an entry with no ceiling never fails, '
+                f'and a ratchet with a permanent pass in it is decorative')
         if key in seen:
             raise ConfigError(
-                f'[pm] {key_name} names {key} twice — one entry per log')
+                f'[pm] {key_name} names {key} twice — one entry per file')
         seen.add(key)
         out.append((key, cap))
     return tuple(out)
 
 
-def log_relkey(cfg: PmConfig, path: Path) -> str:
-    """The repo-relative, forward-slashed key a grandfather spec is matched on."""
+def relkey(cfg: PmConfig, path: Path) -> str:
+    """The repo-relative, forward-slashed key a ledger spec is matched on.
+
+    One spelling for all three ledgers, so a path a consumer writes into
+    `decision_grandfather` is keyed exactly as one written into
+    `prose_grandfather`.
+    """
     return cfg.rel(path).replace('\\', '/')
 
 
@@ -1578,7 +1686,7 @@ def milestones_without_notes(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int
                               f'release ships with notes; append them with '
                               f'`pm changelog {mid}`'))
             continue
-        cap = ledger.get(log_relkey(cfg, path), 0)
+        cap = ledger.get(relkey(cfg, path), 0)
         broken = {n for n, _, _ in entry_violations_in(entries, CHANGELOG_SCHEMA)}
         if any(n not in broken or cap is None or n < cap
                for n in range(len(entries))):
@@ -1587,3 +1695,239 @@ def milestones_without_notes(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int
                           f'{len(entries)} changelog entries is malformed — '
                           f'no reader can tell what shipped'))
     return out, scanned
+
+
+# --- the prose ratchet (D17, D18) ---------------------------------------------
+# WHY THIS EXISTS: everything written into a PM tree is grep-reachable, so every
+# line of PM prose is a line some future agent may pull into its context and
+# reason from. The scaffolding should not be twice the size of the thing it
+# scaffolds. The close-evidence budget is already stated in prose — "≤5 lines"
+# for a story close, "a line and a link" for a milestone — and nothing enforced
+# any of it; one consumer measured 48,704 lines across 235 stories, 136
+# feature.md, 89 bugs and 57 decisions.md, with individual files at 774 and 567.
+#
+# HONEST SCOPE: this counts lines. It cannot tell 200 earned lines of authored
+# tables from 200 lines of restated commit messages — that judgement stays with
+# the PO and the reviewer. What it can do is stop the corpus growing while
+# nobody is looking, which is what happened.
+#
+# A RATCHET, not a big bang. Every already-over-cap document is recorded in
+# `[pm] prose_grandfather` at its CURRENT size, and the gate fails only when a
+# ledgered document GROWS past its recorded ceiling (GREW) or a new one crosses
+# its cap (OVERCAP). The ledger is a DEBT ledger: its length is the metric, it
+# may only ever shrink, and `pm prose-ledger` REFUSES to raise a ceiling.
+# Without that refusal the gate is decorative — every growth would be absorbed
+# by a regeneration.
+#
+# THREE THINGS THAT ARE NOT OBVIOUS AND ARE LOAD-BEARING:
+#
+#  1. A MILESTONE'S OWN `decisions.md` IS NOT CAPPED WHILE ITS MILESTONE IS
+#     OPEN. It is the append-only autonomous-mode trail by design, and it is
+#     routinely the largest file in the tree. Capping it fights the process.
+#     What IS a finding is a CLOSED milestone still carrying its raw log — that
+#     is D18, and its threshold is derived from the close rule ("close evidence
+#     is pointers, a line and a link") rather than from any distribution: about
+#     twenty pointer lines plus headers, an order of magnitude above "a line and
+#     a link" and an order of magnitude below what a live trail reaches.
+#
+#  2. THE TOOL-MANDATED INSTRUCTION HEADER IS EXCLUDED FROM EVERY LINE COUNT.
+#     D13 asserts that header is present, so it is a constant an author cannot
+#     trim — counting it against a prose budget makes the budget uncompliable
+#     and silently shrinks every cap. `doc_lines` drops it for EVERY slot
+#     header (SLOT_HEADERS), not just the decisions one.
+#
+#  3. THE CAPS ARE CONFIG, NOT CONSTANTS. The defaults below are ONE consumer's
+#     measured p90 — the median document is untouched and only the outliers must
+#     shrink. Another tree's distribution is its own, and hardcoding one repo's
+#     numbers into a shared toolkit is a gate that fits that repo and misfires
+#     on the next. Every cap is a `[pm]` key.
+#
+# This is a SHAPE gate, not a style gate: a story that genuinely needs 200 lines
+# is usually two stories.
+def doc_lines(path: Path) -> int:
+    """Line count for a PM document, EXCLUDING the mandated instruction header.
+
+    D13 asserts each shared doc opens with its SLOT_HEADER line, so that line —
+    and the blank line separating it from the body — is a constant an author
+    cannot trim. Counting it against a prose budget makes the budget
+    uncompliable and silently shrinks every cap by two.
+
+    A file's final newline TERMINATES its last line rather than starting an
+    empty one, which is `wc -l`'s reading; a final line with no newline is still
+    counted, which is not. The difference shows up only on a file that does not
+    end in a newline, and there the honest answer is the larger one.
+    """
+    try:
+        lines = _split(read_raw(path))
+    except (OSError, UnicodeDecodeError):
+        return 0
+    if lines and lines[-1] == '':
+        lines.pop()
+    total = len(lines)
+    head = next((n for n, line in enumerate(lines) if line.strip()), None)
+    if head is None or lines[head].strip() not in SLOT_HEADERS:
+        return total
+    total -= 1
+    if head + 1 < len(lines) and not lines[head + 1].strip():
+        total -= 1
+    return total
+
+
+@dataclass(frozen=True)
+class ProseDoc:
+    """One measured grain document: what it is, what it may be, what it is."""
+    kind: str    # story | feature | bug | decisions | changelog | closed-log
+    rule: str    # the rule that reports it over cap — D17, or D18 for a closed log
+    cap: int
+    path: Path
+    key: str     # repo-relative, forward-slashed — the ledger's spelling
+    lines: int
+
+
+def prose_docs(cfg: PmConfig) -> list[ProseDoc]:
+    """Every capped grain document in the ACTIVE tree, in reading order.
+
+    IN SCOPE: a story, a feature.md, a bug, a feature's decisions.md, a
+    milestone's changelog.md — and, for D18 only, a DONE milestone's
+    decisions.md.
+
+    OUT OF SCOPE, deliberately: an OPEN milestone's decisions.md (the
+    append-only trail, see note 1 above), milestone.md, handoff.md, review.md
+    and anything under `design/`. Those are not prose budgets — a milestone.md
+    is frontmatter and a scope statement, a review.md is transient and D11
+    deletes it at close, and `design/` is where a feature.md over its cap is
+    told to put the design it is carrying. Capping the destination too would
+    leave the author nowhere to go.
+
+    The walk reuses the discovery every other rule uses — `milestone_dirs`,
+    `feature_files`, `story_files`, `bug_files`, `dir_entries` — so D17 and D13
+    can never disagree about which documents the tree holds.
+    """
+    out: list[ProseDoc] = []
+
+    def add(kind: str, rule: str, cap: int, path: Path) -> None:
+        out.append(ProseDoc(kind=kind, rule=rule, cap=cap, path=path,
+                            key=relkey(cfg, path), lines=doc_lines(path)))
+
+    for mdir in milestone_dirs(cfg):
+        mfile = mdir / 'milestone.md'
+        entries = dir_entries(mdir)
+        for ffile in feature_files(mdir):
+            add('feature', 'D17', cfg.feature_lines_max, ffile)
+            for sfile in story_files(ffile):
+                add('story', 'D17', cfg.story_lines_max, sfile)
+            if dir_entries(ffile.parent).get(DECISION_FILE_NAME) == 'file':
+                add('decisions', 'D17', cfg.decisions_lines_max,
+                    ffile.parent / DECISION_FILE_NAME)
+        for bfile in bug_files(mdir):
+            add('bug', 'D17', cfg.bug_lines_max, bfile)
+        # The changelog accumulates by design exactly as a decision log does,
+        # and stopping it growing without bound is the whole reason it is a
+        # written-by-the-tool slot rather than a free-text file.
+        if entries.get(CHANGELOG_FILE_NAME) == 'file':
+            add('changelog', 'D17', cfg.changelog_lines_max,
+                mdir / CHANGELOG_FILE_NAME)
+        # D18. The OPEN half of this file is out of scope on purpose — see
+        # note 1. Only a milestone that has already closed is measured.
+        if (entries.get(DECISION_FILE_NAME) == 'file'
+                and field_of(mfile, 'status') == 'done'):
+            add('closed-log', 'D18', cfg.closed_log_lines_max,
+                mdir / DECISION_FILE_NAME)
+    return out
+
+
+# The ledger's own hygiene is reported under whichever prose rule is enabled:
+# one `[pm]` key serves both rules, so its integrity is one fact, not two.
+LEDGER_FINDING = 'LEDGER'
+
+
+def prose_findings(cfg: PmConfig,
+                   docs: list[ProseDoc]) -> list[tuple[str, str]]:
+    """[(rule, message)] — the ratchet's findings and the ledger's own hygiene.
+
+    Measurement is INDEPENDENT of which rules are enabled, and only the
+    reporting is filtered. Otherwise a ledger entry for a story would "suppress
+    nothing" whenever D17 happened to be off, and the shrink-only rule would
+    delete the debt record of a document nobody had looked at.
+
+    Three classes, and the shrink-only ledger rules `decision_grandfather`
+    already has:
+      GREW       — ledgered and larger than its recorded ceiling.
+      OVERCAP    — over its grain's cap and not on the ledger.
+      CLOSED-LOG — a `done` milestone still carrying its raw decision trail.
+    """
+    ledger = dict(cfg.prose_grandfather)
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for doc in docs:
+        ceiling = ledger.get(doc.key)
+        if ceiling is None:
+            if doc.lines <= doc.cap:
+                continue
+            if doc.kind == 'closed-log':
+                out.append((doc.rule, (
+                    f'CLOSED-LOG  {doc.key} — {doc.lines} lines of raw '
+                    f'decision trail on a `done` milestone (cap '
+                    f'{doc.cap}); close evidence is pointers, a line and a '
+                    f'link, and the detail lives at the feature grain')))
+            else:
+                out.append((doc.rule, (
+                    f'OVERCAP     {doc.key} — {doc.lines} lines, over the '
+                    f'{doc.kind} cap of {doc.cap} and not on the ledger; '
+                    f'a story over its cap is usually two stories, and a '
+                    f'feature.md over its cap is carrying design')))
+            continue
+        seen.add(doc.key)
+        if doc.lines > ceiling:
+            out.append((doc.rule, (
+                f'GREW        {doc.key} — {doc.lines} lines, past its '
+                f'prose_grandfather ceiling of {ceiling}; the ledger only '
+                f'shrinks, so trim it rather than regenerate')))
+            continue
+        # Shrink-only, both directions, exactly as the log ledgers are: an
+        # entry that suppresses nothing has done its job and must go, and a
+        # ceiling reaching past the end of the file is a claim the file no
+        # longer supports.
+        if doc.lines <= doc.cap:
+            out.append((LEDGER_FINDING, (
+                f'{doc.key} is in prose_grandfather but {doc.lines} lines is '
+                f'inside the {doc.kind} cap of {doc.cap} — drop it from the '
+                f'ledger')))
+        if ceiling > doc.lines:
+            out.append((LEDGER_FINDING, (
+                f'{doc.key} is ledgered at {ceiling} lines but the document '
+                f'has {doc.lines} — lower the ceiling')))
+    for key in ledger:
+        if key not in seen:
+            out.append((LEDGER_FINDING, (
+                f'{key} is in prose_grandfather but no such grain document '
+                f'exists — drop it from the ledger')))
+    return out
+
+
+def regenerate_prose_ledger(cfg: PmConfig,
+                            docs: list[ProseDoc]) -> tuple[list[str], list[str]]:
+    """(the ledger's `"<path>:<lines>"` entries, the growths it REFUSES).
+
+    The refusal is the whole point. A regeneration that absorbed growth would
+    make the ratchet decorative: every over-cap document would simply be
+    re-recorded at its new size and the gate would never fail. So a document
+    larger than its recorded ceiling is refused, and the only way to regenerate
+    is after a genuine trim.
+
+    What comes out is gate-clean by construction — a document back inside its
+    cap is DROPPED rather than re-recorded, which is the same shrink the
+    "suppresses nothing" finding asks for by hand.
+    """
+    ledger = dict(cfg.prose_grandfather)
+    body: list[str] = []
+    refused: list[str] = []
+    for doc in docs:
+        ceiling = ledger.get(doc.key)
+        if ceiling is not None and doc.lines > ceiling:
+            refused.append(f'{doc.key} is {doc.lines} lines, past its ledger '
+                           f'ceiling of {ceiling}')
+            continue
+        if doc.lines > doc.cap:
+            body.append(f'{doc.key}:{doc.lines}')
+    return body, refused

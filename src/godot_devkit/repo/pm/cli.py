@@ -59,6 +59,8 @@ USAGE = """usage: godot-devkit pm <command>
                                           (append a release note to that milestone)
   changelog --render [--milestone <id>]   (the union of every milestone's changelog,
                                            newest release first, to stdout)
+  prose-ledger                            (regenerate `[pm] prose_grandfather`, D17's debt
+                                           ledger, to stdout — REFUSES to raise a ceiling)
   prune                                   (delete cooled archives; stamp the prune log)"""
 
 
@@ -1302,6 +1304,42 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+def cmd_prose_ledger(cfg: model.PmConfig, args: list[str]) -> int:
+    """Regenerate D17's debt ledger to STDOUT, refusing to raise any ceiling.
+
+    A RENDER, not a file this tool owns — the ledger lives in the consumer's
+    `devkit.toml`, so the block goes to stdout to be pasted or redirected and
+    every count goes to stderr, where redirecting the block cannot swallow it.
+
+    The refusal is the feature. A regeneration that absorbed growth would make
+    the whole ratchet decorative: every over-cap document would be re-recorded
+    at its new size and the gate would never fail again. The only way to
+    regenerate is after a genuine trim.
+    """
+    if args:
+        raise Usage('prose-ledger takes no arguments')
+    docs = model.prose_docs(cfg)
+    if not docs:
+        raise Usage(f'no grain documents found under {cfg.roadmap_dir}/ '
+                    f'(wrong [pm] roadmap_dir, or an empty tree?)')
+    body, refused = model.regenerate_prose_ledger(cfg, docs)
+    if refused:
+        raise Refused(
+            'the ledger is a DEBT ledger and only shrinks — '
+            + '; '.join(refused)
+            + '. Trim the document(s) back under the recorded ceiling, or make '
+              'the case for the growth and lower something else. Absorbing a '
+              'growth is the one thing this will not do (nothing was written)')
+    print('prose_grandfather = [')
+    for entry in body:
+        print(f'    "{entry}",')
+    print(']')
+    print(f'[pm] {len(body)} document(s) over cap, from '
+          f'{len(cfg.prose_grandfather)} ledgered; paste this into [pm] in '
+          f'devkit.toml', file=sys.stderr)
+    return 0
+
+
 # --- dispatch -----------------------------------------------------------------
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help', 'help'):
@@ -1321,6 +1359,7 @@ def main(argv: list[str]) -> int:
         'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
         'decisions': cmd_decisions, 'changelog': cmd_changelog,
+        'prose-ledger': cmd_prose_ledger,
     }
     fn = table.get(cmd)
     if fn is None:
