@@ -33,14 +33,28 @@ the new name stages nothing: the migration goes green on the laptop, gets commit
 checks out the old name with D13 reporting every renamed grain missing and D12 scanning nothing. If
 git tracks the path and refuses the move, the scaffolder **refuses too**, printing the exact command
 — a half-done rename is the one outcome worse than none. A file slot that exists as a DIRECTORY is
-likewise refused rather than crashed, because exit 1 is reserved for findings. Every refusal the
-grain can raise is decided **before the first rename runs**, so `nothing was written` is a claim
-about the whole grain rather than about the slot the refusal happened to land on: the slot order is
-`milestone.md, handoff.md, decisions.md, review.md`, and a refusal keyed on `decisions.md` used to
-leave `HANDOFF.md -> handoff.md` on disk and staged, where it rides out on the next commit under
-somebody else's message. The one refusal that cannot be inspected for in advance — git declining a
-`git mv --force` — now names what already landed instead of claiming nothing did. Measured on scratch
-copies of both consumers, with a second full pass changing nothing:
+likewise refused rather than crashed, because exit 1 is reserved for findings; that refusal reads the
+KIND of every spelling, not just the canonical one, so a `DECISIONS.md/` directory is refused where a
+name-only variant scan would have queued it as a rename, renamed it, and then opened it as a file.
+A slot that is a SYMLINK is refused for the same reason from the other side: a verb asked to fill
+THIS grain does not follow a link and rewrite a file outside it.
+
+Every refusal the grain can raise is decided **before the first rename runs**, so `nothing was
+written` is a claim about the whole grain rather than about the slot the refusal happened to land on:
+the slot order is `milestone.md, handoff.md, decisions.md, review.md`, and a refusal keyed on
+`decisions.md` used to leave `HANDOFF.md -> handoff.md` on disk and staged, where it rides out on the
+next commit under somebody else's message. That now covers a leftover `.pm-case-rename` temp file
+too — it is in the directory listing, so it is decidable in the pre-pass, and deciding it inside the
+moving loop was the last way an earlier slot's rename reached disk under a "nothing was written".
+**And the write phase is pre-decided the same way**: every template the grain will need is loaded and
+DECODED, and every existing doc due a header prepend is proved writable, before the first byte lands
+— a latin-1 byte in a project's `template_dir` and a read-only legacy `handoff.md` both used to
+escape as tracebacks with two slots already created. What genuinely cannot be inspected in advance —
+git declining a `git mv --force`, a mode changed underneath the run — becomes a refusal that names
+what already landed instead of claiming nothing did, and says whether a landed rename was **staged by
+`git mv`** or only moved on disk: advice to unstage a worktree-only rename sends an operator to a
+`git status` that shows them nothing. Exit 1 is always a finding, never a stack trace. Measured on
+scratch copies of both consumers, with a second full pass changing nothing:
 
 | | grain dirs | slots created | renamed | headers restored |
 |---|---|---|---|---|
@@ -125,10 +139,19 @@ underneath, and against trail's live corpus a heading-only test called 8 of 9 re
 prose and passed the whole file, its single finding landing on the one heading that happened to
 contain a bug id. A heading with neither an id/date nor a field line is prose and is never
 schema-checked, so a log may open with a preamble. A CLOSED `<!-- -->` block is not in the log at
-all, and neither is a fenced code block — both are text the entry parser steps over. An UNCLOSED
-`<!--` suppresses nothing and is itself reported: a marker with no terminator would otherwise mark
-every line after it dead, and D12 would print PASS over the entries it ate. A marker inside backticks
-or a fence is a marker being named, not a comment being opened.
+all, and neither is a TERMINATED fenced code block — both are text the entry parser steps over. Its
+two edges are symmetric and both keep their live half: the opening line keeps what precedes `<!--`,
+and the closing line keeps what follows `-->`, so a conforming `**Over:**` written after a spanning
+aside is still read rather than failed for naming no rejected alternative.
+
+**Neither marker may mask in silence.** An unclosed `<!--` suppresses nothing and is itself reported,
+and **so is an unterminated code fence** — one stray ` ``` `, a `~~~` "closed" by ` ``` `, a line
+merely opening with a three-backtick inline span. Either would otherwise mark every line after it
+dead and D12 would print PASS over the entries it ate, which is the exact sin the comment scan
+already refuses to commit; the fence masking added to stop a quoted `<!--` eating a log had reopened
+it by the other route, silently, and `pm decide` then refused every append to that log forever with
+`the composed entry does not parse as a decision entry`. A marker inside backticks or a terminated
+fence is a marker being named, not a comment being opened.
 Legacy logs migrate through `[pm] decision_grandfather` — `"<path>"` exempts a whole log,
 `"<path>:<N>"` only its first N entries — whose size the gate PRINTS every run and which may only
 shrink: an exemption that suppresses nothing, a cap reaching past the end of its log, and a line
@@ -165,9 +188,12 @@ because the upper-left quadrant is ordinary — so `tiles paint` / `tiles erase`
 not reach a quarter of the plane on the declared 3.11 floor, while passing on 3.14. Fixed in the
 argv, not the parser (the private matcher argparse keys on was rewritten in 3.14, and a tool whose
 behaviour depends on which interpreter `uvx` picked is not a tool): a token opening `-<digit>` after
-one of those flags is glued into `--flag=value`. Narrow on purpose — `--region --tile 9/0,0` is still
-a usage error with exit 2, and nothing after `--` is touched. Predates v0.12.0. The suite now runs
-green on 3.11, 3.12, 3.13 and 3.14; it was 296 passed / 1 failed below 3.14.
+one of those flags is glued into `--flag=value`, on `sys.argv` as well as on an injected argv —
+applying it only to the injected one left `python -m godot_devkit.godot.read.tiles … --at -3,-3`
+exiting 2 on 3.11 while working on 3.14, which is the version-dependent tool the glue exists to not
+be. Narrow on purpose — `--region --tile 9/0,0` is still a usage error with exit 2, and nothing after
+`--` is touched. Predates v0.12.0. The suite now runs green on 3.11, 3.12, 3.13 and 3.14; it was
+296 passed / 1 failed below 3.14.
 
 **Breaking for a tree that has one:** the decision log is `decisions.md`, not `DECISIONS.md`, and the
 handoff is `handoff.md`. `pm new milestone <id>` / `pm new feature <mid> <slug>` performs the rename.
