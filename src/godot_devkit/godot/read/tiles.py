@@ -20,6 +20,7 @@ the full node path when a name is ambiguous. Read output is write input.
 from __future__ import annotations
 
 import argparse
+import sys
 from collections import Counter
 
 from godot_devkit.godot.format.tilemap import (
@@ -132,7 +133,12 @@ def main(argv: list[str] | None = None) -> int:
                         help='cell count + tile kinds inside an inclusive rectangle')
     # `--at -1,-1` and `--region -2,-2,1,1` are ordinary grid coordinates and
     # argparse before 3.14 reads them as options. See `glue_signed_values`.
-    args = parser.parse_args(glue_signed_values(argv) if argv is not None else None)
+    # `sys.argv[1:]` gets the same glue as an injected argv: applying it only to
+    # the injected one made `python -m godot_devkit.godot.read.tiles … --at -3,-3`
+    # exit 2 on 3.11 and work on 3.14, which is the version-dependent tool this
+    # glue exists to not be.
+    args = parser.parse_args(glue_signed_values(
+        sys.argv[1:] if argv is None else argv))
     try:
         sections = parse(args.file)
     except OSError as err:
