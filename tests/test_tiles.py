@@ -15,9 +15,11 @@ import contextlib
 import io
 import shutil
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from support import FIXTURES
 
@@ -150,6 +152,17 @@ class ReadsTheGrid(ReadCase):
         self.assertIn('(-2,5)  src=1 atlas=(0,0) alt=0', self.text)
         self.read('--layer', FLOOR, '--region', '-2,4,-1,5')
         self.assertIn('region x[-2..-1] y[4..5]  1/4 cells', self.text)
+
+    def test_the_glue_applies_to_the_real_argv_too(self) -> None:
+        # The glue was applied only to an INJECTED argv, so every test above
+        # passed while `python -m godot_devkit.godot.read.tiles … --at -3,-3`
+        # still exited 2 on 3.11 and worked on 3.14 — the version-dependent
+        # tool the glue exists to not be.
+        argv = ['tiles', str(SCENE), '--layer', FLOOR, '--at', '-2,5']
+        out = io.StringIO()
+        with mock.patch.object(sys, 'argv', argv), contextlib.redirect_stdout(out):
+            self.assertEqual(tiles.main(), 0)
+        self.assertIn('(-2,5)  src=1 atlas=(0,0) alt=0', out.getvalue())
 
     def test_region_counts_the_cells_inside_it(self) -> None:
         self.read('--layer', FLOOR, '--region', '0,0,3,2')

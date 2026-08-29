@@ -16,12 +16,13 @@ import os
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from support import REPO_ROOT  # noqa: F401  (inserts src/ on sys.path)
 
 from godot_devkit.repo.checks import pm as pm_check
-from godot_devkit.repo.pm import cli, model
+from godot_devkit.repo.pm import cli, model, templates
 
 
 LEGACY_LOG = '# legacy log\n\nM1 said something.\n'
@@ -523,6 +524,75 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('1 decision log(s), 2 entry/ies', out)
 
+    def test_d12_reports_an_unterminated_fence_instead_of_masking_past_it(self):
+        # The same cardinal sin arrived at by the OTHER marker. Fence masking
+        # was added so a quoted `<!--` inside a sample stopped eating the log;
+        # a fence with no terminator then ate the log in silence — the gate
+        # printed `1 entry/ies … PASS` over a two-entry file. It must suppress
+        # nothing and say what is wrong.
+        for opener, closer in (('```gdscript', '```'), ('~~~', '~~~')):
+            with self.subTest(opener), tree(story_statuses=('todo',)) as root:
+                (root / 'devkit.toml').write_text(
+                    '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+                log = self._log(root, self.ENTRY + f'\n{opener}\nfunc f():\n'
+                                '    pass\n\n' + self.SECOND)
+                code, out = run_gate(root)
+                self.assertEqual(code, 1, out)
+                self.assertIn('opens a code fence that is never terminated', out)
+                self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+                # Terminating it clears the finding and hides the sample again.
+                log.write_text(log.read_text(encoding='utf-8').replace(
+                    '    pass\n', f'    pass\n{closer}\n'), encoding='utf-8')
+                code, out = run_gate(root)
+                self.assertEqual(code, 0, out)
+                self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+    def test_d12_reports_a_fence_that_only_LOOKS_closed(self):
+        # `~~~` is closed by `~~~`, never by ```. Masking to the end of the file
+        # on the strength of a mismatched terminator is the same silent lie.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, self.ENTRY + '\n~~~\nfunc f():\n```\n\n' + self.SECOND)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('opens a code fence that is never terminated', out)
+            self.assertIn('1 decision log(s), 2 entry/ies', out)
+
+    def test_pm_decide_appends_past_an_unterminated_fence(self):
+        # The user-visible half: with the rest of the log masked dead, `decide`
+        # re-parsed its own composed entry, could not see it, and refused with
+        # `does not parse as a decision entry` — permanently, on every re-run.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, self.ENTRY + '\n```gdscript\nfunc f():\n')
+            code, out = run_cli(root, 'decide', '0.1', '--chose', 'x',
+                                '--over', 'y', '--because', 'z',
+                                '--evidence', '`deadbee`')
+            self.assertEqual(code, 0, out)
+            self.assertIn('## D4 — ', log.read_text(encoding='utf-8'))
+
+    def test_d12_keeps_the_content_after_a_comment_closes(self):
+        # The two edges of a span are symmetric: the opening line keeps what
+        # precedes `<!--`, so the closing line keeps what FOLLOWS `-->`.
+        # Suppressing the whole closing line hid a conforming `**Over:**` and
+        # failed the entry for having no rejected alternative — a false FAIL.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root,
+                      '## D1 — 2026-08-28 — a decision with an aside in it\n'
+                      '**Chose:** a\n'
+                      '<!-- an aside\n'
+                      'that spans two lines --> **Over:** b\n'
+                      '**Because:** c\n'
+                      '**Evidence:** `deadbee`\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 decision log(s), 1 entry/ies', out)
+
     def test_pm_decide_appends_past_a_stray_comment_marker(self):
         # The user-visible half of the same bug: with the rest of the log
         # marked dead, `pm decide` re-parsed its own composed entry, could not
@@ -852,6 +922,119 @@ class Scaffolding(unittest.TestCase):
             self.assertIn('nothing was written', out)
             self.assertEqual(self._porcelain(root), '')
             self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
+
+    def test_new_refuses_a_squatting_temp_rename_before_anything_moves(self):
+        # The temp name a case-only rename passes through, left behind by an
+        # interrupted run. It is in the directory LISTING, so it is decidable in
+        # the pre-pass — checked inside the moving loop instead, `handoff.md`
+        # was already on disk when the refusal claimed nothing was written.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = self._committed_legacy_grain(
+                root, {'DECISIONS.md': LEGACY_LOG,
+                       'DECISIONS.md.pm-case-rename': 'leftover\n'})
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('is in the way of the DECISIONS.md -> decisions.md', out)
+            self.assertIn('nothing was written', out)
+            self.assertEqual(self._porcelain(root), '')
+            self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
+            # EXACT names: macOS answers `handoff.md` with the `HANDOFF.md`
+            # sitting there, so `exists()` cannot tell a rename from a no-op.
+            self.assertNotIn('handoff.md', model.dir_entries(mdir))
+
+    def test_new_refuses_a_case_VARIANT_that_is_a_directory(self):
+        # `case_variants` reads names, not kinds, so a variant DIRECTORY slipped
+        # past the exact-name refusal, got renamed, and was then opened as a
+        # file: `IsADirectoryError` with the move already done. Same refusal,
+        # every spelling, before anything moves.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = self._committed_legacy_grain(root, {'DECISIONS.md': None})
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('DECISIONS.md is a DIRECTORY', out)
+            self.assertIn('nothing was written', out)
+            self.assertEqual(self._porcelain(root), '')
+            self.assertNotIn('decisions.md', model.dir_entries(mdir))
+            self.assertNotIn('handoff.md', model.dir_entries(mdir))
+
+    def test_new_refuses_a_slot_it_cannot_prepend_a_header_to(self):
+        # `_fill_header` guarded the READ and not the write, so a read-only
+        # legacy doc raised `PermissionError` — a traceback, exit 1, and the
+        # remaining slots never created. Writability is inspectable up front.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            model.write_raw(mdir / 'handoff.md', 'legacy prose\n')
+            model.write_raw(mdir / 'decisions.md', LEGACY_LOG)
+            (mdir / 'handoff.md').chmod(0o444)
+            try:
+                code, out = run_cli(root, 'new', 'milestone', '0.1')
+                self.assertEqual(code, 1, out)
+                self.assertIn('is not writable', out)
+                self.assertIn('nothing was written', out)
+                self.assertNotIn('Traceback', out)
+                self.assertFalse((mdir / 'review.md').exists())
+                self.assertEqual(model.read_raw(mdir / 'decisions.md'), LEGACY_LOG)
+            finally:
+                (mdir / 'handoff.md').chmod(0o644)
+            # And it goes through once the mode allows it.
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            self.assertTrue((mdir / 'review.md').is_file())
+
+    def test_new_refuses_an_undecodable_template_before_the_first_write(self):
+        # A latin-1 byte in a project's `template_dir` raised
+        # `UnicodeDecodeError` from inside the slot loop, two files in. Every
+        # template the grain needs is loaded and decoded before anything lands.
+        for slot in ('review.md', 'milestone.md'):
+            with self.subTest(slot), tree(story_statuses=('todo',)) as root:
+                (root / 'devkit.toml').write_text(
+                    '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+                self.assertEqual(run_cli(root, 'templates')[0], 0)
+                (root / 'pm/templates' / slot).write_bytes(b'caf\xe9\n')
+                (root / 'pm/roadmap/0.1-demo/milestone.md').unlink()
+                code, out = run_cli(root, 'new', 'milestone', '0.1')
+                self.assertEqual(code, 1, out)
+                self.assertIn('template cannot be read', out)
+                self.assertIn('nothing was written', out)
+                self.assertNotIn('Traceback', out)
+                self.assertFalse((root / 'pm/roadmap/0.1-demo/handoff.md').exists())
+
+    def test_new_reports_a_write_that_no_listing_could_have_predicted(self):
+        # Not everything is pre-inspectable — a mode changed under us, a disk
+        # that fills. Rule 6 still holds: exit 1 is a finding a consumer's hook
+        # can print, so the escaping exception becomes a refusal that names
+        # exactly which slots did land rather than a stack trace over them.
+        with tree(story_statuses=('todo',)) as root:
+            gdir = root / 'pm/roadmap/0.1-demo'
+            real = templates.write
+
+            def flaky(path: Path, text: str) -> None:
+                if path.name == model.REVIEW_FILE_NAME:
+                    raise OSError(28, 'No space left on device')
+                real(path, text)
+
+            with unittest.mock.patch.object(templates, 'write', flaky):
+                code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertNotIn('Traceback', out)
+            self.assertIn('No space left on device', out)
+            self.assertIn('PART-FILLED', out)
+            self.assertIn('created pm/roadmap/0.1-demo/handoff.md', out)
+            self.assertFalse((gdir / model.REVIEW_FILE_NAME).exists())
+
+    def test_new_refuses_a_slot_that_is_a_symlink_out_of_the_grain(self):
+        # `_fill_header` followed it and rewrote a file the verb was never
+        # pointed at. A write verb stays inside the grain it was asked to fill.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            outside = root / 'outside.md'
+            model.write_raw(outside, 'OUTSIDE\n')
+            (mdir / 'decisions.md').symlink_to(outside)
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('is a SYMLINK', out)
+            self.assertIn('nothing was written', out)
+            self.assertEqual(model.read_raw(outside), 'OUTSIDE\n')
+            self.assertFalse((mdir / 'review.md').exists())
 
     def test_new_never_stacks_a_second_header_on_a_doc_that_has_one(self):
         with tree(story_statuses=('todo',)) as root:
