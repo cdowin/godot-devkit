@@ -29,7 +29,7 @@ import argparse
 import re
 from pathlib import Path
 from godot_devkit.core.markdown import non_fenced_lines
-from godot_devkit.core.project import load_config, repo_root
+from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import config_section, str_tuple
 
 REPO_ROOT = repo_root()
@@ -165,7 +165,12 @@ def run() -> int:
             part for part in (
                 f'{len(findings)} unresolved claim(s)' if findings else '',
                 f'{len(defects)} malformed doc(s)' if defects else '') if part)
-        print(f'[check:doc] FAIL — {counts}')
+        # The census rides the FAIL line too, exactly as it rides the PASS. A
+        # verdict that does not say what was read is half a verdict whichever
+        # way it went — "1 malformed doc(s)" out of one doc and out of two
+        # hundred are different reports, and only one of them printed.
+        print(f'[check:doc] FAIL — {counts}, across {len(docs)} doc(s), '
+              f'{skipped} fenced line(s) skipped')
         for finding in sorted(defects) + sorted(findings):
             print(f'  {finding}')
         print(f'\nA genuine exception (a deliberate retired-thing citation) gets a trailing '

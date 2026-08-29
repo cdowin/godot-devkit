@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from godot_devkit.core.markdown import fenced_flags
+from godot_devkit.core.markdown import block_scan
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
 
@@ -659,6 +659,47 @@ def version_key(name: str) -> tuple:
     return tuple(parts)
 
 
+def _is_grain_doc(path: Path) -> bool:
+    """True when this file is a GRAIN document rather than a note parked beside
+    one — i.e. it opens with the `---` frontmatter block `field_of` reads.
+
+    A grain IS its frontmatter: every template mints the block, and every rule
+    asks its questions through `field_of`, which reads nothing else. A `.md`
+    without one answers `''` to every question, which is why a `README.md`
+    explaining how bugs are filed came out of D14 as a bug with an illegal
+    status.
+
+    A file that cannot be READ stays IN scope rather than being dropped: "this
+    is not a grain" and "this cannot be opened" are different facts, and
+    answering the second with the first is how a document leaves a census in
+    silence. In scope it reaches the rule, and the rule reports it.
+    """
+    try:
+        return _fence_bounds(_split(read_raw(path))) is not None
+    except (OSError, UnicodeDecodeError):
+        return True
+
+
+def grain_docs(gdir: Path) -> list[Path]:
+    """Every grain document under one slot directory, in reading order.
+
+    RECURSIVE, and the extension compared case-insensitively. A `glob('*.md')`
+    saw neither `<slot>/<topic>/<doc>.md` nor `<DOC>.MD`, and neither `bugs/`
+    nor `stories/` is a directory D13 descends into, so both were invisible to
+    every rule at once — and the census printed the smaller number without
+    saying it had looked less far.
+
+    One definition, every reader (D2/D4's story walk, D14's bug lifetime, D17's
+    prose cap, every census): a second walk would be a second chance to
+    disagree about which documents the tree even holds.
+    """
+    if not gdir.is_dir():
+        return []
+    return sorted(p for p in gdir.rglob('*')
+                  if p.is_file() and p.suffix.lower() == '.md'
+                  and _is_grain_doc(p))
+
+
 def feature_files(mdir: Path) -> list[Path]:
     fdir = mdir / 'features'
     if not fdir.is_dir():
@@ -667,10 +708,8 @@ def feature_files(mdir: Path) -> list[Path]:
 
 
 def story_files(ffile: Path) -> list[Path]:
-    sdir = ffile.parent / 'stories'
-    if not sdir.is_dir():
-        return []
-    return [p for p in sorted(sdir.glob('*.md')) if p.is_file()]
+    """Every story document under one feature, in reading order."""
+    return grain_docs(ffile.parent / 'stories')
 
 
 # --- THE review-record definition --------------------------------------------
@@ -971,23 +1010,8 @@ def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
 # would look, and `prune`'s lag-by-one deletes the file the moment the next
 # milestone closes. This rule is what makes prune safe by construction.
 def bug_files(mdir: Path) -> list[Path]:
-    """Every bug document under one milestone, in reading order.
-
-    RECURSIVE, and the extension compared case-insensitively. A `glob('*.md')`
-    saw neither `bugs/<topic>/<bug>.md` nor `<BUG>.MD`, and `bugs/` is a
-    permitted slot that D13 never descends into, so both were invisible to
-    every rule at once — and the census printed the smaller number without
-    saying it had looked less far.
-
-    One definition, three readers (D14's lifetime rule, D17's prose cap, any
-    census): a second walk would be a second chance to disagree about which
-    files the tree even has.
-    """
-    bdir = mdir / 'bugs'
-    if not bdir.is_dir():
-        return []
-    return sorted(p for p in bdir.rglob('*')
-                  if p.is_file() and p.suffix.lower() == '.md')
+    """Every bug document under one milestone, in reading order."""
+    return grain_docs(mdir / 'bugs')
 
 
 def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
@@ -1216,65 +1240,6 @@ def log_files(cfg: PmConfig, schema: LogSchema) -> tuple[list[Path], list[Path]]
     return sorted(logs), sorted(variants)
 
 
-def _mask_code_spans(raw: str) -> str:
-    """The line with every inline `code span` blanked to spaces.
-
-    Offsets are preserved, so the caller can go on searching the masked line
-    and still report positions from the real one. A marker inside backticks is
-    a marker being NAMED, not a comment being opened — which is exactly how a
-    log documenting comment handling swallowed its own next three fields.
-    """
-    out = list(raw)
-    i, n = 0, len(raw)
-    while i < n:
-        if raw[i] != '`':
-            i += 1
-            continue
-        j = i
-        while j < n and raw[j] == '`':
-            j += 1
-        close = raw.find(raw[i:j], j)
-        if close < 0:  # an unpaired run opens no span
-            i = j
-            continue
-        end = close + (j - i)
-        for k in range(i, end):
-            out[k] = ' '
-        i = end
-    return ''.join(out)
-
-
-def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool], int]:
-    """(each line with inline code spans blanked, which lines are FENCED, the
-    1-based line of a fence that is never terminated, or 0).
-
-    A fenced block is a code sample the reader sees verbatim: `## <short title>`
-    inside one is not a heading and `<!--` inside one is a marker being quoted,
-    not a comment being opened. Fenced lines are blanked here and excluded from
-    entry detection by the caller — counting a template's example block as a
-    real entry is the same lie in the other direction.
-
-    An UNTERMINATED fence suppresses nothing, exactly as an unterminated `<!--`
-    suppresses nothing: left masked it would mark every remaining entry dead and
-    the gate would print PASS over the ones it ate — the cardinal sin, arrived at
-    the second way. One stray ``` typo, one ~~~ closed by ```, one line opening
-    with a three-backtick inline span: each is REPORTED here instead, because a
-    log whose fences D12 cannot delimit is a log D12 has not honestly scanned.
-
-    Blanking preserves length, so a marker OUTSIDE the masked ranges still lands
-    at its real offset.
-
-    WHERE the fences are is `core.markdown.fenced_flags`' answer, not a second
-    one: `check doc` and `check agents` read the same markdown under the same
-    CommonMark rules, and two scanners would drift into disagreeing about which
-    lines a document even has.
-    """
-    fenced, unfenced = fenced_flags(lines)
-    out = [' ' * len(raw) if hidden else _mask_code_spans(raw)
-           for raw, hidden in zip(lines, fenced)]
-    return out, fenced, unfenced
-
-
 def _comment_scan(lines: list[str]) -> tuple[list[bool], list[str], int, int]:
     """(per line: is it LIVE log text — outside any HTML comment at the point it
     starts, and outside any fenced code block?, the text of each line the entry
@@ -1299,33 +1264,30 @@ def _comment_scan(lines: list[str]) -> tuple[list[bool], list[str], int, int]:
     commented head is dropped and that half reads at line start too — killing
     the whole closing line instead hid a conforming `**Over:**` written after a
     spanning aside, and D12 failed the entry for having no rejected alternative.
+
+    A fenced block is a code sample the reader sees verbatim: `## <short title>`
+    inside one is not a heading and `<!--` inside one is a marker being quoted.
+    Fenced lines are dead here for that reason — counting a template's example
+    block as a real entry is the same lie in the other direction.
+
+    WHERE the fences and the comments are is `core.markdown.block_scan`'s
+    answer, not a second one: `check doc` and `check agents` read the same
+    markdown under the same CommonMark rules, and two scanners would drift into
+    disagreeing about which lines a document even has. It settles both markers
+    in ONE ordered pass, which is the only way to get both right — a fence
+    quoted inside a CLOSED comment used to be reported malformed, because the
+    fences were decided before anything knew where the comments were.
     """
-    masked, fenced, unfenced = _mask_markup(lines)
-    live = [not f for f in fenced]
+    scan = block_scan(lines, comments=True)
+    live = [not f for f in scan.fenced]
     text = list(lines)
-    spans: list[tuple[int, int, int]] = []
-    inside, start = False, 0
-    for idx, body in enumerate(masked):
-        i = 0
-        while i < len(body):
-            if inside:
-                j = body.find('-->', i)
-                if j < 0:
-                    break
-                spans.append((start, idx, j + 3))
-                inside, i = False, j + 3
-            else:
-                j = body.find('<!--', i)
-                if j < 0:
-                    break
-                inside, start, i = True, idx, j + 4
-    for opened, closed, after in spans:
+    for opened, closed, after in scan.comment_spans:
         if closed == opened:
             continue  # opened and closed inline: the line was never suppressed
         for k in range(opened + 1, closed):
             live[k] = False
         text[closed] = lines[closed][after:].lstrip(' \t')
-    return live, text, (start + 1 if inside else 0), unfenced
+    return live, text, scan.unclosed, scan.unterminated
 
 
 def log_comment_defect(text: str, rule: str) -> str:

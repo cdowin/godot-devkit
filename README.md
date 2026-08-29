@@ -197,9 +197,12 @@ grain does not make you responsible for the rest.
 
 ## Reading a gate failure
 
-Every gate prints a **census** of what it scanned, then a verdict. Read the census first — a gate
-that scanned fewer files than you expected is telling you your config is wrong, not that your tree is
-clean. A gate that scans **zero** files fails rather than passing, deliberately.
+Every gate prints a **census** of what it scanned, then a verdict — on the FAIL line as much as on
+the PASS line, because "1 malformed doc" out of one document and out of two hundred are different
+reports. Read the census first — a gate that scanned fewer files than you expected is telling you
+your config is wrong, not that your tree is clean. A gate that scans **zero** files fails rather than
+passing, deliberately, and a file it could not DECODE is reported and dropped from the count rather
+than counted as scanned.
 
 ```
 [check:tres] FAIL — scanned 0 files; check [tres] exclude_prefixes
@@ -309,7 +312,7 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
-| `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from templates — every canonical slot, all lowercase (`milestone.md`/`handoff.md`/`decisions.md`/`changelog.md`/`review.md` + `features/ bugs/ design/`; a feature gets `feature.md`/`decisions.md`/`review.md` + `stories/ design/`). `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. `review.md` is never minted on a `done` grain; `changelog.md` always is, because a closed milestone is when its notes matter most |
+| `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from templates — every canonical slot, all lowercase (`milestone.md`/`handoff.md`/`decisions.md`/`changelog.md`/`review.md` + `features/ bugs/ design/`; a feature gets `feature.md`/`decisions.md`/`review.md` + `stories/ design/`). `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. `review.md` is never minted on a `done` grain; `changelog.md` always is, because a closed milestone is when its notes matter most. Every failure out is a **refusal**, never a stack trace — including the grain directory or file the filesystem itself will not take (a name past NAME_MAX, an unwritable parent), which answers the same way on every supported Python |
 | `pm decide <grain-id> --chose … --over … --because … --evidence … [--title …]` | Append a D12-conforming entry to that milestone's or feature's `decisions.md`. The tool stamps the ISO date and the next ordinal in the log's own id prefix. `--over` is **required** — a decision with no rejected alternative is a description — and every value is validated by re-parsing the composed entry through D12's own predicates, so a non-conforming entry is refused with the log byte-identical rather than written and then reported |
 | `pm decisions <grain-id>` | Print that grain's decision entries, parsed and deterministic — the READ half of the contract `decide` writes. A milestone prints its own log **and its features'**. The document goes to stdout and the count to stderr. Exists so answering "what did we decide in milestone xyz" is never a `find` piped to a `grep`: that is a second parser with none of the fence and comment handling, and it disagrees with the gate on exactly the logs where it matters |
 | `pm changelog <milestone-id> --what … --evidence … [--title …]` | Append a D15-conforming release note to that milestone's `changelog.md`. Two fields and no more — **what was built that a player cares about**, and the reference proving it shipped; the reasoning is a *decision* and belongs in `decisions.md`. A **milestone** log: a feature contributes through the entry's `Evidence:` pointer, and naming one is refused. Same machinery as `decide` — the tool stamps the ISO date and the next ordinal in the log's own prefix, and re-parses the composed entry through D15's own predicates, so a refusal leaves the log byte-identical |
@@ -404,6 +407,11 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 #       decision), and prune's lag-by-one deletes a closed milestone's dir — so
 #       this rule is what makes prune safe by construction. Also reports a bug
 #       status outside bug_states, which D4 does not cover.
+#       `bugs/` and `stories/` are walked RECURSIVELY, with the extension
+#       compared case-insensitively, so a document one directory down or named
+#       `.MD` is not invisible. A grain IS its frontmatter: a `.md` in either
+#       slot with no leading `---` block is a note parked beside the grains
+#       (a README, a sketch), not a bug or a story with an empty status.
 #   D12 every `## <ID> — <ISO date> — <title>` entry in a decisions.md carries
 #       **Chose:** / **Over:** / **Because:** / **Evidence:**, in that order, one
 #       per line, values <= 200 chars and the title <= 80. `Over:` is the

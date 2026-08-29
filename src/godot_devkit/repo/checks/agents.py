@@ -110,6 +110,7 @@ def run() -> int:
     defects: list[str] = []
     unverified = 0
     skipped = 0
+    unreadable = 0
 
     def report(msg: str) -> None:
         findings.append(msg)
@@ -135,7 +136,18 @@ def run() -> int:
         rel = str(path.relative_to(root))
         try:
             text = path.read_text(encoding='utf-8')
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as err:
+            # REPORTED, and dropped from the census in the same breath. A
+            # bare `continue` here left the file counted in `scanned N
+            # definition(s)` while nothing had been read from it — a definition
+            # instructing the impossible passed the moment one latin-1 byte
+            # landed above it. D12 and D15 report an unopenable log for exactly
+            # this reason, and `check doc` reads with `errors='replace'`; this
+            # was the one reader in the package that masked in silence.
+            defect(f'{rel}: cannot be read ({err}) — a definition this gate '
+                   f'cannot open is not a definition it has scanned; save it '
+                   f'as UTF-8')
+            unreadable += 1
             continue
 
         # A3 — a flat skill file never loads as a skill. But `<name>/SKILL.md`
@@ -204,7 +216,11 @@ def run() -> int:
     # The census counts FILES, and files are not what a fence hides — so it
     # also says how much text was skipped, or a PASS is a PASS over an unknown
     # amount of unread definition.
-    census = f'{len(files)} definition(s), {skipped} fenced line(s) skipped'
+    census = (f'{len(files) - unreadable} definition(s), {skipped} fenced '
+              f'line(s) skipped')
+    if unreadable:
+        census += (f', {unreadable} of {len(files)} UNREADABLE and reported '
+                   f'above rather than counted as scanned')
     if unverified:
         census += (f', {unverified} transition mention(s) UNVERIFIED (the line '
                    f'names no single grain, an unknown state, or prohibits '

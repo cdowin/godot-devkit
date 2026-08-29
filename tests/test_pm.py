@@ -1149,6 +1149,55 @@ class Scaffolding(unittest.TestCase):
             for slot, want in model.SLOT_HEADER.items():
                 self.assertEqual(model.header_of(mdir / slot), want, slot)
 
+    def test_a_name_the_filesystem_refuses_is_a_refusal_not_a_traceback(self):
+        # The grain DIRECTORY was the last unguarded write: `gdir.mkdir` on a
+        # name too long for the filesystem came out as an OSError traceback
+        # under exit 1, and exit 1 is what a consumer's pre-push hook reads as
+        # "drift found".
+        with tree(story_statuses=('todo',)) as root:
+            code, out = run_cli(root, 'new', 'milestone', '0.2-' + 'a' * 300,
+                                'Too Long')
+            self.assertEqual(code, 1, out)
+            self.assertNotIn('Traceback', out)
+            self.assertIn('REFUSED', out)
+            self.assertIn('could not be created', out)
+            self.assertIn('nothing was written', out)
+
+    def test_new_story_and_new_bug_refuse_a_name_the_filesystem_rejects(self):
+        # Those two write straight rather than through the scaffolder, so
+        # neither guard `new` grew ever covered them.
+        with tree(story_statuses=('todo',)) as root:
+            for argv in (('new', 'story', '0.1/alpha', 'a' * 300, 'S'),
+                         ('new', 'bug', '0.1', 'a' * 300)):
+                code, out = run_cli(root, *argv)
+                self.assertEqual(code, 1, out)
+                self.assertNotIn('Traceback', out)
+                self.assertIn('nothing was written', out)
+
+    def test_the_same_pm_new_refuses_on_every_supported_python(self):
+        # `Path.exists()` raises OSError on an over-long name up to 3.13 and
+        # answers False from 3.14 on, so the verb came out as a traceback or as
+        # a refusal depending on which interpreter `uvx` picked.
+        from godot_devkit.repo.pm import cli as pm_cli
+        with tree(story_statuses=('todo',)) as root:
+            self.assertFalse(pm_cli._exists(root / ('a' * 300)))
+
+    def test_an_unwritable_roadmap_dir_is_a_refusal_not_a_traceback(self):
+        # The same unguarded call from the other side, and the claim is
+        # honest here: nothing has been written when the mkdir fails.
+        with tree(story_statuses=('todo',)) as root:
+            rdir = root / 'pm/roadmap'
+            rdir.chmod(0o555)
+            try:
+                code, out = run_cli(root, 'new', 'milestone', '0.2', 'Next')
+                self.assertEqual(code, 1, out)
+                self.assertNotIn('Traceback', out)
+                self.assertIn('nothing was written', out)
+                self.assertFalse((rdir / '0.2-next').exists())
+            finally:
+                rdir.chmod(0o755)
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.2', 'Next')[0], 0)
+
 
 class StatusReport(unittest.TestCase):
     def test_unphased_milestone_prints_no_bucket_header(self):
@@ -2311,6 +2360,23 @@ class AgentGatePrecision(unittest.TestCase):
                         '```\n[pm] REFUSED — story wip -> done\n```\n')
             self.assertEqual(self._gate(root)[0], 0)
 
+    def test_a_definition_this_gate_cannot_decode_is_reported_not_skipped(self):
+        # The one reader in the package that masked in SILENCE: the file was
+        # dropped by a bare `continue` while the census still counted it as
+        # scanned, so one latin-1 byte turned a real INSTRUCTS finding into a
+        # PASS with the census unchanged.
+        with tree() as root:
+            p = root / '.claude/agents/bad.md'
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b'caf\xe9\nFlip it with `pm story done <id>`.\n')
+            code, out = self._gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('MALFORMED', out)
+            self.assertIn('cannot be read', out)
+            # And the census stops asserting a scan that did not happen.
+            self.assertIn('0 definition(s)', out)
+            self.assertIn('1 of 1 UNREADABLE', out)
+
     def test_prose_prohibiting_a_transition_is_not_instructing_it(self):
         with tree() as root:
             self._write(root, '.claude/rules/r.md',
@@ -2707,6 +2773,102 @@ class BugLifetime(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
             self.assertNotIn('D14', out)
+
+    def test_a_non_grain_md_parked_under_bugs_is_not_a_bug(self):
+        # A grain IS its frontmatter, so a README explaining how bugs are filed
+        # — or a design note beside them — is not a bug with an empty status.
+        # There was no way to park either under `bugs/` without a finding.
+        with tree(milestone_status='building') as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            bdir = root / 'pm/roadmap/0.1-demo/bugs'
+            (bdir / 'design').mkdir(parents=True, exist_ok=True)
+            (bdir / 'README.md').write_text('# how bugs are filed here\n',
+                                            encoding='utf-8')
+            (bdir / 'design/sketch.md').write_text('a sketch\n',
+                                                   encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('README.md', out)
+            self.assertIn('no bug files under', out)
+
+    def test_that_rule_does_not_reopen_the_subdir_hole_it_sits_next_to(self):
+        # The control: a REAL bug carries frontmatter wherever it is parked and
+        # whatever its extension, so narrowing the walk to grain documents must
+        # not undo the recursion that made nested bugs visible at all.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            (root / 'pm/roadmap/0.1-demo/bugs/README.md').parent.mkdir(
+                parents=True, exist_ok=True)
+            (root / 'pm/roadmap/0.1-demo/bugs/README.md').write_text(
+                '# how bugs are filed here\n', encoding='utf-8')
+            write(root / 'pm/roadmap/0.1-demo/bugs/spatial/SEED.MD',
+                  {'id': '0.1/bugs/seed', 'milestone': '"0.1"',
+                   'status': 'open', 'caught_in': '"0.1"'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('bugs/spatial/SEED.MD', out)
+            self.assertIn('1 bug(s)', out)
+
+
+class StoryWalk(unittest.TestCase):
+    """`stories/` is the same never-descended slot shape `bugs/` was.
+
+    D14's fix made the bug walk recursive and case-insensitive on extension and
+    `stories/` never got it, so a story parked one directory down was invisible
+    to every rule at once — and worse than invisible: D4 could not see its
+    status, and D2 read "all stories done" off the ones it could see and filed
+    a FALSE finding against a feature that had an unfinished story in it.
+    """
+
+    FDIR = 'pm/roadmap/0.1-demo/features/alpha'
+
+    def test_a_story_in_a_stories_SUBDIR_is_not_invisible(self):
+        with tree(feature_status='building', story_statuses=('done',)) as root:
+            write(root / self.FDIR / 'stories/parked/s2.md',
+                  {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S2', 'status': 'todo'})
+            code, out = run_gate(root)
+            self.assertIn('2 story/ies', out)
+
+    def test_it_is_the_false_D2_finding_that_makes_this_load_bearing(self):
+        # Not just an undercount: the stories it COULD see were all done, so
+        # D2 told the author to close a feature with an open story in it.
+        with tree(feature_status='building', story_statuses=('done',)) as root:
+            write(root / self.FDIR / 'stories/parked/s2.md',
+                  {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S2', 'status': 'todo'})
+            code, out = run_gate(root)
+            self.assertNotIn('all stories done', out)
+
+    def test_D4_can_see_a_nested_story_with_an_illegal_status(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            write(root / self.FDIR / 'stories/parked/s2.md',
+                  {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S2',
+                   'status': 'NOT-A-REAL-STATUS'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn("status 'NOT-A-REAL-STATUS' not in", out)
+
+    def test_an_uppercase_MD_story_is_counted(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            write(root / self.FDIR / 'stories/S3.MD',
+                  {'id': '0.1/alpha/S3', 'feature': '0.1/alpha',
+                   'milestone': '"0.1"', 'name': 'S3', 'status': 'todo'})
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('2 story/ies', out)
+
+    def test_a_non_grain_md_parked_under_stories_is_not_a_story(self):
+        # The same rule `bugs/` gets, from the same walk: a README beside the
+        # stories is not a story with an empty status.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / self.FDIR / 'stories/README.md').write_text(
+                '# how stories are written here\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 story/ies', out)
 
 
 class Decide(unittest.TestCase):
@@ -3490,6 +3652,90 @@ class MarkdownFences(unittest.TestCase):
         self.assertIn('line 1', model.log_fence_defect('```\n## D1 — x\n', 'D12'))
         self.assertEqual(model.log_fence_defect('```\nx\n```\n', 'D12'), '')
 
+    def test_a_balanced_inline_span_leading_a_line_is_not_a_fence_opener(self):
+        # CommonMark: the info string after a BACKTICK fence may not contain a
+        # backtick. Without that rule a paragraph merely BEGINNING with a
+        # ```balanced``` span opened a fence, a later bare ``` "closed" it, and
+        # the claims between were masked with NO defect reported — the silent
+        # mask, reached by a third route.
+        with tree() as root:
+            code, out = self._doc(
+                root, '```make nosuchtarget``` is the spelling.\n'
+                      + self.DEAD + '```\n')
+            self.assertEqual(code, 1, out)
+            self.assertIn('unknown make target: `make nosuchtarget`', out)
+            self.assertIn('dead link target', out)
+            self.assertIn('unknown make target: `make no-such-target`', out)
+            # And the ``` that used to "close" it opens nothing it can finish.
+            self.assertIn('never terminated', out)
+
+    def test_a_longer_run_leading_a_line_is_not_a_fence_opener_either(self):
+        # ````x``` is the same shape one backtick wider, and the fuzz found it
+        # as the second half of the one divergence class.
+        with tree() as root:
+            code, out = self._doc(root, '````x``` and\n' + self.DEAD + '````\n')
+            self.assertEqual(code, 1, out)
+            self.assertIn('dead link target', out)
+            self.assertIn('unknown make target', out)
+
+    def test_a_tilde_fence_may_carry_backticks_in_its_info_string(self):
+        # The rule is BACKTICK-fence-only. Over-applying it would stop a real
+        # `~~~` block masking, which is the same defect pointing the other way.
+        with tree() as root:
+            code, out = self._doc(root, '~~~ a ``b`` c\n' + self.DEAD + '~~~\n')
+            self.assertEqual(code, 0, out)
+            self.assertIn('4 fenced line(s) skipped', out)
+
+    def test_the_decision_log_reads_that_span_the_same_way(self):
+        # D12's twin of the case above: the same masking bug returned two
+        # entries as one, and printed PASS over the one it ate.
+        log = ('```D1 is written``` like so.\n\n'
+               '## D1 — 2026-01-01 — a\n**Decision:** x\n\n```\n\n'
+               '## D2 — 2026-01-02 — b\n**Decision:** y\n')
+        self.assertEqual(len(model.log_entries_in(log)), 2)
+        self.assertIn('line 6', model.log_fence_defect(log, 'D12'))
+
+    def test_an_unterminated_fence_inside_a_CLOSED_comment_is_not_malformed(self):
+        # CommonMark puts that ``` inside an HTML block, so it opens nothing.
+        # Fence flags used to be computed before comment spans, which made a
+        # perfectly well-formed log report MALFORMED — a loud false FAIL, and a
+        # false FAIL is how a gate gets switched off.
+        log = ('## D1 — 2026-01-01 — a\n**Decision:** x\n\n'
+               '<!--\n```\naside\n-->\n\n'
+               '## D2 — 2026-01-02 — b\n**Decision:** y\n')
+        self.assertEqual(model.log_fence_defect(log, 'D12'), '')
+        self.assertEqual(model.log_comment_defect(log, 'D12'), '')
+        self.assertEqual(len(model.log_entries_in(log)), 2)
+
+    def test_a_closed_fence_inside_a_closed_comment_still_behaves(self):
+        # The control for the case above: this always worked, and the
+        # interleaved scan must not trade one for the other.
+        log = ('## D1 — 2026-01-01 — a\n**Decision:** x\n\n'
+               '<!--\n```\naside\n```\n-->\n\n'
+               '## D2 — 2026-01-02 — b\n**Decision:** y\n')
+        self.assertEqual(model.log_fence_defect(log, 'D12'), '')
+        self.assertEqual(len(model.log_entries_in(log)), 2)
+
+    def test_a_comment_marker_inside_a_fence_is_still_a_marker_being_shown(self):
+        # The other direction, and the reason fences were settled first in the
+        # first place: a `<!--` inside a sample must not open a comment and eat
+        # the entries below it.
+        log = ('## D1 — 2026-01-01 — a\n**Decision:** x\n\n'
+               '```\n<!--\n```\n\n'
+               '## D2 — 2026-01-02 — b\n**Decision:** y\n')
+        self.assertEqual(model.log_comment_defect(log, 'D12'), '')
+        self.assertEqual(len(model.log_entries_in(log)), 2)
+
+    def test_the_doc_FAIL_line_says_what_it_scanned(self):
+        # `agents` carries its census into its FAIL line; `doc` printed the
+        # verdict alone. "1 malformed doc(s)" out of one doc and out of two
+        # hundred are different reports, and only one of them printed.
+        with tree() as root:
+            code, out = self._doc(root, '```\n' + self.DEAD)
+            self.assertEqual(code, 1, out)
+            self.assertIn('1 doc(s)', out.splitlines()[0])
+            self.assertIn('fenced line(s) skipped', out.splitlines()[0])
+
 
 class ProseRatchet(unittest.TestCase):
     """D17 / D18 — the prose caps, the debt ledger, and the ratchet.
@@ -3509,11 +3755,18 @@ class ProseRatchet(unittest.TestCase):
 
         With a header the file is two lines longer on disk — the mandated line
         and the blank after it — and `doc_lines` must not see them.
+
+        A `header` says this is a LOG (decisions.md, changelog.md); anything
+        else is a grain document, and a grain IS its frontmatter — the walk
+        that finds a story or a bug reads the leading `---` block, so a fixture
+        without one is not the thing being measured. Those three lines are
+        prose the cap counts, so they come out of `n`.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        body = [f'line {i}' for i in range(n)]
         pre = [header, ''] if header else []
-        path.write_text('\n'.join(pre + body) + '\n', encoding='utf-8')
+        front = [] if header else ['---', f'id: {path.stem}', '---']
+        body = [f'line {i}' for i in range(n - len(front))]
+        path.write_text('\n'.join(pre + front + body) + '\n', encoding='utf-8')
         return path
 
     def _cfg(self, root: Path, extra: str = '',

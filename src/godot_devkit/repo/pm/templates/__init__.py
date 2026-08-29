@@ -209,7 +209,19 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     dir_slots = (model.MILESTONE_DIR_SLOTS if kind == 'milestone'
                  else model.FEATURE_DIR_SLOTS)
     actions: list[tuple[str, Path]] = []
-    gdir.mkdir(parents=True, exist_ok=True)
+    # The grain DIRECTORY is the first byte this verb writes, and it was the
+    # last unguarded one: a name the filesystem will not take (`OSError: File
+    # name too long`) and an unwritable `<roadmap>/` both came out as a
+    # traceback under exit 1 — the code a consumer's pre-push hook reads as
+    # "drift found", so the stack trace lied in both directions. Nothing has
+    # been written when this fails, so the refusal can say so and mean it.
+    try:
+        gdir.mkdir(parents=True, exist_ok=True)
+    except OSError as err:
+        raise ScaffoldRefused(
+            f'{cfg.rel(gdir)}/ could not be created ({err}) — nothing was '
+            f'written; shorten the id or name, or make {cfg.rel(gdir.parent)}/ '
+            f'writable, and re-run') from err
 
     # Resolve every case-variant FIRST, so the status read below and the writes
     # after it both see the canonical names.

@@ -121,6 +121,87 @@ One predicate behind both writers and both gates, so `pm decide`, `pm changelog`
 the same thing. Real prose is still called prose, including a sentence whose first bad word happens
 to be hex.
 
+**A line that merely BEGINS with a balanced ` ``` ` span is no longer read as a fence opener.** The
+one CommonMark rule `fenced_flags` still lacked: *the info string after a backtick fence may not
+contain a backtick*. Without it, a paragraph opening with ```` ```make nosuchtarget``` is the
+spelling. ```` opened a fence, a later bare ` ``` ` "closed" it, and everything between was masked —
+in **silence**, because a fence that opens and closes looks perfectly well-formed. That is this
+package's cardinal sin reached by a third route: `check doc` printed `PASS — 0 unresolved claims`
+over two dead claims, and D12 returned one entry from a two-entry log. The info string is now read as
+the WHOLE rest of the line rather than its first token, which is where the closing backticks of an
+inline span actually sit. **Tildes are untouched** — `~~~ a ``b`` c` is a real fence whose info string
+carries backticks, and over-applying the rule would mask a document's genuine sample instead. A
+60,000-case differential fuzz against a spec-literal CommonMark reference (three seeds) now reports
+**0 divergences in 0 classes**, against 4,525 in 1,515 classes on one of those seeds before the fix;
+a mask-diff over all **1,550** tracked markdown files of both consumers reports **0 differing**.
+
+**An unterminated fence inside a CLOSED HTML comment is no longer reported malformed.** The twin
+defect, pointing the other way: fence flags were computed BEFORE comment spans, so a lone ` ``` `
+quoted inside a paired `<!-- -->` produced a loud false `MALFORMED` — and a false FAIL is how a gate
+gets switched off. CommonMark puts that fence inside an HTML block, and the two markers hide each
+other, so only document ORDER settles which wins. `core.markdown.block_scan` now walks the document
+**once**, tracking whichever block is open: a fence inside a comment is a fence being quoted, and a
+`<!--` inside a fenced sample is still a marker being shown (the behaviour the fence masking was
+added for). `fenced_flags` is that scan with the comment half off, and `_mask_markup` is gone —
+D12/D15, `check doc` and `check agents` share one implementation, as they did before, now with one
+pass instead of two.
+
+**`check agents` no longer drops a definition it cannot decode while counting it as scanned.** A
+`UnicodeDecodeError` hit a bare `continue` while the file stayed inside `scanned N definition(s)`, so
+one latin-1 byte prepended to an agent definition turned a real `INSTRUCTS` finding into a PASS with
+the census unchanged — the one reader in this package that masked in silence. It is now a `MALFORMED`
+finding and comes OUT of the scanned count, the way D12 and D15 already report a log they cannot
+open. The census says so: `0 definition(s), 0 fenced line(s) skipped, 1 of 1 UNREADABLE and reported
+above rather than counted as scanned`.
+
+**`stories/` got the recursion fix `bugs/` got, and both now define a grain document the same way.**
+D14's walk became recursive and case-insensitive on the extension; `stories/` is the same
+never-descended slot shape and never got it, so a story at `stories/parked/s2.md` or named `S3.MD`
+was invisible to every rule at once. Worse than an undercount: the stories D2 COULD see were all
+done, so it filed the FALSE finding *all stories done, feature still building* against a feature with
+an open story in it, while D4 could not see that story's illegal status at all. One
+`grain_docs(<slot>)` now serves the story walk, the bug walk, D17's prose cap and every census.
+
+That shared walk also decides what a bug IS, which closes the other half: D14 reported any non-bug
+`.md` under `bugs/` — a `README.md`, a `design/` sketch — as *bug status '' is not in (open fixed
+closed)*, and there was no way to park either there. **A grain is its frontmatter.** Every template
+mints the leading `---` block and every rule asks its questions through `field_of`, which reads
+nothing else, so a `.md` with no block is a note beside the grains rather than a grain with an empty
+status. Chosen over an ignore list because it is the tree's own existing definition rather than a
+second one, and it cannot re-open the hole recursion just closed: a real bug carries frontmatter
+wherever it is parked and whatever its extension, which is asserted by a test that files one at
+`bugs/spatial/SEED.MD` beside a `README.md` and requires the bug found and the README silent. A file
+that cannot be READ stays in scope and is reported — "this is not a grain" and "this cannot be
+opened" are different facts.
+
+**`pm new` has no path left out from under "exit 1 is a finding, not a stack trace".** `gdir.mkdir`
+was the last unguarded write in the scaffolder: a ~300-character grain name (`OSError: File name too
+long`) and an unwritable `pm/roadmap/` (`PermissionError`) both came out as tracebacks under exit 1,
+the code a consumer's pre-push hook reads as "drift found". Both are now a `ScaffoldRefused`, and
+*nothing was written* is honest there because nothing has been. Two more of the same shape went with
+it. `pm new story` and `pm new bug` write straight rather than through the scaffolder, so neither
+guard that verb grew ever covered them; they refuse now too. And `Path.exists()` **raises**
+`OSError` on an over-long name up to 3.13 while answering `False` from 3.14 on, so the same command
+produced a traceback or a refusal depending on which interpreter `uvx` picked — a tool whose
+behaviour depends on that is not a tool, and `_exists` settles it at False on every supported Python,
+which routes into the refusal that names the cause.
+
+**`check doc`'s FAIL line carries its census**, the way `check agents`' already did: `FAIL — 1
+malformed doc(s), across 22 doc(s), 223 fenced line(s) skipped`. A verdict that does not say what was
+read is half a verdict whichever way it went, which is the reason the fence census exists at all.
+
+**Dead code removed.** `core/markdown.py`'s `COMMAND_LINE` had no reader anywhere in `src` or
+`tests`, and `repo/checks/doc.py` imported `load_config` unused. When the last reader dies, the
+declaration dies.
+
+**Nothing moved in either consumer.** `check doc` / `check agents` / `check pm` / `check all` print
+byte-identical censuses and verdicts on both trail and nullbound before and after — 19/22 docs,
+22/26 definitions, 18/22 milestones, 14/136 features, 36/235 stories. D12's live census over
+nullbound is unchanged at 158 decision logs / 295 entries / 1,467 violations / 0 comment defects / 0
+fence defects, and D17/D18 over a scratch copy of that tree with its 58-entry ledger still reports
+598 documents / 45,802 lines, 1 closed log of 47 lines, zero OVERCAP / GREW / CLOSED-LOG, and the one
+shrink-only ledger DRIFT.
+
 ## v0.13.0 — 2026-08-29
 
 **One uniform grain structure, all lowercase.** Every milestone and feature dir carries the same
@@ -344,21 +425,11 @@ so `[]` and the absent key both say "none exempt".
 `\r`; a `decision_grandfather` cap names the wrong entry when one is inserted above it;
 `ScaffoldRefused` prints an absolute path rather than a repo-relative one.
 
-Six more, all pre-existing and none introduced by this release; each was found by constructing the
-input and running it, and none of them fires in either consumer today. A line opening with a
-*balanced* three-backtick inline span is still read as a fence opener, so a later bare ` ``` ` masks
-the region between with no defect reported — the one CommonMark rule `fenced_flags` still lacks (an
-info string after a backtick fence may not contain backticks); a 20,000-case differential fuzz found
-it as the only divergence class, and a mask-diff over all 170 live markdown files of both consumers
-reported none differing. `check agents` skips a non-UTF-8 definition while its census still counts it
-as scanned, which is the one reader in the package that masks in silence rather than reporting. D14's
-recursion and case-insensitive extension were not carried to `stories/`, which is the same
-never-descended slot shape `bugs/` was: a story under `stories/<subdir>/` or named `.MD` goes unseen
-by D4 and can flip D2 into a false finding. `pm new` has a third path out from under "exit 1 is a
-finding" that the rename fixes did not reach — `gdir.mkdir` on an over-long grain name or an
-unwritable `pm/roadmap/`. D14 now reports any non-bug `.md` parked under `bugs/` (a `README.md`, a
-`design/` note) as a bug with a bad status. And an unterminated fence inside a *closed* HTML comment
-is reported as malformed, because fence flags are computed before comment spans.
+Six more were reported here and all six are fixed in `## Unreleased` above: the balanced
+three-backtick span read as a fence opener, `check agents` skipping a non-UTF-8 definition in
+silence, `stories/` never getting D14's recursion, `pm new`'s unguarded `gdir.mkdir`, D14 reporting a
+non-bug `.md` under `bugs/`, and an unterminated fence inside a *closed* HTML comment reported as
+malformed.
 
 **`tiles --region` and `tiles --at` can address the negative quadrants again.** `--region -2,-2,1,1`
 died with `argument --region: expected one argument` on **every Python a consumer actually runs**:

@@ -99,6 +99,39 @@ def _check_slug(kind: str, value: str) -> str:
     return value
 
 
+def _exists(path: Path) -> bool:
+    """`Path.exists()` that answers False for a path the FILESYSTEM refuses.
+
+    A component longer than the filesystem's NAME_MAX raises `OSError` out of
+    `stat` on 3.11, 3.12 and 3.13, and is swallowed into False from 3.14 on. So
+    one `pm new` came out as a traceback or as a refusal depending on which
+    interpreter `uvx` picked, and a tool whose behaviour depends on that is not
+    a tool. False is the answer both readings want: nothing is there, and the
+    write that follows refuses with the reason.
+    """
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _mint(cfg: model.PmConfig, path: Path, body: str) -> None:
+    """Write one new grain FILE, turning a filesystem refusal into a REFUSED.
+
+    `new story` and `new bug` write straight rather than through the idempotent
+    scaffolder, so neither guard that verb grew covers them: a slug the
+    filesystem will not take, or an unwritable `stories/`, came out as an
+    `OSError` traceback under exit 1 — the code a consumer's pre-push hook
+    reads as "drift found".
+    """
+    try:
+        templates.write(path, body)
+    except OSError as err:
+        raise Refused(f'{cfg.rel(path)} could not be written ({err}) — nothing '
+                      f'was written; shorten the slug, or make '
+                      f'{cfg.rel(path.parent)}/ writable') from err
+
+
 def _slugify(text: str) -> str:
     """ASCII-only, because the result becomes a permanent directory name.
 
@@ -874,7 +907,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
                 raise Usage(f'milestone {ver!r} does not exist yet — a new one '
                             f'needs a name (the name mints the directory)')
             mdir = cfg.roadmap / f'{ver}-{_slugify(name)}'
-            if mdir.exists():
+            if _exists(mdir):
                 raise Refused(f'{cfg.rel(mdir)} already exists')
         name = name or model.field_of(mdir / 'milestone.md', 'name')
         return _scaffold(cfg, 'milestone', mdir, {'id': ver, 'name': name})
@@ -887,7 +920,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         if mdir is None:
             raise Usage(f'no milestone resolves from {mid!r}')
         fdir = mdir / 'features' / slug
-        if not (fdir / 'feature.md').exists() and not name:
+        if not _exists(fdir / 'feature.md') and not name:
             raise Usage(f'feature {mid}/{slug!r} does not exist yet — a new one '
                         f'needs a name')
         name = name or model.field_of(fdir / 'feature.md', 'name')
@@ -905,14 +938,14 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         # source, never re-derived from the id string.
         mid = model.field_of(fdir / 'feature.md', 'milestone')
         sf = fdir / 'stories' / f'{slug}.md'
-        if sf.exists():
+        if _exists(sf):
             raise Refused(f'story {fid}/{slug!r} already exists')
         body = templates.render(
             templates.load(cfg, 'story'),
             {'id': f'{fid}/{slug}', 'feature': fid, 'milestone': mid,
              'name': name})
         _guard_initial_status('story', body)
-        templates.write(sf, body)
+        _mint(cfg, sf, body)
         _ok(f'created {cfg.rel(sf)}')
         return 0
     if grain == 'bug':
@@ -923,7 +956,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         if mdir is None:
             raise Usage(f'no milestone resolves from {mid!r}')
         bf = mdir / 'bugs' / f'{slug}.md'
-        if bf.exists():
+        if _exists(bf):
             raise Refused(f'bug {mid}/bugs/{slug!r} already exists')
         # Bugs anchor to where they were CAUGHT, not where they get fixed —
         # the file path preserves the catch history.
@@ -931,7 +964,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             templates.load(cfg, 'bug'),
             {'id': f'{mid}/bugs/{slug}', 'milestone': mid, 'slug': slug})
         _guard_initial_status('bug', body)
-        templates.write(bf, body)
+        _mint(cfg, bf, body)
         _ok(f'created {cfg.rel(bf)}')
         return 0
     raise Usage(USAGE)
