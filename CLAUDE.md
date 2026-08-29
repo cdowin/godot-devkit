@@ -83,8 +83,17 @@ A, B, C. When nothing needs him, say "nothing needs you" explicitly.
 
 ## Verification loop
 
-- Parse gate: `python3 -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('src').rglob('*.py')]"`.
-- Behavior gate: run `/consumer-smoke` (skill) — executes every READ subcommand against the live consumer checkouts and compares pass-counts/censuses against the repo's own independent census commands. The consumers ARE the read fixtures.
+**Run `godot-devkit task quick` after a change and `godot-devkit task verify` before a
+release. Never hand-roll an incantation.** Those two roles are declared in `devkit.toml`
+`[tasks]` and point at this repo's own `make precommit` / `make milestone`; `make help`
+lists every target. If the check you need is not a target, **add the target**, then run
+it — apparatus that lives in one agent's context is apparatus that gets rebuilt.
+
+- Behavior gate: `make smoke` — every READ subcommand against the live consumer
+  checkouts, censuses compared against independent counts. The consumers ARE the read
+  fixtures. Read-only, and it fails if it leaves either checkout dirty.
+- Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
+  exactly rather than being re-derived; `make test` runs them too.
 - **Write verbs NEVER run against a live consumer checkout.** Copy the file (or the tree) to scratch first. A smoke run that mutates `~/workspace/nullbound` or `~/workspace/trail` is a broken smoke run, not a thorough one — the consumers are shipping game repos with their own dirty-tree gates.
 - Round-trip fidelity is proven on COPIES of real consumer scenes, kept as a corpus. Parse → serialise with no mutation, byte-compared. This is the test that makes every write verb safe; it is not optional and it is not a smoke check.
 - A gate-semantics change additionally needs a deliberately-broken probe: introduce the drift class in a scratch copy of a consumer and confirm the gate FAILS (rule 4). Prove the **config** path too: a bad value for that gate's section must exit 2, and a zero-file census must FAIL rather than pass.
@@ -97,6 +106,7 @@ A, B, C. When nothing needs him, say "nothing needs you" explicitly.
 This package runs its own tooling on its own tree, and that is a gate, not a demo.
 
 - `pm/roadmap/` is a real PM tree scaffolded by `pm new`, and `devkit.toml` turns on **every** rule this package ships except D8 (which encodes bump-at-START; we bump at close). Both `godot-devkit check all` and `godot-devkit check pm` must exit 0 here.
+- `devkit.toml` `[tasks]` declares this repo's own two roles, and `check tasks` is in its `[checks] all` roster — the shape is asserted here first. CI is the installed `.github/workflows/verify.yml`, which runs `godot-devkit task verify` and nothing else.
 - **`CHANGELOG.md` above the frozen boundary is GENERATED** by `pm changelog --render`. Write a release note with `pm changelog <milestone-id> --what … --evidence …` as the work lands; never type into the file. Rationale with a rejected alternative is a decision — `pm decide` — not a release note.
 - If a rule fails when pointed at this repo, the finding gets fixed. Turning the rule off is only right when the rule encodes a flow this package does not run, and that goes in `decisions.md` with what was rejected.
 

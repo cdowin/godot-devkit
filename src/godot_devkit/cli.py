@@ -46,9 +46,19 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a
      hand-edit would leave, off the SAME predicates)
 
+Verification, in the project's own vocabulary (devkit.toml `[tasks]`):
+    godot-devkit task <role>        # runs what THIS repo declared for the role
+    godot-devkit task --list        # the declared roles and their commands
+                                    # required roles: quick (the per-change
+                                    # gate) and verify (the full gate, and
+                                    # what CI runs). One word per role means a
+                                    # dispatch never has to paste a regression
+                                    # bar again.
+    godot-devkit install-ci         # the workflow that runs `task verify`
+
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
-                      | repo-hygiene | pm | agents
+                      | repo-hygiene | pm | agents | tasks
                                     # `uid --fix` applies the repair the gate
                                     # already computes: a stale Script ref uid
                                     # rewritten to the target's .uid sidecar
@@ -80,7 +90,12 @@ FIX_FLAG = '--fix'
 # after the one-time cleanup pass. `repo-hygiene` is excluded for its own reason
 # (it is close-time and hits the network). `pm` is excluded because a repo with
 # no PM tree has no drift to find and must not be failed for its absence.
-EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents')
+# `tasks` joins them for the same reason `pm` did: a repo that has not declared
+# `[tasks]` yet has no roles to find stale, and failing it for the absence would
+# redden every existing consumer on the version bump that introduced the table.
+# A repo that HAS declared them names `tasks` in its own `[checks] all`, as this
+# one does.
+EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents', 'tasks')
 KNOWN_CHECKS = (*OFFLINE_CHECKS, *EXPLICIT_CHECKS)
 
 
@@ -107,6 +122,17 @@ def all_roster() -> tuple[str, ...]:
     # `all` naming itself would recurse forever; it is the one name that cannot
     # appear, and KNOWN_CHECKS already excludes it.
     return tuple(dict.fromkeys(roster))
+
+
+def install_commands() -> tuple[str, ...]:
+    """The `install-*` verbs, from the installer's own plan table.
+
+    Asked rather than restated: a second list here would be a second name for
+    the same fact, and the failure mode is a verb documented in one place and
+    dispatched in neither.
+    """
+    from godot_devkit.repo.install import PLANS
+    return tuple(PLANS)
 
 
 def _usage() -> int:
@@ -159,6 +185,9 @@ def _dispatch_check(name: str, fix: bool = False) -> int:
     if name == 'agents':
         from godot_devkit.repo.checks import agents
         return agents.run()
+    if name == 'tasks':
+        from godot_devkit.repo import tasks
+        return tasks.run()
     if name == 'all':
         worst = 0
         for check in all_roster():
@@ -214,6 +243,12 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'pm':
         from godot_devkit.repo.pm import cli as pm_cli
         return pm_cli.main(rest)
+    if cmd == 'task':
+        from godot_devkit.repo import tasks
+        return tasks.main(rest)
+    if cmd in install_commands():
+        from godot_devkit.repo import install
+        return install.main(cmd, rest)
     if cmd == 'check':
         if not rest:
             return _usage()
