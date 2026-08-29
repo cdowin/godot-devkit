@@ -17,3 +17,11 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C2 — 2026-08-29 — a gate on the shortcut itself
 **What:** `godot-devkit check tasks` fails the day a project renames a target its [tasks] table still points at, instead of the day an agent needed it.
 **Evidence:** tests/test_tasks.py:88
+
+## C3 — 2026-08-29 — consumer smoke is a target
+**What:** `make smoke` runs every read verb against the live game checkouts, compares each printed census against an independent count, and fails if it leaves either checkout dirty.
+**Evidence:** tools/consumer_smoke.py
+
+## C4 — 2026-08-29 — the fuzzers are code now
+**What:** The CommonMark differential (60,000 documents), the log-schema differential (692 logs) and the migration replay run from `make fuzz` in two seconds, instead of being rebuilt on demand.
+**Evidence:** tests/test_fuzz_markdown.py

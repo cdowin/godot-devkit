@@ -19,3 +19,15 @@ pointers, and everything that still explains a live constraint stays.
 **Over:** adding it to the default check all roster
 **Because:** a consumer that has not declared [tasks] has no stale role to find, and failing it for the absence reddens every existing consumer on the version bump that introduced the table
 **Evidence:** src/godot_devkit/cli.py:98
+
+## D3 — 2026-08-29 — two idempotence contracts, recorded not flattened
+**Chose:** recording per-verb replay exit codes — fill-gaps verbs exit 0, story and bug REFUSE
+**Over:** dropping the refusing verbs from the replay sequence to make it uniform
+**Because:** a story and a bug are one authored file each, so re-scaffolding could only mean overwrite; narrowing the sequence would convert a real distinction into a silent pass
+**Evidence:** tests/test_replay_migration.py:70
+
+## D4 — 2026-08-29 — a golden corpus, checksummed
+**Chose:** committing the log-schema findings as a golden file whose header carries a checksum of the corpus that produced them
+**Over:** diffing behaviour against an older git revision of the code
+**Because:** an old revision stops being buildable, while a checksum makes a change to the GENERATOR report itself instead of silently redescribing different inputs
+**Evidence:** tests/corpus/log_schema.golden.txt:1
