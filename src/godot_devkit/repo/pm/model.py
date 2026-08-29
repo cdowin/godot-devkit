@@ -23,6 +23,8 @@ the milestone machine has no `review` state (nothing transitions into one).
     milestone_states      = [...]  # vocabulary overrides
     feature_states        = [...]
     story_states          = [...]
+    bug_states            = [...]  # D14 only: the bug vocabulary
+    bug_open_states       = [...]  # D14 only: which of those mean "still open"
     milestone_transitions = [...]  # "from->to" edges
     feature_transitions   = [...]
     story_transitions     = [...]
@@ -48,6 +50,11 @@ from godot_devkit.core.config import ConfigError, config_section, flag, number, 
 DEFAULT_MILESTONE_STATES = ('planning', 'ready', 'building', 'done')
 DEFAULT_FEATURE_STATES = ('planning', 'ready', 'building', 'review', 'done')
 DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
+# Bugs have no transition graph — they are filed and they close. The vocabulary
+# exists so D14 can tell an OPEN bug from a closed one, and so a typo'd status
+# is a finding rather than a silent "closed" (rule 4).
+DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
+DEFAULT_BUG_OPEN_STATES = ('open',)
 
 DEFAULT_MILESTONE_TRANSITIONS = ('planning->ready', 'ready->building', 'building->done')
 DEFAULT_FEATURE_TRANSITIONS = (
@@ -69,11 +76,15 @@ DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review',
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7',
                   'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 FLOW_CHECKS = ('D8', 'D9', 'D10')
-# D11 is review-dir RETENTION. Opt-in for the same reason D8-D10 are: a project
-# whose durable review records live IN review_dir satisfies it trivially, while
-# a project that keeps transient findings docs there on purpose is not drifting
-# by its own lights. Opt in with `[pm] checks`.
+# D11 is review RETENTION: the transient `review.md` slot must be gone once its
+# grain is done. Opt-in for the same reason D8-D10 are — a project that keeps
+# its review notes forever is running a different (valid) convention.
 RETENTION_CHECKS = ('D11',)
+# D13 is the canonical grain STRUCTURE, D14 the bug-lifetime rule. Opt-in for
+# the migration reason D12 is: a tree that predates the canonical slots is
+# missing most of them, and a rule that turns a consumer red on upgrade day is
+# unshippable. `pm new <grain>` fills the gaps, then the rule holds the line.
+STRUCTURE_CHECKS = ('D13', 'D14')
 # D12 is the decision-record SCHEMA. Opt-in like the rest, and for one more
 # reason: every log written before it existed conforms to none of it, so a
 # consumer switching it on migrates through `decision_grandfather` rather than
@@ -84,9 +95,77 @@ SCHEMA_CHECKS = ('D12',)
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
     DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + SCHEMA_CHECKS
-    + VALIDATE_CHECKS))
+    + STRUCTURE_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
+
+# --- the canonical grain structure (D13) --------------------------------------
+# One shape, every grain, all lowercase. The split that makes it worth having:
+#
+#   decisions.md  DURABLE   — appended during the grain's life, survives close,
+#                             collapses to pointers when the milestone closes.
+#   review.md     TRANSIENT — simplifier and reviewer both append; DELETED at
+#                             close, with anything durable promoted first (D11).
+#
+# `handoff.md` and `bugs/` are milestone-only, ruled explicitly: a feature is
+# never picked up cold on its own, and a bug lives in the milestone that will
+# FIX it, which is a milestone-level decision.
+#
+# DIRECTORY slots are allowed but never REQUIRED, and the reason is git: an
+# empty directory does not survive a clone, so requiring `design/` would mean
+# 178 placeholder files or a rule that fails the moment somebody checks the
+# tree out fresh. Files carry the requirement; directories carry permission.
+DECISION_FILE_NAME = 'decisions.md'
+REVIEW_FILE_NAME = 'review.md'
+HANDOFF_FILE_NAME = 'handoff.md'
+
+MILESTONE_FILE_SLOTS = ('milestone.md', 'handoff.md', 'decisions.md', 'review.md')
+MILESTONE_DIR_SLOTS = ('features', 'bugs', 'design')
+FEATURE_FILE_SLOTS = ('feature.md', 'decisions.md', 'review.md')
+FEATURE_DIR_SLOTS = ('stories', 'design')
+
+# slot -> the template that mints it. The grain file's own template is named for
+# the grain, the shared docs are named for the slot.
+SLOT_TEMPLATE = {
+    'milestone.md': 'milestone', 'feature.md': 'feature',
+    'handoff.md': 'handoff', 'decisions.md': 'decisions', 'review.md': 'review',
+}
+
+# The one-line instruction each shared doc opens with, and D13 asserts is still
+# there. `.claude/rules/*` never reach a dispatched subagent — measured — so a
+# file's own first line is the one delivery channel with a 100% hit rate for the
+# action its reader is about to take. Each line is an INSTRUCTION for that
+# action, never an explanation of what the file is, and deliberately NOT a
+# second copy of a schema a gate already owns: restating D12's four fields in
+# 178 files is a drift generator, so decisions.md points at the command instead.
+SLOT_HEADER = {
+    'decisions.md': 'Append with `godot-devkit pm decide <grain-id>` — never by '
+                    'hand; the command stamps the date and the next ordinal.',
+    'review.md': 'Transient. Deleted at close — promote anything durable into '
+                 'decisions.md first.',
+    'handoff.md': 'Cold-start only. Never restate what `pm status` computes.',
+}
+
+
+def dir_entries(path: Path) -> dict[str, str]:
+    """{exact name: 'file'|'dir'} for one directory — EXACT names, always.
+
+    Never `Path.is_file()` for an existence question here: macOS resolves
+    `decisions.md` to an existing `DECISIONS.md` and Linux does not, so the same
+    tree would be clean on one platform and drifting on the other. A listing
+    compares the bytes git stores.
+    """
+    try:
+        return {p.name: ('dir' if p.is_dir() else 'file')
+                for p in path.iterdir()}
+    except OSError:
+        return {}
+
+
+def case_variants(entries: dict[str, str], name: str) -> list[str]:
+    """Names in `entries` that differ from `name` only by case (excluding it)."""
+    low = name.lower()
+    return sorted(n for n in entries if n != name and n.lower() == low)
 
 
 @dataclass(frozen=True)
@@ -101,6 +180,8 @@ class PmConfig:
     milestone_states: tuple[str, ...] = DEFAULT_MILESTONE_STATES
     feature_states: tuple[str, ...] = DEFAULT_FEATURE_STATES
     story_states: tuple[str, ...] = DEFAULT_STORY_STATES
+    bug_states: tuple[str, ...] = DEFAULT_BUG_STATES
+    bug_open_states: tuple[str, ...] = DEFAULT_BUG_OPEN_STATES
     milestone_transitions: tuple[str, ...] = DEFAULT_MILESTONE_TRANSITIONS
     feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
@@ -160,6 +241,18 @@ def load() -> PmConfig:
         raise ConfigError('[pm] version_pattern needs one capture group around '
                           'the version itself')
 
+    # A bug is "open" by a POSITIVE list, so a project adding `triage` says so
+    # once. The two keys have to agree, or D14 would read a legal status as
+    # closed and stay silent about exactly the bug it exists to find.
+    bug_states = tup('bug_states', DEFAULT_BUG_STATES)
+    bug_open = tup('bug_open_states', DEFAULT_BUG_OPEN_STATES)
+    stray = [s for s in bug_open if s not in bug_states]
+    if stray:
+        raise ConfigError(
+            f'[pm] bug_open_states names {", ".join(stray)}, which is not in '
+            f'bug_states ({" ".join(bug_states)}) — a bug cannot be open in a '
+            f'state the vocabulary does not have')
+
     # `[pm.scaffold.*]` was retired by template files. Refuse it rather than
     # ignoring it: a config key that silently does nothing is worse than one
     # that errors, because the author believes it took effect.
@@ -181,6 +274,8 @@ def load() -> PmConfig:
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
+        bug_states=bug_states,
+        bug_open_states=bug_open,
         milestone_transitions=tup('milestone_transitions', DEFAULT_MILESTONE_TRANSITIONS),
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
@@ -219,12 +314,12 @@ def _split(text: str) -> list[str]:
 # silently becomes LF on a one-field write. `newline=''` disables both halves
 # and hands us the bytes as they are. (Path.read_text only gained a `newline`
 # parameter in 3.13; the floor here is 3.11, so open() it is.)
-def _read(path: Path) -> str:
+def read_raw(path: Path) -> str:
     with path.open('r', encoding='utf-8', newline='') as fh:
         return fh.read()
 
 
-def _write(path: Path, text: str) -> None:
+def write_raw(path: Path, text: str) -> None:
     with path.open('w', encoding='utf-8', newline='') as fh:
         fh.write(text)
 
@@ -252,7 +347,7 @@ def field_of(path: Path, key: str) -> str:
     never leak out and be mistaken for the grain's status.
     """
     try:
-        lines = _split(_read(path))
+        lines = _split(read_raw(path))
     except (OSError, UnicodeDecodeError):
         return ''
     bounds = _fence_bounds(lines)
@@ -285,7 +380,7 @@ def set_field(path: Path, key: str, value: str) -> bool:
     a False into a loud refusal.
     """
     try:
-        text = _read(path)
+        text = read_raw(path)
     except (OSError, UnicodeDecodeError):
         return False
     lines = _split(text)
@@ -300,7 +395,7 @@ def set_field(path: Path, key: str, value: str) -> bool:
     else:
         lines.insert(close_i, f'{key}: {value}{_eol(lines[close_i])}')
     try:
-        _write(path, '\n'.join(lines))
+        write_raw(path, '\n'.join(lines))
     except OSError:
         return False
     return True
@@ -476,7 +571,7 @@ def record_is_substantive(cfg: PmConfig, path: Path) -> bool:
     if not path.is_file():
         return False
     try:
-        body = _read(path)
+        body = read_raw(path)
     except (OSError, UnicodeDecodeError):
         return False
     return len(''.join(body.split())) >= cfg.review_min_content_bytes
@@ -528,7 +623,7 @@ def shipped_version(cfg: PmConfig) -> str | None:
         return None
     pattern = re.compile(cfg.version_pattern)
     try:
-        for line in _read(path).split('\n'):
+        for line in read_raw(path).split('\n'):
             m = pattern.match(line.strip())
             if m:
                 return m.group(1)
@@ -645,81 +740,152 @@ def read_feature(ffile: Path) -> FeatureView:
     view.done_n = sum(1 for s in view.stories if field_of(s, 'status') == 'done')
     return view
 
-# --- retention helper (D11) ---------------------------------------------------
-def review_dir_files(cfg: PmConfig) -> list[Path]:
-    """Every `*.md` directly under review_dir, minus README and the archive."""
-    rdir = cfg.root / cfg.review_dir
-    if not rdir.is_dir():
-        return []
-    return sorted(f for f in rdir.glob('*.md') if f.name.lower() != 'readme.md')
+# --- the grain walk (D11, D13, D14) -------------------------------------------
+@dataclass(frozen=True)
+class GrainDir:
+    """One milestone or feature directory, its grain file, and its status."""
+    kind: str          # 'milestone' | 'feature'
+    path: Path
+    grain_file: Path
+    gid: str
+    status: str
+
+    @property
+    def file_slots(self) -> tuple[str, ...]:
+        return (MILESTONE_FILE_SLOTS if self.kind == 'milestone'
+                else FEATURE_FILE_SLOTS)
+
+    @property
+    def dir_slots(self) -> tuple[str, ...]:
+        return (MILESTONE_DIR_SLOTS if self.kind == 'milestone'
+                else FEATURE_DIR_SLOTS)
 
 
-def pointed_review_paths(cfg: PmConfig, fids: list[str]) -> set[Path]:
-    """Every review file the TREE points at, as a resolved `Path`.
-
-    Deliberately NOT `review_record_for()`. That applies `record_is_substantive`,
-    which is D1's business: a short-but-legitimate record would be told by D1 to
-    exist and by D11 to be deleted — two rules ordering opposite repairs on one
-    file. Whether a record says enough is D1's question; whether the tree still
-    points at the file is this one's.
-
-    Resolved paths, never the `reviewed:` string as a human typed it: `./docs/
-    reviews/x.md`, an absolute path and a Windows-separator spelling all name the
-    same file, and comparing the raw text flags the tree's own durable record.
-
-    `review_slug_fallback` accepts a GLOB, so every candidate it would accept is
-    exempt — not just the first sorted one, which is all `review_record_for`
-    returns.
-    """
-    out: set[Path] = set()
-    rdir = cfg.root / cfg.review_dir
-    for fid in fids:
-        ffile = feature_file(cfg, fid)
-        if ffile is None:
-            continue
-        pointer = unquote(field_of(ffile, 'reviewed'))
-        if pointer and pointer != 'null':
-            p = Path(pointer.replace('\\', '/'))
-            out.add((p if p.is_absolute() else cfg.root / p).resolve())
-        if cfg.review_slug_fallback:
-            slug = fid.partition('/')[2]
-            if slug and rdir.is_dir():
-                out.update(c.resolve() for c in rdir.glob(f'{slug}*.md'))
+def grain_dirs(cfg: PmConfig) -> list[GrainDir]:
+    """Every milestone and feature dir in the ACTIVE tree, in reading order."""
+    out: list[GrainDir] = []
+    for mdir in milestone_dirs(cfg):
+        mfile = mdir / 'milestone.md'
+        out.append(GrainDir('milestone', mdir, mfile,
+                            unquote(field_of(mfile, 'id')) or mdir.name,
+                            field_of(mfile, 'status')))
+        for ffile in feature_files(mdir):
+            out.append(GrainDir('feature', ffile.parent, ffile,
+                                unquote(field_of(ffile, 'id')) or ffile.parent.name,
+                                field_of(ffile, 'status')))
     return out
 
 
-def grain_named_by(cfg: PmConfig, path: Path) -> tuple[str, str] | None:
-    """(feature-id, status) for the FEATURE a review file NAMES, or None.
+# --- retention (D11) ----------------------------------------------------------
+# `review.md` is CO-LOCATED, so retention has one question and no guess: is the
+# transient slot still there on a grain that closed? The rule this replaces
+# resolved a filename in a shared directory back to the grain it "named", and a
+# real corpus got that exactly backwards — 6 of 123 docs resolved, and those 6
+# were the durable ones `reviewed:` already pointed at. Anchoring the match
+# could only ever remove matches. A known path removes the question.
+def stale_review_files(cfg: PmConfig) -> list[tuple[GrainDir, Path]]:
+    """(grain, review.md) for every `done` grain that still has one."""
+    out = []
+    for grain in grain_dirs(cfg):
+        if grain.status != 'done':
+            continue
+        if dir_entries(grain.path).get(REVIEW_FILE_NAME) == 'file':
+            out.append((grain, grain.path / REVIEW_FILE_NAME))
+    return out
 
-    Filename-slug resolution, because a transient findings doc is by definition
-    not pointed at by any `reviewed:` field — that is what makes it transient.
-    Longest slug wins so `health-as-composition` beats a stem that merely
-    contains a shorter sibling's slug.
 
-    FEATURES ONLY. `reviewed:` exists on `feature.md` and nowhere else, so a
-    milestone-scoped record has no green state to reach and the finding would
-    order a repair the schema cannot accept.
+# --- structure (D13) ----------------------------------------------------------
+def header_of(path: Path) -> str:
+    """The file's first non-blank line, stripped — its canonical header slot."""
+    try:
+        for line in _split(read_raw(path)):
+            if line.strip():
+                return line.strip()
+    except (OSError, UnicodeDecodeError):
+        return ''
+    return ''
 
-    KNOWN DEFECT, do not enable D11 against a tree you have not eyeballed: the
-    match is a bare substring, so a slug embedded in a longer word resolves
-    (a feature `den` claims `hidden-room-audit.md`). Anchoring it is deferred
-    pending the co-located-`reviews/` decision, which removes the guess
-    entirely.
+
+def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
+    """(path, reason) for every deviation from the canonical grain shape.
+
+    MISSING is drift and EXTRA is drift, and the extra half is the one that
+    matters: `plans/`, `findings/`, `AUDIT-REPORT.md` and `DELETED-SCENARIO-
+    LEDGER.md` all exist in a real tree because no slot was scaffolded AND
+    nothing flagged the invention. A missing-only check leaves those forever.
+
+    `review.md` is required exactly while the grain is open and forbidden once
+    it is done — the two halves of one fact, with D11 owning the `done` half so
+    a closed grain is never told both to have it and to delete it.
     """
-    stem = path.stem
-    best: tuple[int, str, str] | None = None
-    for mdir in milestone_dirs(cfg):
-        for fdir in sorted((mdir / 'features').glob('*')):
-            ffile = fdir / 'feature.md'
-            if not ffile.is_file() or fdir.name not in stem:
+    out: list[tuple[Path, str]] = []
+    for grain in grain_dirs(cfg):
+        entries = dir_entries(grain.path)
+        allowed = set(grain.file_slots) | set(grain.dir_slots)
+        for slot in grain.file_slots:
+            if slot == REVIEW_FILE_NAME and grain.status == 'done':
+                continue  # D11 owns the closed half
+            if entries.get(slot) == 'file':
                 continue
-            # The dir slug is the fallback id: a feature.md with no `id:` would
-            # otherwise render as "is transient and  is done".
-            cand = (len(fdir.name), field_of(ffile, 'id') or fdir.name,
-                    field_of(ffile, 'status'))
-            if best is None or cand[0] > best[0]:
-                best = cand
-    return (best[1], best[2]) if best else None
+            variants = case_variants(entries, slot)
+            why = (f' — {", ".join(variants)} is the same slot in another case, '
+                   f'renamed by `pm new {grain.kind}`') if variants else ''
+            out.append((grain.path / slot,
+                        f'{grain.kind} {grain.gid} is missing {slot}{why}'))
+        for name, kind in sorted(entries.items()):
+            if name in allowed or name.startswith('.'):
+                continue
+            out.append((grain.path / name,
+                        f'{grain.kind} {grain.gid} carries {name}'
+                        f'{"/" if kind == "dir" else ""}, which is not a '
+                        f'canonical slot ({" ".join(sorted(allowed))})'))
+        for slot, want in SLOT_HEADER.items():
+            if slot not in grain.file_slots or entries.get(slot) != 'file':
+                continue
+            got = header_of(grain.path / slot)
+            if got != want:
+                out.append((grain.path / slot,
+                            f'{slot} no longer opens with its instruction line '
+                            f'— restore "{want}"'))
+    return out
+
+
+# --- bug lifetime (D14) -------------------------------------------------------
+# A bug lives in the milestone that will FIX it, not the one that caught it:
+# `caught_in:` keeps the provenance, `fix_milestone:` names the decision, and
+# the DIRECTORY is that decision made real. An open bug under a `done` milestone
+# is therefore drift twice over — the fix is not scheduled anywhere a reader
+# would look, and `prune`'s lag-by-one deletes the file the moment the next
+# milestone closes. This rule is what makes prune safe by construction.
+def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
+    """(findings, bugs scanned) — open bugs under a done milestone, plus any
+    bug whose status is outside the vocabulary (which D4 does not cover, and
+    which would otherwise read as "closed" and be passed in silence)."""
+    out: list[tuple[Path, str]] = []
+    scanned = 0
+    for mdir in milestone_dirs(cfg):
+        mstat = field_of(mdir / 'milestone.md', 'status')
+        mid = unquote(field_of(mdir / 'milestone.md', 'id')) or mdir.name
+        bdir = mdir / 'bugs'
+        if not bdir.is_dir():
+            continue
+        for bfile in sorted(bdir.glob('*.md')):
+            if not bfile.is_file():
+                continue
+            scanned += 1
+            bstat = field_of(bfile, 'status')
+            if bstat not in cfg.bug_states:
+                out.append((bfile, f'bug status {bstat!r} is not in '
+                                   f'({" ".join(cfg.bug_states)})'))
+                continue
+            if mstat != 'done' or bstat not in cfg.bug_open_states:
+                continue
+            fix = unquote(field_of(bfile, 'fix_milestone'))
+            where = (f'move it to {fix}/bugs/' if fix and fix != mid
+                     else 'set fix_milestone: and move it there')
+            out.append((bfile, f'is {bstat!r} under the done milestone {mid} — '
+                               f'{where} (a prune deletes it where it sits)'))
+    return out, scanned
 
 
 # --- decision-record schema (D12) ---------------------------------------------
@@ -733,7 +899,6 @@ def grain_named_by(cfg: PmConfig, path: Path) -> tuple[str, str] | None:
 #     **Over:** leaving it on `entity_behavior.gd`, the lean root
 #     **Because:** all three consumers extend the combat layer
 #     **Evidence:** `64e89ad5b`
-DECISION_FILE_NAME = 'DECISIONS.md'
 DECISION_FIELDS = ('Chose', 'Over', 'Because', 'Evidence')
 DECISION_TITLE_MAX = 80
 DECISION_VALUE_MAX = 200
@@ -816,9 +981,15 @@ def decision_files(cfg: PmConfig) -> list[Path]:
 def decision_entries(path: Path) -> list[DecisionEntry]:
     """The decision entries in one log, in document order."""
     try:
-        lines = _split(_read(path))
+        return decision_entries_in(read_raw(path))
     except (OSError, UnicodeDecodeError):
         return []
+
+
+def decision_entries_in(text: str) -> list[DecisionEntry]:
+    """The same parse over log TEXT, so a candidate entry can be validated
+    against D12's own regexes BEFORE it is written rather than after."""
+    lines = _split(text)
     starts: list[tuple[int, str]] = []
     for i, raw in enumerate(lines):
         m = _DECISION_HEADING.match(raw.rstrip('\r'))
@@ -850,8 +1021,15 @@ def decision_violations(path: Path) -> list[tuple[int, str, str]]:
     The ordinal is the entry's 0-based position, which is what a `path:N`
     grandfather caps: a log is append-only, so "the first N" is stable.
     """
+    return decision_violations_in(decision_entries(path))
+
+
+def decision_violations_in(entries: list[DecisionEntry]) -> list[tuple[int, str, str]]:
+    """The schema predicates over already-parsed entries. ONE implementation:
+    `pm decide` validates its candidate through this, so the writer cannot
+    disagree with the gate about what conforms."""
     out: list[tuple[int, str, str]] = []
-    for n, entry in enumerate(decision_entries(path)):
+    for n, entry in enumerate(entries):
         def bad(msg: str, _n: int = n, _e: str = entry.eid) -> None:
             out.append((_n, _e, msg))
 
@@ -892,6 +1070,58 @@ def decision_violations(path: Path) -> list[tuple[int, str, str]]:
                     'hash, a path[:line], or a number')
             break
     return out
+
+
+# --- writing a decision (`pm decide`) -----------------------------------------
+_DECISION_ORDINAL = re.compile(r'^([A-Za-z]{1,4})(\d+)$')
+
+
+def next_decision_id(entries: list[DecisionEntry]) -> str:
+    """The next id for this log — the two things authors get wrong, allocated.
+
+    The PREFIX comes from the log's own last id-shaped entry, so a tree that
+    numbers `M27` keeps numbering `M`. An empty log (or one whose headings are
+    all dates) starts at `D1`.
+    """
+    numbered = [m for m in (_DECISION_ORDINAL.match(e.eid) for e in entries) if m]
+    if not numbered:
+        return 'D1'
+    prefix = numbered[-1].group(1)
+    highest = max(int(m.group(2)) for m in numbered if m.group(1) == prefix)
+    return f'{prefix}{highest + 1}'
+
+
+def render_decision(eid: str, when: str, title: str,
+                    values: dict[str, str], eol: str = '\n') -> str:
+    """One schema-shaped entry block. The separator is an em dash both times,
+    because that is what `_DECISION_HEADER` matches — a hyphen renders
+    near-identically to a human and differently to a parser."""
+    lines = [f'## {eid} — {when} — {title}']
+    lines += [f'**{name}:** {values[name]}' for name in DECISION_FIELDS]
+    return ''.join(f'{line}{eol}' for line in lines)
+
+
+def append_decision(text: str, eid: str, when: str, title: str,
+                    values: dict[str, str]) -> tuple[str, list[str]]:
+    """(log text with the entry appended, what the NEW entry gets wrong).
+
+    Composed then re-parsed through D12's own predicates, so the writer refuses
+    exactly what the gate would report — no second copy of the schema, and no
+    way for the two to drift apart. Pre-existing violations further up a legacy
+    log are the grandfather ledger's business, never this call's.
+    """
+    eol = '\r\n' if '\r\n' in text else '\n'
+    body = text
+    if body and not body.endswith(('\n', '\r')):
+        body += eol
+    if body and not body.endswith(eol * 2):
+        body += eol
+    body += render_decision(eid, when, title, values, eol)
+    entries = decision_entries_in(body)
+    if not entries or entries[-1].eid != eid:
+        return body, ['the composed entry does not parse as a decision entry']
+    last = len(entries) - 1
+    return body, [why for n, _, why in decision_violations_in(entries) if n == last]
 
 
 def parse_decision_grandfather(specs: tuple[str, ...]) -> tuple[tuple[str, int | None], ...]:

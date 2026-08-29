@@ -22,10 +22,11 @@ from pathlib import Path
 
 from godot_devkit.repo.pm import model
 
-# grain -> template filename. HANDOFF/DECISIONS are milestone-scoped docs rather
-# than grains, so they are addressed by name.
+# grain -> template filename. The shared docs are addressed by their SLOT name
+# minus the extension, so `decisions.md` is minted by `decisions.md` and there
+# is no mapping table to keep in sync.
 GRAINS = ('milestone', 'feature', 'story', 'bug')
-DOCS = ('HANDOFF', 'DECISIONS')
+DOCS = ('handoff', 'decisions', 'review')
 
 
 class MissingTemplate(Exception):
@@ -43,10 +44,12 @@ def _packaged(name: str) -> str | None:
 def load(cfg: model.PmConfig, name: str) -> str:
     """The template text for `name`, project override winning."""
     if cfg.template_dir:
-        local = cfg.root / cfg.template_dir / f'{name}.md'
-        if local.is_file():
-            with local.open('r', encoding='utf-8', newline='') as fh:
-                return fh.read()
+        tdir = cfg.root / cfg.template_dir
+        # EXACT name, from a listing. `Path.is_file()` on macOS resolves
+        # `decisions.md` to a leftover `DECISIONS.md` and on Linux does not, so
+        # the same repo would render from a different template per platform.
+        if model.dir_entries(tdir).get(f'{name}.md') == 'file':
+            return model.read_raw(tdir / f'{name}.md')
     text = _packaged(name)
     if text is None:
         raise MissingTemplate(
@@ -75,6 +78,110 @@ def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('w', encoding='utf-8', newline='') as fh:
         fh.write(text)
+
+
+class ScaffoldRefused(Exception):
+    """The scaffolder cannot guarantee a correct result, so it did nothing."""
+
+
+def _rename_case(old: Path, new: Path) -> None:
+    """Rename through a temp name, because macOS is case-INSENSITIVE.
+
+    `DECISIONS.md` -> `decisions.md` is a no-op rename there, and `open(new)`
+    would truncate the existing file: the migration would delete the very
+    content it exists to carry forward. Two steps make it a real rename on both
+    kinds of filesystem, and git records it as one.
+    """
+    tmp = old.with_name(f'{old.name}.pm-case-rename')
+    if tmp.exists():
+        raise ScaffoldRefused(f'{tmp} is in the way of the {old.name} -> '
+                              f'{new.name} rename — move it aside')
+    old.rename(tmp)
+    tmp.rename(new)
+
+
+def _fill_header(path: Path, slot: str, actions: list[tuple[str, Path]]) -> None:
+    """Prepend the slot's instruction line to a doc that predates it.
+
+    The renamed legacy logs are the reason: 60 of them in one consumer, and a
+    migration that leaves 60 hand-edits behind is the hand-migration this
+    scaffolder exists to avoid. The prepend is additive and reported — no
+    existing byte moves except by one line.
+
+    A file already opening with SOME known instruction line is left alone, so a
+    future wording change can never stack two headers; D13 reports the mismatch
+    and a human decides.
+    """
+    want = model.SLOT_HEADER.get(slot)
+    if want is None:
+        return
+    got = model.header_of(path)
+    if got == want or got in set(model.SLOT_HEADER.values()):
+        return
+    try:
+        body = model.read_raw(path)
+    except (OSError, UnicodeDecodeError):
+        return
+    eol = '\r\n' if '\r\n' in body else '\n'
+    model.write_raw(path, f'{want}{eol}{eol}{body}')
+    actions.append(('restored the header line of', path))
+
+
+def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
+             values: dict[str, str]) -> list[tuple[str, Path]]:
+    """Fill every canonical slot of one grain dir. IDEMPOTENT, and never
+    clobbers: an existing slot is left byte-identical, and a slot present under
+    another CASE is renamed rather than written past.
+
+    This is how a consumer migrates. A tree with 22 milestones and 136 features
+    cannot be hand-shaped, and a scaffolder that refuses on an existing grain
+    would leave hand-shaping as the only path.
+
+    `review.md` is scaffolded only while the grain is OPEN: minting the
+    transient slot on a `done` grain would hand D11 a finding the scaffolder
+    itself created.
+    """
+    file_slots = (model.MILESTONE_FILE_SLOTS if kind == 'milestone'
+                  else model.FEATURE_FILE_SLOTS)
+    dir_slots = (model.MILESTONE_DIR_SLOTS if kind == 'milestone'
+                 else model.FEATURE_DIR_SLOTS)
+    actions: list[tuple[str, Path]] = []
+    gdir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve every case-variant FIRST, so the status read below and the writes
+    # after it both see the canonical names.
+    entries = model.dir_entries(gdir)
+    for slot in file_slots:
+        if entries.get(slot) == 'file':
+            continue
+        variants = model.case_variants(entries, slot)
+        if len(variants) > 1:
+            raise ScaffoldRefused(
+                f'{cfg.rel(gdir)}/ holds {len(variants)} spellings of {slot} '
+                f'({", ".join(variants)}) — nothing was written; keep one')
+        if variants:
+            _rename_case(gdir / variants[0], gdir / slot)
+            actions.append((f'renamed {variants[0]} ->', gdir / slot))
+    entries = model.dir_entries(gdir)
+
+    grain_slot = f'{kind}.md'
+    status = (model.field_of(gdir / grain_slot, 'status')
+              if entries.get(grain_slot) == 'file' else '')
+    for slot in file_slots:
+        if entries.get(slot) == 'file':
+            _fill_header(gdir / slot, slot, actions)
+            continue
+        if slot == model.REVIEW_FILE_NAME and status == 'done':
+            continue
+        body = render(load(cfg, model.SLOT_TEMPLATE[slot]), values)
+        write(gdir / slot, body)
+        actions.append(('created', gdir / slot))
+    for slot in dir_slots:
+        if slot in entries:
+            continue
+        (gdir / slot).mkdir(exist_ok=True)
+        actions.append(('created', gdir / slot))
+    return actions
 
 
 def install(cfg: model.PmConfig, force: bool = False) -> list[Path]:

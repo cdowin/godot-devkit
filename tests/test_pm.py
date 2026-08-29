@@ -24,6 +24,9 @@ from godot_devkit.repo.checks import pm as pm_check
 from godot_devkit.repo.pm import cli, model
 
 
+LEGACY_LOG = '# legacy log\n\nM1 said something.\n'
+
+
 def write(path: Path, front: dict[str, str], body: str = 'x') -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ['---'] + [f'{k}: {v}' for k, v in front.items()] + ['---', '', body, '']
@@ -302,7 +305,7 @@ class DriftGate(unittest.TestCase):
 
     @staticmethod
     def _log(root: Path, body: str) -> Path:
-        path = root / 'pm' / 'roadmap' / '0.1-demo' / 'DECISIONS.md'
+        path = root / 'pm' / 'roadmap' / '0.1-demo' / 'decisions.md'
         path.write_text('# Demo — decisions\n\nAppend-only.\n\n' + body,
                         encoding='utf-8')
         return path
@@ -377,7 +380,7 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(run_gate(root)[0], 0)
 
     def test_d12_a_grandfathered_log_passes_and_the_ledger_size_is_reported(self):
-        rel = 'pm/roadmap/0.1-demo/DECISIONS.md'
+        rel = 'pm/roadmap/0.1-demo/decisions.md'
         legacy = '## M1 — a legacy entry conforming to none of this\n\nProse.\n\n'
         with tree(story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(
@@ -413,7 +416,7 @@ class DriftGate(unittest.TestCase):
             self.assertIn('missing **Over:**', out)
 
     def test_d12_the_ledger_may_only_shrink(self):
-        rel = 'pm/roadmap/0.1-demo/DECISIONS.md'
+        rel = 'pm/roadmap/0.1-demo/decisions.md'
         with tree(story_statuses=('todo',)) as root:
             # An exemption that suppresses nothing has done its job and must go,
             # or the ledger becomes permanent by inattention.
@@ -437,7 +440,7 @@ class DriftGate(unittest.TestCase):
             # A ledger line naming a log that does not exist.
             (root / 'devkit.toml').write_text(
                 '[pm]\nchecks = ["D12"]\n'
-                'decision_grandfather = ["pm/roadmap/gone/DECISIONS.md"]\n',
+                'decision_grandfather = ["pm/roadmap/gone/decisions.md"]\n',
                 encoding='utf-8')
             code, out = run_gate(root)
             self.assertEqual(code, 1)
@@ -498,11 +501,87 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('2 feature(s), 2 story/ies', out)
 
-    def test_new_refuses_to_overwrite(self):
-        with tree() as root:
-            code, out = run_cli(root, 'new', 'feature', '0.1', 'alpha', 'Alpha')
-            self.assertEqual(code, 1)
-            self.assertIn('already exists', out)
+    def test_new_is_idempotent_over_an_existing_grain(self):
+        # This is how a consumer MIGRATES. A tree of 22 milestones and 136
+        # features cannot be hand-shaped, so re-running the scaffolder has to
+        # fill gaps and leave every existing byte alone.
+        with tree(story_statuses=('todo',)) as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            before = ff.read_text(encoding='utf-8')
+            code, out = run_cli(root, 'new', 'feature', '0.1', 'alpha')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(ff.read_text(encoding='utf-8'), before)
+            for slot in model.FEATURE_FILE_SLOTS:
+                self.assertTrue((ff.parent / slot).is_file(), slot)
+
+            # Second run: nothing left to do, and it says so.
+            code, out = run_cli(root, 'new', 'feature', '0.1', 'alpha')
+            self.assertEqual(code, 0, out)
+            self.assertIn('already has every canonical slot', out)
+            self.assertEqual(ff.read_text(encoding='utf-8'), before)
+
+    def test_new_fills_a_milestones_slots_without_touching_milestone_md(self):
+        with tree(story_statuses=('todo',)) as root:
+            mf = root / 'pm/roadmap/0.1-demo/milestone.md'
+            before = mf.read_text(encoding='utf-8')
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(mf.read_text(encoding='utf-8'), before)
+            for slot in model.MILESTONE_FILE_SLOTS:
+                self.assertTrue((mf.parent / slot).is_file(), slot)
+            for slot in model.MILESTONE_DIR_SLOTS:
+                self.assertTrue((mf.parent / slot).is_dir(), slot)
+
+    def test_new_renames_a_case_variant_instead_of_writing_past_it(self):
+        # macOS is case-INSENSITIVE: open('decisions.md', 'w') next to an
+        # existing DECISIONS.md truncates it, so the migration would delete the
+        # content it exists to carry forward.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            legacy = mdir / 'DECISIONS.md'
+            legacy.write_text(LEGACY_LOG, encoding='utf-8')
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 0, out)
+            self.assertIn('renamed DECISIONS.md ->', out)
+            self.assertEqual(model.dir_entries(mdir).get('decisions.md'), 'file')
+            self.assertNotIn('DECISIONS.md', model.dir_entries(mdir))
+            # Every legacy byte survives; only the instruction line is added,
+            # because a migration that leaves 60 hand-edits behind is the hand
+            # migration this scaffolder exists to avoid.
+            body = (mdir / 'decisions.md').read_text(encoding='utf-8')
+            self.assertTrue(body.endswith(LEGACY_LOG), body)
+            self.assertEqual(model.header_of(mdir / 'decisions.md'),
+                             model.SLOT_HEADER['decisions.md'])
+
+    def test_new_never_stacks_a_second_header_on_a_doc_that_has_one(self):
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            before = (mdir / 'decisions.md').read_text(encoding='utf-8')
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            self.assertEqual((mdir / 'decisions.md').read_text(encoding='utf-8'),
+                             before)
+
+    def test_new_does_not_mint_a_review_md_on_a_done_grain(self):
+        # Otherwise the scaffolder hands D11 a finding it created itself.
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
+            self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
+            self.assertFalse((fdir / 'review.md').exists())
+            self.assertTrue((fdir / 'decisions.md').is_file())
+
+    def test_new_needs_a_name_only_when_the_grain_does_not_exist(self):
+        with tree(story_statuses=('todo',)) as root:
+            code, out = run_cli(root, 'new', 'milestone', '0.2')
+            self.assertEqual(code, 2, out)
+            self.assertIn('needs a name', out)
+
+    def test_every_shared_doc_ships_its_instruction_header(self):
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            mdir = root / 'pm/roadmap/0.1-demo'
+            for slot, want in model.SLOT_HEADER.items():
+                self.assertEqual(model.header_of(mdir / slot), want, slot)
 
 
 class StatusReport(unittest.TestCase):
@@ -1676,233 +1755,447 @@ class TemplateCannotMintPastTheGraph(unittest.TestCase):
             self.assertIn('moves only through the CLI', out)
 
 
-class Retention(unittest.TestCase):
-    """D11 — a transient findings doc outliving the FEATURE it names.
 
-    The shipped rule has one finding class and one exemption, and both halves
-    have burned us: the "names no grain" class was 116 of 117 findings on a real
-    consumer, and the exemption compared display STRINGS, which flagged the
-    tree's own durable record whenever a human typed the pointer any other way.
+class Retention(unittest.TestCase):
+    """D11 — the transient `review.md` outliving the grain that owns it.
+
+    Co-located, so the rule asks one question at a known path and guesses at
+    nothing. What it replaces resolved a findings-doc FILENAME back to the grain
+    it "named", and on a real 123-doc corpus that resolved 6 — precisely the
+    durable ones `reviewed:` already pointed at. Anchoring the match could only
+    ever remove matches, which is why this is a rewrite and not a repair.
     """
 
     TOML = '[pm]\nchecks = ["D11"]\n'
-    FFILE = 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+    FDIR = 'pm/roadmap/0.1-demo/features/alpha'
+    MDIR = 'pm/roadmap/0.1-demo'
 
     @staticmethod
-    def _feature(root: Path, slug: str, status: str, **extra) -> Path:
-        f = root / 'pm/roadmap/0.1-demo/features' / slug / 'feature.md'
-        front = {'id': f'0.1/{slug}', 'milestone': '"0.1"', 'name': slug,
-                 'status': status, 'reviewed': ''}
-        front.update(extra)
-        write(f, front)
-        return f
+    def _review(root: Path, rel: str) -> Path:
+        p = root / rel / model.REVIEW_FILE_NAME
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f'{model.SLOT_HEADER["review.md"]}\n\n# review\n',
+                     encoding='utf-8')
+        return p
 
     @staticmethod
-    def _doc(root: Path, name: str, body: str = 'findings enough to be real\n') -> Path:
-        d = root / 'docs' / 'reviews' / name
-        d.parent.mkdir(parents=True, exist_ok=True)
-        d.write_text(body, encoding='utf-8')
-        return d
-
-    @staticmethod
-    def _close(root: Path, rel: str = FFILE) -> None:
+    def _close(root: Path, rel: str) -> None:
         f = root / rel
         f.write_text(f.read_text(encoding='utf-8').replace(
             'status: building', 'status: done'), encoding='utf-8')
 
-    # --- the finding that is the whole rule -------------------------------
-    def test_a_doc_outliving_its_done_feature_is_drift_and_not_before(self):
-        # The same file is legitimate WHILE the feature is open and dead weight
-        # the moment it closes. A gate that merely flagged "unreferenced" would
-        # be wrong in the first half of that.
+    def test_a_review_outliving_its_done_feature_is_drift_and_not_before(self):
+        # The same file is legitimate WHILE the grain is open and dead weight
+        # the moment it closes. A rule that merely flagged its presence would be
+        # wrong for the whole first half of the grain's life.
         with tree(feature_status='building', story_statuses=('review',)) as root:
             (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._doc(root, '2026-01-01-alpha.md')
+            self._review(root, self.FDIR)
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
 
-            self._close(root)
+            self._close(root, f'{self.FDIR}/feature.md')
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('2026-01-01-alpha.md is transient and 0.1/alpha is done', out)
-            # The pointed-at record is durable by definition and never flagged,
-            # or the rule would punish the layout `review_dir` is named for.
-            self.assertNotIn('reviews/alpha.md is transient', out)
+            self.assertIn(f'{self.FDIR}/review.md is transient but feature '
+                          f'0.1/alpha is done', out)
+            self.assertIn('decisions.md', out)
 
-    # --- the two classes that were DROPPED --------------------------------
-    def test_a_doc_naming_no_feature_is_not_a_finding(self):
-        # Dropped: 116 of one consumer's 117 findings, and the claim ("nothing
-        # can reach it") is false — the archived feature.md in git history does.
-        with tree(story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._doc(root, 'README.md', 'index\n')
-            self._doc(root, '2026-01-01-nothing-here.md')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertNotIn('DRIFT', out)
-
-    def test_a_milestone_scoped_doc_is_not_a_finding(self):
-        # Dropped: `reviewed:` exists only on feature.md, so a milestone-scoped
-        # record has NO green state and the finding ordered an impossible repair.
+    def test_a_done_milestone_with_a_review_is_drift_too(self):
+        # Milestones get the rule as well. The old D11 had to skip them: it
+        # resolved through `reviewed:`, which exists only on feature.md, so a
+        # milestone-scoped doc had no green state and the finding ordered a
+        # repair the schema could not accept. A co-located slot has one.
         with tree(milestone_status='done', feature_status='done',
                   story_statuses=('done',)) as root:
             (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._doc(root, '0.1-milestone-review.md')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-    # --- the exemption ----------------------------------------------------
-    def test_the_pointer_is_exempt_in_every_spelling_a_human_types(self):
-        # The bug: the exemption compared cfg.rel() against the `reviewed:`
-        # string verbatim, so each of these flagged the tree's OWN durable
-        # record for deletion.
-        for spelling in ('docs/reviews/alpha.md', './docs/reviews/alpha.md',
-                         'docs\\reviews\\alpha.md', '<ABS>'):
-            with self.subTest(spelling=spelling):
-                with tree(feature_status='done', story_statuses=('done',)) as root:
-                    (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-                    value = (str((root / 'docs/reviews/alpha.md').resolve())
-                             if spelling == '<ABS>' else spelling)
-                    f = root / self.FFILE
-                    f.write_text(f.read_text(encoding='utf-8').replace(
-                        'reviewed: docs/reviews/alpha.md', f'reviewed: {value}'),
-                        encoding='utf-8')
-                    code, out = run_gate(root)
-                    self.assertEqual(code, 0, out)
-                    self.assertNotIn('alpha.md is transient', out)
-
-    def test_a_short_record_is_exempt_from_d11_while_d1_still_reports_it(self):
-        # Whether a record says ENOUGH is D1's question. Resolving the exemption
-        # through review_record_for() applied record_is_substantive, so one file
-        # got D1 saying "stamp a record" and D11 saying "delete this record" —
-        # two rules ordering opposite repairs on the same path.
-        with tree(feature_status='done', story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D1", "D11"]\n', encoding='utf-8')
-            (root / 'docs/reviews/alpha.md').write_text('ok\n', encoding='utf-8')
+            self._review(root, self.MDIR)
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('done w/o review record', out)
-            self.assertNotIn('is transient', out)
+            self.assertIn('milestone 0.1 is done', out)
 
-    def test_slug_fallback_exempts_every_candidate_not_just_the_first(self):
-        # review_record_for() returns the FIRST sorted match, so a second
-        # legitimate record was flagged for deletion by the same config that
-        # made the first one durable.
-        with tree(feature_status='done', story_statuses=('done',),
-                  with_record=False) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D11"]\nreview_slug_fallback = true\n',
-                encoding='utf-8')
-            self._doc(root, 'alpha-first.md')
-            self._doc(root, 'alpha-second.md')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-    # --- rule 4: the rule must say what it scanned ------------------------
-    def test_an_absent_review_dir_is_loud(self):
-        # Confirmed on a real tree: `review_dir = "docs/review"` (a typo) exited
-        # 0 with a serene PASS while three stale docs sat in docs/reviews/.
-        with tree(feature_status='done', story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D11"]\nreview_dir = "docs/review"\n',
-                encoding='utf-8')
-            self._doc(root, '2026-01-01-alpha.md')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('does not exist', out)
-
-    def test_an_empty_review_dir_setting_is_loud(self):
-        with tree(feature_status='done', story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D11"]\nreview_dir = ""\n', encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('sweep the repo root', out)
-
-    def test_an_empty_review_dir_is_named_rather_than_silently_passed(self):
-        # Not a FINDING — an empty review dir is this rule's own success state,
-        # unlike D12, whose missing log means it can never fire at all.
-        with tree(feature_status='building', story_statuses=('todo',),
-                  with_record=False) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            (root / 'docs' / 'reviews').mkdir(parents=True)
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertIn('holds no review doc', out)
-
-    def test_the_census_carries_the_review_doc_count(self):
+    def test_no_done_grain_is_named_rather_than_silently_passed(self):
+        # Not a FINDING — "nothing has closed yet" is this rule's own success
+        # state, unlike D12, whose missing log means it can never fire at all.
         with tree(feature_status='building', story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._doc(root, '2026-01-01-alpha.md')
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
-            # alpha.md (the record) + the transient doc; README is excluded.
-            self.assertIn('2 review doc(s)', out)
+            self.assertIn('no `done` grain in the tree', out)
 
-    # --- resolution -------------------------------------------------------
-    def test_a_feature_with_no_id_is_named_by_its_directory_slug(self):
-        # Was: "is transient and  is done" — a blank grain and a double space.
-        with tree(feature_status='building', story_statuses=('todo',),
-                  with_record=False) as root:
+    def test_the_census_carries_the_done_grain_count(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
             (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            f = root / self.FFILE
-            f.write_text(f.read_text(encoding='utf-8').replace(
-                'id: 0.1/alpha\n', ''), encoding='utf-8')
-            self._close(root)
-            self._doc(root, '2026-01-01-alpha.md')
             code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('is transient and alpha is done', out)
-
-    def test_longest_wins_resolves_the_sibling_case_in_both_directions(self):
-        # The real pair. Whichever of the two is `done`, the doc must resolve to
-        # the LONGER slug it actually names — not to the shorter one embedded
-        # in it, and not to whichever directory happens to sort first.
-        for long_status, short_status, expect in (
-                ('done', 'building', 1), ('building', 'done', 0)):
-            with self.subTest(long=long_status):
-                with tree(feature_status='building', story_statuses=('todo',),
-                          with_record=False) as root:
-                    (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-                    self._feature(root, 'hit-feedback', short_status)
-                    self._feature(root, 'hit-feedback-rides-the-host', long_status)
-                    self._doc(root, '2026-01-01-hit-feedback-rides-the-host.md')
-                    code, out = run_gate(root)
-                    self.assertEqual(code, expect, out)
-                    if expect:
-                        self.assertIn('0.1/hit-feedback-rides-the-host is done', out)
-
-    def test_KNOWN_DEFECT_a_slug_inside_a_word_still_resolves(self):
-        """PINS A BUG, does not bless it. Delete this test with the defect.
-
-        `den` is a real feature slug in a real consumer, and the match is a bare
-        substring, so a closed `den` claims `hidden-room-audit.md` and
-        `enemy-density-tuning.md` and confidently instructs their deletion.
-        D11 must not be enabled against a tree nobody has eyeballed until the
-        match is anchored — or until review docs live inside the feature folder,
-        which removes the guess rather than narrowing it.
-        """
-        with tree(feature_status='building', story_statuses=('todo',),
-                  with_record=False) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._feature(root, 'den', 'done')
-            self._doc(root, '2026-08-28-hidden-room-audit.md')
-            self._doc(root, '2026-08-28-enemy-density-tuning.md')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('hidden-room-audit.md is transient and 0.1/den is done', out)
-            self.assertIn('enemy-density-tuning.md is transient and 0.1/den is done', out)
+            self.assertEqual(code, 0, out)
+            self.assertIn('2 done grain(s)', out)
 
     def test_d11_is_silent_when_not_enabled(self):
         with tree(feature_status='done', story_statuses=('done',)) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\nchecks = ["D4"]\n', encoding='utf-8')
-            self._doc(root, '2026-01-01-alpha.md')
+            self._review(root, self.FDIR)
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
             self.assertNotIn('is transient', out)
-            self.assertNotIn('review doc(s)', out)
+            self.assertNotIn('done grain(s)', out)
+
+
+class Structure(unittest.TestCase):
+    """D13 — the canonical slots. Missing is drift AND extra is drift.
+
+    The extra half is the one that earns the rule. Every invented sibling in a
+    real tree (`plans/`, `findings/`, `AUDIT-REPORT.md`, `audit-prompt.md`,
+    `DELETED-SCENARIO-LEDGER.md`) exists because no slot was scaffolded AND
+    nothing flagged the invention; a missing-only check leaves all of them.
+    """
+
+    TOML = '[pm]\nchecks = ["D13"]\n'
+    MDIR = 'pm/roadmap/0.1-demo'
+    FDIR = 'pm/roadmap/0.1-demo/features/alpha'
+
+    def _scaffolded(self, root: Path) -> None:
+        self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+        self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
+
+    def test_a_scaffolded_tree_satisfies_the_rule(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('2 grain dir(s)', out)
+
+    def test_a_missing_slot_is_drift(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            (root / self.MDIR / 'handoff.md').unlink()
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is missing handoff.md', out)
+
+    def test_an_extra_slot_is_drift(self):
+        # The half that matters. Each of these is a real invention from a real
+        # consumer tree, and none of them would ever be reported by a
+        # missing-only structure check.
+        for name, is_dir in (('plans', True), ('findings', True),
+                             ('AUDIT-REPORT.md', False),
+                             ('DELETED-SCENARIO-LEDGER.md', False)):
+            with self.subTest(name=name):
+                with tree(feature_status='building',
+                          story_statuses=('todo',)) as root:
+                    (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+                    self._scaffolded(root)
+                    target = root / self.FDIR / name
+                    if is_dir:
+                        target.mkdir()
+                        (target / 'x.md').write_text('x\n', encoding='utf-8')
+                    else:
+                        target.write_text('x\n', encoding='utf-8')
+                    code, out = run_gate(root)
+                    self.assertEqual(code, 1, out)
+                    self.assertIn(f'carries {name}', out)
+                    self.assertIn('not a canonical slot', out)
+
+    def test_a_mangled_header_is_drift(self):
+        # The header is the ONE delivery channel with a 100% hit rate for a
+        # dispatched agent, so it has to be unrottable, not merely present once.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            log = root / self.FDIR / 'decisions.md'
+            log.write_text('# 0.1/alpha — decisions\n\nnotes\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('no longer opens with its instruction line', out)
+            self.assertIn('godot-devkit pm decide', out)
+
+    def test_review_md_is_required_open_and_forbidden_done_with_no_overlap(self):
+        # The two halves of one fact. D13 owns the open half, D11 the closed
+        # one, and a `done` grain must never be told both to have the file and
+        # to delete it.
+        with tree(feature_status='building', story_statuses=('review',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D11","D13"]\n', encoding='utf-8')
+            self._scaffolded(root)
+            (root / self.FDIR / 'review.md').unlink()
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is missing review.md', out)
+
+            f = root / self.FDIR / 'feature.md'
+            f.write_text(f.read_text(encoding='utf-8').replace(
+                'status: building', 'status: done'), encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_a_case_variant_is_both_missing_and_extra(self):
+        # `DECISIONS.md` vs `decisions.md`. macOS resolves one to the other and
+        # Linux does not, so existence is decided from a directory LISTING —
+        # otherwise the same tree is clean on a laptop and drifting in CI.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            src = root / self.FDIR / 'decisions.md'
+            body = src.read_text(encoding='utf-8')
+            src.rename(src.with_name('decisions.tmp'))
+            (src.parent / 'decisions.tmp').rename(src.with_name('DECISIONS.md'))
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is missing decisions.md', out)
+            self.assertIn('DECISIONS.md is the same slot in another case', out)
+            self.assertIn('carries DECISIONS.md', out)
+            self.assertEqual(
+                (root / self.FDIR / 'DECISIONS.md').read_text(encoding='utf-8'),
+                body)
+
+    def test_d13_is_silent_when_not_enabled(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('D13', out)
+
+
+class BugLifetime(unittest.TestCase):
+    """D14 — a bug lives in the milestone that will FIX it.
+
+    Not cosmetic: `prune`'s lag-by-one deletes a done milestone's directory the
+    moment the next one closes, so an open bug parked in a closed milestone is
+    already scheduled for deletion. One consumer holds 28 of them.
+    """
+
+    TOML = '[pm]\nchecks = ["D14"]\n'
+
+    @staticmethod
+    def _bug(root: Path, slug: str, status: str, **extra) -> Path:
+        p = root / 'pm/roadmap/0.1-demo/bugs' / f'{slug}.md'
+        front = {'id': f'0.1/bugs/{slug}', 'milestone': '"0.1"',
+                 'status': status, 'caught_in': '"0.1"'}
+        front.update(extra)
+        write(p, front)
+        return p
+
+    def test_an_open_bug_under_a_done_milestone_is_drift(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'open', fix_milestone='"0.2"')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn("is 'open' under the done milestone 0.1", out)
+            # The repair names where it goes, from the bug's own decision.
+            self.assertIn('move it to 0.2/bugs/', out)
+
+    def test_an_untriaged_open_bug_is_told_to_decide_first(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'open')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('set fix_milestone:', out)
+
+    def test_a_closed_bug_under_a_done_milestone_is_fine(self):
+        # Where a FIXED bug lives is history, and history is exactly what the
+        # done milestone's directory is for.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'fixed')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_an_open_bug_under_a_live_milestone_is_fine(self):
+        with tree(milestone_status='building', feature_status='building',
+                  story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'open')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_a_status_outside_the_vocabulary_is_a_finding_not_a_silent_close(self):
+        # D4 does not cover bugs, so a typo'd status would otherwise read as
+        # "not open" and be passed in silence — rule 4's cardinal sin.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'opne')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn("bug status 'opne' is not in", out)
+
+    def test_bug_open_states_must_be_in_bug_states(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D14"]\nbug_open_states = ["triage"]\n',
+                encoding='utf-8')
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            with self.assertRaises(model.ConfigError):
+                model.load()
+
+    def test_no_bug_file_is_named_rather_than_silently_passed(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('no bug files under', out)
+
+    def test_d14_is_silent_when_not_enabled(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D4"]\n', encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'open')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('D14', out)
+
+
+class Decide(unittest.TestCase):
+    """`pm decide` — the writer that cannot produce what the gate rejects.
+
+    It stamps the two things authors get wrong (the date and the ordinal) and
+    validates every value through D12's OWN predicates, so a non-conforming
+    entry is refused before the write rather than reported after it.
+    """
+
+    ARGS = ('--chose', 'move the sweep verb to combat_behavior.gd',
+            '--over', 'leaving it on entity_behavior.gd, the lean root',
+            '--because', 'all three consumers extend the combat layer',
+            '--evidence', '64e89ad5b')
+    MDIR = 'pm/roadmap/0.1-demo'
+
+    def _scaffolded(self, root: Path) -> None:
+        self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+        self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
+
+    def test_it_allocates_D1_on_an_empty_log_and_the_next_ordinal_after_that(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+            self.assertIn('## D1 — ', log.read_text(encoding='utf-8'))
+            self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+            self.assertIn('## D2 — ', log.read_text(encoding='utf-8'))
+            self.assertEqual(len(model.decision_entries(log)), 2)
+
+    def test_it_keeps_the_logs_own_id_prefix(self):
+        # A tree that numbers `M27` keeps numbering `M`. The prefix is the
+        # log's, not the tool's.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            log.write_text(log.read_text(encoding='utf-8')
+                           + '\n## M27 — 2026-01-01 — a legacy entry\n'
+                             '**Chose:** a\n**Over:** b\n**Because:** c\n'
+                             '**Evidence:** `abcdef1`\n', encoding='utf-8')
+            self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+            self.assertIn('## M28 — ', log.read_text(encoding='utf-8'))
+
+    def test_what_it_writes_passes_the_D12_gate(self):
+        # The load-bearing round trip: writer and gate share one schema, so an
+        # entry this mints can never be one the gate reports.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+            self.assertEqual(
+                run_cli(root, 'decide', '0.1/alpha', *self.ARGS)[0], 0)
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_it_stamps_todays_date(self):
+        from datetime import datetime, timezone
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+            today = datetime.now(timezone.utc).date().isoformat()
+            self.assertIn(f'## D1 — {today} — ',
+                          (root / self.MDIR / 'decisions.md').read_text(
+                              encoding='utf-8'))
+
+    def test_a_missing_over_is_refused(self):
+        # The whole point of the flag. A decision with no rejected alternative
+        # is a description, and requiring it at WRITE time is what stops the
+        # entry existing at all — the author still remembers the alternative.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            before = log.read_text(encoding='utf-8')
+            args = [a for a in self.ARGS
+                    if a not in ('--over',
+                                 'leaving it on entity_behavior.gd, the lean root')]
+            code, out = run_cli(root, 'decide', '0.1', *args)
+            self.assertEqual(code, 2, out)
+            self.assertIn('--over is required', out)
+            self.assertIn('is a description', out)
+            self.assertEqual(log.read_text(encoding='utf-8'), before)
+
+    def test_prose_evidence_is_refused_and_nothing_is_written(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            before = log.read_text(encoding='utf-8')
+            args = list(self.ARGS)
+            args[-1] = 'we discussed it and agreed'
+            code, out = run_cli(root, 'decide', '0.1', *args)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is prose, not a reference', out)
+            self.assertEqual(log.read_text(encoding='utf-8'), before)
+
+    def test_an_overlong_value_is_refused(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            args = list(self.ARGS)
+            args[5] = 'x' * (model.DECISION_VALUE_MAX + 1)
+            code, out = run_cli(root, 'decide', '0.1', *args)
+            self.assertEqual(code, 1, out)
+            self.assertIn('over the', out)
+
+    def test_a_chose_too_long_to_be_a_title_asks_for_title_not_truncation(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            args = list(self.ARGS)
+            args[1] = 'x' * (model.DECISION_TITLE_MAX + 1)
+            code, out = run_cli(root, 'decide', '0.1', *args)
+            self.assertEqual(code, 1, out)
+            self.assertIn('--title', out)
+            self.assertEqual(run_cli(root, 'decide', '0.1', *args,
+                                     '--title', 'a short one')[0], 0)
+            self.assertIn('## D1', (root / self.MDIR / 'decisions.md').read_text(
+                encoding='utf-8'))
+
+    def test_a_story_or_bug_has_no_decision_log(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            code, out = run_cli(root, 'decide', '0.1/alpha/s0', *self.ARGS)
+            self.assertEqual(code, 1, out)
+            self.assertIn('no decision log', out)
+
+    def test_a_grain_with_no_log_points_at_the_scaffolder(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            code, out = run_cli(root, 'decide', '0.1', *self.ARGS)
+            self.assertEqual(code, 1, out)
+            self.assertIn('new milestone 0.1', out)
+
+    def test_a_crlf_log_stays_crlf(self):
+        # Rule 3: a write verb touches only what it was asked to touch, and a
+        # line-ending conversion is the quietest way to touch a whole file.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            model.write_raw(log, model.read_raw(log).replace('\n', '\r\n'))
+            self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+            raw = model.read_raw(log)
+            self.assertNotIn('\r\r', raw)
+            self.assertEqual(raw.count('\n'), raw.count('\r\n'))
+            self.assertEqual(len(model.decision_entries(log)), 1)
 
 
 if __name__ == '__main__':

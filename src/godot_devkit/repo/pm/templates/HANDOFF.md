@@ -1,11 +1,6 @@
-# {id} {name} — HANDOFF
+Cold-start only. Never restate what `pm status` computes.
 
-**Cold-start doc. Read this FIRST, then `milestone.md`, then the feature you are
-picking up — before touching code.**
-
-> Never read this file as live status. `godot-devkit pm status {id}` is the single
-> read for that, and a hand-copied tally is a second scoreboard. This file carries
-> what `pm status` cannot: judgment, sequencing, and the reasons behind both.
+# {id} {name} — handoff
 
 ## 1. Where the work lives
 

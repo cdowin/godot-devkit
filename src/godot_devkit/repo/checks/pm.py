@@ -40,18 +40,32 @@ DRIFT RULES (each FAILs, naming the offending path):
       the roadmap root (lag-by-one keeps exactly the most recently closed),
       means a prune is due.
 
-  D11 review-dir RETENTION — a findings doc outlives its purpose. A `*.md` in
-      the review dir is legitimate while the FEATURE it NAMES is still open;
-      once that feature is `done` the durable record is the feature's own
-      review record and the transient doc is dead weight a `grep` still finds.
-      Features only — `reviewed:` exists on `feature.md` and nowhere else, so a
-      milestone-scoped record has no green state to reach. A file naming no
-      feature is not a finding: git history still names it. OFF by default (see
-      RETENTION_CHECKS), and see `model.grain_named_by` for the resolution
-      defect that keeps it unsafe to enable blind.
+  D11 review RETENTION — a `done` grain must not have a `review.md`. The slot
+      is the TRANSIENT half of the pair: simplifier and reviewer append to it
+      while the grain is open, and at close anything durable is promoted into
+      `decisions.md` and the file goes. Co-located at a known path, so there is
+      no filename to resolve, no exemption list and nothing to guess. OFF by
+      default (see RETENTION_CHECKS).
+
+  D13 canonical grain STRUCTURE — every milestone and feature dir carries
+      exactly its slots. MISSING is drift and EXTRA is drift, and each shared
+      doc must still open with its one-line instruction header, so the
+      breadcrumb the dispatched agent actually reads cannot rot. Directory
+      slots are permitted, never required: git does not store an empty
+      directory. `pm new milestone|feature <id>` is idempotent and fills gaps.
+
+  D14 bug LIFETIME — a bug lives in the milestone that will FIX it, so an OPEN
+      bug under a `done` milestone is drift: nothing schedules the fix, and
+      `prune`'s lag-by-one deletes the file where it sits. Also reports a bug
+      status outside `[pm] bug_states`, which D4 does not cover and which would
+      otherwise read as "closed" and pass in silence.
+
+  D11/D13/D14 are OFF by default like D8-D12 — a tree predating the canonical
+  slots is missing most of them, and a rule that turns a consumer red on
+  upgrade day is unshippable. Scaffold first, then hold the line.
 
   D12 decision-record SCHEMA — a decision log rots into description. Every
-      `## <ID> — <ISO date> — <title>` entry in a DECISIONS.md carries exactly
+      `## <ID> — <ISO date> — <title>` entry in a decisions.md carries exactly
       **Chose:** / **Over:** / **Because:** / **Evidence:**, in that order, one
       per line, each value <= 200 chars, the title <= 80. `Over:` is the
       load-bearing one: an entry that cannot name what it ruled out is a
@@ -75,53 +89,70 @@ import sys
 from godot_devkit.repo.pm import model
 
 
-def _retention(cfg, report, all_feature_ids) -> int:
-    """D11 — a transient findings doc outliving the feature it names.
+def _retention(cfg, report) -> int:
+    """D11 — the transient `review.md` slot outliving the grain that owns it.
 
-    Returns the number of review docs scanned, so the census can carry it:
-    rule 4 wants the file count of every scoping decision, and this one scopes
-    on a CONFIG value nothing else reads.
+    Returns the number of `done` grains scanned, so the census can carry it:
+    this rule's population is not "every grain", it is the closed ones, and a
+    run where nothing had closed must not read like a run where everything was
+    clean.
 
-    One finding class, not two. "Names no grain" was dropped: it produced 116 of
-    117 findings on one consumer, and its claim — nothing can reach the file —
-    is false, because the archived `feature.md` in git history still names it.
+    Co-located, so there is no resolution step and nothing to guess. The rule
+    this replaced matched a findings-doc FILENAME back to the grain it "named",
+    and against a real corpus that got the answer backwards: 6 of 123 docs
+    resolved, and those 6 were the durable ones `reviewed:` already pointed at.
+    A known path deletes the question rather than narrowing it.
     """
-    rdir = cfg.root / cfg.review_dir
-
-    # Loud, both ways. A typo'd review_dir used to exit 0 with a serene PASS
-    # while the real directory sat there full of stale docs — rule 4's read-side
-    # cardinal sin, produced by a config typo rather than a bug.
-    if not cfg.review_dir.strip():
-        report('[pm] review_dir is empty — D11 would sweep the repo root; '
-               'name the directory or drop D11 from [pm] checks')
-        return 0
-    if not rdir.is_dir():
-        report(f'D11 is enabled but {cfg.review_dir}/ does not exist — the rule '
-               f'scanned nothing (a [pm] review_dir typo?)')
-        return 0
-
-    files = model.review_dir_files(cfg)
-    if not files:
-        # Printed, NOT reported. An empty review dir is this rule's own success
-        # state; D12 fails on a zero census because a missing DECISIONS.md means
+    stale = model.stale_review_files(cfg)
+    n_done = sum(1 for g in model.grain_dirs(cfg) if g.status == 'done')
+    if not n_done:
+        # Printed, NOT reported. "Nothing has closed yet" is this rule's own
+        # success state; D12 fails on a zero census because a missing log means
         # it can never fire, which is the opposite situation.
-        print(f'[check:pm] D11: {cfg.rel(rdir)}/ holds no review doc — nothing '
-              f'to retire')
+        print(f'[check:pm] D11: no `done` grain in the tree — nothing to retire')
         return 0
+    for grain, rfile in stale:
+        report(f'{cfg.rel(rfile)} is transient but {grain.kind} {grain.gid} is '
+               f'done — promote anything durable into '
+               f'{model.DECISION_FILE_NAME}, then delete it (D11)')
+    return n_done
 
-    # A file the tree still POINTS at is durable by definition, so resolve the
-    # pointers once and exempt them: a project whose review records live in
-    # review_dir must satisfy this trivially, or the rule would be punishing the
-    # layout the setting is named for.
-    pointed = model.pointed_review_paths(cfg, all_feature_ids)
-    for rfile in files:
-        if rfile.resolve() in pointed:
-            continue
-        named = model.grain_named_by(cfg, rfile)
-        if named and named[1] == 'done':
-            report(f'{cfg.rel(rfile)} is transient and {named[0]} is done '
-                   f'— its durable record is the grain\'s own (D11)')
-    return len(files)
+
+def _structure(cfg, report) -> int:
+    """D13 — the canonical grain shape. Returns the grain dirs checked.
+
+    Missing is drift AND extra is drift. The extra half is the one that earns
+    the rule: `plans/`, `findings/`, `AUDIT-REPORT.md`, `audit-prompt.md` and
+    `DELETED-SCENARIO-LEDGER.md` all exist in a real tree because no slot was
+    scaffolded AND nothing flagged the invention. A missing-only check would
+    leave every one of them there forever.
+    """
+    grains = model.grain_dirs(cfg)
+    for path, why in model.structure_findings(cfg):
+        report(f'{cfg.rel(path)}: {why} (D13)')
+    print(f'[check:pm] D13: {len(grains)} grain dir(s) held to the canonical '
+          f'slots; `pm new milestone|feature <id>` fills a gap')
+    return len(grains)
+
+
+def _bug_lifetime(cfg, report) -> int:
+    """D14 — an open bug under a `done` milestone. Returns the bugs scanned.
+
+    Not cosmetic: `prune`'s lag-by-one deletes a done milestone's directory the
+    moment the next one closes, so an open bug parked in a closed milestone is
+    scheduled for deletion. Moving it to the milestone that will FIX it is what
+    makes prune safe by construction.
+    """
+    findings, scanned = model.open_bugs_under_done(cfg)
+    if not scanned:
+        # This rule's own success state, like D11's: a tree with no bugs filed
+        # is not a tree whose bug lifetime is broken.
+        print(f'[check:pm] D14: no bug files under {cfg.roadmap_dir}/ — '
+              f'nothing to place')
+        return 0
+    for path, why in findings:
+        report(f'{cfg.rel(path)} {why} (D14)')
+    return scanned
 
 
 def _decision_schema(cfg, report) -> None:
@@ -213,7 +244,6 @@ def run() -> int:
     n_features = 0
     n_stories = 0
     done_milestone_dirs = 0
-    all_feature_ids: list[str] = []
 
     for mdir in mdirs:
         mfile = mdir / 'milestone.md'
@@ -233,7 +263,6 @@ def run() -> int:
             frel = cfg.rel(ffile)
             feat_total += 1
             n_features += 1
-            all_feature_ids.append(view.fid)
             n_stories += view.total
             if view.status == 'done':
                 feat_done_n += 1
@@ -329,18 +358,25 @@ def run() -> int:
             report(f'{done_milestone_dirs} done milestone dirs at the roadmap '
                    f'root — lag-by-one allows 1; a prune is due')
 
-    n_review = 0
+    n_done_grains = 0
     if 'D11' in enabled:
-        n_review = _retention(cfg, report, all_feature_ids)
+        n_done_grains = _retention(cfg, report)
 
     if 'D12' in enabled:
         _decision_schema(cfg, report)
+
+    n_grain_dirs = _structure(cfg, report) if 'D13' in enabled else 0
+    n_bugs = _bug_lifetime(cfg, report) if 'D14' in enabled else 0
 
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
     if 'D11' in enabled:
-        census += f', {n_review} review doc(s)'
+        census += f', {n_done_grains} done grain(s)'
+    if 'D13' in enabled:
+        census += f', {n_grain_dirs} grain dir(s)'
+    if 'D14' in enabled:
+        census += f', {n_bugs} bug(s)'
     if v_census:
         census += f', {v_census["refs"]} ref(s)'
         if v_census['unverifiable']:

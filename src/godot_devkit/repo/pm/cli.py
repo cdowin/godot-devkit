@@ -44,10 +44,15 @@ USAGE = """usage: godot-devkit pm <command>
   validate                                (structural + referential integrity)
   install-skills [--force]                (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
-  new milestone <ver> <name...>           (scaffold; statuses move via the commands above)
-  new feature <milestone> <slug> <name...>
+  new milestone <ver> [<name...>]         (scaffold every canonical slot; idempotent —
+                                           re-run on an existing grain to fill gaps)
+  new feature <milestone> <slug> [<name...>]
   new story <feature-id> <slug> <name...>
   new bug <milestone> <slug>
+  decide <grain-id> --chose <what> --over <rejected> --because <why>
+         --evidence <hash|path[:line]|number> [--title <short>]
+                                          (append a schema-conforming decision; the
+                                           tool stamps the date and the next ordinal)
   prune                                   (delete cooled archives; stamp the prune log)"""
 
 
@@ -805,33 +810,53 @@ def _guard_initial_status(grain: str, body: str) -> None:
             return
 
 
+def _scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
+              values: dict[str, str]) -> int:
+    """Fill a grain's canonical slots and report only what CHANGED."""
+    # The guard runs on the rendered grain template even when the grain already
+    # exists: a project that edits its template into `status: done` must not be
+    # able to mint one through the fill-gaps path either.
+    _guard_initial_status(kind, templates.render(templates.load(cfg, kind), values))
+    try:
+        actions = templates.scaffold(cfg, kind, gdir, values)
+    except templates.ScaffoldRefused as err:
+        raise Refused(str(err)) from err
+    except templates.MissingTemplate as err:
+        raise Usage(str(err)) from err
+    for what, path in actions:
+        _ok(f'{what} {cfg.rel(path)}')
+    if not actions:
+        _ok(f'{cfg.rel(gdir)}/ already has every canonical slot (no-op)')
+    else:
+        _ok(f'{cfg.rel(gdir)}/: {len(actions)} slot(s) filled')
+    return 0
+
+
 def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
     if not args:
         raise Usage(USAGE)
     grain, rest = args[0], args[1:]
+    # `new milestone` and `new feature` are IDEMPOTENT: run against an existing
+    # grain they fill the missing slots and leave every existing byte alone.
+    # That is how a consumer migrates a tree of 22 milestones and 136 features
+    # to the canonical shape, which is why the name is optional there — the
+    # name only ever mints the directory, and the directory already exists.
     if grain == 'milestone':
-        if len(rest) < 2:
+        if not rest:
             raise Usage(USAGE)
         ver, name = _check_slug('milestone version', rest[0]), ' '.join(rest[1:])
-        if model.milestone_dir(cfg, ver) is not None:
-            raise Refused(f'milestone {ver!r} already exists')
-        mdir = cfg.roadmap / f'{ver}-{_slugify(name)}'
-        if mdir.exists():
-            raise Refused(f'{cfg.rel(mdir)} already exists')
-        (mdir / 'features').mkdir(parents=True, exist_ok=True)
-        (mdir / 'bugs').mkdir(parents=True, exist_ok=True)
-        values = {'id': ver, 'name': name}
-        for tpl, dest in (('milestone', 'milestone.md'),
-                          ('HANDOFF', 'HANDOFF.md'),
-                          ('DECISIONS', 'DECISIONS.md')):
-            body = templates.render(templates.load(cfg, tpl), values)
-            if tpl == 'milestone':
-                _guard_initial_status('milestone', body)
-            templates.write(mdir / dest, body)
-            _ok(f'created {cfg.rel(mdir / dest)}')
-        return 0
+        mdir = model.milestone_dir(cfg, ver)
+        if mdir is None:
+            if not name:
+                raise Usage(f'milestone {ver!r} does not exist yet — a new one '
+                            f'needs a name (the name mints the directory)')
+            mdir = cfg.roadmap / f'{ver}-{_slugify(name)}'
+            if mdir.exists():
+                raise Refused(f'{cfg.rel(mdir)} already exists')
+        name = name or model.field_of(mdir / 'milestone.md', 'name')
+        return _scaffold(cfg, 'milestone', mdir, {'id': ver, 'name': name})
     if grain == 'feature':
-        if len(rest) < 3:
+        if len(rest) < 2:
             raise Usage(USAGE)
         mid, slug = rest[0], _check_slug('feature slug', rest[1])
         name = ' '.join(rest[2:])
@@ -839,17 +864,12 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         if mdir is None:
             raise Usage(f'no milestone resolves from {mid!r}')
         fdir = mdir / 'features' / slug
-        if (fdir / 'feature.md').exists():
-            raise Refused(f'feature {mid}/{slug!r} already exists')
-        (fdir / 'stories').mkdir(parents=True, exist_ok=True)
-        (fdir / 'plans').mkdir(parents=True, exist_ok=True)
-        body = templates.render(
-            templates.load(cfg, 'feature'),
-            {'id': f'{mid}/{slug}', 'milestone': mid, 'name': name})
-        _guard_initial_status('feature', body)
-        templates.write(fdir / 'feature.md', body)
-        _ok(f'created {cfg.rel(fdir / "feature.md")}')
-        return 0
+        if not (fdir / 'feature.md').exists() and not name:
+            raise Usage(f'feature {mid}/{slug!r} does not exist yet — a new one '
+                        f'needs a name')
+        name = name or model.field_of(fdir / 'feature.md', 'name')
+        return _scaffold(cfg, 'feature', fdir,
+                         {'id': f'{mid}/{slug}', 'milestone': mid, 'name': name})
     if grain == 'story':
         if len(rest) < 3:
             raise Usage(USAGE)
@@ -892,6 +912,106 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         _ok(f'created {cfg.rel(bf)}')
         return 0
     raise Usage(USAGE)
+
+
+# --- decide -------------------------------------------------------------------
+# The two things authors get wrong are the date and the ordinal, so the tool
+# stamps both. `--over` is REQUIRED because a decision with no rejected
+# alternative is a description — making it a flag you cannot omit enforces that
+# at WRITE time, where the author still remembers the alternative, instead of at
+# gate time weeks later. Every value is validated through D12's own predicates
+# (`model.append_decision` re-parses the composed entry), so a non-conforming
+# entry is refused rather than written and then reported.
+DECIDE_FLAGS = {'--chose': 'Chose', '--over': 'Over',
+                '--because': 'Because', '--evidence': 'Evidence'}
+
+
+def _decision_log(cfg: model.PmConfig, gid: str) -> Path:
+    """The decisions.md of the milestone or feature `gid` names."""
+    depth = gid.count('/')
+    gdir = (model.milestone_dir(cfg, gid) if depth == 0 else
+            model.feature_dir(cfg, gid) if depth == 1 else None)
+    if depth > 1 or '/bugs/' in gid:
+        raise Refused(f'{gid!r} is a story or a bug — those have no decision '
+                      f'log; name the feature or milestone that owns the choice')
+    if gdir is None:
+        raise Usage(f'no milestone or feature resolves from id {gid!r}')
+    entries = model.dir_entries(gdir)
+    if entries.get(model.DECISION_FILE_NAME) != 'file':
+        kind = 'milestone' if depth == 0 else 'feature'
+        raise Refused(
+            f'{cfg.rel(gdir)}/ has no {model.DECISION_FILE_NAME} — run '
+            f'`{PROG} new {kind} {gid.replace("/", " ")}` to fill the '
+            f'canonical slots (it is idempotent), then re-run')
+    return gdir / model.DECISION_FILE_NAME
+
+
+def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
+    gid = ''
+    title = ''
+    values: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        key, sep, inline = a.partition('=')
+        if key in DECIDE_FLAGS or key == '--title':
+            if sep:
+                val, i = inline, i + 1
+            elif i + 1 < len(args):
+                val, i = args[i + 1], i + 2
+            else:
+                raise Usage(f'{key} needs a value')
+            if key == '--title':
+                title = val
+            else:
+                values[DECIDE_FLAGS[key]] = val
+            continue
+        if a.startswith('-'):
+            raise Usage(f'unknown flag {a!r}')
+        if gid:
+            raise Usage(f'unexpected arg {a!r}')
+        gid, i = a, i + 1
+    if not gid:
+        raise Usage(USAGE)
+    for flag, name in DECIDE_FLAGS.items():
+        if values.get(name):
+            continue
+        why = (' — a decision with no rejected alternative is a description, '
+               'not a decision') if flag == '--over' else ''
+        raise Usage(f'{flag} is required{why}')
+    for name, val in values.items():
+        if '\n' in val or '\r' in val:
+            raise Refused(f'**{name}:** is one line — a decision field that '
+                          f'needs a paragraph is two decisions')
+
+    log = _decision_log(cfg, gid)
+    try:
+        text = model.read_raw(log)
+    except (OSError, UnicodeDecodeError) as err:
+        raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
+    entries = model.decision_entries_in(text)
+    eid = model.next_decision_id(entries)
+    when = datetime.now(timezone.utc).date().isoformat()
+    # The title defaults to the choice, which is right most of the time and
+    # wrong loudly the rest: a `--chose` too long to be a title is refused with
+    # the flag that fixes it, never silently truncated into a header.
+    if not title:
+        title = values['Chose']
+        if len(title) > model.DECISION_TITLE_MAX:
+            raise Refused(
+                f'--chose is {len(title)} chars, over the header\'s '
+                f'{model.DECISION_TITLE_MAX}-char title cap — pass --title '
+                f'with a short one (nothing was written)')
+    body, problems = model.append_decision(text, eid, when, title, values)
+    if problems:
+        raise Refused(f'{cfg.rel(log)} left untouched — the entry would not '
+                      f'conform: ' + '; '.join(problems))
+    try:
+        model.write_raw(log, body)
+    except OSError as err:
+        raise Usage(f'could not append to {cfg.rel(log)} ({err})') from err
+    _ok(f'{cfg.rel(log)}: {eid} — {when} — {title}')
+    return 0
 
 
 # --- prune --------------------------------------------------------------------
@@ -986,7 +1106,7 @@ def main(argv: list[str]) -> int:
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
         'init': cmd_init, 'set': cmd_set, 'get': cmd_get, 'claim': cmd_claim,
         'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
-        'vocabulary': cmd_vocabulary,
+        'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
     }
     fn = table.get(cmd)
     if fn is None:
