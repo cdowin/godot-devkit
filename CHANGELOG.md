@@ -24,6 +24,7 @@
 - **[uid] exclude_prefixes scopes both uid checks** — `[uid] exclude_prefixes` now scopes the sidecar-tracking check too, not just the ref-drift one. (src/godot_devkit/godot/checks/uid.py:151)
 - **an empty census says what it was out of** — A `uid`/`tres`/`props` run that scans nothing now reports "0 of N tracked", so an empty repo and an over-broad exclude stop reading identically. (src/godot_devkit/godot/checks/tres.py:54)
 - **the toolkit runs its own gates on itself** — godot-devkit carries its own PM tree at `pm/roadmap/`, with every rule it ships enabled, and its own CHANGELOG rendered from it. (devkit.toml:1)
+
 ---
 
 ## Below this line: frozen, not rendered
