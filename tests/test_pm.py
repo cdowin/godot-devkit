@@ -2735,7 +2735,7 @@ class Decide(unittest.TestCase):
             self.assertIn('## D1 — ', log.read_text(encoding='utf-8'))
             self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
             self.assertIn('## D2 — ', log.read_text(encoding='utf-8'))
-            self.assertEqual(len(model.decision_entries_in(model.read_raw(log))), 2)
+            self.assertEqual(len(model.log_entries_in(model.read_raw(log))), 2)
 
     def test_it_keeps_the_logs_own_id_prefix(self):
         # A tree that numbers `M27` keeps numbering `M`. The prefix is the
@@ -2806,7 +2806,7 @@ class Decide(unittest.TestCase):
         with tree(feature_status='building', story_statuses=('todo',)) as root:
             self._scaffolded(root)
             args = list(self.ARGS)
-            args[5] = 'x' * (model.DECISION_VALUE_MAX + 1)
+            args[5] = 'x' * (model.VALUE_MAX + 1)
             code, out = run_cli(root, 'decide', '0.1', *args)
             self.assertEqual(code, 1, out)
             self.assertIn('over the', out)
@@ -2815,7 +2815,7 @@ class Decide(unittest.TestCase):
         with tree(feature_status='building', story_statuses=('todo',)) as root:
             self._scaffolded(root)
             args = list(self.ARGS)
-            args[1] = 'x' * (model.DECISION_TITLE_MAX + 1)
+            args[1] = 'x' * (model.TITLE_MAX + 1)
             code, out = run_cli(root, 'decide', '0.1', *args)
             self.assertEqual(code, 1, out)
             self.assertIn('--title', out)
@@ -2848,7 +2848,530 @@ class Decide(unittest.TestCase):
             raw = model.read_raw(log)
             self.assertNotIn('\r\r', raw)
             self.assertEqual(raw.count('\n'), raw.count('\r\n'))
-            self.assertEqual(len(model.decision_entries_in(model.read_raw(log))), 1)
+            self.assertEqual(len(model.log_entries_in(model.read_raw(log))), 1)
+
+
+def run_cli_split(root: Path, *argv: str) -> tuple[int, str, str]:
+    """(exit, stdout, stderr) — the render puts the DOCUMENT on stdout and every
+    count, skip and defect on stderr, so a consumer redirecting one cannot
+    swallow the other. Asserting that needs the two kept apart."""
+    from godot_devkit.core.project import load_config, repo_root
+    repo_root.cache_clear()
+    load_config.cache_clear()
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            code = cli.main(list(argv))
+        except SystemExit as exc:  # pragma: no cover - defensive
+            code = int(exc.code or 0)
+    return code, out.getvalue(), err.getvalue()
+
+
+class Changelog(unittest.TestCase):
+    """`pm changelog` — the writer, and D15/D16 that hold what it writes.
+
+    The same machinery as `pm decide`/D12 over a second log, which is the
+    property under test as much as any single behaviour: one parser, one
+    validator, one ordinal allocator, one grandfather ledger shape. A second
+    implementation of those would be free to disagree with the first.
+    """
+
+    ARGS = ('--what', 'The hub remembers where you parked.',
+            '--evidence', '64e89ad5b')
+    MDIR = 'pm/roadmap/0.1-demo'
+
+    def _scaffolded(self, root: Path) -> None:
+        self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+        self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
+
+    def _d15(self, root: Path, extra: str = '') -> None:
+        (root / 'devkit.toml').write_text(
+            f'[pm]\nchecks = ["D15"]\n{extra}', encoding='utf-8')
+
+    # --- the slot ---------------------------------------------------------
+    def test_the_scaffolder_mints_a_changelog_on_a_milestone_only(self):
+        # A release is a MILESTONE. A feature contributes to its milestone's
+        # log through the entry's Evidence pointer, so a feature carrying one
+        # is an extra slot — which D13 reports.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            mlog = root / self.MDIR / 'changelog.md'
+            self.assertTrue(mlog.is_file())
+            self.assertEqual(model.header_of(mlog),
+                             model.SLOT_HEADER['changelog.md'])
+            self.assertFalse(
+                (root / self.MDIR / 'features/alpha/changelog.md').exists())
+            self.assertNotIn('changelog.md', model.FEATURE_FILE_SLOTS)
+
+    def test_the_changelog_is_durable_and_survives_a_done_grain(self):
+        # review.md is the TRANSIENT half and D13 stops requiring it once the
+        # grain closes. The changelog must NOT follow it out: a done milestone
+        # is exactly when its notes matter most.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._scaffolded(root)
+            self.assertTrue((root / self.MDIR / 'changelog.md').is_file())
+            (root / self.MDIR / 'changelog.md').unlink()
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D13"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('is missing changelog.md', out)
+
+    # --- the writer -------------------------------------------------------
+    def test_it_allocates_C1_then_C2_and_stamps_todays_date(self):
+        from datetime import datetime, timezone
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            today = datetime.now(timezone.utc).date().isoformat()
+            self.assertIn(f'## C1 — {today} — ', log.read_text(encoding='utf-8'))
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            self.assertIn('## C2 — ', log.read_text(encoding='utf-8'))
+
+    def test_what_it_writes_passes_the_D15_gate(self):
+        # The load-bearing round trip, and the reason `append_entry` re-parses:
+        # writer and gate share one schema, so an entry this mints can never be
+        # one the gate reports.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            self._d15(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_missing_evidence_is_refused_and_nothing_is_written(self):
+        # A changelog entry with nothing behind it is a rumour, and requiring
+        # the reference at WRITE time is what stops the entry existing at all.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            before = log.read_text(encoding='utf-8')
+            code, out = run_cli(root, 'changelog', '0.1',
+                                '--what', 'Something shipped.')
+            self.assertEqual(code, 2, out)
+            self.assertIn('--evidence is required', out)
+            self.assertIn('is a rumour', out)
+            self.assertEqual(log.read_text(encoding='utf-8'), before)
+
+    def test_prose_evidence_is_refused_and_the_log_is_byte_identical(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            before = log.read_bytes()
+            code, out = run_cli(root, 'changelog', '0.1', '--what', 'It shipped.',
+                                '--evidence', 'we discussed it and agreed')
+            self.assertEqual(code, 1, out)
+            self.assertIn('is prose, not a reference', out)
+            self.assertEqual(log.read_bytes(), before)
+
+    def test_a_what_too_long_to_be_a_title_asks_for_title_not_truncation(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            long = 'x' * (model.TITLE_MAX + 1)
+            code, out = run_cli(root, 'changelog', '0.1', '--what', long,
+                                '--evidence', '64e89ad5b')
+            self.assertEqual(code, 1, out)
+            self.assertIn('--title', out)
+            self.assertEqual(
+                run_cli(root, 'changelog', '0.1', '--what', long,
+                        '--evidence', '64e89ad5b', '--title', 'a short one')[0], 0)
+            self.assertIn('## C1', (root / self.MDIR / 'changelog.md').read_text(
+                encoding='utf-8'))
+
+    def test_an_overlong_what_is_refused(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            before = log.read_bytes()
+            code, out = run_cli(root, 'changelog', '0.1',
+                                '--what', 'x' * (model.VALUE_MAX + 1),
+                                '--evidence', '64e89ad5b', '--title', 'short')
+            self.assertEqual(code, 1, out)
+            self.assertIn('over the', out)
+            self.assertEqual(log.read_bytes(), before)
+
+    def test_a_feature_id_is_refused_the_changelog_is_a_milestone_log(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            code, out = run_cli(root, 'changelog', '0.1/alpha', *self.ARGS)
+            self.assertEqual(code, 1, out)
+            self.assertIn('MILESTONE log', out)
+
+    def test_a_milestone_with_no_changelog_points_at_the_scaffolder(self):
+        with tree(story_statuses=('todo',)) as root:
+            code, out = run_cli(root, 'changelog', '0.1', *self.ARGS)
+            self.assertEqual(code, 1, out)
+            self.assertIn('new milestone 0.1', out)
+
+    def test_a_crlf_changelog_stays_crlf(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            model.write_raw(log, model.read_raw(log).replace('\n', '\r\n'))
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            raw = model.read_raw(log)
+            self.assertNotIn('\r\r', raw)
+            self.assertEqual(raw.count('\n'), raw.count('\r\n'))
+            self.assertEqual(len(model.log_entries_in(raw)), 1)
+
+    # --- D15 --------------------------------------------------------------
+    ENTRY = ('## C3 — 2026-08-28 — the hub remembers where you parked\n'
+             '**What:** Your loadout is where you left it when you come back.\n'
+             '**Evidence:** `64e89ad5b`\n')
+
+    @staticmethod
+    def _log(root: Path, body: str) -> Path:
+        path = root / 'pm' / 'roadmap' / '0.1-demo' / 'changelog.md'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('# Demo — changelog\n\nAppend-only.\n\n' + body,
+                        encoding='utf-8')
+        return path
+
+    def test_d15_a_conforming_entry_passes_and_a_missing_what_does_not(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._d15(root)
+            log = self._log(root, self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            log.write_text(log.read_text(encoding='utf-8').replace(
+                '**What:** Your loadout is where you left it when you come back.\n',
+                ''), encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('missing **What:**', out)
+            self.assertIn('C3', out)
+
+    def test_d15_evidence_must_be_a_reference_not_prose(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._d15(root)
+            self._log(root, self.ENTRY.replace('**Evidence:** `64e89ad5b`',
+                                               '**Evidence:** trust me'))
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('is prose, not a reference', out)
+
+    def test_d15_prints_its_census_and_carries_it_into_the_summary(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._d15(root)
+            self._log(root, self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('[check:pm] D15: 1 changelog(s), 1 entry/ies', out)
+            self.assertIn('1 changelog(s), 1 entry/ies', out.rsplit('PASS', 1)[1])
+
+    def test_d15_reads_the_same_fences_and_comments_as_d12(self):
+        # ONE masking implementation (core.markdown.fenced_flags). An
+        # unterminated marker masks NOTHING and is reported, or the gate prints
+        # PASS over the entries it ate — and it must do that for both logs.
+        with tree(story_statuses=('todo',)) as root:
+            self._d15(root)
+            self._log(root, '```\n' + self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('never terminated', out)
+            self.assertIn('D15 cannot say', out)
+
+            self._log(root, '<!--\n' + self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('never closed', out)
+
+            # A CLOSED fence is a sample, and a sample is not an entry.
+            self._log(root, '```\n' + self.ENTRY + '```\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 changelog(s), 0 entry/ies', out)
+
+    def test_d15_the_ledger_caps_legacy_entries_and_may_only_shrink(self):
+        rel = 'pm/roadmap/0.1-demo/changelog.md'
+        legacy = '## C1 — a legacy note conforming to none of this\n\nProse.\n\n'
+        with tree(story_statuses=('todo',)) as root:
+            self._d15(root)
+            log = self._log(root, legacy)
+            self.assertEqual(run_gate(root)[0], 1)
+
+            self._d15(root, f'changelog_grandfather = ["{rel}"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('D15 grandfather: 1 changelog(s) exempt', out)
+            self.assertIn('may only shrink', out)
+
+            # The CAPPED form: legacy stays, a NEW entry still has to conform.
+            self._d15(root, f'changelog_grandfather = ["{rel}:1"]\n')
+            self.assertEqual(run_gate(root)[0], 0)
+            log.write_text(log.read_text(encoding='utf-8') + '\n' + self.ENTRY,
+                           encoding='utf-8')
+            self.assertEqual(run_gate(root)[0], 0)
+            log.write_text(log.read_text(encoding='utf-8').replace(
+                '**Evidence:** `64e89ad5b`\n', ''), encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('missing **Evidence:**', out)
+
+            # Shrink-only: a cap reaching past the end of the log is a claim
+            # the file no longer supports.
+            self._d15(root, f'changelog_grandfather = ["{rel}:9"]\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('lower the cap', out)
+
+    def test_d15_scanning_no_changelog_is_loud(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._d15(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('scanned nothing', out)
+
+    def test_d15_is_silent_when_not_enabled(self):
+        # Both halves, or the test passes on a tree where D15 does not exist at
+        # all: the SAME log is silent off and reported on.
+        with tree(story_statuses=('todo',)) as root:
+            self._log(root, '## C1 — nothing here conforms\n\nProse.\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('D15', out)
+
+            self._d15(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('(D15)', out)
+
+    def test_d15_a_malformed_ledger_spec_is_a_config_error(self):
+        with tree(story_statuses=('todo',)) as root:
+            # Naming a decisions.md in the CHANGELOG ledger: the two ledgers
+            # exempt different logs, and crossing them would silently exempt
+            # nothing at all.
+            self._d15(root, 'changelog_grandfather = '
+                            '["pm/roadmap/0.1-demo/decisions.md"]\n')
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            with self.assertRaises(model.ConfigError) as caught:
+                model.load()
+            self.assertIn('changelog_grandfather', str(caught.exception))
+
+    # --- D16 --------------------------------------------------------------
+    def test_d16_a_done_milestone_ships_with_notes_or_it_fails(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._scaffolded(root)
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D16"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('no entries yet', out)
+            self.assertIn('1 shipped milestone(s)', out)
+
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_d16_says_so_when_nothing_has_shipped(self):
+        # This rule's own success state. A tree where nothing has closed is not
+        # a tree shipping without notes, and printing PASS over zero would make
+        # the two indistinguishable.
+        with tree(milestone_status='building', story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D16"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('nothing has shipped yet', out)
+
+    def test_d16_a_log_of_malformed_blocks_is_not_release_notes(self):
+        # A conforming EMPTY log satisfies D15 forever, and so does a log whose
+        # every entry D15 already reports. D16 is the one that says a reader
+        # still cannot tell what shipped.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._scaffolded(root)
+            self._log(root, '## C1 — a note conforming to none of this\n\nx: y\n')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D16"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('every one of its 1 changelog entries is malformed', out)
+
+    def test_d16_honours_the_same_ledger_d15_does(self):
+        # Two rules on one file may not contradict each other: an entry D15 has
+        # been told to accept cannot be an entry D16 rejects, or a consumer
+        # turning both on is permanently red with no way forward.
+        rel = 'pm/roadmap/0.1-demo/changelog.md'
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            self._scaffolded(root)
+            self._log(root, '## C1 — a legacy note\n\nProse.\n')
+            (root / 'devkit.toml').write_text(
+                f'[pm]\nchecks = ["D15","D16"]\n'
+                f'changelog_grandfather = ["{rel}"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    # --- the render -------------------------------------------------------
+    def _released(self, root: Path, *versions: str) -> None:
+        for ver in versions:
+            self.assertEqual(
+                run_cli(root, 'new', 'milestone', ver, f'v{ver}')[0], 0)
+            self.assertEqual(
+                run_cli(root, 'changelog', ver, '--what', f'Shipped {ver}.',
+                        '--evidence', '64e89ad5b')[0], 0)
+
+    def test_the_render_orders_milestones_by_version_not_by_string(self):
+        # THE proof case. Sorted as STRINGS, descending, these read
+        # 0.90.3, 0.9, 0.10, 0.1 — 0.9 published as newer than 0.10, which is
+        # wrong in the one place a reader trusts a changelog most.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(
+                run_cli(root, 'changelog', '0.1', '--what', 'Shipped 0.1.',
+                        '--evidence', '64e89ad5b')[0], 0)
+            self._released(root, '0.9', '0.10', '0.90.3')
+            code, out, _ = run_cli_split(root, 'changelog', '--render')
+            self.assertEqual(code, 0)
+            heads = [ln.split()[1] for ln in out.split('\n') if ln.startswith('## ')]
+            self.assertEqual(heads, ['0.90.3', '0.10', '0.9', '0.1'])
+            self.assertNotEqual(heads, sorted(heads, reverse=True))
+
+    def test_the_render_is_byte_identical_across_runs(self):
+        # The whole point: "the changelog for milestone xyz" must be the same
+        # answer every time, never whatever a directory walk happened to yield.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self._released(root, '0.9', '0.10')
+            first = run_cli_split(root, 'changelog', '--render')[1]
+            for _ in range(3):
+                self.assertEqual(run_cli_split(root, 'changelog', '--render')[1],
+                                 first)
+            self.assertIn('## 0.10', first)
+
+    def test_the_render_puts_the_document_on_stdout_and_the_census_on_stderr(self):
+        # It is a RENDER the consumer redirects, so a count printed into the
+        # document would land in their published notes.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self._released(root, '0.9')
+            code, out, err = run_cli_split(root, 'changelog', '--render')
+            self.assertEqual(code, 0)
+            self.assertTrue(out.startswith('# Changelog\n'))
+            self.assertNotIn('[pm]', out)
+            self.assertIn('rendered 1 entry/ies', err)
+            # 0.1-demo has a changelog with nothing in it — named, not hidden.
+            self.assertIn('nothing to render for 0.1 (no entries yet)', err)
+
+    def test_the_render_narrows_to_one_milestone(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self._released(root, '0.9', '0.10')
+            code, out, _ = run_cli_split(root, 'changelog', '--render',
+                                         '--milestone', '0.10')
+            self.assertEqual(code, 0)
+            self.assertIn('## 0.10', out)
+            self.assertNotIn('## 0.9', out)
+            self.assertEqual(run_cli(root, 'changelog', '--render',
+                                     '--milestone', 'nope')[0], 2)
+
+    def test_the_render_prints_a_half_written_entry_and_says_so(self):
+        # Dropping it would make the render disagree with D15 about what the
+        # log holds — the render would look clean over a log the gate fails.
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self._log(root, '## C1 — 2026-08-28 — a note with no evidence\n'
+                            '**What:** Something shipped.\n')
+            code, out, err = run_cli_split(root, 'changelog', '--render')
+            self.assertEqual(code, 0)
+            self.assertIn('- **a note with no evidence** — Something shipped.\n',
+                          out)
+            self.assertIn('missing **What:** or **Evidence:**', err)
+
+    def test_a_titled_entry_renders_both_and_an_untitled_one_renders_once(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'changelog', '0.1', *self.ARGS)[0], 0)
+            self.assertEqual(
+                run_cli(root, 'changelog', '0.1', '--what', 'Charms stack again.',
+                        '--evidence', 'abcdef1', '--title', 'charms stack')[0], 0)
+            out = run_cli_split(root, 'changelog', '--render')[1]
+            self.assertIn('- The hub remembers where you parked. (64e89ad5b)', out)
+            self.assertIn('- **charms stack** — Charms stack again. (abcdef1)', out)
+
+    def test_render_and_append_flags_do_not_mix(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'changelog.md'
+            before = log.read_bytes()
+            code, out = run_cli(root, 'changelog', '--render', *self.ARGS)
+            self.assertEqual(code, 2, out)
+            self.assertIn('--render READS the tree', out)
+            code, out = run_cli(root, 'changelog', '--milestone', '0.1',
+                                *self.ARGS)
+            self.assertEqual(code, 2, out)
+            self.assertIn('--milestone belongs to --render', out)
+            self.assertEqual(log.read_bytes(), before)
+
+
+class Decisions(unittest.TestCase):
+    """`pm decisions` — the READ half of the contract `pm decide` writes.
+
+    Without it the only way to answer "what did we decide in milestone xyz" is
+    a `find` piped to a `grep`: a second parser with none of the fence and
+    comment handling, which disagrees with the gate on exactly the logs where
+    it matters.
+    """
+
+    ARGS = ('--chose', 'move the sweep verb to combat_behavior.gd',
+            '--over', 'leaving it on entity_behavior.gd',
+            '--because', 'all three consumers extend the combat layer',
+            '--evidence', '64e89ad5b')
+
+    def _tree(self, root: Path) -> None:
+        self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+        self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
+        self.assertEqual(run_cli(root, 'decide', '0.1', *self.ARGS)[0], 0)
+        self.assertEqual(run_cli(root, 'decide', '0.1/alpha', *self.ARGS)[0], 0)
+
+    def test_a_milestone_prints_its_own_log_and_its_features(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._tree(root)
+            code, out, err = run_cli_split(root, 'decisions', '0.1')
+            self.assertEqual(code, 0, err)
+            self.assertIn('## 0.1 — pm/roadmap/0.1-demo/decisions.md', out)
+            self.assertIn('## 0.1/alpha — '
+                          'pm/roadmap/0.1-demo/features/alpha/decisions.md', out)
+            self.assertIn('- **Chose:** move the sweep verb to '
+                          'combat_behavior.gd', out)
+            self.assertIn('- **Over:** leaving it on entity_behavior.gd', out)
+            self.assertIn('2 entry/ies across 2 log(s)', err)
+            self.assertNotIn('[pm]', out)
+
+    def test_a_feature_prints_only_its_own(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._tree(root)
+            code, out, err = run_cli_split(root, 'decisions', '0.1/alpha')
+            self.assertEqual(code, 0, err)
+            self.assertIn('## 0.1/alpha — ', out)
+            self.assertNotIn('## 0.1 — ', out)
+            self.assertIn('1 entry/ies across 1 log(s)', err)
+
+    def test_it_is_deterministic(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._tree(root)
+            first = run_cli_split(root, 'decisions', '0.1')[1]
+            # Non-empty FIRST: two identical empty answers are not determinism,
+            # they are a command that printed nothing twice.
+            self.assertIn('- **Because:** all three consumers extend the '
+                          'combat layer', first)
+            self.assertEqual(first.count('### D1 — '), 2)
+            for _ in range(3):
+                self.assertEqual(run_cli_split(root, 'decisions', '0.1')[1], first)
+
+    def test_a_story_has_no_decision_log(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._tree(root)
+            code, out = run_cli(root, 'decisions', '0.1/alpha/s0')
+            self.assertEqual(code, 1, out)
+            self.assertIn('no decision log', out)
 
 
 class MarkdownFences(unittest.TestCase):
@@ -2858,7 +3381,7 @@ class MarkdownFences(unittest.TestCase):
     instruction. An UNTERMINATED one illustrates nothing and hides the rest of
     the file, and a parity toggle let it do that in silence: two claims that
     FAIL normally printed PASS the moment one stray ``` was prepended above
-    them. Same defect `decision_fence_defect` reports for a decision log,
+    them. Same defect `log_fence_defect` reports for a decision log,
     reached the other way round, so it gets the same answer — report it.
     """
 
@@ -2962,10 +3485,10 @@ class MarkdownFences(unittest.TestCase):
     def test_the_decision_log_scanner_reads_the_same_fences(self):
         # One scanner, or the two drift into disagreeing about which lines a
         # document even has.
-        self.assertEqual(model.decision_fence_defect('```\n## D1 — x\n'),
-                         model.decision_fence_defect('```\n## D1 — x\n'))
-        self.assertIn('line 1', model.decision_fence_defect('```\n## D1 — x\n'))
-        self.assertEqual(model.decision_fence_defect('```\nx\n```\n'), '')
+        self.assertEqual(model.log_fence_defect('```\n## D1 — x\n', 'D12'),
+                         model.log_fence_defect('```\n## D1 — x\n', 'D12'))
+        self.assertIn('line 1', model.log_fence_defect('```\n## D1 — x\n', 'D12'))
+        self.assertEqual(model.log_fence_defect('```\nx\n```\n', 'D12'), '')
 
 
 if __name__ == '__main__':

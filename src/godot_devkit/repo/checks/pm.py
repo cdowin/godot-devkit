@@ -60,9 +60,22 @@ DRIFT RULES (each FAILs, naming the offending path):
       status outside `[pm] bug_states`, which D4 does not cover and which would
       otherwise read as "closed" and pass in silence.
 
-  D11/D13/D14 are OFF by default like D8-D12 — a tree predating the canonical
-  slots is missing most of them, and a rule that turns a consumer red on
-  upgrade day is unshippable. Scaffold first, then hold the line.
+  D15 changelog SCHEMA — the same machinery as D12 over `changelog.md`, whose
+      entries carry `**What:**` (one sentence a player would recognise) and
+      `**Evidence:**` (the reference proving it shipped). Deliberately the
+      smaller schema: the reasoning behind a change is a DECISION and lives in
+      decisions.md, so a changelog carrying it is a commit log with a nicer
+      name. Legacy logs migrate through `[pm] changelog_grandfather`, capped
+      per-entry exactly as D12's ledger is.
+
+  D16 release NOTES — a `done` milestone must have a non-empty changelog.md
+      holding at least one entry D15 does not report. D15 asks whether what is
+      written conforms; a conforming EMPTY log satisfies it forever, and this
+      is what stops a release shipping with nothing a player can read.
+
+  D11/D13/D14/D15/D16 are OFF by default like D8-D12 — a tree predating the
+  canonical slots is missing most of them, and a rule that turns a consumer red
+  on upgrade day is unshippable. Scaffold first, then hold the line.
 
   D12 decision-record SCHEMA — a decision log rots into description. Every
       `## <ID> — <ISO date> — <title>` entry in a decisions.md carries exactly
@@ -155,9 +168,15 @@ def _bug_lifetime(cfg, report) -> int:
     return scanned
 
 
-def _decision_schema(cfg, report) -> tuple[int, int]:
-    """D12 — the decision-record schema, and the ledger that lets it ship.
-    Returns (logs scanned, entries scanned).
+def _log_schema(cfg, report, schema) -> tuple[int, int]:
+    """D12 / D15 — one append-only log's entry schema, and the ledger that lets
+    it ship. Returns (logs scanned, entries scanned).
+
+    ONE implementation over both rules. A decisions.md and a changelog.md differ
+    in their field list and their file name — data the schema carries — and in
+    nothing else this function does, so a second copy of it would be a second
+    chance to get the census, the case-variant handling or the shrink-only
+    ledger subtly different between two rules a reader believes are the same.
 
     The census is not decoration. Without it "scanned 58 logs / 294 entries",
     "scanned 1 log" and "scanned 2 logs / 0 entries" print identically, and that
@@ -165,16 +184,17 @@ def _decision_schema(cfg, report) -> tuple[int, int]:
     silence. A rule's population belongs on stdout beside its verdict.
 
     The ledger is the whole migration story: 57 logs in one consumer conform to
-    none of this, and a rule that turns a consumer red on upgrade day is
-    unshippable. So an exempted log is named in `[pm] decision_grandfather`, the
-    gate PRINTS how many are exempt on every run, and the ledger can only
-    shrink — an exemption that suppresses nothing, or a cap reaching past the
-    entries it claims to cover, is itself reported.
+    none of D12, and a rule that turns a consumer red on upgrade day is
+    unshippable. So an exempted log is named in the schema's own `[pm]` ledger
+    key, the gate PRINTS how many are exempt on every run, and the ledger can
+    only shrink — an exemption that suppresses nothing, or a cap reaching past
+    the entries it claims to cover, is itself reported.
     """
-    ledger = dict(cfg.decision_grandfather)
-    logs, variants = model.decision_files(cfg)
+    rule, name = schema.rule, schema.plural
+    ledger = model.ledger_for(cfg, schema)
+    logs, variants = model.log_files(cfg, schema)
     whole = sum(1 for cap in ledger.values() if cap is None)
-    print(f'[check:pm] D12 grandfather: {len(ledger)} decision log(s) exempt '
+    print(f'[check:pm] {rule} grandfather: {len(ledger)} {name}(s) exempt '
           f'({whole} whole, {len(ledger) - whole} capped) — this ledger may '
           f'only shrink')
 
@@ -182,18 +202,18 @@ def _decision_schema(cfg, report) -> tuple[int, int]:
     # the two platforms would then emit opposite findings about the same file.
     for path in variants:
         report(f'{cfg.rel(path)} is a case variant of '
-               f'{model.DECISION_FILE_NAME} — D12 reads EXACT names, so this '
-               f'log is invisible to it; rename it via `pm new` (D12)')
+               f'{schema.file_name} — {rule} reads EXACT names, so this '
+               f'log is invisible to it; rename it via `pm new` ({rule})')
 
     # Rule 4: a rule that scanned nothing must say so rather than print PASS.
     if not logs:
-        report(f'D12 is enabled but no {model.DECISION_FILE_NAME} exists under '
+        report(f'{rule} is enabled but no {schema.file_name} exists under '
                f'{cfg.roadmap_dir}/ — the rule scanned nothing')
 
     n_entries = 0
     seen: set[str] = set()
     for log in logs:
-        key = model.decision_relkey(cfg, log)
+        key = model.log_relkey(cfg, log)
         cap = ledger.get(key, 0)  # 0 == not listed: nothing is exempt
         if key in ledger:
             seen.add(key)
@@ -201,47 +221,68 @@ def _decision_schema(cfg, report) -> tuple[int, int]:
             text = model.read_raw(log)
         except (OSError, UnicodeDecodeError) as err:
             # Reported, never counted as scanned-with-zero-entries: an
-            # unreadable log would otherwise be exempt from D12 for free.
-            report(f'{key} cannot be read ({err}) — a log D12 cannot open is '
-                   f'not a log D12 has checked (D12)')
+            # unreadable log would otherwise be exempt from the rule for free.
+            report(f'{key} cannot be read ({err}) — a log {rule} cannot open is '
+                   f'not a log {rule} has checked ({rule})')
             continue
         # Reported whatever the ledger says: an unclosed comment and an
         # unterminated fence are defects of the FILE, not of an entry — they are
         # the reason the entry count below may be a lie. Both, never one: the
         # fence mask was added to stop a quoted `<!--` eating the log, and an
         # unterminated fence then ate it the other way round in silence.
-        for defect in (model.decision_comment_defect(text),
-                       model.decision_fence_defect(text)):
+        for defect in (model.log_comment_defect(text, rule),
+                       model.log_fence_defect(text, rule)):
             if defect:
-                report(f'{key}: {defect} (D12)')
-        entries = model.decision_entries_in(text)
+                report(f'{key}: {defect} ({rule})')
+        entries = model.log_entries_in(text)
         n_entries += len(entries)
         n_suppressed = 0
-        for ordinal, eid, why in model.decision_violations_in(entries):
+        for ordinal, eid, why in model.entry_violations_in(entries, schema):
             if cap is None or ordinal < cap:
                 n_suppressed += 1
                 continue
-            report(f'{key}: {eid} — {why} (D12)')
+            report(f'{key}: {eid} — {why} ({rule})')
         if key not in ledger:
             continue
         # Shrink-only, both directions: an exemption covering no violation has
         # done its job and must go, and a cap reaching past the end of the log
         # is a claim the file no longer supports.
         if not n_suppressed:
-            report(f'{key} is in decision_grandfather but every entry conforms '
-                   f'— drop it from the ledger (D12)')
+            report(f'{key} is in {schema.ledger_key} but every entry conforms '
+                   f'— drop it from the ledger ({rule})')
         if cap is not None and cap > len(entries):
             report(f'{key} is grandfathered to {cap} entries but the log has '
-                   f'{len(entries)} — lower the cap (D12)')
+                   f'{len(entries)} — lower the cap ({rule})')
 
     for key in ledger:
         if key not in seen:
-            report(f'{key} is in decision_grandfather but no such log exists '
-                   f'— drop it from the ledger (D12)')
+            report(f'{key} is in {schema.ledger_key} but no such log exists '
+                   f'— drop it from the ledger ({rule})')
 
-    print(f'[check:pm] D12: {len(logs)} decision log(s), {n_entries} entry/ies '
+    print(f'[check:pm] {rule}: {len(logs)} {name}(s), {n_entries} entry/ies '
           f'held to the schema')
     return len(logs), n_entries
+
+
+def _release_notes(cfg, report) -> int:
+    """D16 — a `done` milestone with no release notes. Returns done milestones.
+
+    D15 asks whether what is written conforms; this asks whether anything is
+    written at all, and a perfectly conforming EMPTY log satisfies D15 forever.
+    A milestone closing with nothing a player could read is the release that
+    ships without notes, and there is no later moment when somebody reconstructs
+    them.
+    """
+    findings, scanned = model.milestones_without_notes(cfg)
+    if not scanned:
+        # This rule's own success state, like D11's and D14's: a tree where
+        # nothing has shipped yet is not a tree shipping without notes.
+        print('[check:pm] D16: no `done` milestone in the tree — nothing has '
+              'shipped yet')
+        return 0
+    for path, why in findings:
+        report(f'{cfg.rel(path)}: {why} (D16)')
+    return scanned
 
 
 def run() -> int:
@@ -401,10 +442,16 @@ def run() -> int:
     n_logs = 0
     n_entries = 0
     if 'D12' in enabled:
-        n_logs, n_entries = _decision_schema(cfg, report)
+        n_logs, n_entries = _log_schema(cfg, report, model.DECISION_SCHEMA)
+
+    n_clogs = 0
+    n_centries = 0
+    if 'D15' in enabled:
+        n_clogs, n_centries = _log_schema(cfg, report, model.CHANGELOG_SCHEMA)
 
     n_grain_dirs = _structure(cfg, report) if 'D13' in enabled else 0
     n_bugs = _bug_lifetime(cfg, report) if 'D14' in enabled else 0
+    n_shipped = _release_notes(cfg, report) if 'D16' in enabled else 0
 
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
@@ -413,10 +460,14 @@ def run() -> int:
         census += f', {n_done_grains} done grain(s)'
     if 'D12' in enabled:
         census += f', {n_logs} decision log(s), {n_entries} entry/ies'
+    if 'D15' in enabled:
+        census += f', {n_clogs} changelog(s), {n_centries} entry/ies'
     if 'D13' in enabled:
         census += f', {n_grain_dirs} grain dir(s)'
     if 'D14' in enabled:
         census += f', {n_bugs} bug(s)'
+    if 'D16' in enabled:
+        census += f', {n_shipped} shipped milestone(s)'
     if v_census:
         census += f', {v_census["refs"]} ref(s)'
         if v_census['unverifiable']:

@@ -1,5 +1,71 @@
 # Changelog
 
+## Unreleased
+
+**A milestone now has release notes, and they are a log the tooling writes.** `changelog.md` joins
+`milestone.md` / `handoff.md` / `decisions.md` / `review.md` as a canonical **milestone** file slot —
+not a feature one, because a release is a milestone and a feature contributes to it through the
+entry's `Evidence:` pointer. It is **durable**, and unlike the transient `review.md` it is *not*
+skipped on a `done` grain: a closed milestone is exactly when its notes matter most.
+
+**The entry is deliberately small.** Two required fields, and no vocabulary to learn:
+
+```
+## C1 — 2026-08-29 — the hub remembers where you parked
+**What:** Your loadout is where you left it when you come back to the hub.
+**Evidence:** `64e89ad5b`
+```
+
+`**What:**` is one sentence a player would recognise; `**Evidence:**` is a reference — a commit hash,
+a `path[:line]` or a number — because a changelog entry with nothing behind it is a rumour. The
+*reasoning* behind a change is a decision and stays in `decisions.md`; a changelog carrying it is a
+commit log with a nicer name.
+
+**`pm changelog <milestone-id> --what … --evidence … [--title …]`** appends one. It is the same
+machinery as `pm decide`, not a second copy of it: the same entry parser, the same fence and HTML-
+comment masking out of `core.markdown.fenced_flags`, the same ordinal allocator (an empty log starts
+at `C1`, a log already numbering `R7` keeps numbering `R`), and the same load-bearing property — the
+composed entry is **re-parsed through the gate's own predicates** before anything is written, so the
+writer refuses exactly what the gate reports and the two cannot drift. Every refusal leaves the log
+**byte-identical**, including a CRLF log's line endings. `--title` defaults to `--what`, and a
+`--what` too long to be a title is refused naming the flag that fixes it rather than silently
+truncated.
+
+**`pm changelog --render [--milestone <id>]`** writes the union of every milestone's log to
+**stdout**, newest release first — a render the consumer redirects, so every count, skip and
+half-written entry goes to stderr where redirecting the document cannot swallow it. Ordering is
+deterministic by construction: milestones by **declared version compared component-wise**, entries in
+the order their append-only log holds them. It compares through the same `version_key` `prune`'s
+lag-by-one already uses, and that comparison is the point of the feature — sorted as strings descending,
+`0.90.3, 0.9, 0.10, 0.1` publishes `0.9` as newer than `0.10`, wrong in the one place a reader trusts
+a changelog most.
+
+**`pm decisions <grain-id>`** is the read half of the contract `pm decide` writes: that grain's
+entries, parsed and deterministic, with a milestone printing its own log **and its features'**.
+Both reads exist so that answering "what shipped in / what did we decide in milestone xyz" is never a
+`find` piped to a `grep` — that is a second parser with none of the fence and comment handling, and
+it disagrees with the gate on exactly the logs where it matters.
+
+**Two new opt-in rules, both OFF by default.** **D15** holds every `changelog.md` entry to the schema,
+and is the *same function* as D12 over different data — same census, same case-variant reporting, same
+unterminated-fence and unclosed-comment defects, and a `changelog_grandfather` ledger with D12's
+per-entry `"<path>:N"` cap so a consumer's legacy text can stay put while every NEW entry must
+conform. Like D12's, that ledger may only **shrink**: an exemption suppressing nothing, a cap reaching
+past the end of its log, and a line naming no log each FAIL. **D16** fails a `done` milestone whose
+changelog is missing, empty, or holds only entries D15 already reports — D15 asks whether what is
+written conforms, and a conforming *empty* log satisfies it forever. D16 reads the same ledger D15
+does, so an entry D15 has been told to accept is never one D16 rejects.
+
+**Migration.** Adding a canonical slot means D13 reports every existing consumer milestone as missing
+`changelog.md` until it is re-scaffolded, and the fix is the idempotent `pm new milestone` — verified
+across a 22-milestone consumer tree: one pass creates exactly 22 `changelog.md` files and changes
+nothing else, and the passes after it are clean no-ops with every file byte-identical.
+
+**Internals.** The decision machinery is now schema-parameterised rather than duplicated: one
+`LogSchema` value describes each log's field list, ordinal prefix, file name and ledger key, and one
+implementation of the parser, the validator, the writer, the ledger parser and the gate serves both.
+The `decision_*` names generalised to `log_*` / `entry_*` accordingly.
+
 ## v0.13.0 — 2026-08-29
 
 **One uniform grain structure, all lowercase.** Every milestone and feature dir carries the same

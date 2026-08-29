@@ -34,8 +34,8 @@ def fenced_flags(lines: list[str]) -> tuple[list[bool], int]:
     drop the rest of the file and the gate would print PASS over the lines it
     ate: a checker cannot both skip a region and claim it scanned the file.
     It is returned to be REPORTED instead — the same resolution
-    `decision_fence_defect` reaches for a decision log, because it is the same
-    defect.
+    `log_fence_defect` reaches for a decisions.md or a changelog.md, because it
+    is the same defect.
     """
     fenced = [False] * len(lines)
     fence, opened = '', 0

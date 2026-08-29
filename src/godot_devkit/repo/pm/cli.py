@@ -53,6 +53,12 @@ USAGE = """usage: godot-devkit pm <command>
          --evidence <hash|path[:line]|number> [--title <short>]
                                           (append a schema-conforming decision; the
                                            tool stamps the date and the next ordinal)
+  decisions <grain-id>                    (print that grain's decision entries, parsed)
+  changelog <milestone-id> --what <sentence>
+            --evidence <hash|path[:line]|number> [--title <short>]
+                                          (append a release note to that milestone)
+  changelog --render [--milestone <id>]   (the union of every milestone's changelog,
+                                           newest release first, to stdout)
   prune                                   (delete cooled archives; stamp the prune log)"""
 
 
@@ -935,10 +941,11 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
 # alternative is a description — making it a flag you cannot omit enforces that
 # at WRITE time, where the author still remembers the alternative, instead of at
 # gate time weeks later. Every value is validated through D12's own predicates
-# (`model.append_decision` re-parses the composed entry), so a non-conforming
+# (`model.append_entry` re-parses the composed entry), so a non-conforming
 # entry is refused rather than written and then reported.
 DECIDE_FLAGS = {'--chose': 'Chose', '--over': 'Over',
-                '--because': 'Because', '--evidence': 'Evidence'}
+                '--because': 'Because', '--evidence': 'Evidence',
+                '--title': 'title'}
 
 
 def _decision_log(cfg: model.PmConfig, gid: str) -> Path:
@@ -961,63 +968,77 @@ def _decision_log(cfg: model.PmConfig, gid: str) -> Path:
     return gdir / model.DECISION_FILE_NAME
 
 
-def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
+def _parse_flags(args: list[str], valued: dict[str, str],
+                 bare: tuple[str, ...] = ()) -> tuple[str, dict[str, str], set[str]]:
+    """(the positional id, {key: value}, which bare flags were given).
+
+    `--flag value` and `--flag=value` both, in one loop, for every verb that
+    writes or reads a log entry. Splitting this per-verb is how two commands end
+    up disagreeing about whether `--evidence=x` is a value or an unknown flag.
+    """
     gid = ''
-    title = ''
-    values: dict[str, str] = {}
+    got: dict[str, str] = {}
+    seen: set[str] = set()
     i = 0
     while i < len(args):
         a = args[i]
         key, sep, inline = a.partition('=')
-        if key in DECIDE_FLAGS or key == '--title':
+        if key in valued:
             if sep:
                 val, i = inline, i + 1
             elif i + 1 < len(args):
                 val, i = args[i + 1], i + 2
             else:
                 raise Usage(f'{key} needs a value')
-            if key == '--title':
-                title = val
-            else:
-                values[DECIDE_FLAGS[key]] = val
+            got[valued[key]] = val
+            continue
+        if key in bare and not sep:
+            seen.add(key)
+            i += 1
             continue
         if a.startswith('-'):
             raise Usage(f'unknown flag {a!r}')
         if gid:
             raise Usage(f'unexpected arg {a!r}')
         gid, i = a, i + 1
-    if not gid:
-        raise Usage(USAGE)
-    for flag, name in DECIDE_FLAGS.items():
-        if values.get(name):
-            continue
-        why = (' — a decision with no rejected alternative is a description, '
-               'not a decision') if flag == '--over' else ''
-        raise Usage(f'{flag} is required{why}')
+    return gid, got, seen
+
+
+def _append_to_log(cfg: model.PmConfig, log: Path, schema: model.LogSchema,
+                   values: dict[str, str], title: str,
+                   title_flag: str, title_field: str) -> int:
+    """Stamp the date and the next ordinal onto one entry, and append it.
+
+    Shared by `pm decide` and `pm changelog`, because it is one act: read the
+    log, allocate, compose, RE-PARSE the composed entry through the gate's own
+    predicates, and write only if it conforms. Two copies of this would be two
+    chances for a writer to refuse something other than what its gate reports.
+
+    Refuses WHOLE: every path out of here that is not a write leaves the log
+    byte-identical.
+    """
     for name, val in values.items():
         if '\n' in val or '\r' in val:
-            raise Refused(f'**{name}:** is one line — a decision field that '
-                          f'needs a paragraph is two decisions')
-
-    log = _decision_log(cfg, gid)
+            raise Refused(f'**{name}:** is one line — a field that needs a '
+                          f'paragraph is two entries')
     try:
         text = model.read_raw(log)
     except (OSError, UnicodeDecodeError) as err:
         raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
-    entries = model.decision_entries_in(text)
-    eid = model.next_decision_id(entries)
+    entries = model.log_entries_in(text)
+    eid = model.next_entry_id(entries, schema)
     when = datetime.now(timezone.utc).date().isoformat()
-    # The title defaults to the choice, which is right most of the time and
-    # wrong loudly the rest: a `--chose` too long to be a title is refused with
-    # the flag that fixes it, never silently truncated into a header.
+    # The title defaults to the entry's headline field, which is right most of
+    # the time and wrong LOUDLY the rest: one too long to be a title is refused
+    # with the flag that fixes it, never silently truncated into a header.
     if not title:
-        title = values['Chose']
-        if len(title) > model.DECISION_TITLE_MAX:
+        title = values[title_field]
+        if len(title) > schema.title_max:
             raise Refused(
-                f'--chose is {len(title)} chars, over the header\'s '
-                f'{model.DECISION_TITLE_MAX}-char title cap — pass --title '
+                f'{title_flag} is {len(title)} chars, over the header\'s '
+                f'{schema.title_max}-char title cap — pass --title '
                 f'with a short one (nothing was written)')
-    body, problems = model.append_decision(text, eid, when, title, values)
+    body, problems = model.append_entry(text, eid, when, title, values, schema)
     if problems:
         raise Refused(f'{cfg.rel(log)} left untouched — the entry would not '
                       f'conform: ' + '; '.join(problems))
@@ -1027,6 +1048,183 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage(f'could not append to {cfg.rel(log)} ({err})') from err
     _ok(f'{cfg.rel(log)}: {eid} — {when} — {title}')
     return 0
+
+
+def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
+    gid, values, _ = _parse_flags(args, DECIDE_FLAGS)
+    title = values.pop('title', '')
+    if not gid:
+        raise Usage(USAGE)
+    for flag, name in DECIDE_FLAGS.items():
+        if name == 'title' or values.get(name):
+            continue
+        why = (' — a decision with no rejected alternative is a description, '
+               'not a decision') if flag == '--over' else ''
+        raise Usage(f'{flag} is required{why}')
+    return _append_to_log(cfg, _decision_log(cfg, gid), model.DECISION_SCHEMA,
+                          values, title, '--chose', 'Chose')
+
+
+def cmd_decisions(cfg: model.PmConfig, args: list[str]) -> int:
+    """Print one grain's decision entries, parsed and deterministic.
+
+    The READ half of the same contract `pm decide` writes. Without it the only
+    way to answer "what did we decide in milestone xyz" is a `find` piped to a
+    `grep`, which is a second parser with none of the fence and comment
+    handling — and it will disagree with the gate about what the log holds on
+    exactly the logs that matter.
+
+    A milestone prints its OWN log and its features', in the tree's order,
+    because "the decisions for milestone xyz" is a question about the milestone
+    and not about one directory in it.
+    """
+    gid, _, _ = _parse_flags(args, {})
+    if not gid:
+        raise Usage(USAGE)
+    logs = [(gid, _decision_log(cfg, gid))]
+    if '/' not in gid:
+        mdir = logs[0][1].parent
+        for ffile in model.feature_files(mdir):
+            fdir = ffile.parent
+            if model.dir_entries(fdir).get(model.DECISION_FILE_NAME) == 'file':
+                logs.append((f'{gid}/{fdir.name}',
+                             fdir / model.DECISION_FILE_NAME))
+    print(f'# {gid} — decisions')
+    total = 0
+    for label, log in logs:
+        try:
+            entries = model.log_entries_in(model.read_raw(log))
+        except (OSError, UnicodeDecodeError) as err:
+            # Named, never skipped: a log this cannot open is a log whose
+            # decisions are missing from an answer that claims to be complete.
+            print(f'[pm] {cfg.rel(log)} cannot be read ({err})', file=sys.stderr)
+            continue
+        print()
+        print(f'## {label} — {cfg.rel(log)}')
+        for entry in entries:
+            print()
+            print(f'### {entry.eid} — {model.entry_title(entry)}')
+            for name, value in entry.fields:
+                print(f'- **{name}:** {value}')
+        total += len(entries)
+    print(f'[pm] {total} entry/ies across {len(logs)} log(s)', file=sys.stderr)
+    return 0
+
+
+# --- changelog ----------------------------------------------------------------
+# A MILESTONE log, never a feature one: a release is a milestone, and a feature
+# contributes to it through the entry's `Evidence:` pointer. Two required
+# fields and no more — what was built that a player cares about, and the
+# reference proving it shipped. The reasoning is a DECISION and belongs in
+# decisions.md; a changelog carrying it is a commit log with a nicer name.
+CHANGELOG_FLAGS = {'--what': 'What', '--evidence': 'Evidence',
+                   '--title': 'title'}
+RENDER_FLAGS = {'--milestone': 'milestone'}
+
+
+def _changelog_log(cfg: model.PmConfig, mid: str) -> Path:
+    """The changelog.md of the milestone `mid` names."""
+    if '/' in mid:
+        raise Refused(
+            f'{mid!r} names a feature, story or bug — the changelog is a '
+            f'MILESTONE log; name the milestone that ships it, and point '
+            f'--evidence at the grain that built it')
+    mdir = model.milestone_dir(cfg, mid)
+    if mdir is None:
+        raise Usage(f'no milestone resolves from id {mid!r}')
+    if model.dir_entries(mdir).get(model.CHANGELOG_FILE_NAME) != 'file':
+        raise Refused(
+            f'{cfg.rel(mdir)}/ has no {model.CHANGELOG_FILE_NAME} — run '
+            f'`{PROG} new milestone {mid}` to fill the canonical slots (it is '
+            f'idempotent), then re-run')
+    return mdir / model.CHANGELOG_FILE_NAME
+
+
+def _render_changelog(cfg: model.PmConfig, only: str) -> int:
+    """The union of every milestone's changelog, newest release first, to STDOUT.
+
+    A RENDER, not a file this tool owns: the consumer redirects it wherever
+    their published notes live, so stdout carries the document and nothing else
+    — every count, skip and defect goes to stderr, where redirecting the
+    document cannot swallow it.
+
+    Deterministic by construction. Milestones come from
+    `milestones_newest_first` (declared version, component-wise) and entries
+    come out in the order their append-only log holds them, so the same tree
+    renders the same bytes on every filesystem and every run.
+    """
+    milestones = model.milestones_newest_first(cfg)
+    if not milestones:
+        raise Usage(f'no milestones found under {cfg.roadmap_dir}/ (wrong '
+                    f'[pm] roadmap_dir, or an empty tree?)')
+    if only:
+        wanted = model.milestone_dir(cfg, only)
+        if wanted is None:
+            raise Usage(f'no milestone resolves from id {only!r}')
+        milestones = [(mid, d) for mid, d in milestones if d == wanted]
+    print('# Changelog')
+    rendered = 0
+    partial = 0
+    quiet: list[str] = []
+    for mid, mdir in milestones:
+        entries, why = model.changelog_entries_of(mdir)
+        if why:
+            quiet.append(f'{mid} ({why})')
+            continue
+        name = model.unquote(model.field_of(mdir / 'milestone.md', 'name'))
+        print()
+        print(f'## {mid}{" — " + name if name else ""}')
+        print()
+        for entry in entries:
+            fields = dict(entry.fields)
+            what = fields.get('What', '').strip()
+            evidence = fields.get('Evidence', '').strip()
+            title = model.entry_title(entry)
+            # The title DEFAULTS to the sentence, so printing both would double
+            # every line in the common case. They are printed together only
+            # when the author actually gave a separate one.
+            head = (f'**{title}** — {what}' if what and title != what
+                    else (what or title))
+            print(f'- {head}' + (f' ({evidence})' if evidence else ''))
+            if not what or not evidence:
+                partial += 1
+        rendered += len(entries)
+    note = f'[pm] rendered {rendered} entry/ies from {len(milestones)} milestone(s)'
+    if partial:
+        # Rendered anyway, and SAID: dropping them would make the render
+        # disagree with D15 about what the log holds.
+        note += (f'; {partial} are missing **What:** or **Evidence:** '
+                 f'(D15 reports them)')
+    if quiet:
+        note += f'; nothing to render for {", ".join(quiet)}'
+    print(note, file=sys.stderr)
+    return 0
+
+
+def cmd_changelog(cfg: model.PmConfig, args: list[str]) -> int:
+    gid, values, seen = _parse_flags(
+        args, {**CHANGELOG_FLAGS, **RENDER_FLAGS}, bare=('--render',))
+    title = values.pop('title', '')
+    only = values.pop('milestone', '')
+    if '--render' in seen:
+        if gid or title or values:
+            raise Usage('--render READS the tree; it takes only --milestone '
+                        '(to append an entry, drop --render and name the '
+                        'milestone)')
+        return _render_changelog(cfg, only)
+    if only:
+        raise Usage('--milestone belongs to --render; to append, name the '
+                    'milestone as the argument')
+    if not gid:
+        raise Usage(USAGE)
+    for flag, name in CHANGELOG_FLAGS.items():
+        if name == 'title' or values.get(name):
+            continue
+        why = (' — a changelog entry with nothing behind it is a rumour'
+               if flag == '--evidence' else '')
+        raise Usage(f'{flag} is required{why}')
+    return _append_to_log(cfg, _changelog_log(cfg, gid), model.CHANGELOG_SCHEMA,
+                          values, title, '--what', 'What')
 
 
 # --- prune --------------------------------------------------------------------
@@ -1122,6 +1320,7 @@ def main(argv: list[str]) -> int:
         'init': cmd_init, 'set': cmd_set, 'get': cmd_get, 'claim': cmd_claim,
         'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
+        'decisions': cmd_decisions, 'changelog': cmd_changelog,
     }
     fn = table.get(cmd)
     if fn is None:
