@@ -108,8 +108,9 @@ consumer's numbers, not a law, and a cap under 1 is a config error rather than a
 does.
 
 Verified against that consumer's live 45,849-line corpus with its 58-entry ledger translated into the
-config form: same corpus total, same zero OVERCAP / GREW / CLOSED-LOG findings its own scanner
-reports. The one difference is deliberate — devkit's shrink-only ledger rule reports the single entry
+config form: the same 599 documents and the same 45,849 lines its own scanner measures (printed as
+45,802 under D17 plus the 47-line closed log under D18, each rule's population beside its own
+verdict), and the same zero OVERCAP / GREW / CLOSED-LOG findings it reports. The one difference is deliberate — devkit's shrink-only ledger rule reports the single entry
 whose document has since fallen back inside its cap, and dropping it leaves 57.
 
 **A too-short reference is no longer called prose.** `--evidence aaa111` is a real commit hash git
