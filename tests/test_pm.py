@@ -3048,6 +3048,29 @@ class DamagedFrontmatter(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertNotIn('note(s) skipped', out)
 
+    def test_the_census_says_how_many_documents_the_dotted_filter_hid(self):
+        # The twin of the note disclosure, and the reason it matters: an open
+        # bug parked under `bugs/.hold/` is out of scope for every rule, so
+        # D14 cannot report it and `prune` deletes the milestone it sits in.
+        # A dot prefix is a deliberate hide; an UNCOUNTED one is a census
+        # asserting the opposite of the filesystem.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            hold = root / 'pm/roadmap/0.1-demo/bugs/.hold'
+            hold.mkdir(parents=True, exist_ok=True)
+            (hold / 'openbug.md').write_text(
+                '---\nid: 0.1/bugs/openbug\nmilestone: "0.1"\n'
+                'name: b\nstatus: open\nseverity: high\n---\n# b\n',
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 hidden (dot-prefixed', out)
+
+    def test_a_tree_with_nothing_hidden_discloses_no_hidden_count(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('hidden (dot-prefixed', out)
+
     def test_the_grain_walk_skips_dotted_names_exactly_as_D13_does(self):
         # `structure_findings` skips a dotted entry, so a `stories/.hidden/d.md`
         # held to D4 was one walk enforcing a rule the structure gate had

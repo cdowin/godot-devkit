@@ -748,12 +748,35 @@ def _slot_docs(gdir: Path) -> list[Path]:
     `stories/.hidden/d.md` to a rule the structure gate has already declared
     out of scope.
     """
+    return [p for p in _all_slot_docs(gdir) if not _is_hidden(gdir, p)]
+
+
+def _is_hidden(gdir: Path, p: Path) -> bool:
+    """True if any path component under `gdir` is dot-prefixed."""
+    return any(part.startswith('.') for part in p.relative_to(gdir).parts)
+
+
+def _all_slot_docs(gdir: Path) -> list[Path]:
+    """Every `.md` one slot directory holds, dotted names INCLUDED.
+
+    The universe the narrower walks partition. It exists so `hidden_docs` can
+    disclose what the dotted filter removed: a skip nobody counts is the same
+    silent narrowing the frontmatter filter already had to answer for.
+    """
     if not gdir.is_dir():
         return []
     return sorted(p for p in gdir.rglob('*')
-                  if p.is_file() and p.suffix.lower() == '.md'
-                  and not any(part.startswith('.')
-                              for part in p.relative_to(gdir).parts))
+                  if p.is_file() and p.suffix.lower() == '.md')
+
+
+def hidden_docs(gdir: Path) -> list[Path]:
+    """The `.md` files under one slot directory the DOTTED filter removed.
+
+    Out of scope for every rule, exactly as D13 treats a dotted name — but
+    COUNTED, because `0 bug(s)` must not quietly mean `one open bug parked
+    under bugs/.hold/`, which prune would then delete where it sits.
+    """
+    return [p for p in _all_slot_docs(gdir) if _is_hidden(gdir, p)]
 
 
 def grain_docs(gdir: Path) -> list[Path]:
@@ -802,6 +825,21 @@ def notes_skipped(cfg: PmConfig) -> list[Path]:
         out += note_docs(mdir / 'bugs')
         for ffile in feature_files(mdir):
             out += note_docs(ffile.parent / 'stories')
+    return out
+
+
+def hidden_skipped(cfg: PmConfig) -> list[Path]:
+    """Every dot-prefixed `.md` the grain walk skipped across the ACTIVE tree.
+
+    The twin of `notes_skipped` for the other filter. A dot prefix is a
+    deliberate hide, so these are not findings — but an uncounted skip is how a
+    census comes to assert the opposite of the filesystem.
+    """
+    out: list[Path] = []
+    for mdir in milestone_dirs(cfg):
+        out += hidden_docs(mdir / 'bugs')
+        for ffile in feature_files(mdir):
+            out += hidden_docs(ffile.parent / 'stories')
     return out
 
 

@@ -125,3 +125,7 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C29 — 2026-08-29 — one fact, one finding, in the right vocabulary
 **What:** An over-cap finding names the grain kind it is about, and a ledgered document back inside its cap is reported once — drop the entry — rather than twice.
 **Evidence:** src/godot_devkit/repo/pm/model.py:1900
+
+## C30 — 2026-08-29 — a hidden document is still disclosed
+**What:** A dot-prefixed file under bugs/ or stories/ is counted in the census instead of vanishing from it.
+**Evidence:** src/godot_devkit/repo/pm/model.py:769

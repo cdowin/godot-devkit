@@ -553,6 +553,10 @@ def run() -> int:
     if n_notes:
         census += (f', {n_notes} note(s) skipped (no frontmatter — not a '
                    f'grain)')
+    n_hidden = len(model.hidden_skipped(cfg))
+    if n_hidden:
+        census += (f', {n_hidden} hidden (dot-prefixed — skipped, as D13 '
+                   f'skips them)')
     if 'D11' in enabled:
         census += f', {n_done_grains} done grain(s)'
     if 'D12' in enabled:

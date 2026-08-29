@@ -31,6 +31,7 @@
 - **pm prose-ledger names what it absorbs** — Regenerating the prose debt ledger prints every newly absorbed document on stderr with a count, so new debt can no longer enter the ratchet unannounced. (src/godot_devkit/repo/pm/cli.py:1394)
 - **a version-shaped changelog heading is not an entry id** — A preamble heading like '## v0.9 release notes' no longer reads as entry 'v0', so the next appended note is allocated C1 rather than v1. (src/godot_devkit/repo/pm/model.py:1138)
 - **one fact, one finding, in the right vocabulary** — An over-cap finding names the grain kind it is about, and a ledgered document back inside its cap is reported once — drop the entry — rather than twice. (src/godot_devkit/repo/pm/model.py:1900)
+- **a hidden document is still disclosed** — A dot-prefixed file under bugs/ or stories/ is counted in the census instead of vanishing from it. (src/godot_devkit/repo/pm/model.py:769)
 
 ---
 
