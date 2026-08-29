@@ -1068,8 +1068,9 @@ def _mask_code_spans(raw: str) -> str:
     return ''.join(out)
 
 
-def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool]]:
-    """(each line with inline code spans blanked, which lines are FENCED).
+def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool], int]:
+    """(each line with inline code spans blanked, which lines are FENCED, the
+    1-based line of a fence that is never terminated, or 0).
 
     A fenced block is a code sample the reader sees verbatim: `## <short title>`
     inside one is not a heading and `<!--` inside one is a marker being quoted,
@@ -1077,13 +1078,20 @@ def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool]]:
     entry detection by the caller — counting a template's example block as a
     real entry is the same lie in the other direction.
 
+    An UNTERMINATED fence suppresses nothing, exactly as an unterminated `<!--`
+    suppresses nothing: left masked it would mark every remaining entry dead and
+    the gate would print PASS over the ones it ate — the cardinal sin, arrived at
+    the second way. One stray ``` typo, one ~~~ closed by ```, one line opening
+    with a three-backtick inline span: each is REPORTED here instead, because a
+    log whose fences D12 cannot delimit is a log D12 has not honestly scanned.
+
     Blanking preserves length, so a marker OUTSIDE the masked ranges still lands
     at its real offset.
     """
     out: list[str] = []
     fenced: list[bool] = []
-    fence = ''
-    for raw in lines:
+    fence, opened = '', 0
+    for idx, raw in enumerate(lines):
         body = raw.rstrip('\r')
         m = _CODE_FENCE.match(body)
         if fence:
@@ -1096,19 +1104,25 @@ def _mask_markup(lines: list[str]) -> tuple[list[str], list[bool]]:
                 fence = ''
             continue
         if m:
-            fence = m.group(1)
+            fence, opened = m.group(1), idx
             out.append(' ' * len(raw))
             fenced.append(True)
             continue
         out.append(_mask_code_spans(raw))
         fenced.append(False)
-    return out, fenced
+    if not fence:
+        return out, fenced, 0
+    for k in range(opened, len(lines)):  # never terminated: unmask it all
+        out[k] = _mask_code_spans(lines[k])
+        fenced[k] = False
+    return out, fenced, opened + 1
 
 
-def _comment_scan(lines: list[str]) -> tuple[list[bool], int]:
+def _comment_scan(lines: list[str]) -> tuple[list[bool], list[str], int, int]:
     """(per line: is it LIVE log text — outside any HTML comment at the point it
-    starts, and outside any fenced code block?, the 1-based line of an `<!--`
-    that is never closed, or 0).
+    starts, and outside any fenced code block?, the text of each line the entry
+    parser should READ, the 1-based line of an `<!--` that is never closed, or 0,
+    the same for an unterminated code fence).
 
     A `<!-- ... -->` block renders as nothing, so what it holds is not in the
     log. Load-bearing here because the RETIRED decisions template shipped its
@@ -1121,10 +1135,18 @@ def _comment_scan(lines: list[str]) -> tuple[list[bool], int]:
     every reader. So spans are collected first and an unterminated marker
     suppresses nothing at all; it is returned to be REPORTED, because a log
     whose comments D12 cannot delimit is a log D12 has not honestly scanned.
+
+    The two EDGE lines of a span are symmetric, and both keep their live half.
+    The opening line's live half is what precedes `<!--`, and it already reads
+    at line start. The closing line's live half is what FOLLOWS `-->`, so the
+    commented head is dropped and that half reads at line start too — killing
+    the whole closing line instead hid a conforming `**Over:**` written after a
+    spanning aside, and D12 failed the entry for having no rejected alternative.
     """
-    masked, fenced = _mask_markup(lines)
+    masked, fenced, unfenced = _mask_markup(lines)
     live = [not f for f in fenced]
-    spans: list[tuple[int, int]] = []
+    text = list(lines)
+    spans: list[tuple[int, int, int]] = []
     inside, start = False, 0
     for idx, body in enumerate(masked):
         i = 0
@@ -1133,19 +1155,20 @@ def _comment_scan(lines: list[str]) -> tuple[list[bool], int]:
                 j = body.find('-->', i)
                 if j < 0:
                     break
-                spans.append((start, idx))
+                spans.append((start, idx, j + 3))
                 inside, i = False, j + 3
             else:
                 j = body.find('<!--', i)
                 if j < 0:
                     break
                 inside, start, i = True, idx, j + 4
-    for opened, closed in spans:
-        # The opening line itself stays live: the marker may sit after real
-        # content on it, and that content is in the log.
-        for k in range(opened + 1, closed + 1):
+    for opened, closed, after in spans:
+        if closed == opened:
+            continue  # opened and closed inline: the line was never suppressed
+        for k in range(opened + 1, closed):
             live[k] = False
-    return live, (start + 1 if inside else 0)
+        text[closed] = lines[closed][after:].lstrip(' \t')
+    return live, text, (start + 1 if inside else 0), unfenced
 
 
 def decision_comment_defect(text: str) -> str:
@@ -1155,12 +1178,30 @@ def decision_comment_defect(text: str) -> str:
     of any entry, so no grandfather ordinal caps it and no entry name carries
     it.
     """
-    _, unclosed = _comment_scan(_split(text))
+    _, _, unclosed, _ = _comment_scan(_split(text))
     if not unclosed:
         return ''
     return (f'line {unclosed} opens an HTML comment `<!--` that is never '
             f'closed — the log is malformed and D12 cannot say what it holds; '
             f'close it, or put the marker in backticks if you meant to name it')
+
+
+def decision_fence_defect(text: str) -> str:
+    """'' when the log's code fences are all terminated, else what is wrong.
+
+    The twin of `decision_comment_defect`, and it exists for the same reason.
+    Fence masking was added so a quoted `<!--` inside a sample stopped eating
+    the log; an unterminated fence then ate the log by the other route, and did
+    it in SILENCE — `1 entry/ies … PASS` over a two-entry file. A mask nothing
+    reports is the defect, whichever marker opened it.
+    """
+    _, _, _, unfenced = _comment_scan(_split(text))
+    if not unfenced:
+        return ''
+    return (f'line {unfenced} opens a code fence that is never terminated — '
+            f'the log is malformed and D12 cannot say which of it is a sample; '
+            f'close the fence, or shorten the run of backticks if you meant an '
+            f'inline span')
 
 
 def decision_entries_in(text: str) -> list[DecisionEntry]:
@@ -1176,9 +1217,9 @@ def decision_entries_in(text: str) -> list[DecisionEntry]:
     is never schema-checked: a log may have a preamble.
     """
     lines = _split(text)
-    live, _ = _comment_scan(lines)
+    live, body, _, _ = _comment_scan(lines)
     out: list[DecisionEntry] = []
-    for i, raw in enumerate(lines):
+    for i, raw in enumerate(body):
         if not live[i]:
             continue
         m = _DECISION_HEADING.match(raw.rstrip('\r'))
@@ -1186,14 +1227,14 @@ def decision_entries_in(text: str) -> list[DecisionEntry]:
             continue
         stop = len(lines)
         for j in range(i + 1, len(lines)):
-            if live[j] and _DECISION_SECTION_END.match(lines[j].rstrip('\r')):
+            if live[j] and _DECISION_SECTION_END.match(body[j].rstrip('\r')):
                 stop = j
                 break
         fields: list[tuple[str, str]] = []
         for j in range(i + 1, stop):
             if not live[j]:
                 continue
-            fm = _DECISION_FIELD.match(lines[j].rstrip('\r'))
+            fm = _DECISION_FIELD.match(body[j].rstrip('\r'))
             if fm:
                 fields.append((fm.group(1), fm.group(2)))
         eid = decision_entry_label(m.group(1))
@@ -1206,7 +1247,7 @@ def decision_entries_in(text: str) -> list[DecisionEntry]:
             eid = (flat if len(flat) <= DECISION_TITLE_MAX
                    else flat[:DECISION_TITLE_MAX - 1] + '…')
         out.append(DecisionEntry(eid=eid, line=i + 1,
-                                 header=lines[i].rstrip('\r'),
+                                 header=body[i].rstrip('\r'),
                                  fields=tuple(fields)))
     return out
 
