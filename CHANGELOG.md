@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.13.0 — 2026-08-29
 
 **One uniform grain structure, all lowercase.** Every milestone and feature dir carries the same
 slots, and the split that makes it worth having is durable vs transient:
@@ -58,10 +58,10 @@ each other either: the inner refusal states what became of ITS OWN file (*its co
 still at …*) and the NOTE states what became of the ones before it, where one message used to say
 both `nothing was written` and `1 earlier rename(s) already landed`.
 
-**Exit 1 is always a finding, never a stack trace** — and the last two paths out from under that are
-closed. A rename writes the DIRECTORY, not the file, and the pre-pass checked only the file: a `0555`
-grain dir holding a `0644` `DECISIONS.md` passed every inspection and came out of `os.rename` as a
-raw `PermissionError` traceback. Directory writability is trivially inspectable, so it is inspected,
+**Exit 1 is a finding, not a stack trace, on every path a rename takes** — the last two paths out
+from under that are closed. A rename writes the DIRECTORY, not the file, and the pre-pass checked
+only the file: a `0555` grain dir holding a `0644` `DECISIONS.md` passed every inspection and came
+out of `os.rename` as a raw `PermissionError` traceback. Directory writability is trivially inspectable, so it is inspected,
 and anything still escaping the two-step temp rename becomes a refusal that **names where the bytes
 actually are** — the second step failing parks the log at `decisions.md.pm-case-rename`, which no
 later run looks for, so a message saying only that the rename failed left an operator hunting for
@@ -164,8 +164,8 @@ and the closing line keeps what follows `-->`, so a conforming `**Over:**` writt
 aside is still read rather than failed for naming no rejected alternative.
 
 **Neither marker may mask in silence.** An unclosed `<!--` suppresses nothing and is itself reported,
-and **so is an unterminated code fence** — one stray ` ``` `, a `~~~` "closed" by ` ``` `, a line
-merely opening with a three-backtick inline span. Either would otherwise mark every line after it
+and **so is an unterminated code fence** — one stray ` ``` `, a `~~~` "closed" by ` ``` `, an
+unbalanced three-backtick span leading a line. Either would otherwise mark every line after it
 dead and D12 would print PASS over the entries it ate, which is the exact sin the comment scan
 already refuses to commit; the fence masking added to stop a quoted `<!--` eating a log had reopened
 it by the other route, silently, and `pm decide` then refused every append to that log forever with
@@ -177,7 +177,8 @@ the same defect wearing the other gate's clothes: their fence scan was a parity 
 number of fence-looking lines dropped every remaining line of the document and the gate printed PASS
 over them. Two dead claims that FAIL normally — `[check:doc] FAIL — 2 unresolved claim(s)` — became
 `PASS — 1 doc(s), 0 unresolved claims` the moment one stray ` ``` ` was prepended above them, and
-`check agents` did it too. Both are in a consumer's `check all`. An unterminated fence now masks
+`check agents` did it too. `check doc` runs in `check all`; both run from each consumer's
+`make check`. An unterminated fence now masks
 nothing and is REPORTED (`malformed doc(s)` / `MALFORMED`) while a terminated one still masks, since
 a rule file quoting the CLI's own refusal is documenting it. **One scanner** answers where the fences
 are — `core.markdown.fenced_flags`, which D12's own mask now calls rather than keeping a second copy
@@ -221,6 +222,22 @@ so `[]` and the absent key both say "none exempt".
 **Known issues, all reported and none fixed here:** `pm decide --title` is not validated for a bare
 `\r`; a `decision_grandfather` cap names the wrong entry when one is inserted above it;
 `ScaffoldRefused` prints an absolute path rather than a repo-relative one.
+
+Six more, all pre-existing and none introduced by this release; each was found by constructing the
+input and running it, and none of them fires in either consumer today. A line opening with a
+*balanced* three-backtick inline span is still read as a fence opener, so a later bare ` ``` ` masks
+the region between with no defect reported — the one CommonMark rule `fenced_flags` still lacks (an
+info string after a backtick fence may not contain backticks); a 20,000-case differential fuzz found
+it as the only divergence class, and a mask-diff over all 170 live markdown files of both consumers
+reported none differing. `check agents` skips a non-UTF-8 definition while its census still counts it
+as scanned, which is the one reader in the package that masks in silence rather than reporting. D14's
+recursion and case-insensitive extension were not carried to `stories/`, which is the same
+never-descended slot shape `bugs/` was: a story under `stories/<subdir>/` or named `.MD` goes unseen
+by D4 and can flip D2 into a false finding. `pm new` has a third path out from under "exit 1 is a
+finding" that the rename fixes did not reach — `gdir.mkdir` on an over-long grain name or an
+unwritable `pm/roadmap/`. D14 now reports any non-bug `.md` parked under `bugs/` (a `README.md`, a
+`design/` note) as a bug with a bad status. And an unterminated fence inside a *closed* HTML comment
+is reported as malformed, because fence flags are computed before comment spans.
 
 **`tiles --region` and `tiles --at` can address the negative quadrants again.** `--region -2,-2,1,1`
 died with `argument --region: expected one argument` on **every Python a consumer actually runs**:
