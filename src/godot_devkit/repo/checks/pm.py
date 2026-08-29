@@ -47,6 +47,17 @@ DRIFT RULES (each FAILs, naming the offending path):
       A file naming NO grain is reported separately: it is unreachable by
       definition. OFF by default (see RETENTION_CHECKS).
 
+  D12 decision-record SCHEMA — a decision log rots into description. Every
+      `## <ID> — <ISO date> — <title>` entry in a DECISIONS.md carries exactly
+      **Chose:** / **Over:** / **Because:** / **Evidence:**, in that order, one
+      per line, each value <= 200 chars, the title <= 80. `Over:` is the
+      load-bearing one: an entry that cannot name what it ruled out is a
+      description, not a decision. `Evidence:` must be a REFERENCE — a commit
+      hash, a path[:line] or a number — never a sentence. A prose `##` heading
+      is not an entry and is not checked; a log may have a preamble. Legacy
+      logs migrate through `[pm] decision_grandfather` (see below), whose size
+      the gate PRINTS every run so it stays visibly temporary. OFF by default.
+
 Which rules run is `[pm] checks` in devkit.toml (default: all seven).
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
@@ -59,6 +70,59 @@ from __future__ import annotations
 import sys
 
 from godot_devkit.repo.pm import model
+
+
+def _decision_schema(cfg, report) -> None:
+    """D12 — the decision-record schema, and the ledger that lets it ship.
+
+    The ledger is the whole migration story: 57 logs in one consumer conform to
+    none of this, and a rule that turns a consumer red on upgrade day is
+    unshippable. So an exempted log is named in `[pm] decision_grandfather`, the
+    gate PRINTS how many are exempt on every run, and the ledger can only
+    shrink — an exemption that suppresses nothing, or a cap reaching past the
+    entries it claims to cover, is itself reported.
+    """
+    ledger = dict(cfg.decision_grandfather)
+    logs = model.decision_files(cfg)
+    whole = sum(1 for cap in ledger.values() if cap is None)
+    print(f'[check:pm] D12 grandfather: {len(ledger)} decision log(s) exempt '
+          f'({whole} whole, {len(ledger) - whole} capped) — this ledger may '
+          f'only shrink')
+
+    # Rule 4: a rule that scanned nothing must say so rather than print PASS.
+    if not logs:
+        report(f'D12 is enabled but no {model.DECISION_FILE_NAME} exists under '
+               f'{cfg.roadmap_dir}/ — the rule scanned nothing')
+
+    seen: set[str] = set()
+    for log in logs:
+        key = model.decision_relkey(cfg, log)
+        cap = ledger.get(key, 0)  # 0 == not listed: nothing is exempt
+        if key in ledger:
+            seen.add(key)
+        n_suppressed = 0
+        for ordinal, eid, why in model.decision_violations(log):
+            if cap is None or ordinal < cap:
+                n_suppressed += 1
+                continue
+            report(f'{key}: {eid} — {why} (D12)')
+        if key not in ledger:
+            continue
+        # Shrink-only, both directions: an exemption covering no violation has
+        # done its job and must go, and a cap reaching past the end of the log
+        # is a claim the file no longer supports.
+        if not n_suppressed:
+            report(f'{key} is in decision_grandfather but every entry conforms '
+                   f'— drop it from the ledger (D12)')
+        n_entries = len(model.decision_entries(log))
+        if cap is not None and cap > n_entries:
+            report(f'{key} is grandfathered to {cap} entries but the log has '
+                   f'{n_entries} — lower the cap (D12)')
+
+    for key in ledger:
+        if key not in seen:
+            report(f'{key} is in decision_grandfather but no such log exists '
+                   f'— drop it from the ledger (D12)')
 
 
 def run() -> int:
@@ -230,6 +294,9 @@ def run() -> int:
             elif named[1] == 'done':
                 report(f'{cfg.rel(rfile)} is transient and {named[0]} is done '
                        f'— its durable record is the grain\'s own (D11)')
+
+    if 'D12' in enabled:
+        _decision_schema(cfg, report)
 
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '

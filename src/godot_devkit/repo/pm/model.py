@@ -27,12 +27,15 @@ the milestone machine has no `review` state (nothing transitions into one).
     feature_transitions   = [...]
     story_transitions     = [...]
     checks = ["D1","D2","D3","D4","D5","D6","D7"]   # which drift rules run
+    decision_grandfather = []      # D12: logs whose legacy entries predate the
+                                   # schema — "<path>" or "<path>:<N entries>"
 """
 from __future__ import annotations
 
 import re
 import subprocess
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from godot_devkit.core.project import repo_root
@@ -71,11 +74,17 @@ FLOW_CHECKS = ('D8', 'D9', 'D10')
 # a project that keeps transient findings docs there on purpose is not drifting
 # by its own lights. Opt in with `[pm] checks`.
 RETENTION_CHECKS = ('D11',)
+# D12 is the decision-record SCHEMA. Opt-in like the rest, and for one more
+# reason: every log written before it existed conforms to none of it, so a
+# consumer switching it on migrates through `decision_grandfather` rather than
+# through a red gate on upgrade day.
+SCHEMA_CHECKS = ('D12',)
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
-    DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + VALIDATE_CHECKS))
+    DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + SCHEMA_CHECKS
+    + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -96,6 +105,9 @@ class PmConfig:
     feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
     checks: tuple[str, ...] = DEFAULT_CHECKS
+    # D12 only: the grandfather ledger, parsed at load so a malformed spec is
+    # exit 2. (repo-relative log path, entries exempted or None for all).
+    decision_grandfather: tuple[tuple[str, int | None], ...] = ()
     # D8 only: where the shipped version lives, and the line that carries it.
     template_dir: str = ''
     version_file: str = 'project.godot'
@@ -173,6 +185,8 @@ def load() -> PmConfig:
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
+        decision_grandfather=parse_decision_grandfather(
+            str_tuple(sect, 'pm', 'decision_grandfather', ())),
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
@@ -663,3 +677,220 @@ def grain_named_by(cfg: PmConfig, path: Path) -> tuple[str, str] | None:
         if mid and mid in stem and (best is None or len(mid) > best[0]):
             best = (len(mid), mid, field_of(mfile, 'status'))
     return (best[1], best[2]) if best else None
+
+
+# --- decision-record schema (D12) ---------------------------------------------
+# A decision log rots into description. The four fields are the cure, and `Over:`
+# is the load-bearing one: a decision with no rejected alternative is not a
+# decision, it is a description, and an entry that cannot name what it ruled out
+# should not exist. Padding is impossible when every part has to be a field.
+#
+#     ## D3 — 2026-08-28 — the sweep verb belongs to the combat layer
+#     **Chose:** move `sweep_tracked_contributions` to `combat_behavior.gd`
+#     **Over:** leaving it on `entity_behavior.gd`, the lean root
+#     **Because:** all three consumers extend the combat layer
+#     **Evidence:** `64e89ad5b`
+DECISION_FILE_NAME = 'DECISIONS.md'
+DECISION_FIELDS = ('Chose', 'Over', 'Because', 'Evidence')
+DECISION_TITLE_MAX = 80
+DECISION_VALUE_MAX = 200
+
+# An ENTRY is an `##` heading carrying an ID or a DATE **anywhere** in it — not
+# one that opens with an id. Detection has to be looser than the schema or the
+# gate is blind to exactly the logs it exists for: real logs number `M27`, `D1`,
+# and also write `## 2026-08-24 — D1: ...` with the id AFTER the date, which an
+# opens-with-an-id test reads as prose and passes in silence (rule 4's cardinal
+# sin). A heading with neither ("## The through-line") IS prose and is never
+# schema-checked: a log may have a preamble.
+_DECISION_HEADING = re.compile(r'^##[ \t]+(\S.*?)[ \t]*$')
+_DECISION_ID = re.compile(
+    r'(?:^|[\s([{`"\'/—-])([A-Za-z]{1,4}\d+)(?=[\s.,:;)\]}`"\'—-]|$)')
+_ISO_DATE = re.compile(r'\d{4}-\d{2}-\d{2}')
+# The full header. The separator is an em dash BOTH times, exactly as the schema
+# reads. A hyphen renders near-identically to a human and differently to a
+# parser, and a separator that is "either" is not a schema.
+_DECISION_HEADER = re.compile(
+    r'^##[ \t]+[A-Za-z]+\d+[ \t]+—[ \t]+(\d{4}-\d{2}-\d{2})[ \t]+—[ \t]+(\S.*?)[ \t]*$')
+_DECISION_FIELD = re.compile(r'^\*\*([A-Za-z]+):\*\*[ \t]*(.*?)[ \t]*$')
+# A new `##`/`#` heading ends the entry; `###` and deeper stay inside it.
+_DECISION_SECTION_END = re.compile(r'^#{1,2}[ \t]')
+
+# `Evidence:` is a REFERENCE, not a sentence — that is what stops "we discussed
+# it and agreed" from counting as evidence. Every whitespace-separated token has
+# to be a commit hash, a path (optionally `:line`), or a number; prose fails on
+# its first word.
+_REF_HASH = re.compile(r'^[0-9a-f]{7,40}$')
+_REF_NUMBER = re.compile(r'^[+-]?\d[\d,._%/x×→-]*$')
+_REF_PATH = re.compile(r'^[\w./~@+-]+(?::\d+(?:-\d+)?)?$')
+
+
+@dataclass(frozen=True)
+class DecisionEntry:
+    eid: str
+    line: int
+    header: str
+    fields: tuple[tuple[str, str], ...]
+
+
+def decision_evidence_is_reference(value: str) -> bool:
+    """True if every token in `value` is a hash, a path[:line], or a number."""
+    tokens = value.replace('`', ' ').split()
+    if not tokens:
+        return False
+    for raw in tokens:
+        tok = raw.strip('[]()<>,;.:"\'')
+        if not tok:
+            return False
+        if _REF_HASH.match(tok) or _REF_NUMBER.match(tok):
+            continue
+        # A path must LOOK like one. Without this, any bare word matches.
+        if _REF_PATH.match(tok) and ('/' in tok or '.' in tok):
+            continue
+        return False
+    return True
+
+
+def decision_entry_label(heading_text: str) -> str:
+    """How a finding NAMES this entry — its id, else its date, else ''.
+
+    '' means the heading is prose, not a decision entry.
+    """
+    ident = _DECISION_ID.search(heading_text)
+    if ident:
+        return ident.group(1)
+    when = _ISO_DATE.search(heading_text)
+    return when.group(0) if when else ''
+
+
+def decision_files(cfg: PmConfig) -> list[Path]:
+    """Every DECISIONS.md in the ACTIVE tree (archived logs predate the schema)."""
+    if not cfg.roadmap.is_dir():
+        return []
+    return sorted(p for p in cfg.roadmap.rglob(DECISION_FILE_NAME)
+                  if p.is_file() and ARCHIVE_DIR_NAME not in p.parts)
+
+
+def decision_entries(path: Path) -> list[DecisionEntry]:
+    """The decision entries in one log, in document order."""
+    try:
+        lines = _split(_read(path))
+    except (OSError, UnicodeDecodeError):
+        return []
+    starts: list[tuple[int, str]] = []
+    for i, raw in enumerate(lines):
+        m = _DECISION_HEADING.match(raw.rstrip('\r'))
+        if m:
+            label = decision_entry_label(m.group(1))
+            if label:
+                starts.append((i, label))
+    out: list[DecisionEntry] = []
+    for i, eid in starts:
+        stop = len(lines)
+        for j in range(i + 1, len(lines)):
+            if _DECISION_SECTION_END.match(lines[j].rstrip('\r')):
+                stop = j
+                break
+        fields: list[tuple[str, str]] = []
+        for raw in lines[i + 1:stop]:
+            fm = _DECISION_FIELD.match(raw.rstrip('\r'))
+            if fm:
+                fields.append((fm.group(1), fm.group(2)))
+        out.append(DecisionEntry(eid=eid, line=i + 1,
+                                 header=lines[i].rstrip('\r'),
+                                 fields=tuple(fields)))
+    return out
+
+
+def decision_violations(path: Path) -> list[tuple[int, str, str]]:
+    """[(ordinal, entry-id, what failed)] for one log, in document order.
+
+    The ordinal is the entry's 0-based position, which is what a `path:N`
+    grandfather caps: a log is append-only, so "the first N" is stable.
+    """
+    out: list[tuple[int, str, str]] = []
+    for n, entry in enumerate(decision_entries(path)):
+        def bad(msg: str, _n: int = n, _e: str = entry.eid) -> None:
+            out.append((_n, _e, msg))
+
+        head = _DECISION_HEADER.match(entry.header)
+        if head is None:
+            bad('header is not `## <ID> — <ISO date> — <title>` (em dashes)')
+        else:
+            try:
+                date.fromisoformat(head.group(1))
+            except ValueError:
+                bad(f'header date {head.group(1)!r} is not a real date')
+            if len(head.group(2)) > DECISION_TITLE_MAX:
+                bad(f'title is {len(head.group(2))} chars, over the '
+                    f'{DECISION_TITLE_MAX}-char cap')
+
+        names = [n_ for n_, _ in entry.fields]
+        at = -1
+        for want in DECISION_FIELDS:
+            if want not in names:
+                why = (' — a decision with no rejected alternative is a '
+                       'description') if want == 'Over' else ''
+                bad(f'missing **{want}:**{why}')
+                continue
+            here = names.index(want)
+            if here <= at:
+                bad(f'**{want}:** is out of order — the fields read '
+                    f'{", ".join(DECISION_FIELDS)}')
+            at = max(at, here)
+        for name, value in entry.fields:
+            if name in DECISION_FIELDS and len(value) > DECISION_VALUE_MAX:
+                bad(f'**{name}:** is {len(value)} chars, over the '
+                    f'{DECISION_VALUE_MAX}-char cap')
+        for name, value in entry.fields:
+            if name != 'Evidence':
+                continue
+            if not decision_evidence_is_reference(value):
+                bad('**Evidence:** is prose, not a reference — want a commit '
+                    'hash, a path[:line], or a number')
+            break
+    return out
+
+
+def parse_decision_grandfather(specs: tuple[str, ...]) -> tuple[tuple[str, int | None], ...]:
+    """`"<path>"` (whole log) or `"<path>:<N>"` (its first N entries only).
+
+    The capped form is the point: a grandfathered log keeps its legacy entries
+    and every entry ADDED past the cap still has to conform, so the log stops
+    growing badly without anyone rewriting old text. A malformed spec is a
+    CONFIG error (exit 2), never a finding.
+    """
+    out: list[tuple[str, int | None]] = []
+    seen: set[str] = set()
+    for spec in specs:
+        raw, cap = spec.strip(), None
+        head, sep, tail = raw.rpartition(':')
+        if sep and tail.isdigit():
+            raw, cap = head.strip(), int(tail)
+            if cap < 1:
+                raise ConfigError(
+                    f'[pm] decision_grandfather {spec!r} caps 0 entries — drop '
+                    f'the ":0" to exempt nothing at all')
+        elif sep:
+            raise ConfigError(
+                f'[pm] decision_grandfather {spec!r} has a ":" but no entry '
+                f'count — write "<path>" or "<path>:<N>"')
+        key = raw.replace('\\', '/')
+        while key.startswith('./'):
+            key = key[2:]
+        if not key:
+            raise ConfigError(f'[pm] decision_grandfather {spec!r} names no path')
+        if not key.endswith(DECISION_FILE_NAME):
+            raise ConfigError(
+                f'[pm] decision_grandfather {spec!r} does not name a '
+                f'{DECISION_FILE_NAME} — the ledger exempts logs, not directories')
+        if key in seen:
+            raise ConfigError(
+                f'[pm] decision_grandfather names {key} twice — one entry per log')
+        seen.add(key)
+        out.append((key, cap))
+    return tuple(out)
+
+
+def decision_relkey(cfg: PmConfig, path: Path) -> str:
+    """The repo-relative, forward-slashed key a grandfather spec is matched on."""
+    return cfg.rel(path).replace('\\', '/')

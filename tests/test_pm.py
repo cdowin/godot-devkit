@@ -324,6 +324,187 @@ class DriftGate(unittest.TestCase):
             self.assertIn('names no grain', out)
             self.assertNotIn('README', out)
 
+    # --- D12: the decision-record schema ---------------------------------
+    # ENTRY is the conforming record from the schema; the mutations below each
+    # break exactly one field of it, so a failure names the rule, not the fixture.
+    ENTRY = (
+        '## D3 — 2026-08-28 — the sweep verb belongs to the combat layer\n'
+        '**Chose:** move `sweep_tracked_contributions` to `combat_behavior.gd`\n'
+        '**Over:** leaving it on `entity_behavior.gd`, the lean root\n'
+        '**Because:** all three consumers extend the combat layer\n'
+        '**Evidence:** `64e89ad5b`\n')
+
+    @staticmethod
+    def _log(root: Path, body: str) -> Path:
+        path = root / 'pm' / 'roadmap' / '0.1-demo' / 'DECISIONS.md'
+        path.write_text('# Demo — decisions\n\nAppend-only.\n\n' + body,
+                        encoding='utf-8')
+        return path
+
+    def test_d12_a_conforming_entry_passes_and_a_missing_over_does_not(self):
+        # The same file green then red: `Over:` is the load-bearing field, so
+        # dropping only that line must flip the gate AND name the field.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+            log.write_text(log.read_text(encoding='utf-8').replace(
+                '**Over:** leaving it on `entity_behavior.gd`, the lean root\n', ''),
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('missing **Over:**', out)
+            self.assertIn('D3', out)
+
+    def test_d12_evidence_must_be_a_reference_not_prose(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, self.ENTRY.replace(
+                '**Evidence:** `64e89ad5b`',
+                '**Evidence:** we discussed it and agreed'))
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('is prose, not a reference', out)
+
+            # A path:line and a bare hash are both references; the same entry
+            # passes the moment the sentence becomes one.
+            log.write_text(log.read_text(encoding='utf-8').replace(
+                '**Evidence:** we discussed it and agreed',
+                '**Evidence:** `systems/combat/combat_behavior.gd:214`'),
+                encoding='utf-8')
+            self.assertEqual(run_gate(root)[0], 0)
+
+    def test_d12_an_over_length_field_fails(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, self.ENTRY.replace(
+                'all three consumers extend the combat layer', 'x' * 201))
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('over the 200-char cap', out)
+
+    def test_d12_sees_an_entry_whose_id_follows_the_date(self):
+        # The blind spot that would have shipped: a log writing the id AFTER
+        # the date reads as prose to an opens-with-an-id test, and 28 real logs
+        # in one consumer are written that way. Silence here is rule 4's sin.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, '## 2026-08-24 — D1: the plural API is the sibling\n\n'
+                            'Prose, no fields at all.\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('header is not', out)
+            self.assertIn('missing **Chose:**', out)
+
+    def test_d12_a_prose_heading_is_not_an_entry(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            self._log(root, '## The through-line, if you read nothing else\n\n'
+                            'A log may have a preamble.\n\n' + self.ENTRY)
+            self.assertEqual(run_gate(root)[0], 0)
+
+    def test_d12_a_grandfathered_log_passes_and_the_ledger_size_is_reported(self):
+        rel = 'pm/roadmap/0.1-demo/DECISIONS.md'
+        legacy = '## M1 — a legacy entry conforming to none of this\n\nProse.\n\n'
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            log = self._log(root, legacy)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+
+            # Listed, and the same tree is green — with the ledger's size on
+            # stdout, so an exemption is visible rather than silently permanent.
+            (root / 'devkit.toml').write_text(
+                f'[pm]\nchecks = ["D12"]\ndecision_grandfather = ["{rel}"]\n',
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('D12 grandfather: 1 decision log(s) exempt', out)
+            self.assertIn('may only shrink', out)
+
+            # The CAPPED form is the point of the ledger: legacy entries stay
+            # exempt while an entry ADDED past the cap still has to conform.
+            (root / 'devkit.toml').write_text(
+                f'[pm]\nchecks = ["D12"]\ndecision_grandfather = ["{rel}:1"]\n',
+                encoding='utf-8')
+            self.assertEqual(run_gate(root)[0], 0)
+            log.write_text(log.read_text(encoding='utf-8') + '\n' + self.ENTRY,
+                           encoding='utf-8')
+            self.assertEqual(run_gate(root)[0], 0)
+            log.write_text(log.read_text(encoding='utf-8').replace(
+                '**Over:** leaving it on `entity_behavior.gd`, the lean root\n', ''),
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('missing **Over:**', out)
+
+    def test_d12_the_ledger_may_only_shrink(self):
+        rel = 'pm/roadmap/0.1-demo/DECISIONS.md'
+        with tree(story_statuses=('todo',)) as root:
+            # An exemption that suppresses nothing has done its job and must go,
+            # or the ledger becomes permanent by inattention.
+            (root / 'devkit.toml').write_text(
+                f'[pm]\nchecks = ["D12"]\ndecision_grandfather = ["{rel}"]\n',
+                encoding='utf-8')
+            self._log(root, self.ENTRY)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('every entry conforms', out)
+
+            # A cap reaching past the end of the log is a claim the file no
+            # longer supports.
+            (root / 'devkit.toml').write_text(
+                f'[pm]\nchecks = ["D12"]\ndecision_grandfather = ["{rel}:9"]\n',
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('lower the cap', out)
+
+            # A ledger line naming a log that does not exist.
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n'
+                'decision_grandfather = ["pm/roadmap/gone/DECISIONS.md"]\n',
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('no such log exists', out)
+
+    def test_d12_scanning_no_decision_log_is_loud(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1)
+            self.assertIn('scanned nothing', out)
+
+    def test_d12_is_silent_when_not_enabled(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._log(root, '## M1 — nothing here conforms\n\nProse.\n')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('D12', out)
+
+    def test_d12_a_malformed_ledger_spec_is_a_config_error(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D12"]\n'
+                'decision_grandfather = ["pm/roadmap/0.1-demo"]\n',
+                encoding='utf-8')
+            # Exit 2, never 1: a config typo is not a finding.
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            with self.assertRaises(model.ConfigError):
+                model.load()
+
     def test_a_disabled_rule_does_not_fire(self):
         # `[pm] checks` is the knob. This fixture trips D2 AND D5, so turning
         # D2 off must silence D2's message specifically while D5 still fires —
