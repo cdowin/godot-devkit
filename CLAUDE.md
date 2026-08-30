@@ -88,9 +88,11 @@ hand-roll an incantation.** `make help` lists every target. If the check you nee
 a target, **add the target**, then run it — apparatus that lives in one agent's context
 is apparatus that gets rebuilt.
 
-- Behavior gate: `make smoke` — every READ subcommand against the live consumer
-  checkouts, censuses compared against independent counts. The consumers ARE the read
-  fixtures. Read-only, and it fails if it leaves either checkout dirty.
+- Behavior gate: `make smoke` — `check all`, `autoloads`, `scene`, `refs`, `pm status`,
+  `pm validate` and `check pm` against the live consumer checkouts, censuses compared
+  against independent counts. The consumers ARE the read fixtures. Read-only, and it
+  fails if it leaves either checkout dirty. A read verb it does NOT cover (`orphans`,
+  `scene-diff`, `tiles`, `pm list`, `pm get`) is proven by the suite alone.
 - Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
   exactly rather than being re-derived; `make test` runs them too.
 - **Write verbs NEVER run against a live consumer checkout.** Copy the file (or the tree) to scratch first. A smoke run that mutates `~/workspace/nullbound` or `~/workspace/trail` is a broken smoke run, not a thorough one — the consumers are shipping game repos with their own dirty-tree gates.

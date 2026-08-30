@@ -36,7 +36,7 @@ help:
 	@echo '  make matrix      the suite on every claimed interpreter ($(PY_MATRIX))'
 	@echo '  make fuzz        the committed seeded harnesses (differential + replay)'
 	@echo '  make gates       godot-devkit check all, on this repo'
-	@echo '  make smoke       every verb against the live consumer checkouts (read-only)'
+	@echo '  make smoke       check all + autoloads/scene/refs/pm on the consumers (read-only)'
 	@echo
 	@echo '  make precommit   gates + test           the per-change gate'
 	@echo '  make milestone   gates + matrix + smoke  the full gate, and what CI runs'

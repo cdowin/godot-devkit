@@ -50,6 +50,7 @@ checks = [
 # tree keeps generated execution lists and is small enough for `pm sync` to be
 # cheap, so the gate holds the view to the tree. A project whose lists go stale
 # on ordinary work should leave it off and reach for `pm sync --check`.
-# No grandfather ledger of any kind, in either direction. The tree was scaffolded
-# after the schemas existed, so every entry conforms and every document is inside
-# its cap. An empty debt ledger is the state the ratchets are aiming at.
+# Nothing else is set. The prose ratchets, their six line caps and their three
+# grandfather ledgers were deleted in 0.15.0, and every key they read is now
+# named at exit 2 by `check pm` — so this file declares scope and roster, and
+# says nothing about the length of anybody's markdown.

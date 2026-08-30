@@ -355,8 +355,10 @@ make milestone   # gates + matrix + smoke — the full gate, and what CI runs
 ```
 
 `make matrix` runs the suite on every claimed interpreter and reports which one failed; `make fuzz`
-runs the seeded differential + replay harnesses alone; `make smoke` runs every READ verb against the
-live consumer checkouts, read-only, and fails if it leaves either dirty. Write verbs NEVER run against
+runs the seeded differential + replay harnesses alone; `make smoke` runs `check all`, `autoloads`,
+`scene`, `refs`, `pm status`, `pm validate` and `check pm` against the live consumer checkouts,
+compares each printed census against an independent count, and fails if it leaves either dirty.
+`orphans`, `scene-diff`, `tiles`, `pm list` and `pm get` are NOT in it. Write verbs NEVER run against
 a consumer checkout. Tests needing a Godot repo skip cleanly when none is present; the hermetic
 fixtures under `tests/fixtures/` always run.
 
