@@ -28,3 +28,15 @@ no-op for scripted re-runs, keeping hard-rule-3 idempotence available on request
 the unconditional no-op (hides typos), and refusing even under `--force` (breaks retry loops).
 Flagged for Chris's end-of-run review: would have asked? NO — it follows the refuse-rather-than-
 mangle doctrine directly.
+
+## D3 — 2026-08-30 — Milestone work branches like the consumers do - main is merge-only here too
+
+Chris's call, mid-milestone. Devkit's codified flow was work-on-main (`devkit.toml`'s D9 comment,
+CLAUDE.md self-hosting, 0.15.0 built that way), and the orchestrator followed it without surfacing
+the divergence from the consumers' branch-per-milestone SDLC — the toolkit that writes the SDLC
+should live the same one. Ten local commits were moved to `milestone/0.16.0-hardening-and-reach`
+before anything was pushed (no history rewrite; main restored to origin/main). Close = merge-commit
+to main + tag. New feature `branch-discipline` encodes it: opt-in rule D10 (a `building`
+milestone's `branch:` must not be the `[repo_hygiene] mainline`), devkit turns it on for itself,
+and CLAUDE.md/devkit.toml stop describing the old flow. Rejected: leaving devkit on-main as a
+single-maintainer carve-out — the carve-out is exactly how the divergence went unnoticed.
