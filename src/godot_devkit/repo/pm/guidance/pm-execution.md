@@ -7,60 +7,54 @@ paths:
      Do NOT edit: the next install overwrites it (and refuses if you have).
      Project-specific SDLC — branching, versioning, release ceremony, dispatch,
      who reviews what — belongs in your OWN rules, not here. This file carries
-     only the loop the `pm` CLI itself enforces. -->
+     only what the `pm` CLI does. -->
 
 # Execution loop — claim to close
 
-Six steps, in order. `godot-devkit pm` writes the `status:` line; `godot-devkit
-check pm` reports a tree whose statuses contradict each other.
+`godot-devkit pm` writes a `status:` line. `godot-devkit check pm` reports a tree
+whose statuses contradict each other. Neither has an opinion about which state may
+follow which — the ORDER below is a shape that works, not something the tool enforces.
 
-**Verify→flip is one action.** The failure this exists to prevent is code that was
-verified while its status never moved — the tree and the work disagreeing. Do not
-batch flips at the end; move the status the moment its precondition holds.
+**Verify→flip is one action.** The failure worth avoiding is code that was verified
+while its status never moved — the tree and the work disagreeing. Move the status when
+it becomes true, rather than batching flips at the end.
 
-1. **Claim.** `pm story wip <id>` when you begin editing files for a story. Set
-   `owner:` to your agent name in the same edit. (A no-build doc/decision story may
-   go `pm story review <id>` straight from `todo` — the sanctioned no-`wip` edge.)
-2. **Commit atomically.** One logical unit per commit. The story stays `wip` — you
-   do not advance it further. There is no `story done` verb.
-3. **The story moves to review when its work is ready to be reviewed.**
-   `pm story review <id>`. Fixes land in place; no re-review. `review` is the story's
-   terminal — it goes no further on its own.
-4. **Close the feature.** `pm feature done <id> --review-record <path>` sets the feature's
-   status and touches nothing else. Add `--cascade` to also move that feature's stories
-   at `review` to `done` in the same run. Either way it prints the stories it did not
-   touch.
+1. **Claim.** `pm story wip <id>` when you begin editing files for a story, and set
+   `owner:` in the same edit (`pm set <id> owner <name>`).
+2. **Commit atomically.** One logical unit per commit.
+3. **Ready for review.** `pm story review <id>`.
+4. **Close the feature.** `pm feature done <id> --review-record <path>` sets the
+   feature's status and **touches nothing else**. Add `--cascade` to also move that
+   feature's stories at `review` to `done` in the same run. Either way it prints the
+   stories it did not touch.
+5. **Move `status:` with the CLI, not an editor.** It rewrites one line and preserves
+   every other byte, including the file's line endings. Creation too: `pm new
+   milestone|feature|story|bug` scaffolds to the schema.
+6. **Leave evidence at close.** One terse block at the grain that closed — below.
 
-**WHO performs steps 3 and 4 is your project's call, and your own rules must say.** The
-two live answers are "the builder flips its own work to review" and "the orchestrator
-flips it after verifying against git" — the tool permits either and has no opinion. What
-it does NOT permit is a story reaching `done` any other way; see below.
-5. **Move `status:` with the CLI, not an editor.** It writes one line and touches
-   nothing else — no line endings, no adjacent fields. Creation too:
-   `pm new milestone|feature|story|bug` scaffolds to the schema.
-6. **Leave evidence at close.** One terse block at the grain that closed. See below.
+**WHO performs steps 3 and 4 is your project's call, and your own rules must say.**
+The two live answers are "the builder flips its own work to review" and "the
+orchestrator flips it after verifying against git". The tool permits either.
 
 ## What the CLI refuses, and what it merely reports
 
-It refuses facts about the input, and reports everything else while doing what it
-was asked:
+It refuses facts about the INPUT. Everything else it reports, while doing what it was
+asked:
 
-- **The status you ASK for is checked; the one already in the file is not.** `butterfly` is
-  not a story status, so that is an error naming the set. `wombat` sitting in the file is
-  just what it says now: `pm story review <id>` prints `wombat -> review` and repairs it.
-  That is the same drift `check pm` reports, so the tool that reports it can also fix it.
-- **`--review-record <path>` naming no file is refused.** Stamping a pointer to
-  nothing is the drift `check pm` D1 reports. There is no floor under it beyond
-  "the file is there" — how much the reviewer needed to write is their call.
-- **A refused close changes nothing.** The check runs before any write, so a refusal
-  leaves `feature.md` byte-identical — never a stale `reviewed:` stamp.
+- **The status you ASK for is checked; the one in the file is not.** `butterfly` is not
+  a story status — that is an error naming the set. `wombat` sitting in the file is
+  simply what it says now, so `pm story review <id>` prints `wombat -> review` and
+  repairs it. That is the same drift `check pm` D4 reports.
+- **`--review-record <path>` naming no file is refused**, whole: no stamp, no story
+  touched. A pointer resolving to nothing is what `check pm` D1 reports. There is no
+  bar beyond "the file is there".
 - **`pm feature review` and `pm milestone done` REPORT, never refuse.** Stories not at
-  review, features not done: the verb names them and does what it was asked. What the
-  tree is left holding is D3/D5's question, and it is asked of the tree.
-- **`pm feature done` touches no story file without `--cascade`.**
+  review, features not done — the verb names them and does what it was asked. What the
+  tree is then left holding is D3/D5's question, asked of the tree.
+- **Malformed frontmatter is refused**, because a file with no `---` block has nowhere
+  to put the field.
 
-Every command is idempotent: running it twice is a no-op the second time. Exit codes
-are `0` ok, `1` refused, `2` usage or config error.
+Every command is idempotent. Exit codes: `0` ok, `1` refused, `2` usage or config error.
 
 ## Step 6 — close evidence
 
@@ -81,21 +75,19 @@ story tallies; `git log` gives history. **Do not hand-maintain a story list in a
 feature file, or a feature list in a milestone file** — that is a second scoreboard
 and it will lie.
 
-**Format: declarations, not narrative.** `bug: X → filed <id>`. `finding: Y → feature
-banner`. Link the hash and stop.
-
 ## Keeping the tree honest
 
 - `pm status [<milestone>]` — the whole tree, grouped by `phase:`. Never hand-copy a
   tally out of it.
-- `pm list [--status …] [--owner …] [--milestone …]` — one tab-separated row per
-  story, filtered. `pm list --status wip,review,blocked` is "what is open right now"
-  where `pm status` is "what is everything doing".
-- `pm validate` — structural + referential integrity: ids match paths, parentage is
-  consistent, `depends_on`/`consumed_by` resolve, the feature graph is acyclic. A ref
-  into a milestone no longer in the tree is UNVERIFIABLE, not a failure.
-- `check pm` — status drift, and the same integrity rules, as a gate.
-- `pm vocabulary --json` — the graph itself, if you write your own checks.
+- `pm list [--status …] [--owner …] [--milestone …]` — one tab-separated row per story,
+  filtered. `pm list --status wip,review,blocked` is "what is open right now" where
+  `pm status` is "what is everything doing".
+- `pm validate` — ids match paths, parentage is consistent, `depends_on`/`consumed_by`
+  resolve, the feature graph is acyclic. A ref into a milestone no longer in the tree
+  is UNVERIFIABLE, not a failure.
+- `check pm` — status drift and those same integrity rules, as a gate.
+- `pm vocabulary [--json]` — the closed state set per grain kind, and the rule ids
+  `[pm] checks` may name. Read it after a devkit pin bump.
 
 Run the gate in your per-change gate set. A PM tree is only worth what it can be
 trusted to say.

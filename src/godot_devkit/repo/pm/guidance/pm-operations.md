@@ -56,14 +56,20 @@ make this project responsible for the rest.
 
 ## Status vocabularies
 
+CLOSED sets, listed in reading order. Any state in a grain's own set is reachable
+directly — nothing constrains which may follow which, and `pm vocabulary --json` prints
+these plus the rule ids `[pm] checks` may name, which is what to read after a pin bump.
+
 | Grain | States |
 |---|---|
-| Milestone | `planning` → `ready` → `building` → `done` |
-| Feature | `planning` → `ready` → `building` → `review` → `done` |
-| Story | `todo` → `wip` → `review` (→ `done` only via the feature cascade), `blocked` from any |
-| Bug | project-defined; `open` initially |
+| Milestone | `planning` `ready` `building` `done` |
+| Feature | `planning` `ready` `building` `review` `done` |
+| Story | `todo` `wip` `review` `done` `blocked` |
+| Bug | `open` `fixed` `closed` (override with `[pm] bug_states`) |
 
-Movement is the `pm` CLI's job, not yours — see the auto-loaded `pm-execution` rule.
+A status outside its set is a `check pm` D4 finding, on every grain kind including
+bugs. Move a status with the `pm` CLI rather than an editor — see the auto-loaded
+`pm-execution` rule for why, and for what the verbs refuse.
 
 ## Decomposing work
 
