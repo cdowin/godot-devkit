@@ -79,6 +79,12 @@ AGENTS = ('.claude/agents/verification-reviewer.md',
           '.claude/agents/verification-builder.md')
 HOOKS = ('tools/hooks/cc-commit-pathspec.sh',
          'tools/hooks/cc-godot-sandbox.sh',
+         'tools/hooks/cc-stop-gate.sh',
+         'tools/hooks/cc-write-confine.sh',
+         'tools/hooks/pre-push',
+         'tools/hooks/prepare-commit-msg',
+         'tools/dev/agent-worktree.sh',
+         'tools/dev/checks/doctor.sh',
          'tools/setup-hooks.sh')
 DESTINATIONS = {'install-ci': (WORKFLOW,),
                 'install-agents': AGENTS,
@@ -329,17 +335,52 @@ def test_the_workflow_runs_the_projects_full_gate_and_says_so():
 
 # --- install-hooks: canonical, and STANDALONE ---------------------------------
 def test_the_hooks_carry_no_project_name_and_source_no_library():
-    """The whole divergence between the two forked copies was a project-name
-    prefix on one helper. One neutral name, defined where it is used: a hook
-    that `source`s a library a fresh repo does not have fails OPEN."""
+    """The bulk of the divergence between the two forked copies was a
+    project-name prefix on a shared library and its env var. One neutral name,
+    defined where it is used: a hook that `source`s a library a fresh repo
+    does not have fails OPEN, so the corpus ships every helper INLINE and the
+    shared scope library ships as no file at all."""
     with repo() as root:
         assert run('install-hooks')[0] == 0
         for rel in HOOKS:
             body = (root / rel).read_text(encoding='utf-8')
-            for banned in ('trail_', 'TRAIL_', 'nullbound', '_scope.sh'):
+            for banned in ('trail_', 'TRAIL_', 'nullbound', 'NULLBOUND',
+                           '_scope.sh', 'source "'):
                 assert banned not in body, f'{rel} carries {banned!r}'
         for rel in HOOKS[:2]:
             assert 'hook_json_field() {' in (
+                root / rel).read_text(encoding='utf-8'), rel
+
+
+CONFIG_HEADED = ('tools/hooks/cc-stop-gate.sh',
+                 'tools/hooks/pre-push',
+                 'tools/hooks/prepare-commit-msg',
+                 'tools/dev/agent-worktree.sh',
+                 'tools/dev/checks/doctor.sh')
+
+
+def test_the_corpus_files_carry_an_editable_config_header():
+    """Per-project variation is a config header the repo edits AFTER install,
+    when the file is its own — never a fork of the source. The header marker
+    is the contract; a rewrite that drops it drops the whole parameterization
+    story."""
+    with repo() as root:
+        assert run('install-hooks')[0] == 0
+        for rel in CONFIG_HEADED:
+            body = (root / rel).read_text(encoding='utf-8')
+            assert 'project config (yours to edit after install' in body, rel
+        # The agent-context contract is one marker + one env var, spelled the
+        # same in every file that reads it — a hook and the worktree tool
+        # disagreeing on the marker name silently de-scopes the hook.
+        for rel in ('tools/hooks/cc-stop-gate.sh', 'tools/hooks/pre-push',
+                    'tools/hooks/prepare-commit-msg',
+                    'tools/dev/agent-worktree.sh'):
+            assert 'SCOPE_MARKER=".agent-scope"' in (
+                root / rel).read_text(encoding='utf-8'), rel
+        for rel in ('tools/hooks/cc-stop-gate.sh', 'tools/hooks/pre-push',
+                    'tools/hooks/prepare-commit-msg',
+                    'tools/hooks/cc-write-confine.sh'):
+            assert 'DEVKIT_AGENT_SCOPE' in (
                 root / rel).read_text(encoding='utf-8'), rel
 
 
@@ -388,6 +429,13 @@ def test_setup_hooks_arms_every_cc_hook_by_glob():
                               capture_output=True, text=True)
         assert done.returncode == 0, done.stderr
         for rel in (*HOOKS[:2], 'tools/hooks/cc-invented-later.sh'):
+            assert os.access(root / rel, os.X_OK), rel
+        # The whole corpus is armed, not just the cc-* glob: the classic git
+        # hooks (skipped by core.hooksPath in silence when unexecutable) and
+        # the by-path tools.
+        for rel in ('tools/hooks/pre-push', 'tools/hooks/prepare-commit-msg',
+                    'tools/dev/agent-worktree.sh',
+                    'tools/dev/checks/doctor.sh'):
             assert os.access(root / rel, os.X_OK), rel
         hooks_path = subprocess.run(
             ['git', 'config', 'core.hooksPath'], cwd=root,

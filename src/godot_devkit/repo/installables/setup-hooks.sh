@@ -25,6 +25,9 @@ git config core.hooksPath "$HOOKS_PATH"
 # have to be edited every time one is added.
 chmod +x "$HOOKS_PATH"/pre-commit "$HOOKS_PATH"/pre-push "$HOOKS_PATH"/prepare-commit-msg 2>/dev/null || true
 chmod +x "$HOOKS_PATH"/cc-*.sh 2>/dev/null || true
+# The non-hook halves of the installed corpus, invoked by path rather than by
+# git — same silent-skip risk if a checkout drops the exec bit.
+chmod +x tools/dev/agent-worktree.sh tools/dev/checks/doctor.sh 2>/dev/null || true
 
 echo "OK: git core.hooksPath → $HOOKS_PATH"
 # List the active hook entry points (exclude the _*.sh sourced libraries) via a

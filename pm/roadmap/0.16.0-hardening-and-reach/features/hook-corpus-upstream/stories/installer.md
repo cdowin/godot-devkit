@@ -3,7 +3,7 @@ id: 0.16.0/hook-corpus-upstream/installer
 feature: 0.16.0/hook-corpus-upstream
 milestone: "0.16.0"
 name: install-hooks ships the corpus; proven against real payloads in a temp repo
-status: wip
+status: review
 owner:
 estimate:
 depends_on: []

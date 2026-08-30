@@ -3,7 +3,7 @@ id: 0.16.0/hook-corpus-upstream/survey-and-generalize
 feature: 0.16.0/hook-corpus-upstream
 milestone: "0.16.0"
 name: Diff the six duplicated hooks across consumers; one generic source each
-status: wip
+status: review
 owner:
 estimate:
 depends_on: []

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# prepare-commit-msg — tracked git hook (active via core.hooksPath=tools/hooks).
+#
+# Cheap win: auto-append the Co-Authored-By trailer to AGENT commits so no
+# agent (or the orchestrator) types it by hand. AGENT-CONTEXT ONLY — detected
+# via the worktree scope marker or the DEVKIT_AGENT_SCOPE env. It MUST NEVER
+# stamp the human's own trunk-tree commits. Idempotent: skips if the trailer is
+# already present.
+#
+# git passes: $1 = path to the commit-message file, $2 = message source
+# (message|template|merge|squash|commit), $3 = commit SHA (amend/-c).
+set -eu
+
+# --- project config (yours to edit after install — the file is your repo's) --
+# The canonical trailer. Point it at the model line your agents use; if the
+# same directive also lives in your CLAUDE.md / agent prompts, move both
+# together.
+TRAILER="Co-Authored-By: Claude <noreply@anthropic.com>"
+# The per-agent worktree marker written by tools/dev/agent-worktree.sh.
+SCOPE_MARKER=".agent-scope"
+# -----------------------------------------------------------------------------
+
+# Agent-context predicate. INLINE, not sourced: an installed hook is a
+# standalone file, and `source` of a library the repo may lack fails the hook
+# instead of the check.
+is_agent_context() {
+	local root="${1:-}"
+	if [ -z "$root" ]; then
+		root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+	fi
+	[ -n "${DEVKIT_AGENT_SCOPE:-}" ] && return 0
+	[ -n "$root" ] && [ -f "${root}/${SCOPE_MARKER}" ]
+}
+
+MSG_FILE="$1"
+MSG_SOURCE="${2:-}"
+
+# Agent-context gate. The trunk tree (orchestrator/human) is never stamped.
+is_agent_context || exit 0
+
+# Don't touch merge/squash auto-messages (their bodies aren't agent-authored).
+# A `commit` source (amend / -c) IS intentionally stamped — an agent amending
+# its own commit should keep the trailer; the dedup below prevents a double.
+case "$MSG_SOURCE" in
+	merge|squash) exit 0 ;;
+esac
+
+# Idempotent: already trailered → nothing to do.
+if grep -qF "$TRAILER" "$MSG_FILE"; then
+	exit 0
+fi
+
+# Append the trailer, separated by a blank line from whatever precedes it.
+# A trailing newline keeps the file well-formed.
+{
+	echo ""
+	echo "$TRAILER"
+} >> "$MSG_FILE"
+
+exit 0

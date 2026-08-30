@@ -11,9 +11,17 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     measured that a rules file never reaches a subagent's spawn
                     context while its definition does, so a contract written as
                     a rule is a contract that arrives nowhere.
-    install-hooks   the shared-tree commit guard, the raw-engine-boot guard, and
-                    the script that arms them. Forked between two repos and
-                    drifting on a project-name prefix; canonical here.
+    install-hooks   the agent-workflow guard corpus: the Claude Code hooks
+                    (commit-pathspec, engine-boot sandbox, stop gate, write
+                    confinement), the git hooks (pre-push, prepare-commit-msg),
+                    the worktree tool that writes the scope marker the guards
+                    read, the toolchain doctor, and the script that arms them.
+                    Forked between two repos (~1,000 lines duplicated per repo,
+                    drifting on a project-name prefix and on which fixes each
+                    fork got); canonical here. Every installed file is
+                    STANDALONE — no sourcing of a library the repo may lack —
+                    and per-project variation is a small config header the
+                    repo edits after install, when the file is its own.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -60,6 +68,12 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     'install-hooks': (
         ('cc-commit-pathspec.sh', 'tools/hooks/cc-commit-pathspec.sh'),
         ('cc-godot-sandbox.sh', 'tools/hooks/cc-godot-sandbox.sh'),
+        ('cc-stop-gate.sh', 'tools/hooks/cc-stop-gate.sh'),
+        ('cc-write-confine.sh', 'tools/hooks/cc-write-confine.sh'),
+        ('pre-push', 'tools/hooks/pre-push'),
+        ('prepare-commit-msg', 'tools/hooks/prepare-commit-msg'),
+        ('agent-worktree.sh', 'tools/dev/agent-worktree.sh'),
+        ('doctor.sh', 'tools/dev/checks/doctor.sh'),
         ('setup-hooks.sh', 'tools/setup-hooks.sh'),
     ),
 }
@@ -73,9 +87,12 @@ install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
                 edits the workflow, which after the write is its own file.
 install-agents  the review and build contract, as AGENT DEFINITIONS under
                 .claude/agents/ — the one place a subagent actually reads.
-install-hooks   tools/hooks/cc-commit-pathspec.sh (a commit names its own
-                paths), tools/hooks/cc-godot-sandbox.sh (never a raw engine
-                boot), and tools/setup-hooks.sh, which arms them.
+install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
+                hooks (cc-commit-pathspec, cc-godot-sandbox, cc-stop-gate,
+                cc-write-confine), the git hooks (pre-push, prepare-commit-msg),
+                tools/dev/agent-worktree.sh, tools/dev/checks/doctor.sh, and
+                tools/setup-hooks.sh, which arms them. Each carries a small
+                `project config` header — yours to edit after install.
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
@@ -86,7 +103,10 @@ A destination that already exists and differs is refused, whole.
 _NEXT_STEP = {
     'install-hooks': 'run `bash tools/setup-hooks.sh` to point git at them and '
                      'set the exec bit — an unexecutable hook is skipped in '
-                     'silence.',
+                     'silence. Then review each file\'s `project config` '
+                     'header (gate commands, protected branches, trailer): '
+                     'the files are yours now, and the stock values assume '
+                     'the standard consumer Makefile.',
     'install-agents': 'these carry the review and build contract only: run '
                       'adversarial input, ship a test that failed against HEAD, '
                       'verify through the project\'s own gate targets. Your '
