@@ -14,7 +14,7 @@ and the feature together so a half-applied close cannot exist.
 Its companion is `godot-devkit check pm`, which imports the same predicates
 from model.py and makes an inconsistent END STATE loud.
 
-Exit codes: 0 ok (incl. idempotent no-op) · 1 precondition refused
+Exit codes: 0 ok (incl. idempotent no-op) · 1 findings
 · 2 usage / resolution error.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ USAGE = """usage: godot-devkit pm <command>
                                           (--cascade also closes that feature's
                                            stories that are at `review`; without
                                            it, no story file is touched)
-  milestone <status> <milestone-id>       (done refuses unless all features done)
+  milestone <status> <milestone-id>       (any state; reports features not done)
   status [<milestone>]
   list [--status <s>[,<s>…]] [--owner <name>] [--milestone <id>]
                                           (one tab-separated line per story:
@@ -799,8 +799,8 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
                 'transitions': 'there is no transition graph — any state in a '
                                'grain\'s own set is reachable directly, and '
                                '`check pm` reports an inconsistent END STATE',
-                'feature_done': '`pm feature done` also moves every story at '
-                                '`review` under that feature, in one write',
+                'feature_done': '`pm feature done --cascade` also moves every '
+                                'story at `review` under that feature',
             },
             'checks': list(model.KNOWN_CHECKS),
         }, indent=2))
@@ -810,9 +810,9 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
         print(f'{g:<{width}}  {" ".join(states)}')
     print()
     print('Any state in a grain\'s own set is reachable directly — there is no')
-    print('transition graph. `pm feature done` additionally moves every story at')
-    print('`review` under that feature. A tree whose statuses contradict each')
-    print('other is what `check pm` reports.')
+    print('transition graph. `pm feature done --cascade` additionally moves every')
+    print('story at `review` under that feature. A tree whose statuses contradict')
+    print('each other is what `check pm` reports.')
     print()
     print(f'rules  {" ".join(model.KNOWN_CHECKS)}')
     return 0
