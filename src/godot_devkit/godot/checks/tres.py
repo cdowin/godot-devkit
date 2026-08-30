@@ -32,9 +32,18 @@ def run() -> int:
     for rel in git_lines('ls-files', '*.tres', '*.tscn'):
         if rel.startswith(exclude):
             continue
+        try:
+            text = (root / rel).read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            # Tracked in the index but not readable on disk (partial checkout,
+            # mid-rebase). No evidence to scan — a censused, disclosed skip
+            # (rule 4), never a traceback and never a finding: a working-tree
+            # gap is not ref-format drift.
+            print(f'  UNVERIFIED  {rel} — tracked in git but not readable on '
+                  f'disk; not scanned')
+            continue
         checked += 1
-        for n, line in enumerate((root / rel).read_text(
-                encoding='utf-8', errors='replace').splitlines(), start=1):
+        for n, line in enumerate(text.splitlines(), start=1):
             if (line.startswith('[ext_resource ') and 'path="' in line
                     and 'uid="uid://' not in line):
                 print(f'  PATH-ONLY  {rel}:{n}:{line.strip()}')

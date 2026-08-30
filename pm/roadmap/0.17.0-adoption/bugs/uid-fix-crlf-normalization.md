@@ -2,7 +2,7 @@
 id: 0.17.0/bugs/uid-fix-crlf-normalization
 milestone: "0.17.0"
 name:
-status: open
+status: fixed
 caught_in: "0.17.0"
 fix_milestone:
 ---

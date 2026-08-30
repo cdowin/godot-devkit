@@ -42,21 +42,11 @@ committed floor beneath that one-time run is
 `test_the_corpus_separates_the_pre_fix_resolver`, which keeps a transcription
 of the rejected resolver in-tree and proves the corpus still reaches it.
 
-KNOWN FINDINGS (reported, deliberately not fixed here)
-Three live findings on HEAD, each held by a PIN test — a carve-out in a judge
-may not outlive its pin. When a pin FAILS, that bug is fixed: delete the pin
-and its flag together, so the property's full clause snaps back on.
-
-  1. `pm decide '0.1/..'` / `pm decide '0.1/.'` write a decisions.md through
-     traversal at exit 0 (the milestone's log, and a features/decisions.md in
-     a slot the schema does not have). Flag: `_DECIDE_CARVED_OUT`.
-  2. `pm milestone ready /etc/hosts` — any absolute milestone id — escapes as
-     `NotImplementedError` from `Path.glob` ("Non-relative patterns are
-     unsupported") instead of exit 2. Flag: `_MILESTONE_GLOB_CRASH_PINNED`.
-  3. `scene <verb> <over-long path> …` escapes as a raw `OSError`
-     (ENAMETOOLONG) instead of a refusal — the scene plane lacks the `_exists`
-     guard the pm plane grew for exactly this. Flag:
-     `_OVERLONG_SCENE_PATH_PINNED`.
+The three findings this harness caught on its first run (decide dot-segment
+traversal, the absolute-milestone-id NotImplementedError, the overlong scene
+path OSError) were pinned as known findings, fixed in 0.17.0, and their pins
+replaced by the explicit refusal tests at the bottom of this file — both
+properties now run at full strength with no judge carve-outs.
 """
 from __future__ import annotations
 
@@ -99,11 +89,6 @@ SEED = 20260830
 PM_CASES = 320
 SCENE_CASES = 320
 RETARGET_CASES = 100
-
-# Each flag dies with its known-finding pin — see the module docstring.
-_DECIDE_CARVED_OUT = True
-_MILESTONE_GLOB_CRASH_PINNED = True
-_OVERLONG_SCENE_PATH_PINNED = True
 
 
 # --- the mangler --------------------------------------------------------------
@@ -367,9 +352,6 @@ def _judge_pm(verb: str, argv: tuple[str, ...], ids: tuple[str, ...],
               outer: Path, roadmap: Path) -> str | None:
     where = f'{argv!r} -> code={code} delta={delta} out={out[:160]!r}'
     if escaped is not None:
-        if (_MILESTONE_GLOB_CRASH_PINNED and verb == 'milestone'
-                and isinstance(escaped, NotImplementedError) and not delta):
-            return None  # known finding 2 — held by its pin test
         return f'TRACEBACK {type(escaped).__name__}: {escaped!r} on {where}'
     if code not in (0, 1, 2):
         return f'EXIT CODE outside the contract on {where}'
@@ -384,7 +366,7 @@ def _judge_pm(verb: str, argv: tuple[str, ...], ids: tuple[str, ...],
                 return f'ESCAPED pm/roadmap/: {rel} on {where}'
             if not _KIND_OK[verb](Path(rel)):
                 return f'WRONG GRAIN KIND: {rel} on {where}'
-        if delta and not (verb == 'decide' and _DECIDE_CARVED_OUT):
+        if delta:
             for gid in ids:
                 if not _literal_segments(gid):
                     return f'NON-LITERAL ID ACCEPTED: {gid!r} on {where}'
@@ -474,12 +456,8 @@ def _named_file(argv: tuple[str, ...], root: Path) -> Path | None:
 
 
 def _judge_scene(argv, code, out, escaped, delta, outer, root) -> str | None:
-    import errno
     where = f'{argv!r} -> code={code} delta={delta} out={out[:160]!r}'
     if escaped is not None:
-        if (_OVERLONG_SCENE_PATH_PINNED and isinstance(escaped, OSError)
-                and escaped.errno == errno.ENAMETOOLONG and not delta):
-            return None  # known finding 3 — held by its pin test
         return f'TRACEBACK {type(escaped).__name__}: {escaped!r} on {where}'
     if code not in (0, 1, 2):
         return f'EXIT CODE outside the contract on {where}'
@@ -645,46 +623,72 @@ def test_the_corpus_separates_the_pre_fix_resolver():
                       'existing sibling grain — the blocker shape is gone')
 
 
-def test_known_finding_decide_traverses_dot_segments_pin():
-    """PIN of a live finding, not an endorsement — see the module docstring.
+def test_decide_refuses_dot_segment_traversal_without_writing():
+    """Replaced the known-finding pin (0.17.0 decide-dot-segment-traversal).
 
-    On HEAD, `pm decide` resolves '0.1/..' (the milestone dir, via
-    features/..) and '0.1/.' (features/ itself, a slot the schema does not
-    have) and writes a decisions.md there at exit 0. Reported upstream rather
-    than fixed here. While this reproduces, the containment property carves
-    decide out of the literal-segment clause. WHEN THIS TEST FAILS the bug is
-    fixed: delete this pin AND `_DECIDE_CARVED_OUT`, so decide rejoins the
-    clause and the carve-out cannot outlive its reason.
+    At the pinned HEAD, `pm decide '0.1/..'` wrote the MILESTONE's
+    decisions.md through `features/..` and `pm decide '0.1/.'` minted
+    `features/decisions.md` — a slot the schema does not have — both at
+    exit 0. The resolver now refuses the segment before the join.
     """
-    with _scratch(_build_pm) as (_, root):
+    with _scratch(_build_pm) as (outer, root):
         mdir = root / 'pm' / 'roadmap' / '0.1-demo'
-        code, out, escaped = _run(('pm', 'decide', '0.1/..', 'pin', 'probe'))
-        assert escaped is None
-        assert code == 0 and (mdir / 'decisions.md').is_file(), (code, out)
-        code, out, escaped = _run(('pm', 'decide', '0.1/.', 'pin', 'probe'))
-        assert escaped is None
-        assert code == 0 and (mdir / 'features' / 'decisions.md').is_file(), (
-            code, out)
+        base = _snap(outer)
+        for gid in ('0.1/..', '0.1/.', '0.1/..\\..'):
+            code, out, escaped = _run(('pm', 'decide', gid, 'pin', 'probe'))
+            assert escaped is None, (gid, escaped)
+            assert code == 2, (gid, code, out)
+        # Deeper spellings refuse on their own (story/bug) precondition —
+        # what matters is refusal WITHOUT a write, either exit code.
+        code, out, escaped = _run(('pm', 'decide', '0.1//', 'pin', 'probe'))
+        assert escaped is None and code in (1, 2), (code, out)
+        assert not (mdir / 'decisions.md').is_file()
+        assert not (mdir / 'features' / 'decisions.md').is_file()
+        assert _delta(base, _snap(outer)) == []
 
 
-def test_known_finding_absolute_milestone_id_crashes_pin():
-    """PIN of finding 2 (module docstring): an absolute milestone id reaches
-    `Path.glob` as a non-relative pattern and escapes as NotImplementedError —
-    the real CLI prints a traceback where exit 2 belongs. When this fails,
-    delete this pin AND `_MILESTONE_GLOB_CRASH_PINNED`."""
-    with _scratch(_build_pm):
-        code, _, escaped = _run(('pm', 'milestone', 'ready', '/etc/hosts'))
-        assert isinstance(escaped, NotImplementedError), (code, escaped)
+def test_absolute_milestone_id_is_refused_not_a_glob_crash():
+    """Replaced the known-finding pin (0.17.0 absolute-milestone-id-crash).
+
+    At the pinned HEAD an absolute milestone id reached `Path.glob` as a
+    non-relative pattern and escaped as NotImplementedError — a traceback
+    where exit 2 belongs. The resolver now refuses before the glob.
+    """
+    with _scratch(_build_pm) as (outer, _):
+        base = _snap(outer)
+        for mid in ('/etc/hosts', '/', '\\\\host\\share', 'a/b', '..'):
+            code, out, escaped = _run(('pm', 'milestone', 'ready', mid))
+            assert escaped is None, (mid, escaped)
+            assert code == 2, (mid, code, out)
+        assert _delta(base, _snap(outer)) == []
 
 
-def test_known_finding_overlong_scene_path_crashes_pin():
-    """PIN of finding 3 (module docstring): a scene file arg longer than
-    NAME_MAX escapes as a raw OSError (ENAMETOOLONG) — the pm plane grew
-    `_exists` for exactly this, the scene plane has not. When this fails,
-    delete this pin AND `_OVERLONG_SCENE_PATH_PINNED`."""
-    import errno
-    with _scratch(_build_scene):
-        argv = ('scene', 'set', 'x' * 300 + '.tscn', '.', 'text', '"x"')
-        code, _, escaped = _run(argv)
-        assert isinstance(escaped, OSError), (code, escaped)
-        assert escaped.errno == errno.ENAMETOOLONG, escaped
+def test_overlong_path_arguments_are_refused_across_the_scene_plane():
+    """Replaced the known-finding pin (0.17.0 overlong-scene-path-crash).
+
+    At the pinned HEAD a file argument longer than NAME_MAX escaped as a raw
+    OSError (ENAMETOOLONG) out of `Path.is_file` — the scene plane lacked the
+    exists/OSError guard the pm plane grew for exactly this. Every verb that
+    stats a caller-supplied path now refuses instead: the write verbs at
+    exit 2 ("no such file"), `refs --retarget` at exit 1 (its missing-target
+    refusal), and `scene add --instance` via its instance-target refusal.
+    """
+    overlong = 'x' * 300
+    with _scratch(_build_scene) as (outer, _):
+        base = _snap(outer)
+        refusals = (
+            (('scene', 'set', f'{overlong}.tscn', '.', 'text', '"x"'), 2),
+            (('scene', 'rm', f'{overlong}.tscn', 'Inner'), 2),
+            (('scene', 'canonicalize', f'{overlong}.tscn'), 2),
+            (('tiles', 'paint', f'{overlong}.tscn', '--layer', 'L',
+              '--region', '0,0,1,1', '--tile', '0/0,0'), 2),
+            (('refs', '--retarget', 'res://scripts/old_helper.gd',
+              f'res://{overlong}.gd'), 1),
+            (('scene', 'add', 'scenes/panel.tscn', '.', 'Inst',
+              '--instance', f'res://{overlong}.tscn'), 1),
+        )
+        for argv, want in refusals:
+            code, out, escaped = _run(argv)
+            assert escaped is None, (argv, escaped)
+            assert code == want, (argv, code, out)
+        assert _delta(base, _snap(outer)) == []
