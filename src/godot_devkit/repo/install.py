@@ -6,11 +6,16 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     Checkout, uv, `make milestone`. It carries no gate of its
                     own and no way to parameterize one: a project that wants
                     something else edits the file, which is now its file.
-    install-agents  the review and build contract, as AGENT DEFINITIONS under
+    install-agents  the review and build contract PLUS the base agent roster
+                    (architect, po, developer, reviewers, simplifier, the
+                    writers, pm-operator), as AGENT DEFINITIONS under
                     .claude/agents/. Deliberately not `.claude/rules/*`: it is
                     measured that a rules file never reaches a subagent's spawn
                     context while its definition does, so a contract written as
-                    a rule is a contract that arrives nowhere.
+                    a rule is a contract that arrives nowhere. The roster is
+                    generalized from the two consumers; per-file variation is a
+                    marked `Project config` section the repo edits after
+                    install, the same relationship the hook corpus has.
     install-hooks   the agent-workflow guard corpus: the Claude Code hooks
                     (commit-pathspec, engine-boot sandbox, stop gate, write
                     confinement), the git hooks (pre-push, prepare-commit-msg),
@@ -62,8 +67,24 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('ci-verify.yml', '.github/workflows/verify.yml'),
     ),
     'install-agents': (
+        # The verification pair first — the contract predates the roster and
+        # is the pair devkit itself self-hosts. Then the base roster: the
+        # generalized consumer agents, each with model/effort frontmatter
+        # (the tiering table in docs/AGENT_WORKFLOW.md) and a project-config
+        # section the consumer edits after install, hook-corpus style.
         ('verification-reviewer.md', '.claude/agents/verification-reviewer.md'),
         ('verification-builder.md', '.claude/agents/verification-builder.md'),
+        ('architect.md', '.claude/agents/architect.md'),
+        ('po.md', '.claude/agents/po.md'),
+        ('developer.md', '.claude/agents/developer.md'),
+        ('reviewer.md', '.claude/agents/reviewer.md'),
+        ('milestone-reviewer.md', '.claude/agents/milestone-reviewer.md'),
+        ('simplifier.md', '.claude/agents/simplifier.md'),
+        ('test-writer.md', '.claude/agents/test-writer.md'),
+        ('tech-writer.md', '.claude/agents/tech-writer.md'),
+        ('changelog-writer.md', '.claude/agents/changelog-writer.md'),
+        ('doc-hygiene.md', '.claude/agents/doc-hygiene.md'),
+        ('pm-operator.md', '.claude/agents/pm-operator.md'),
     ),
     'install-hooks': (
         ('cc-commit-pathspec.sh', 'tools/hooks/cc-commit-pathspec.sh'),
@@ -85,8 +106,10 @@ USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
 install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
                 It ASSUMES that target is your full gate; a project without one
                 edits the workflow, which after the write is its own file.
-install-agents  the review and build contract, as AGENT DEFINITIONS under
-                .claude/agents/ — the one place a subagent actually reads.
+install-agents  the review/build contract plus the base agent roster, as
+                AGENT DEFINITIONS under .claude/agents/ — the one place a
+                subagent actually reads. Each roster file carries a
+                `Project config` section — yours to edit after install.
 install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 hooks (cc-commit-pathspec, cc-godot-sandbox, cc-stop-gate,
                 cc-write-confine), the git hooks (pre-push, prepare-commit-msg),
@@ -107,10 +130,14 @@ _NEXT_STEP = {
                      'header (gate commands, protected branches, trailer): '
                      'the files are yours now, and the stock values assume '
                      'the standard consumer Makefile.',
-    'install-agents': 'these carry the review and build contract only: run '
-                      'adversarial input, ship a test that failed against HEAD, '
-                      'verify through the project\'s own gate targets. Your '
-                      'project\'s agents, rosters and dispatch model stay yours.',
+    'install-agents': 'the verification pair carries the review and build '
+                      'contract; the rest are the base roster. Each roster '
+                      'file opens with a `Project config` section — edit its '
+                      'stock values (gate commands, pm tree, doc layout) to '
+                      'your spellings: the files are yours now. `model:` in '
+                      'the frontmatter is doing proven work; `effort:` is '
+                      'carried unverified. The SDLC these agents run is '
+                      'docs/AGENT_WORKFLOW.md in the godot-devkit repo.',
     'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
                   'target exists and is your full gate.',
 }

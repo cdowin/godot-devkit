@@ -54,6 +54,7 @@ to solve quietly. Tool modules own their behavior and expose `main(argv)` or `ru
 
 ## How we work
 
+- **The agent SDLC** — milestone branching, the dispatch loop, the model mix, and the roster `install-agents` ships — is [`SDLC.md`](SDLC.md), at the root because it is the operating contract, not auxiliary documentation.
 - **The README carries the why; this file carries the enforceable form.** If a change
   makes you want to edit this file, ask first whether it changed *doctrine* or merely
   *contents*. Contents belong in the tree, in `--help`, or in the README. A CLAUDE.md
