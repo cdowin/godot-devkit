@@ -25,9 +25,7 @@ defaults.
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 
 from godot_devkit.core import apply, walk
@@ -144,38 +142,6 @@ def case_variants(entries: dict[str, str], name: str) -> list[str]:
     """Names in `entries` that differ from `name` only by case (excluding it)."""
     low = name.lower()
     return sorted(n for n in entries if n != name and n.lower() == low)
-
-
-def git_rename(root: Path, old: Path, new: Path) -> tuple[bool, str]:
-    """Rename THROUGH git when git tracks `old`. (did it, why it could not).
-
-    `(False, '')` means git does not track the path — a plain rename is then the
-    whole job. `(False, why)` means git tracks it and refused, which the caller
-    must surface rather than paper over.
-
-    An `os.rename` is not enough. git's default on macOS is
-    `core.ignorecase = true`, and under it a case-only rename leaves the INDEX
-    holding the old spelling: the worktree says `decisions.md`, `git ls-files`
-    says `DECISIONS.md`, and an explicit `git add` of the new name stages
-    nothing. The migration goes green on the laptop, gets committed, and CI on
-    Linux checks out the OLD name — every renamed grain then goes missing
-    there. `git mv --force` is the one spelling that
-    moves the index with the file.
-    """
-    try:
-        tracked = subprocess.run(
-            ['git', 'ls-files', '--error-unmatch', '--', str(old)],
-            cwd=root, capture_output=True, text=True)
-        if tracked.returncode != 0:
-            return False, ''
-        moved = subprocess.run(['git', 'mv', '--force', '--', str(old), str(new)],
-                               cwd=root, capture_output=True, text=True)
-    except OSError:
-        return False, ''  # no git on PATH: the plain rename is all there is
-    if moved.returncode == 0:
-        return True, ''
-    return False, (moved.stderr.strip() or moved.stdout.strip()
-                   or f'git mv exited {moved.returncode}')
 
 
 @dataclass(frozen=True)

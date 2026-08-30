@@ -604,53 +604,31 @@ class Scaffolding(unittest.TestCase):
             for slot in model.MILESTONE_FILE_SLOTS:
                 self.assertTrue((mf.parent / slot).is_file(), slot)
 
-    def test_new_renames_a_case_variant_instead_of_writing_past_it(self):
-        # macOS is case-INSENSITIVE: open('decisions.md', 'w') next to an
-        # existing DECISIONS.md truncates it, so the migration would delete the
-        # content it exists to carry forward.
+    def test_a_legacy_uppercase_slot_is_refused_never_renamed_or_twinned(self):
+        # The uppercase->lowercase migration is COMPLETE in every consumer and
+        # the rename machinery is retired. The CHOSEN successor behavior: a
+        # leftover case variant is a refusal that names it and the canonical
+        # name — never a rename, and never a `decisions.md` minted beside
+        # `DECISIONS.md` (a twin on a case-sensitive filesystem, a truncation
+        # of the legacy bytes on an insensitive one).
         with tree(story_statuses=('todo',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             legacy = mdir / 'DECISIONS.md'
-            legacy.write_text(LEGACY_LOG, encoding='utf-8')
+            model.write_raw(legacy, LEGACY_LOG)
             code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 0, out)
-            self.assertIn('renamed DECISIONS.md ->', out)
-            self.assertEqual(model.dir_entries(mdir).get('decisions.md'), 'file')
-            self.assertNotIn('DECISIONS.md', model.dir_entries(mdir))
-            # Every legacy byte survives; only the instruction line is added,
-            # because a migration that leaves 60 hand-edits behind is the hand
-            # migration this scaffolder exists to avoid.
-            body = (mdir / 'decisions.md').read_text(encoding='utf-8')
-            self.assertTrue(body.endswith(LEGACY_LOG), body)
-            self.assertEqual(model.header_of(mdir / 'decisions.md'),
-                             model.SLOT_HEADER['decisions.md'])
-
-    def test_new_records_the_case_rename_in_git_not_only_the_worktree(self):
-        # git's default on macOS is `core.ignorecase = true`, and under it a
-        # worktree-only rename leaves the INDEX on the old spelling: the tree
-        # says decisions.md, `git ls-files` says DECISIONS.md, and an explicit
-        # `git add` of the new name stages NOTHING. The migration goes green on
-        # the laptop, gets committed, and CI on Linux checks out the old name —
-        # D13 then reports every renamed grain missing and D12 scans nothing.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = root / 'pm/roadmap/0.1-demo'
-            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
-            git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
-            subprocess.run([*git, 'add', '-A'], cwd=root, check=True)
-            subprocess.run([*git, 'commit', '-qm', 'fixture'], cwd=root, check=True)
-            tracked = subprocess.run(['git', 'ls-files'], cwd=root, check=True,
-                                     capture_output=True, text=True).stdout
-            self.assertIn('pm/roadmap/0.1-demo/DECISIONS.md', tracked)
-
-            code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 0, out)
-            tracked = subprocess.run(['git', 'ls-files'], cwd=root, check=True,
-                                     capture_output=True, text=True).stdout
-            self.assertIn('pm/roadmap/0.1-demo/decisions.md', tracked)
-            self.assertNotIn('DECISIONS.md', tracked)
-            self.assertEqual(model.dir_entries(mdir).get('decisions.md'), 'file')
-            self.assertTrue(model.read_raw(mdir / 'decisions.md')
-                            .endswith(LEGACY_LOG))
+            self.assertEqual(code, 1, out)
+            self.assertIn('REFUSED', out)
+            self.assertIn('DECISIONS.md', out)
+            self.assertIn('decisions.md', out)
+            self.assertIn('nothing was written', out)
+            entries = model.dir_entries(mdir)
+            # EXACT names: on macOS `exists('decisions.md')` answers True off
+            # the DECISIONS.md sitting there, so only a listing can prove no
+            # twin was minted and no rename ran.
+            self.assertEqual(entries.get('DECISIONS.md'), 'file')
+            self.assertNotIn('decisions.md', entries)
+            self.assertNotIn('handoff.md', entries)
+            self.assertEqual(model.read_raw(legacy), LEGACY_LOG)
 
     def test_new_refuses_a_file_slot_that_exists_as_a_directory(self):
         # Rule 6 reserves exit 1 for FINDINGS, so an uncaught IsADirectoryError
@@ -665,88 +643,6 @@ class Scaffolding(unittest.TestCase):
             self.assertIn('is a DIRECTORY', out)
             self.assertIn('nothing was written', out)
             self.assertFalse((mdir / 'handoff.md').exists())
-
-    # `nothing was written` is a claim about the WHOLE grain, and the slot order
-    # is milestone.md, handoff.md, decisions.md — so every refusal
-    # that keys on decisions.md is reached with handoff.md's rename already
-    # decided. Deciding inside the moving loop put that rename on disk and, via
-    # `git mv --force`, in the INDEX, where it rides out on the next commit
-    # under someone else's message.
-
-    def _committed_legacy_grain(self, root: Path, extra: dict) -> Path:
-        mdir = root / 'pm/roadmap/0.1-demo'
-        (mdir / 'HANDOFF.md').write_text('# legacy handoff\n', encoding='utf-8')
-        for name, body in extra.items():
-            if body is None:
-                (mdir / name).mkdir()
-            else:
-                model.write_raw(mdir / name, body)
-        git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
-        subprocess.run([*git, 'add', '-A'], cwd=root, check=True)
-        subprocess.run([*git, 'commit', '-qm', 'fixture'], cwd=root, check=True)
-        return mdir
-
-    def _porcelain(self, root: Path) -> str:
-        return subprocess.run(['git', 'status', '--porcelain'], cwd=root,
-                              check=True, capture_output=True, text=True).stdout
-
-    def test_new_refuses_a_dir_slot_without_staging_an_earlier_rename(self):
-        with tree(story_statuses=('todo',)) as root:
-            mdir = self._committed_legacy_grain(root, {'decisions.md': None})
-            code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('is a DIRECTORY', out)
-            self.assertIn('nothing was written', out)
-            # The claim, checked: nothing on disk and nothing in the index.
-            self.assertEqual(self._porcelain(root), '')
-            self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
-
-    @unittest.skipUnless(CASE_SENSITIVE_TMP,
-                         'two spellings of one name need a case-sensitive FS')
-    def test_new_refuses_two_spellings_without_staging_an_earlier_rename(self):
-        with tree(story_statuses=('todo',)) as root:
-            mdir = self._committed_legacy_grain(
-                root, {'DECISIONS.md': LEGACY_LOG, 'Decisions.md': LEGACY_LOG})
-            code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('2 spellings of decisions.md', out)
-            self.assertIn('nothing was written', out)
-            self.assertEqual(self._porcelain(root), '')
-            self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
-
-    def test_new_refuses_a_squatting_temp_rename_before_anything_moves(self):
-        # The temp name a case-only rename passes through, left behind by an
-        # interrupted run. It is in the directory LISTING, so it is decidable in
-        # the pre-pass — checked inside the moving loop instead, `handoff.md`
-        # was already on disk when the refusal claimed nothing was written.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = self._committed_legacy_grain(
-                root, {'DECISIONS.md': LEGACY_LOG,
-                       'DECISIONS.md.pm-case-rename': 'leftover\n'})
-            code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('is in the way of the DECISIONS.md -> decisions.md', out)
-            self.assertIn('nothing was written', out)
-            self.assertEqual(self._porcelain(root), '')
-            self.assertEqual(model.dir_entries(mdir).get('HANDOFF.md'), 'file')
-            # EXACT names: macOS answers `handoff.md` with the `HANDOFF.md`
-            # sitting there, so `exists()` cannot tell a rename from a no-op.
-            self.assertNotIn('handoff.md', model.dir_entries(mdir))
-
-    def test_new_refuses_a_case_VARIANT_that_is_a_directory(self):
-        # `case_variants` reads names, not kinds, so a variant DIRECTORY slipped
-        # past the exact-name refusal, got renamed, and was then opened as a
-        # file: `IsADirectoryError` with the move already done. Same refusal,
-        # every spelling, before anything moves.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = self._committed_legacy_grain(root, {'DECISIONS.md': None})
-            code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('DECISIONS.md is a DIRECTORY', out)
-            self.assertIn('nothing was written', out)
-            self.assertEqual(self._porcelain(root), '')
-            self.assertNotIn('decisions.md', model.dir_entries(mdir))
-            self.assertNotIn('handoff.md', model.dir_entries(mdir))
 
     def test_new_refuses_a_slot_it_cannot_prepend_a_header_to(self):
         # `_fill_header` guarded the READ and not the write, so a read-only
@@ -769,75 +665,6 @@ class Scaffolding(unittest.TestCase):
             # And it goes through once the mode allows it.
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             self.assertTrue((mdir / 'handoff.md').is_file())
-
-    def test_new_refuses_an_unwritable_grain_DIRECTORY_before_a_rename(self):
-        # A rename writes the DIRECTORY; the FILE's mode says nothing about it.
-        # The pre-pass checked only the file, so a 0555 grain holding a 0644
-        # DECISIONS.md sailed through it and came out of `os.rename` as a
-        # PermissionError traceback under exit 1 — the code this package
-        # reserves for findings.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = root / 'pm/roadmap/0.1-demo'
-            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
-            mdir.chmod(0o555)
-            try:
-                code, out = run_cli(root, 'new', 'milestone', '0.1')
-                self.assertEqual(code, 1, out)
-                self.assertNotIn('Traceback', out)
-                self.assertIn('DIRECTORY is not writable', out)
-                self.assertIn('nothing was written', out)
-                self.assertEqual(model.read_raw(mdir / 'DECISIONS.md'), LEGACY_LOG)
-            finally:
-                mdir.chmod(0o755)
-            # And it goes through once the mode allows it.
-            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
-            self.assertIn(LEGACY_LOG, model.read_raw(mdir / 'decisions.md'))
-
-    def test_a_rename_that_fails_HALFWAY_says_where_the_bytes_are(self):
-        # The two-step temp rename can fail on its second step, parking the log
-        # under a name no later run looks for. "The rename failed" would send an
-        # operator hunting for content that is sitting right there.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = root / 'pm/roadmap/0.1-demo'
-            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
-            real = Path.rename
-
-            def flaky(path: Path, target):
-                if Path(target).name == 'decisions.md':
-                    raise OSError(13, 'Permission denied')
-                return real(path, target)
-
-            with unittest.mock.patch.object(Path, 'rename', flaky):
-                code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertNotIn('Traceback', out)
-            self.assertIn('DECISIONS.md.pm-case-rename', out)
-            parked = mdir / 'DECISIONS.md.pm-case-rename'
-            self.assertEqual(model.read_raw(parked), LEGACY_LOG)
-            self.assertNotIn('nothing was written', out)
-
-    def test_a_refusal_behind_a_landed_rename_does_not_also_claim_nothing_moved(self):
-        # One sentence said BOTH "nothing was written" AND "1 earlier rename
-        # already landed". The NOTE half was the true one, so the inner half
-        # goes: each half now states only what became of its own file.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = root / 'pm/roadmap/0.1-demo'
-            (mdir / 'HANDOFF.md').write_text('# legacy handoff\n', encoding='utf-8')
-            model.write_raw(mdir / 'DECISIONS.md', LEGACY_LOG)
-            real = model.git_rename
-
-            def refuse(root_: Path, old: Path, new: Path):
-                if old.name == 'DECISIONS.md':
-                    return False, 'index.lock exists'
-                return real(root_, old, new)
-
-            with unittest.mock.patch.object(model, 'git_rename', refuse):
-                code, out = run_cli(root, 'new', 'milestone', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('already landed: HANDOFF.md -> handoff.md', out)
-            self.assertNotIn('nothing was written', out)
-            self.assertIn('its content is untouched, still at', out)
-            self.assertEqual(model.read_raw(mdir / 'DECISIONS.md'), LEGACY_LOG)
 
     def test_new_refuses_an_undecodable_template_before_the_first_write(self):
         # A latin-1 byte in a project's `template_dir` raised
@@ -959,20 +786,6 @@ class Scaffolding(unittest.TestCase):
                 self.assertEqual(model.header_of(mdir / slot), want, slot)
                 self.assertIn('# headerless',
                               (mdir / slot).read_text(encoding='utf-8'))
-
-    def test_new_renames_a_case_variant_of_a_shared_doc_without_minting_one(self):
-        # The migration this verb exists for: `DECISIONS.md` -> `decisions.md`
-        # with the bytes intact. Optional does not mean invisible.
-        with tree(story_statuses=('todo',)) as root:
-            mdir = root / 'pm/roadmap/0.1-demo'
-            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
-            legacy = f'{model.SLOT_HEADER["decisions.md"]}\n\n# legacy\n'
-            model.write_raw(mdir / 'DECISIONS.md', legacy)
-            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
-            entries = model.dir_entries(mdir)
-            self.assertEqual(entries.get('decisions.md'), 'file')
-            self.assertNotIn('DECISIONS.md', entries)
-            self.assertEqual(model.read_raw(mdir / 'decisions.md'), legacy)
 
     def test_a_name_the_filesystem_refuses_is_a_refusal_not_a_traceback(self):
         # The grain DIRECTORY was the last unguarded write: `gdir.mkdir` on a

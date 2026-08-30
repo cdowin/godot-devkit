@@ -24,11 +24,6 @@ from pathlib import Path
 from godot_devkit.core import apply
 from godot_devkit.repo.pm import model
 
-# The halfway name a case-only rename passes through on a case-INSENSITIVE
-# filesystem. Named once because two places need it: the mover, and the pre-pass
-# that refuses a leftover one before anything moves.
-TEMP_RENAME_SUFFIX = '{name}.pm-case-rename'
-
 # grain -> template filename. The shared docs are addressed by their SLOT name
 # minus the extension, so `decisions.md` is minted by `decisions.md` and there
 # is no mapping table to keep in sync.
@@ -95,68 +90,6 @@ class ScaffoldRefused(Exception):
     """The scaffolder cannot guarantee a correct result, so it did nothing."""
 
 
-def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> bool:
-    """`DECISIONS.md` -> `decisions.md`, recorded by GIT when git tracks it.
-    True when git moved it — so the rename is also STAGED — and False when the
-    temp rename did, which stages nothing at all.
-
-    Which one ran is the whole of the advice a later refusal can give. Telling
-    an operator to unstage a rename that only ever touched the worktree sends
-    them to a `git status` showing nothing, and unactionable advice on a refusal
-    is its own defect.
-
-    Two problems, one on each side of the filesystem. macOS is
-    case-INSENSITIVE, so the rename is a no-op there and `open(new)` would
-    truncate the existing file — the migration deleting the very content it
-    exists to carry forward. And git on macOS defaults to
-    `core.ignorecase = true`, under which a worktree-only rename leaves the
-    INDEX on the old spelling: clean on the laptop, and CI on Linux checks out
-    `DECISIONS.md` with every gate red. `git mv --force` fixes both at once.
-
-    Untracked, or no git: the two-step temp rename is a real rename on both
-    kinds of filesystem. Tracked and git refused: this REFUSES, printing the
-    command that finishes the job, because a half-done rename is the one
-    outcome worse than none.
-
-    Every failure out of here is a ScaffoldRefused naming WHERE THE BYTES ARE.
-    The two `rename` calls sat outside any handler, so a grain directory the
-    process cannot write (its FILES being writable proves nothing about it)
-    came out as a `PermissionError` traceback under exit 1 — the one code this
-    package reserves for findings. And the second call failing is worse than
-    the first: the log is then parked under a temp name that no later run looks
-    for, so a message saying only "the rename failed" leaves an operator
-    hunting for content that is sitting right there.
-    """
-    done, why = model.git_rename(cfg.root, old, new)
-    if done:
-        return True
-    if why:
-        raise ScaffoldRefused(
-            f'git tracks {cfg.rel(old)} and would not rename it to {new.name} '
-            f'({why}) — its content is untouched, still at {cfg.rel(old)}; run '
-            f'`git mv --force {cfg.rel(old)} {cfg.rel(new)}` yourself, then '
-            f're-run')
-    # The squatter this would trip over is refused in the pre-pass, where the
-    # directory listing already showed it — a refusal raised here has an earlier
-    # slot's rename behind it and is no longer the "nothing was written" it says.
-    tmp = old.with_name(TEMP_RENAME_SUFFIX.format(name=old.name))
-    try:
-        apply.raise_on_error(apply.move(old, tmp))
-    except OSError as err:
-        raise ScaffoldRefused(
-            f'{cfg.rel(old)} could not be renamed to {new.name} ({err}); its '
-            f'content is untouched, still at {cfg.rel(old)}') from err
-    try:
-        apply.raise_on_error(apply.move(tmp, new))
-    except OSError as err:
-        raise ScaffoldRefused(
-            f'{cfg.rel(old)} was renamed halfway to {new.name} and the second '
-            f'step failed ({err}) — ITS CONTENT IS NOW AT {cfg.rel(tmp)}, '
-            f'where nothing looks for it; finish the move with `mv '
-            f'{cfg.rel(tmp)} {cfg.rel(new)}`, then re-run') from err
-    return False
-
-
 def _header_wanted(path: Path, slot: str) -> str:
     """The instruction line this doc is MISSING, or '' when it needs none.
 
@@ -174,10 +107,10 @@ def _header_wanted(path: Path, slot: str) -> str:
 def _fill_header(path: Path, slot: str, actions: list[tuple[str, Path]]) -> None:
     """Prepend the slot's instruction line to a doc that predates it.
 
-    The renamed legacy logs are the reason: 60 of them in one consumer, and a
-    migration that leaves 60 hand-edits behind is the hand-migration this
-    scaffolder exists to avoid. The prepend is additive and reported — no
-    existing byte moves except by one line.
+    Legacy logs are the reason: 60 of them in one consumer, and a migration
+    that leaves 60 hand-edits behind is the hand-migration this scaffolder
+    exists to avoid. The prepend is additive and reported — no existing byte
+    moves except by one line.
 
     Whether it CAN be written is settled in the pre-pass, not here: a
     `PermissionError` out of this call used to escape as a traceback with the
@@ -199,11 +132,11 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
              values: dict[str, str]) -> list[tuple[str, Path]]:
     """Fill one grain dir's REQUIRED slots. IDEMPOTENT, and never clobbers: an
     existing slot is left byte-identical, and a slot present under another CASE
-    is renamed rather than written past.
+    is REFUSED rather than written past.
 
-    This is how a consumer migrates. A tree with 22 milestones and 136 features
-    cannot be hand-shaped, and a scaffolder that refuses on an existing grain
-    would leave hand-shaping as the only path.
+    Re-running over an existing grain fills only the gaps. A tree with 22
+    milestones and 136 features cannot be hand-shaped, and a scaffolder that
+    refuses on an existing grain would leave hand-shaping as the only path.
 
     WHAT IT DOES NOT MINT: a shared doc, or a directory. `handoff.md`,
     `decisions.md` and `review.md` appear on first write — a decisions.md the
@@ -215,10 +148,9 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     a parent on the way to a write, so `stories/` appears when the first story
     is written into it.
 
-    They stay MANAGED, which is the other half: an existing `DECISIONS.md` is
-    still renamed to the canonical case and an existing doc that lost its
-    instruction header still gets it back. Migration is what this verb is for;
-    creation-from-nothing is what it stops doing.
+    They stay MANAGED, which is the other half: an existing doc that lost its
+    instruction header still gets it back. Creation-from-nothing is what it
+    stops doing.
     """
     file_slots = (model.MILESTONE_FILE_SLOTS if kind == 'milestone'
                   else model.FEATURE_FILE_SLOTS)
@@ -240,76 +172,47 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
             f'written; shorten the id or name, or make {cfg.rel(gdir.parent)}/ '
             f'writable, and re-run') from err
 
-    # Resolve every case-variant FIRST, so the writes after it see the
-    # canonical names.
+    # Every refusal for the WHOLE grain is raised before the first slot write.
+    # Rule 3: a write verb refuses whole or not at all.
     #
-    # Every refusal for the WHOLE grain is raised before the first rename runs.
-    # Deciding slot-by-slot inside the moving loop meant an earlier slot's
-    # rename was already on disk — and, through `git mv --force`, already in the
-    # INDEX — while the message said "nothing was written". Rule 3: a write verb
-    # refuses whole or not at all. The staged half is the worse harm of the two:
-    # on a shared tree it rides out on the next `git commit` under someone
-    # else's message, which is exactly what a consumer's commit hook exists to
-    # stop.
+    # A slot present under another CASE is refused, never written past and
+    # never renamed — the uppercase->lowercase migration is complete in every
+    # consumer, so a variant here is a leftover to name, not work to finish.
+    # Writing the canonical name anyway would mint a twin beside it on a
+    # case-sensitive filesystem and TRUNCATE the legacy bytes on an
+    # insensitive one; both are worse than stopping.
     entries = model.dir_entries(gdir)
-    renames: list[tuple[str, str]] = []
     for slot in managed:
         variants = model.case_variants(entries, slot)
-        # A DIRECTORY or a SYMLINK is refused under EVERY spelling, not only the
-        # canonical one. `case_variants` reads names, not kinds, so a variant
-        # DIRECTORY was queued as a rename, renamed, and then opened as a file:
-        # an `IsADirectoryError` traceback with the move already done. And a
-        # symlinked slot is a slot whose bytes live somewhere else — following
-        # it would let a verb asked to fill THIS grain rewrite a file outside it.
-        for name in (slot, *variants):
-            if name not in entries:
-                continue
-            # The LINK before the kind. `dir_entries` classifies with
-            # `is_dir()`, which follows the link, so a symlink pointing at a
-            # directory read as 'dir' and got the DIRECTORY refusal: correctly
-            # refused, but told to "move the directory aside" when the thing in
-            # the grain is a link and the directory is somewhere else entirely.
-            if (gdir / name).is_symlink():
-                raise ScaffoldRefused(
-                    f'{cfg.rel(gdir / name)} is a SYMLINK to '
-                    f'{os.readlink(gdir / name)} — the scaffolder writes inside '
-                    f'the grain it was asked to fill and does not follow a link '
-                    f'out of it; nothing was written; replace it with the real '
-                    f'file')
-            if entries[name] == 'dir':
-                # Refused, not crashed: exit 1 is reserved for findings, so a
-                # traceback out of here reads to a consumer's hook as "drift
-                # found".
-                raise ScaffoldRefused(
-                    f'{cfg.rel(gdir / name)} is a DIRECTORY and {slot} is a '
-                    f'file slot — nothing was written; move it aside')
-        if entries.get(slot) == 'file':
-            continue
-        if len(variants) > 1:
-            raise ScaffoldRefused(
-                f'{cfg.rel(gdir)}/ holds {len(variants)} spellings of {slot} '
-                f'({", ".join(variants)}) — nothing was written; keep one')
         if variants:
-            squat = TEMP_RENAME_SUFFIX.format(name=variants[0])
-            if squat in entries:
-                raise ScaffoldRefused(
-                    f'{cfg.rel(gdir / squat)} is in the way of the '
-                    f'{variants[0]} -> {slot} rename — nothing was written; '
-                    f'move it aside')
-            renames.append((variants[0], slot))
-
-    # A rename writes the DIRECTORY, not the file, and the two permissions are
-    # independent: a 0555 grain dir holding a 0644 decisions.md passes every
-    # per-file check below and then fails inside `os.rename`. Directory
-    # writability is trivially inspectable, so it is inspected here, where a
-    # refusal is still whole-or-nothing.
-    if renames and not os.access(gdir, os.W_OK):
-        under = ', '.join(f'{variant} -> {slot}' for variant, slot in renames)
-        raise ScaffoldRefused(
-            f'{cfg.rel(gdir)}/ needs {len(renames)} case rename(s) ({under}) '
-            f'and the DIRECTORY is not writable — a writable file in it proves '
-            f'nothing, the rename writes the directory; nothing was written, '
-            f'make it writable and re-run')
+            raise ScaffoldRefused(
+                f'{cfg.rel(gdir)}/ holds {", ".join(variants)} where this '
+                f'package expects {slot} — nothing was written; rename it '
+                f'yourself (`git mv --force {cfg.rel(gdir / variants[0])} '
+                f'{cfg.rel(gdir / slot)}`), then re-run')
+        if slot not in entries:
+            continue
+        # The LINK before the kind. `dir_entries` classifies with `is_dir()`,
+        # which follows the link, so a symlink pointing at a directory read as
+        # 'dir' and got the DIRECTORY refusal: correctly refused, but told to
+        # "move the directory aside" when the thing in the grain is a link and
+        # the directory is somewhere else entirely. A symlinked slot is a slot
+        # whose bytes live somewhere else — following it would let a verb
+        # asked to fill THIS grain rewrite a file outside it.
+        if (gdir / slot).is_symlink():
+            raise ScaffoldRefused(
+                f'{cfg.rel(gdir / slot)} is a SYMLINK to '
+                f'{os.readlink(gdir / slot)} — the scaffolder writes inside '
+                f'the grain it was asked to fill and does not follow a link '
+                f'out of it; nothing was written; replace it with the real '
+                f'file')
+        if entries[slot] == 'dir':
+            # Refused, not crashed: exit 1 is reserved for findings, so a
+            # traceback out of here reads to a consumer's hook as "drift
+            # found".
+            raise ScaffoldRefused(
+                f'{cfg.rel(gdir / slot)} is a DIRECTORY and {slot} is a '
+                f'file slot — nothing was written; move it aside')
 
     # What the fill phase will DO, decided here too, because a refusal raised
     # after the first `write` is a refusal that already changed the tree. Both
@@ -318,10 +221,9 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     # as `UnicodeDecodeError` two slots in), and every existing doc due a header
     # prepend is proved writable (a read-only legacy `handoff.md` used to escape
     # as `PermissionError` with the remaining slots never created).
-    by_slot = {slot: variant for variant, slot in renames}
     bodies: dict[str, str] = {}
     for slot in file_slots:
-        if entries.get(by_slot.get(slot, slot)) == 'file':
+        if entries.get(slot) == 'file':
             continue
         name = model.SLOT_TEMPLATE[slot]
         try:
@@ -333,8 +235,8 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                               f'it there to fall back to the packaged one'
                               if cfg.template_dir else '')) from err
     for slot in managed:
-        now = gdir / by_slot.get(slot, slot)
-        if slot in bodies or entries.get(now.name) != 'file':
+        now = gdir / slot
+        if slot in bodies or entries.get(slot) != 'file':
             continue
         want = _header_wanted(now, slot)
         if want and not os.access(now, os.W_OK):
@@ -342,35 +244,6 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                 f'{cfg.rel(now)} is missing its header line and is not '
                 f'writable — nothing was written; make it writable, or prepend '
                 f'the line yourself: {want!r}')
-
-    landed: list[tuple[str, str, bool]] = []
-    for variant, slot in renames:
-        try:
-            staged = _rename_case(cfg, gdir / variant, gdir / slot)
-        except ScaffoldRefused as err:
-            # git refusing one `mv --force` cannot be inspected for in advance.
-            # What CAN be guaranteed is that the message stops claiming nothing
-            # happened once something has — and says WHICH half happened: an
-            # operator told to unstage a worktree-only rename goes to a `git
-            # status` that shows nothing and cannot act on the advice at all.
-            #
-            # `_rename_case` states what became of the file IT was moving, and
-            # this adds what became of the ones before it. Neither half claims
-            # anything about the other, which is how the composed sentence stops
-            # saying "nothing was written" and "1 earlier rename already landed"
-            # at the same time.
-            if not landed:
-                raise
-            moved = ', '.join(
-                f'{v} -> {s} ({"staged by git mv" if g else "on disk, staged nowhere"})'
-                for v, s, g in landed)
-            raise ScaffoldRefused(
-                f'{err} — NOTE: {len(landed)} earlier rename(s) in '
-                f'{cfg.rel(gdir)}/ already landed: {moved}; undo or finish '
-                f'them before re-running') from err
-        landed.append((variant, slot, staged))
-        actions.append((f'renamed {variant} ->', gdir / slot))
-    entries = model.dir_entries(gdir)
 
     # Whatever is left is a real write, and a real write can still fail on
     # something no listing could show (a disk that fills, a mode changed under
