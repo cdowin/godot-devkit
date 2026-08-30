@@ -55,9 +55,9 @@ USAGE = """usage: godot-devkit pm <command>
   validate                                (structural + referential integrity)
   install-skills [--force] [--diff]       (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
-  new milestone <ver> [<name...>]         (scaffold the grain file. No directory
-                                           is minted, and a shared doc appears on
-                                           first WRITE. Idempotent — re-run to fill)
+  new milestone <ver> [<name...>]         (scaffold the grain file in its own dir;
+                                           no sub-slot dirs, and a shared doc appears
+                                           on first WRITE. Idempotent — re-run to fill)
   new feature <milestone> <slug> [<name...>]
   new story <feature-id> <slug> <name...>
   new bug <milestone> <slug>

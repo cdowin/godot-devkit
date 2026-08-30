@@ -2741,6 +2741,29 @@ class YourMilestoneDirectoryIsYours(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
+    def test_the_help_line_matches_what_new_milestone_actually_mints(self):
+        # The help said "No directory is minted" while the verb minted three and
+        # printed one of them. A claim in shipped output is a claim under test.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            root.mkdir()
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                code, out = run_cli(root, '--help')
+                self.assertEqual(code, 0, out)
+                self.assertIn('in its own dir', out)
+                self.assertIn('no sub-slot dirs', out)
+                self.assertNotIn('No directory\n', out)
+                self.assertEqual(run_cli(root, 'new', 'milestone', '0.9', 'N')[0], 0)
+                mdir = root / 'pm/roadmap/0.9-n'
+                # its OWN dir exists, and holds no sub-slot dir
+                self.assertTrue(mdir.is_dir())
+                self.assertEqual([p.name for p in mdir.iterdir() if p.is_dir()], [])
+            finally:
+                os.chdir(previous)
+
 
 class BugStatusVocabulary(unittest.TestCase):
     """D4 — a bug's status, held to the vocabulary like every other grain's.

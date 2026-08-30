@@ -34,7 +34,7 @@ SRC = REPO_ROOT / 'src' / 'godot_devkit'
 # Both allowlists assert an EMPTY offender list, so both pass perfectly on a
 # census of zero files — which is what a moved/renamed SRC produces. Rule 4 says
 # a gate scanning nothing must say so, and these are gates. The floor is well
-# under the real count (30 at the time of writing) and well over zero: it is
+# under the real count (48 at the time of writing) and well over zero: it is
 # there to catch a broken root, not to track the module count.
 MIN_SOURCES = 20
 
