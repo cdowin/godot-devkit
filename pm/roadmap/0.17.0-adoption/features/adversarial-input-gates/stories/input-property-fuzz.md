@@ -3,7 +3,7 @@ id: 0.17.0/adversarial-input-gates/input-property-fuzz
 feature: 0.17.0/adversarial-input-gates
 milestone: "0.17.0"
 name: Seeded property harness: no mangled grain id or verb input escapes its slot or refusal grammar
-status: wip
+status: review
 owner:
 depends_on: []
 ---

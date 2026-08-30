@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`make fuzz` grows a seeded adversarial-input property harness** — every pm grain id and every scene/retarget path either refuses byte-identically or writes only inside its named slot, over 12 hostile input classes with anti-degenerate censuses. Proven to catch the v0.16.0 traversal blocker against the pre-fix code; found and pinned three live findings on arrival (`pm decide` dot-segment traversal, absolute-milestone-id crash, over-long scene-path crash — filed as 0.17.0 bugs). SDLC §5 now requires every new input surface to ship a refusal matrix plus adversarial cases against its own docstring claims, mirrored into the verification-builder contract. (tests/test_fuzz_inputs.py, SDLC.md, repo/installables/verification-builder.md)
+
 ## v0.16.0 — 2026-08-30
 
 - **`pm decide` refuses a `--`-leading title word** — the retired four-field interface's flags were landing verbatim in the durable log at exit 0. (repo/pm/cli.py)
