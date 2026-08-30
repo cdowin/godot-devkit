@@ -89,9 +89,8 @@ banner`. Link the hash and stop.
 - `pm status [<milestone>]` — the single read for live status, grouped by `phase:`.
   Never hand-copy a tally out of it.
 - `pm validate` — structural + referential integrity: ids match paths, parentage is
-  consistent, `depends_on`/`consumed_by` resolve, the feature graph is acyclic and
-  phase-monotone. A ref into a milestone no longer in the tree is UNVERIFIABLE,
-  not a failure.
+  consistent, `depends_on`/`consumed_by` resolve, the feature graph is acyclic. A ref
+  into a milestone no longer in the tree is UNVERIFIABLE, not a failure.
 - `check pm` — status drift, and the same integrity rules, as a gate.
 - `pm vocabulary --json` — the graph itself, if you write your own checks.
 

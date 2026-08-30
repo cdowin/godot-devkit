@@ -541,8 +541,6 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(mf.read_text(encoding='utf-8'), before)
             for slot in model.MILESTONE_FILE_SLOTS:
                 self.assertTrue((mf.parent / slot).is_file(), slot)
-            for slot in model.MILESTONE_DIR_SLOTS:
-                self.assertTrue((mf.parent / slot).is_dir(), slot)
 
     def test_new_renames_a_case_variant_instead_of_writing_past_it(self):
         # macOS is case-INSENSITIVE: open('decisions.md', 'w') next to an
@@ -1417,16 +1415,6 @@ class Validate(unittest.TestCase):
             findings, _ = self._run(root)
             self.assertTrue(any('CYCLE' in f for f in findings), findings)
 
-    def test_v5_phase_monotone(self):
-        with tree() as root:
-            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
-            fdir = root / 'pm/roadmap/0.1-demo/features'
-            model.set_field(fdir / 'alpha/feature.md', 'phase', '1')
-            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
-            model.set_field(fdir / 'beta/feature.md', 'phase', '2')
-            findings, _ = self._run(root)
-            self.assertTrue(any('LATER phase' in f for f in findings), findings)
-
     def test_phase_monotone_is_satisfied_in_the_right_order(self):
         with tree() as root:
             run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
@@ -1755,26 +1743,46 @@ class NewRefusesUnsafeSlugs(unittest.TestCase):
                 run_cli(root, 'new', 'milestone', '../../oops', 'Name')[0], 1)
 
 
-class PhaseEdges(unittest.TestCase):
-    def test_a_numeric_phase_may_not_depend_on_an_unordered_one(self):
-        # `seam` means nothing blocks on it; sitting mid-chain contradicts that.
-        with tree() as root:
-            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
-            fdir = root / 'pm/roadmap/0.1-demo/features'
-            model.set_field(fdir / 'alpha/feature.md', 'phase', '2')
-            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
-            model.set_field(fdir / 'beta/feature.md', 'phase', 'seam')
-            from godot_devkit.repo.pm import validate
-            findings = validate.run(model.PmConfig(root=root))[0]
-            self.assertTrue(any('seam' in f for f in findings), findings)
+def _phased(root: Path, slug: str, phase: str, deps: list[str]) -> None:
+    """One feature under 0.1 with a `phase:` and a `depends_on:` list."""
+    write(root / f'pm/roadmap/0.1-demo/features/{slug}/feature.md',
+          {'id': f'0.1/{slug}', 'milestone': '"0.1"', 'name': slug.title(),
+           'status': 'planning', 'phase': phase,
+           'depends_on': '[' + ', '.join(f'"{d}"' for d in deps) + ']'})
 
-    def test_an_unphased_milestone_raises_no_phase_findings(self):
+
+class PhaseIsABucketNotAConstraint(unittest.TestCase):
+    """V5b is gone. A cycle is a fact; a bucket disagreeing with the graph is not.
+
+    "A feature may not depend on one in a LATER phase" fired on `seam` — a
+    vocabulary this tool invented, defined as neither blocking nor blocked, and
+    then reported for sitting in a dependency chain. `phase:` groups the board
+    for `pm status`; the dependency graph orders the work. They are allowed to
+    be two different readings of the same tree.
+    """
+
+    def test_a_numeric_phase_may_depend_on_a_LATER_one(self):
         with tree() as root:
-            run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')
-            fdir = root / 'pm/roadmap/0.1-demo/features'
-            model.set_field(fdir / 'alpha/feature.md', 'depends_on', '["0.1/beta"]')
-            from godot_devkit.repo.pm import validate
-            self.assertEqual(validate.run(model.PmConfig(root=root))[0], [])
+            _phased(root, 'alpha', '2', ['0.1/beta'])
+            _phased(root, 'beta', '5', [])
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 0, out)
+
+    def test_a_numeric_phase_may_depend_on_an_unordered_one(self):
+        with tree() as root:
+            _phased(root, 'alpha', '1', ['0.1/seamy'])
+            _phased(root, 'seamy', 'seam', [])
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 0, out)
+
+    def test_a_CYCLE_is_still_a_finding(self):
+        # V5a survives: a loop means no build order exists at all.
+        with tree() as root:
+            _phased(root, 'alpha', '1', ['0.1/beta'])
+            _phased(root, 'beta', '1', ['0.1/alpha'])
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 1, out)
+            self.assertIn('dependency CYCLE', out)
 
 
 class Templates(unittest.TestCase):
@@ -2123,7 +2131,7 @@ class Vocabulary(unittest.TestCase):
             self.assertEqual(code, 0, out)
             for grain in ('milestone', 'feature', 'story', 'bug'):
                 self.assertIn(grain, out)
-            self.assertIn('D13', out)
+            self.assertIn('D9', out)
             self.assertNotIn('->', out)
 
 
@@ -2341,164 +2349,94 @@ class ATemplateMintsWhateverItSays(unittest.TestCase):
 
 
 
-class Structure(unittest.TestCase):
-    """D13 — the canonical slots. Missing is drift AND extra is drift.
+class YourMilestoneDirectoryIsYours(unittest.TestCase):
+    """D13 is gone, both halves, and `pm new` mints no directory.
 
-    The extra half is the one that earns the rule. Every invented sibling in a
-    real tree (`plans/`, `findings/`, `AUDIT-REPORT.md`, `audit-prompt.md`,
-    `DELETED-SCENARIO-LEDGER.md`) exists because no slot was scaffolded AND
-    nothing flagged the invention; a missing-only check leaves all of them.
+    D13b — "extra slot" — FAILED your gate for keeping a file in your own
+    milestone directory. `plans/`, `findings/`, `AUDIT-REPORT.md`: those are a
+    project's own notes in a project's own tree, and a tracker with an opinion
+    about them is a tracker deciding what you may write down.
+
+    D13a — a grain dir with no grain file — was already reported twice over:
+    `orphan_dirs` says it (always on, never gated by `[pm] checks`) because a
+    dropped directory takes every descendant out of the scan, and V1 says a
+    grain file with no `id:`/`status:` is malformed. This pins BOTH so the
+    coverage cannot quietly leave with the rule.
+
+    And `pm new` no longer mints `features/ bugs/ design/ stories/`. Git does
+    not store an empty directory: across one consumer's tree that produced 158
+    `design/` dirs, 11 of which hold anything.
     """
 
-    TOML = '[pm]\nchecks = ["D13"]\n'
-    MDIR = 'pm/roadmap/0.1-demo'
-    FDIR = 'pm/roadmap/0.1-demo/features/alpha'
+    def test_your_own_files_in_your_own_milestone_dir_are_not_findings(self):
+        for name in ('plans', 'findings', 'AUDIT-REPORT.md',
+                     'DELETED-SCENARIO-LEDGER.md', 'design'):
+            with self.subTest(name=name), tree(story_statuses=('todo',)) as root:
+                target = root / 'pm/roadmap/0.1-demo' / name
+                if name.endswith('.md'):
+                    target.write_text('# notes\n', encoding='utf-8')
+                else:
+                    target.mkdir()
+                code, out = run_gate(root)
+                self.assertEqual(code, 0, out)
 
-    def _scaffolded(self, root: Path) -> None:
-        self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
-        self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
-
-    def test_a_scaffolded_tree_satisfies_the_rule(self):
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
+    def test_a_shared_doc_that_lost_its_header_is_not_a_finding(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'pm/roadmap/0.1-demo/decisions.md').write_text(
+                '# log\n\n## D1 — 2026-01-01 — a thing\n', encoding='utf-8')
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
-            self.assertIn('2 grain dir(s)', out)
 
-    def test_a_grain_dir_with_no_grain_file_is_still_reported(self):
-        # The only REQUIRED slot is the grain's own frontmatter file, and a dir
-        # without one is invisible to `feature_files` — so the missing half of
-        # D13 cannot reach it. The always-on orphan scan does, and that is what
-        # keeps this from being a narrowing: the case-variant test below covers
-        # D13's own missing branch, and this covers the outright-absent case.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
-            (root / self.FDIR / 'feature.md').unlink()
+    def test_a_missing_grain_file_is_STILL_reported_by_two_other_rules(self):
+        # The fold-in, proven. If this ever goes quiet, the D13a coverage left
+        # with the rule and the census is lying about what it scanned.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'pm/roadmap/0.2-scaffolded-by-hand').mkdir()
+            (root / 'pm/roadmap/0.1-demo/features/beta').mkdir()
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
+            self.assertIn('milestone dir with no milestone.md', out)
             self.assertIn('feature dir with no feature.md', out)
+            self.assertIn('SKIPPED', out)
 
-    def test_an_absent_shared_doc_is_not_drift(self):
-        # A shared doc is minted on FIRST WRITE, so its absence means nothing
-        # was recorded — a fact about the grain, not a finding. Requiring it is
-        # what put 204 empty files into one consumer's tree.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
-            for slot in model.MILESTONE_OPTIONAL_SLOTS:
-                self.assertFalse((root / self.MDIR / slot).exists(), slot)
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-    def test_a_shared_doc_that_EXISTS_still_has_to_carry_its_header(self):
-        # Optional does not mean unmanaged: the instruction line is the whole
-        # reason the file has a convention, and it is the one channel that
-        # reaches a dispatched agent.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
-            (root / self.MDIR / 'handoff.md').write_text(
-                '# a hand-made handoff\n', encoding='utf-8')
+    def test_a_grain_file_with_no_id_or_status_is_STILL_V1(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'pm/roadmap/0.1-demo/features/beta').mkdir()
+            (root / 'pm/roadmap/0.1-demo/features/beta/feature.md').write_text(
+                '---\nname: Beta\n---\n\nprose\n', encoding='utf-8')
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('no longer opens with its instruction line', out)
+            self.assertIn('missing id: or status:', out)
 
-    def test_handoff_md_is_milestone_only_and_extra_on_a_feature(self):
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
-            (root / self.FDIR / 'handoff.md').write_text('x\n', encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('carries handoff.md', out)
+    def test_the_rule_and_its_config_name_are_both_gone(self):
+        self.assertNotIn('D13', model.KNOWN_CHECKS)
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D13"]\n', encoding='utf-8')
+            self.assertEqual(run_gate(root)[0], 2)
 
-    def test_an_extra_slot_is_drift(self):
-        # The half that matters. Each of these is a real invention from a real
-        # consumer tree, and none of them would ever be reported by a
-        # missing-only structure check.
-        for name, is_dir in (('plans', True), ('findings', True),
-                             ('AUDIT-REPORT.md', False),
-                             ('DELETED-SCENARIO-LEDGER.md', False)):
-            with self.subTest(name=name):
-                with tree(feature_status='building',
-                          story_statuses=('todo',)) as root:
-                    (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-                    self._scaffolded(root)
-                    target = root / self.FDIR / name
-                    if is_dir:
-                        target.mkdir()
-                        (target / 'x.md').write_text('x\n', encoding='utf-8')
-                    else:
-                        target.write_text('x\n', encoding='utf-8')
-                    code, out = run_gate(root)
-                    self.assertEqual(code, 1, out)
-                    self.assertIn(f'carries {name}', out)
-                    self.assertIn('not a canonical slot', out)
-
-    def test_a_mangled_header_is_drift(self):
-        # The header is the ONE delivery channel with a 100% hit rate for a
-        # dispatched agent, so it has to be unrottable, not merely present once.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
-            log = root / self.FDIR / 'decisions.md'
-            log.write_text('# 0.1/alpha — decisions\n\nnotes\n', encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('no longer opens with its instruction line', out)
-            self.assertIn('godot-devkit pm decide', out)
-
-    def test_review_md_is_permitted_at_every_status_and_never_required(self):
-        # PERMITTED, never required, never minted. One consumer holds 103 of
-        # them, so forbidding it would report 103 findings about notes nobody
-        # asked for; requiring it would mint an empty file per grain, which is
-        # the sprawl `pm new` was making. Both halves are asserted, and at both
-        # statuses, because "extra is drift" is the half that earns D13.
-        for status in ('building', 'done'):
-            with self.subTest(status), tree(
-                    feature_status=status,
-                    story_statuses=('done' if status == 'done' else 'review',)) as root:
-                (root / 'devkit.toml').write_text(
-                    '[pm]\nchecks = ["D13"]\n', encoding='utf-8')
-                self._scaffolded(root)
-                # Not minted by the scaffolder, and its absence is not a finding.
-                self.assertFalse((root / self.FDIR / 'review.md').exists())
-                code, out = run_gate(root)
-                self.assertEqual(code, 0, out)
-                # And present, it is not reported as a non-canonical file either.
-                (root / self.FDIR / 'review.md').write_text(
-                    '# notes\n', encoding='utf-8')
-                code, out = run_gate(root)
-                self.assertEqual(code, 0, out)
-                self.assertNotIn('review.md', out)
-
-    def test_a_case_variant_is_both_missing_and_extra(self):
-        # `DECISIONS.md` vs `decisions.md`. macOS resolves one to the other and
-        # Linux does not, so existence is decided from a directory LISTING —
-        # otherwise the same tree is clean on a laptop and drifting in CI.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._scaffolded(root)
-            src = root / self.FDIR / 'feature.md'
-            body = src.read_text(encoding='utf-8')
-            src.rename(src.with_name('feature.tmp'))
-            (src.parent / 'feature.tmp').rename(src.with_name('FEATURE.MD'))
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('is missing feature.md', out)
-            self.assertIn('FEATURE.MD is the same slot in another case', out)
-            self.assertIn('carries FEATURE.MD', out)
-            self.assertEqual(
-                (root / self.FDIR / 'FEATURE.MD').read_text(encoding='utf-8'),
-                body)
-
-    def test_d13_is_silent_when_not_enabled(self):
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertNotIn('D13', out)
+    def test_new_mints_no_empty_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            root.mkdir()
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                self.assertEqual(run_cli(root, 'new', 'milestone', '0.1', 'M')[0], 0)
+                mdir = root / 'pm/roadmap/0.1-m'
+                self.assertEqual(sorted(p.name for p in mdir.iterdir()),
+                                 ['milestone.md'])
+                self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'f', 'F')[0], 0)
+                fdir = mdir / 'features' / 'f'
+                self.assertEqual(sorted(p.name for p in fdir.iterdir()),
+                                 ['feature.md'])
+                # ...and `stories/` appears when the first story goes into it.
+                self.assertEqual(
+                    run_cli(root, 'new', 'story', '0.1/f', 's0', 'S0')[0], 0)
+                self.assertTrue((fdir / 'stories' / 's0.md').is_file())
+            finally:
+                os.chdir(previous)
 
 
 class BugStatusVocabulary(unittest.TestCase):

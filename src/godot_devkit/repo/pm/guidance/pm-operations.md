@@ -81,9 +81,10 @@ Movement is the `pm` CLI's job, not yours — see the auto-loaded `pm-execution`
 
 A milestone big enough to need ordering stamps `phase:` on each feature (`0`, `1`, …,
 or `seam` for work that neither blocks nor is blocked). `pm status` then groups by
-bucket with a per-phase tally, and `pm validate` proves **phase-monotone**: no feature
-depends on one in a LATER phase. Small milestones omit the field and report as before.
-The phase is the bucket, never the status.
+bucket with a per-phase tally.
+Small milestones omit the field and report as before. The phase is the bucket, never
+the status — it groups the board, and the dependency graph orders the work; nothing
+requires the two readings to agree.
 
 ## Reading the tools
 
@@ -91,7 +92,7 @@ The phase is the bucket, never the status.
   using the same predicates the gate fails on. Never hand-copy a tally out of it into
   a doc; that is a second scoreboard and it will lie.
 - **`pm validate`** — ids match paths, parentage is consistent, refs resolve, the graph
-  is acyclic and phase-monotone. **UNVERIFIABLE** in its summary is not a failure: it
+  is acyclic. **UNVERIFIABLE** in its summary is not a failure: it
   counts refs into milestones no longer in the working tree, which is expected.
 - **`check pm`** — the same integrity rules plus status drift, as a gate. A failure
   names the file; fix it with the CLI, never with a `status:` edit.

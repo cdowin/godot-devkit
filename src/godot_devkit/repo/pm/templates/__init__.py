@@ -161,8 +161,8 @@ def _header_wanted(path: Path, slot: str) -> str:
     """The instruction line this doc is MISSING, or '' when it needs none.
 
     A file already opening with SOME known instruction line needs none, so a
-    future wording change can never stack two headers; D13 reports the mismatch
-    and a human decides.
+    future wording change can never stack two headers — a doc that has one is
+    left exactly as its author wrote it.
     """
     want = model.SLOT_HEADER.get(slot)
     if want is None:
@@ -205,11 +205,15 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     cannot be hand-shaped, and a scaffolder that refuses on an existing grain
     would leave hand-shaping as the only path.
 
-    WHAT IT DOES NOT DO IS MINT A SHARED DOC. `handoff.md`, `decisions.md` and
-    `review.md` are optional and appear on first write — a decisions.md the
-    moment `pm decide` records one, the other two when a human writes one.
-    Scaffolding them empty put 204 files and ~1,900 lines into one consumer's
-    tree, a quarter of it, minted by the verb that exists to stop sprawl.
+    WHAT IT DOES NOT MINT: a shared doc, or a directory. `handoff.md`,
+    `decisions.md` and `review.md` appear on first write — a decisions.md the
+    moment `pm decide` records one, the other two when a human writes one;
+    scaffolding them empty put 204 files and ~1,900 lines into one consumer's
+    tree, a quarter of it, minted by the verb that exists to stop sprawl. The
+    directory slots went the same way and worse: git stores no empty directory,
+    so 158 minted `design/` dirs left 11 with anything in them. `apply` creates
+    a parent on the way to a write, so `stories/` appears when the first story
+    is written into it.
 
     They stay MANAGED, which is the other half: an existing `DECISIONS.md` is
     still renamed to the canonical case and an existing doc that lost its
@@ -218,8 +222,6 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     """
     file_slots = (model.MILESTONE_FILE_SLOTS if kind == 'milestone'
                   else model.FEATURE_FILE_SLOTS)
-    dir_slots = (model.MILESTONE_DIR_SLOTS if kind == 'milestone'
-                 else model.FEATURE_DIR_SLOTS)
     # Renamed and header-repaired when PRESENT, never created when absent.
     managed = file_slots + (model.MILESTONE_OPTIONAL_SLOTS if kind == 'milestone'
                             else model.FEATURE_OPTIONAL_SLOTS)
@@ -381,11 +383,6 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                 actions.append(('created', gdir / slot))
             elif entries.get(slot) == 'file':
                 _fill_header(gdir / slot, slot, actions)
-        for slot in dir_slots:
-            if slot in entries:
-                continue
-            apply.raise_on_error(apply.make_dir(gdir / slot))
-            actions.append(('created', gdir / slot))
     except (OSError, UnicodeDecodeError) as err:
         did = '; '.join(f'{what} {cfg.rel(p)}' for what, p in actions)
         raise ScaffoldRefused(

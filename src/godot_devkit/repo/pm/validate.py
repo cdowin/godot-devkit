@@ -10,8 +10,8 @@ undrifted and still depend on a feature that does not exist.
     V3  parentage is consistent — a story's `feature:`/`milestone:` and a
         feature's `milestone:` name the grains that actually own them
     V4  `depends_on` / `consumed_by` refs resolve
-    V5  the feature dependency graph is acyclic and phase-monotone (no feature
-        depends on one in a LATER phase)
+    V5  the feature dependency graph is ACYCLIC — a cycle means no build order
+        exists at all
     V6  a generated execution-list block, WHERE ONE EXISTS, matches the tree it
         was rendered from (the list is opt-in per file; absence is not staleness)
 
@@ -115,7 +115,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
         findings.append(msg)
 
     # (grain path, its declared id, the id its PATH implies, parentage pairs)
-    graph: dict[str, tuple[str, list[str]]] = {}
+    graph: dict[str, list[str]] = {}
 
     for mdir in model.milestone_dirs(cfg):
         mfile = mdir / 'milestone.md'
@@ -132,7 +132,6 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
             census['grains'] += 1
             fid = model.field_of(ffile, 'id')
             fstat = model.field_of(ffile, 'status')
-            fphase = model.field_of(ffile, 'phase')
             if 'V1' in on and (not fid or not fstat):
                 bad(f'{cfg.rel(ffile)}: missing id: or status: in the frontmatter')
             expect = f'{mid}/{ffile.parent.name}'
@@ -145,7 +144,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                     bad(f'{cfg.rel(ffile)}: milestone: {own!r} but it lives under '
                         f'milestone {mid!r}')
             if fid:
-                graph[fid] = (fphase, [])
+                graph[fid] = []
 
             for sfile in model.story_files(ffile):
                 census['grains'] += 1
@@ -193,7 +192,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                             bad(f'{cfg.rel(ffile)}: {key} {ref!r} resolves to '
                                 f'nothing (its milestone IS in the tree)')
                     elif key == 'depends_on' and fid and ref.count('/') == 1:
-                        graph[fid][1].append(ref)
+                        graph[fid].append(ref)
 
         for ref in _safe_refs(mfile, 'depends_on', bad, cfg.rel(mfile)):
             census['refs'] += 1
@@ -219,7 +218,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
     return findings, census
 
 
-def _graph_findings(graph: dict[str, tuple[str, list[str]]]) -> list[str]:
+def _graph_findings(graph: dict[str, list[str]]) -> list[str]:
     out: list[str] = []
     # Cycles — a dependency loop means no build order exists at all.
     WHITE, GREY, BLACK = 0, 1, 2
@@ -227,7 +226,7 @@ def _graph_findings(graph: dict[str, tuple[str, list[str]]]) -> list[str]:
 
     def walk(node: str, trail: list[str]) -> None:
         colour[node] = GREY
-        for dep in graph.get(node, ('', []))[1]:
+        for dep in graph.get(node, []):
             if dep not in colour:
                 continue
             if colour[dep] == GREY:
@@ -242,28 +241,4 @@ def _graph_findings(graph: dict[str, tuple[str, list[str]]]) -> list[str]:
         if colour[node] == WHITE:
             walk(node, [])
 
-    # Phase-monotone — a feature may not depend on one scheduled LATER, and a
-    # numeric-phase feature may not depend on one with no ordering at all.
-    # Exempting non-numeric phases silently let `seam` (defined as neither
-    # blocking nor blocked) sit in the middle of a dependency chain.
-    phased = any(p.isdigit() for p, _ in graph.values())
-    for fid, (phase, deps) in sorted(graph.items()):
-        if not phase.isdigit():
-            continue
-        for dep in deps:
-            if dep not in graph:
-                continue
-            dep_phase = graph[dep][0]
-            if dep_phase.isdigit():
-                if int(dep_phase) > int(phase):
-                    out.append(f'{fid} is phase {phase} but depends on {dep} in '
-                               f'the LATER phase {dep_phase} — the buckets '
-                               f'contradict the graph')
-            elif phased:
-                what = f'phase {dep_phase!r}' if dep_phase else 'no phase'
-                out.append(f'{fid} is phase {phase} but depends on {dep}, which '
-                           f'has {what} — it carries no ordering, so the bucket '
-                           f'cannot be honoured'
-                           + (' (`seam` means nothing blocks on it)'
-                              if dep_phase == 'seam' else ''))
     return out

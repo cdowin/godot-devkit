@@ -33,6 +33,9 @@
 - **BREAKING: `review_min_content_bytes` is removed** — It refused an honest 15-byte "LGTM. Ship it." — the tool judging whether a person's prose was long enough. A record is a pointer that RESOLVES.
 - **D1 is the dangling-pointer half only** — `reviewed:` naming a file that is not there, the shape V4 already checks. "This feature has no `reviewed:` at all" is the absence of a document, not drift.
 - **`pm feature review` and `pm milestone done` report instead of refusing** — Stories not at review, features not done: named in the output, and the verb does what it was asked. D3/D5 read the tree.
+- **BREAKING: D13 is removed** — Its "extra slot" half failed your gate for keeping a file in your own milestone directory. The missing-grain-file half is already reported by `orphan_dirs` and V1.
+- **V5 is the dependency cycle, and nothing else** — Phase-monotone fired on `seam`, a bucket this tool invented and called neither blocking nor blocked. `phase:` groups the board; the graph orders the work.
+- **`pm new` mints no directory** — `features/ bugs/ design/ stories/` were scaffolded empty, and git stores no empty directory: 158 `design/` dirs in one consumer, 11 with content in them.
 - **empty repo to a closed milestone: 14 commands to 6** — Six of the fourteen existed only because an edge demanded them, and every one was reachable by hand anyway.
 - **`pm vocabulary` prints the closed SETS, not edges** — The states each grain may hold and the rule ids `[pm] checks` may name, machine-readably. It is how a project sees what a pin bump changed.
 - **a project's own template may open a grain at any state** — The guard forbidding it was the tool overruling a project about its own scaffold; D4 reads the state off the tree either way.

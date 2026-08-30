@@ -36,17 +36,6 @@ DRIFT RULES (each FAILs, naming the offending path):
   default; a project shipping from the trunk and bumping at close is running a
   different valid flow, not drifting. Opt in via `[pm] checks`.
 
-  D13 canonical grain STRUCTURE — every milestone and feature dir carries
-      exactly its slots. MISSING is drift and EXTRA is drift, and each shared
-      doc must still open with its one-line instruction header, so the
-      breadcrumb the dispatched agent actually reads cannot rot. Directory
-      slots are permitted, never required: git does not store an empty
-      directory. `pm new milestone|feature <id>` is idempotent and fills gaps.
-
-  D13 is OFF by default like D8/D9 — a tree predating the canonical slots is
-  missing most of them, and a rule that turns a consumer red on upgrade day is
-  unshippable. Scaffold first, then hold the line.
-
 Which rules run is `[pm] checks` in devkit.toml (default: D1-D6 + V1-V6).
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
@@ -59,23 +48,6 @@ from __future__ import annotations
 import sys
 
 from godot_devkit.repo.pm import model
-
-
-def _structure(cfg, report) -> int:
-    """D13 — the canonical grain shape. Returns the grain dirs checked.
-
-    Missing is drift AND extra is drift. The extra half is the one that earns
-    the rule: `plans/`, `findings/`, `AUDIT-REPORT.md`, `audit-prompt.md` and
-    `DELETED-SCENARIO-LEDGER.md` all exist in a real tree because no slot was
-    scaffolded AND nothing flagged the invention. A missing-only check would
-    leave every one of them there forever.
-    """
-    grains = model.grain_dirs(cfg)
-    for path, why in model.structure_findings(cfg):
-        report(f'{cfg.rel(path)}: {why} (D13)')
-    print(f'[check:pm] D13: {len(grains)} grain dir(s) held to the canonical '
-          f'slots; `pm new milestone|feature <id>` fills a gap')
-    return len(grains)
 
 
 def run() -> int:
@@ -221,7 +193,6 @@ def run() -> int:
         for msg in v_findings:
             report(msg)
 
-    n_grain_dirs = _structure(cfg, report) if 'D13' in enabled else 0
 
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
@@ -240,8 +211,6 @@ def run() -> int:
     # the instance and fixing the shape.
     census += model.tree_walk(cfg).disclosures()
     census += f', {n_bugs} bug(s)'
-    if 'D13' in enabled:
-        census += f', {n_grain_dirs} grain dir(s)'
     if v_census:
         census += f', {v_census["refs"]} ref(s)'
         if v_census['unverifiable']:

@@ -56,20 +56,15 @@ DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6',
                   'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 FLOW_CHECKS = ('D8', 'D9')
-# D13 is the canonical grain STRUCTURE. Opt-in because a tree that predates the
-# canonical slots is missing most of them, and a rule that turns a consumer red
-# on upgrade day is unshippable. `pm new <grain>` fills the gaps, then the rule
-# holds the line.
-STRUCTURE_CHECKS = ('D13',)
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
-    DEFAULT_CHECKS + FLOW_CHECKS + STRUCTURE_CHECKS + VALIDATE_CHECKS))
+    DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
-# --- the canonical grain structure (D13) --------------------------------------
+# --- the canonical grain slots ------------------------------------------------
 # One shape, every grain, all lowercase. The split that makes it worth having:
 #
 #   decisions.md  DURABLE   — appended during the grain's life, survives close.
@@ -81,10 +76,12 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 # Every shared doc is OPTIONAL and minted on first write — see
 # OPTIONAL_FILE_SLOTS. Only the grain's own frontmatter file is required.
 #
-# DIRECTORY slots are allowed but never REQUIRED, and the reason is git: an
-# empty directory does not survive a clone, so requiring `design/` would mean
-# 178 placeholder files or a rule that fails the moment somebody checks the
-# tree out fresh. Files carry the requirement; directories carry permission.
+# There are no DIRECTORY slots. `pm new` used to mint `features/`, `bugs/` and
+# `design/` on every milestone and `stories/`+`design/` on every feature — and
+# git does not store an empty directory, so across one consumer's tree that
+# produced 158 `design/` dirs of which 11 hold anything. `apply` creates a
+# parent on the way to a write, so `stories/` appears when the first story is
+# written into it, which is the moment it means something.
 DECISION_FILE_NAME = 'decisions.md'
 REVIEW_FILE_NAME = 'review.md'
 HANDOFF_FILE_NAME = 'handoff.md'
@@ -101,11 +98,9 @@ HANDOFF_FILE_NAME = 'handoff.md'
 # consumer holds 103 review.md, and reporting them would be reporting notes.
 # What a grain MUST carry: its own frontmatter file, and nothing else.
 MILESTONE_FILE_SLOTS = ('milestone.md',)
-MILESTONE_DIR_SLOTS = ('features', 'bugs', 'design')
 MILESTONE_OPTIONAL_SLOTS = (HANDOFF_FILE_NAME, DECISION_FILE_NAME,
                             REVIEW_FILE_NAME)
 FEATURE_FILE_SLOTS = ('feature.md',)
-FEATURE_DIR_SLOTS = ('stories', 'design')
 # No handoff.md: a feature is never picked up cold on its own.
 FEATURE_OPTIONAL_SLOTS = (DECISION_FILE_NAME, REVIEW_FILE_NAME)
 
@@ -116,8 +111,8 @@ SLOT_TEMPLATE = {
     'handoff.md': 'handoff', 'decisions.md': 'decisions',
 }
 
-# The one-line instruction each shared doc opens with, and D13 asserts is still
-# there. `.claude/rules/*` never reach a dispatched subagent — measured — so a
+# The one-line instruction each shared doc opens with, restored by `pm new` on a
+# doc that lost it. `.claude/rules/*` never reach a dispatched subagent — so a
 # file's own first line is the one delivery channel with a 100% hit rate for the
 # action its reader is about to take. Each line is an INSTRUCTION for that
 # action, never an explanation of what the file is, and deliberately NOT a
@@ -157,8 +152,8 @@ def git_rename(root: Path, old: Path, new: Path) -> tuple[bool, str]:
     holding the old spelling: the worktree says `decisions.md`, `git ls-files`
     says `DECISIONS.md`, and an explicit `git add` of the new name stages
     nothing. The migration goes green on the laptop, gets committed, and CI on
-    Linux checks out the OLD name — D13 then reports every renamed grain
-    missing. `git mv --force` is the one spelling that
+    Linux checks out the OLD name — every renamed grain then goes missing
+    there. `git mv --force` is the one spelling that
     moves the index with the file.
     """
     try:
@@ -659,15 +654,15 @@ def slot_walk(gdir: Path) -> Walk:
 
     RECURSIVE, and the extension compared case-insensitively: a `glob('*.md')`
     saw neither `<slot>/<topic>/<doc>.md` nor `<DOC>.MD`, and neither `bugs/`
-    nor `stories/` is a directory D13 descends into, so both were invisible to
-    every rule at once — and the census printed the smaller number without
-    saying it had looked less far.
+    nor `stories/` was descended into, so both were invisible to every rule at
+    once — and the census printed the smaller number without saying it had
+    looked less far.
 
     Two NARROWINGS, and both disclose because `Walk.filter` gives them no other
     option:
 
       * DOTTED_NAME — dot-prefixed components, files and directories alike,
-        exactly as `structure_findings` skips them for D13. Out of scope for
+        a dot prefix is a deliberate hide. Out of scope for
         every rule, but COUNTED: `0 bug(s)` must not quietly mean "one bug
         parked under `bugs/.hold/` that no rule ever opened".
       * NO_FRONTMATTER — a `.md` that is a note parked beside a grain rather
@@ -842,48 +837,7 @@ def read_feature(ffile: Path) -> FeatureView:
     view.done_n = sum(1 for s in view.stories if field_of(s, 'status') == 'done')
     return view
 
-# --- the grain walk (D13) ------------------------------------------------
-@dataclass(frozen=True)
-class GrainDir:
-    """One milestone or feature directory, its grain file, and its status."""
-    kind: str          # 'milestone' | 'feature'
-    path: Path
-    grain_file: Path
-    gid: str
-    status: str
-
-    @property
-    def file_slots(self) -> tuple[str, ...]:
-        return (MILESTONE_FILE_SLOTS if self.kind == 'milestone'
-                else FEATURE_FILE_SLOTS)
-
-    @property
-    def dir_slots(self) -> tuple[str, ...]:
-        return (MILESTONE_DIR_SLOTS if self.kind == 'milestone'
-                else FEATURE_DIR_SLOTS)
-
-    @property
-    def optional_slots(self) -> tuple[str, ...]:
-        return (MILESTONE_OPTIONAL_SLOTS if self.kind == 'milestone'
-                else FEATURE_OPTIONAL_SLOTS)
-
-
-def grain_dirs(cfg: PmConfig) -> list[GrainDir]:
-    """Every milestone and feature dir in the ACTIVE tree, in reading order."""
-    out: list[GrainDir] = []
-    for mdir in milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
-        out.append(GrainDir('milestone', mdir, mfile,
-                            unquote(field_of(mfile, 'id')) or mdir.name,
-                            field_of(mfile, 'status')))
-        for ffile in feature_files(mdir):
-            out.append(GrainDir('feature', ffile.parent, ffile,
-                                unquote(field_of(ffile, 'id')) or ffile.parent.name,
-                                field_of(ffile, 'status')))
-    return out
-
-
-# --- structure (D13) ----------------------------------------------------------
+# --- shared-doc headers -------------------------------------------------------
 def header_of(path: Path) -> str:
     """The file's first non-blank line, stripped — its canonical header slot."""
     try:
@@ -893,50 +847,6 @@ def header_of(path: Path) -> str:
     except (OSError, UnicodeDecodeError):
         return ''
     return ''
-
-
-def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
-    """(path, reason) for every deviation from the canonical grain shape.
-
-    MISSING is drift and EXTRA is drift, and the extra half is the one that
-    matters: `plans/`, `findings/`, `AUDIT-REPORT.md` and `DELETED-SCENARIO-
-    LEDGER.md` all exist in a real tree because no slot was scaffolded AND
-    nothing flagged the invention. A missing-only check leaves those forever.
-
-    The shared docs are OPTIONAL and minted on first write — permitted, never
-    required, see MILESTONE_OPTIONAL_SLOTS. Their instruction header is still
-    asserted once one EXISTS: the breadcrumb is the reason the file has a
-    convention at all, and a hand-made one that lost it is drift.
-    """
-    out: list[tuple[Path, str]] = []
-    for grain in grain_dirs(cfg):
-        entries = dir_entries(grain.path)
-        allowed = (set(grain.file_slots) | set(grain.dir_slots)
-                   | set(grain.optional_slots))
-        for slot in grain.file_slots:
-            if entries.get(slot) == 'file':
-                continue
-            variants = case_variants(entries, slot)
-            why = (f' — {", ".join(variants)} is the same slot in another case, '
-                   f'renamed by `pm new {grain.kind}`') if variants else ''
-            out.append((grain.path / slot,
-                        f'{grain.kind} {grain.gid} is missing {slot}{why}'))
-        for name, kind in sorted(entries.items()):
-            if name in allowed or name.startswith('.'):
-                continue
-            out.append((grain.path / name,
-                        f'{grain.kind} {grain.gid} carries {name}'
-                        f'{"/" if kind == "dir" else ""}, which is not a '
-                        f'canonical slot ({" ".join(sorted(allowed))})'))
-        for slot, want in SLOT_HEADER.items():
-            if slot not in grain.optional_slots or entries.get(slot) != 'file':
-                continue
-            got = header_of(grain.path / slot)
-            if got != want:
-                out.append((grain.path / slot,
-                            f'{slot} no longer opens with its instruction line '
-                            f'— restore "{want}"'))
-    return out
 
 
 # --- bug status vocabulary (D4) -----------------------------------------------
