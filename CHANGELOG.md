@@ -21,20 +21,20 @@
 - **BREAKING: `pm prune` is removed, with D7 and D14** — On the default roster an open bug under a `done` milestone was PASS, and prune then deleted it. Nothing here deletes a grain. (repo/pm/cli.py)
 - **D4 covers a bug's status** — D14's one fact about a FILE (a status outside `bug_states`) moves to the rule that already owns it, on by default. `bug_open_states` goes with its only reader.
 - **the census always counts bugs** — `N bug(s)` used to ride the opt-in D14, so a default run said nothing about a directory it had walked. (repo/checks/pm.py)
-- **a stale rule id stops the gate, not the CLI** — One retired name in `[pm] checks` used to kill `pm status`, `pm get`, `pm new` and `pm vocabulary --json` too. Now only `check pm` and `pm validate` refuse.
+- **a stale rule id stops the gate, not the CLI** — One retired name in `[pm] checks` used to kill `pm status`, `pm get` and `pm vocabulary --json` too. Only `check pm` and `pm validate` refuse.
 - **BREAKING: `check agents` is removed** — A1/A2/A4 failed a build because a markdown file DESCRIBED a workflow, and they inferred: a line's subject was guessed from "one grain word appears".
 - **the flat-skill rule survives, in `check doc`** — `.claude/skills/<name>.md` instead of `<name>/SKILL.md` genuinely does not load. A fact about a file, on the gate that checks those.
-- **BREAKING: the transition graph is removed** — README claimed "transitions no one can hand-edit around". A `sed` reaches the refused state and `check pm` prints PASS: nothing ever checked an EDGE. (repo/pm/model.py)
-- **closed states, open transitions** — `pm story|feature|milestone <status> <id>` takes any value in that grain's vocabulary; `butterfly` is exit 2 naming the set. `pm set <id> status` is no longer refused.
+- **BREAKING: the transition graph is removed** — README claimed "transitions no one can hand-edit around". A `sed` reaches the refused state and `check pm` prints PASS: nothing checked an EDGE.
+- **closed states, open transitions** — `pm story|feature|milestone <status> <id>` takes any value in that grain's vocabulary; `butterfly` is exit 2 naming the set. `pm set <id> status` works too.
 - **a status verb never validates the state it FOUND** — `pm milestone done` on a hand-edited `status: wombat` used to refuse. It prints `wombat -> done` and repairs the drift `check pm` reports.
 - **BREAKING: the `pm feature done` story cascade is opt-in** — Without `--cascade` no story file is touched. Writing files the caller did not name is the tool acting on its own initiative.
-- **BREAKING: `place_branch_on_building` and D10 are removed** — `pm milestone building` ran `git checkout` in your trunk worktree. A PM tracker does not mutate your VCS checkout. D9 stays. (repo/pm/cli.py)
+- **BREAKING: `place_branch_on_building` and D10 are removed** — `pm milestone building` ran `git checkout` in your trunk worktree. A PM tracker does not mutate your VCS checkout. D9 stays.
 - **a retired `[pm]` key is NAMED, never silently ignored** — `check pm` and `pm validate` exit 2 listing it, beside a stale rule id. The read verbs keep running, so a pin bump stays readable.
 - **BREAKING: `review_min_content_bytes` is removed** — It refused an honest 15-byte "LGTM. Ship it." — the tool judging whether a person's prose was long enough. A record is a pointer that RESOLVES.
-- **D1 is the dangling-pointer half only** — `reviewed:` naming a file that is not there, the shape V4 already checks. "This feature has no `reviewed:` at all" is the absence of a document, not drift.
+- **D1 is the dangling-pointer half only** — `reviewed:` naming a file that is not there, the shape V4 checks. "This feature has no `reviewed:` at all" is the absence of a document, not drift.
 - **`pm feature review` and `pm milestone done` report instead of refusing** — Stories not at review, features not done: named in the output, and the verb does what it was asked. D3/D5 read the tree.
 - **BREAKING: D13 is removed** — Its "extra slot" half failed your gate for keeping a file in your own milestone directory. The missing-grain-file half is already reported by `orphan_dirs` and V1.
-- **V5 is the dependency cycle, and nothing else** — Phase-monotone fired on `seam`, a bucket this tool invented and called neither blocking nor blocked. `phase:` groups the board; the graph orders the work.
+- **V5 is the dependency cycle, and nothing else** — Phase-monotone fired on `seam`, a bucket this tool invented and called neither blocking nor blocked. `phase:` buckets; the graph orders.
 - **`pm new` mints no directory** — `features/ bugs/ design/ stories/` were scaffolded empty, and git stores no empty directory: 158 `design/` dirs in one consumer, 11 with content in them.
 - **`pm list` — the nail-finder** — One tab-separated row per story, filtered by `--status`/`--owner`/`--milestone`. `pm status` prints 165 lines on one consumer; the open work was 2 stories.
 - **no `pm next`, on purpose** — A verb that picks THE next thing is the tool having an opinion about your priorities. `pm list` filters; you decide. `pm status` is unchanged.
