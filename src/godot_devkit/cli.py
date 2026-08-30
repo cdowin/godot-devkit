@@ -72,20 +72,27 @@ import sys
 from godot_devkit import __version__
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 
-OFFLINE_CHECKS = ('uid', 'tres', 'props', 'doc', 'shell')
 FIX_FLAG = '--fix'
-# Deliberately OUT of `check all`: `defaults` reports thousands of findings on a
-# tree that has never been canonicalized, so folding it into the aggregate would
-# turn every existing consumer's gate red on a version bump. Wire it explicitly,
-# after the one-time cleanup pass. `repo-hygiene` is excluded for its own reason
-# (it is close-time and hits the network). `pm` is excluded because a repo with
-# no PM tree has no drift to find and must not be failed for its absence.
-EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents')
-KNOWN_CHECKS = (*OFFLINE_CHECKS, *EXPLICIT_CHECKS)
+
+# THE gate roster: {name: in the default `check all`?}. One list, because two
+# were one list with the answer to a single question split across them — and a
+# gate added to one and forgotten in the other is either undispatchable or
+# invisible to `[checks] all`'s own typo refusal.
+#
+# The `False` gates are out of the DEFAULT aggregate, each for its own reason:
+# `defaults` reports thousands of findings on a tree that has never been
+# canonicalized, so folding it in would redden every existing consumer on a
+# version bump — wire it explicitly, after the one-time cleanup pass;
+# `repo-hygiene` is close-time and hits the network; `pm` and `agents` would
+# fail a repo for not having a PM tree or agent definitions at all.
+KNOWN_CHECKS = {
+    'uid': True, 'tres': True, 'props': True, 'doc': True, 'shell': True,
+    'defaults': False, 'repo-hygiene': False, 'pm': False, 'agents': False,
+}
 
 
 def all_roster() -> tuple[str, ...]:
-    """Which gates `check all` runs HERE — `[checks] all`, default OFFLINE_CHECKS.
+    """Which gates `check all` runs HERE — `[checks] all`, else the defaults.
 
     Applicability is per-repo and the aggregate is where it shows. Five of the
     nine gates read `.tscn`/`.tres`/shell, so a repo holding none of those
@@ -98,7 +105,8 @@ def all_roster() -> tuple[str, ...]:
     narrow the aggregate in silence, which is the cardinal sin with a config
     file in front of it.
     """
-    roster = str_tuple(config_section('checks'), 'checks', 'all', OFFLINE_CHECKS)
+    default = tuple(name for name, on in KNOWN_CHECKS.items() if on)
+    roster = str_tuple(config_section('checks'), 'checks', 'all', default)
     unknown = [c for c in roster if c not in KNOWN_CHECKS]
     if unknown:
         raise ConfigError(
@@ -168,7 +176,7 @@ def _dispatch_check(name: str, fix: bool = False) -> int:
     # `all` never repairs: an aggregate that writes is the last place a
     # consumer expects one, so `--fix` is asked for on the gate itself.
     print(f'godot-devkit: unknown check {name!r} '
-          f'(expected: {", ".join((*OFFLINE_CHECKS, *EXPLICIT_CHECKS, "all"))})',
+          f'(expected: {", ".join((*KNOWN_CHECKS, "all"))})',
           file=sys.stderr)
     return 2
 

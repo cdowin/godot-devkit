@@ -9,10 +9,12 @@ a repair that does not converge is worse than no repair.
 """
 from __future__ import annotations
 
+import os
+import sys
 import unittest
 from pathlib import Path
 
-from support import run_check, temp_repo
+from support import REPO_ROOT, run_check, temp_repo
 
 from godot_devkit.godot.checks import uid
 
@@ -180,17 +182,44 @@ class CliRouting(unittest.TestCase):
 
 
 class AggregateRoster(unittest.TestCase):
-    """`[checks] all` — which gates apply to THIS repo. Five of the eight read
+    """`[checks] all` — which gates apply to THIS repo. Five of the nine read
     `.tscn`/`.tres`/shell, so a repo holding none of them gets five 0-file
     censuses and rule 4 correctly reddens every one; that is the roster being
     wrong for the repo, not a reason to weaken a gate."""
 
     run_cli = CliRouting.run_cli
 
-    def test_default_roster_is_the_offline_set(self) -> None:
+    def test_the_default_roster_is_every_gate_flagged_for_it(self) -> None:
+        # ONE roster, with the answer to "is this in the default aggregate?"
+        # on the gate itself. Two lists were two chances for a gate to be
+        # dispatchable and invisible to `[checks] all`, or the reverse.
         from godot_devkit import cli
         with temp_repo('uid_repo', only=CLEAN):
-            self.assertEqual(cli.all_roster(), cli.OFFLINE_CHECKS)
+            self.assertEqual(
+                cli.all_roster(),
+                tuple(n for n, on in cli.KNOWN_CHECKS.items() if on))
+
+    def test_every_known_gate_is_dispatchable(self) -> None:
+        # The property the split list could not state: a name `[checks] all`
+        # accepts is a name `check <name>` runs. A gate in one and not the
+        # other is either unreachable or a silent hole in the typo refusal.
+        #
+        # A SUBPROCESS per gate, for the reason `check doc` binds its scope and
+        # its repo root at IMPORT: running nine gates in-process leaves that
+        # module pointing at a deleted temp dir and the next test inherits it.
+        # The assertion is routing only — a gate's own verdict is its own test.
+        import subprocess
+        from godot_devkit import cli
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            for name in cli.KNOWN_CHECKS:
+                with self.subTest(name):
+                    proc = subprocess.run(
+                        [sys.executable, '-m', 'godot_devkit.cli', 'check', name],
+                        cwd=root, capture_output=True, text=True,
+                        env={**os.environ,
+                             'PYTHONPATH': str(REPO_ROOT / 'src')})
+                    self.assertNotIn('unknown check',
+                                     proc.stdout + proc.stderr)
 
     def test_a_declared_roster_runs_exactly_what_it_names(self) -> None:
         with temp_repo('uid_repo', only=CLEAN) as root:
