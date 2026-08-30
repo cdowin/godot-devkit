@@ -3,7 +3,7 @@ id: 0.16.0/scene-verbs/add-instance
 feature: 0.16.0/scene-verbs
 milestone: "0.16.0"
 name: scene add --instance res://x.tscn mints a canonical ext_resource
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

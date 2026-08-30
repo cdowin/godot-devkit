@@ -3,7 +3,7 @@ id: 0.16.0/scene-verbs/connect-disconnect
 feature: 0.16.0/scene-verbs
 milestone: "0.16.0"
 name: scene connect/disconnect author [connection] sections
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

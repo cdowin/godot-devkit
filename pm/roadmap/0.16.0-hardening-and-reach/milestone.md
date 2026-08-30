@@ -36,7 +36,7 @@ labels: []
 8. `hook-soundness` · building · 0/2 stories
 9. `pm-contract` · building · 0/3 stories
 10. `pm-verbs` · building · 0/2 stories
-11. `scene-verbs` · planning · 0/4 stories
+11. `scene-verbs` · building · 0/4 stories
 12. `self-discipline` · building · 0/3 stories
 13. `subresource-model` · building · 0/1 stories
 14. `technical-review` · planning · 0/2 stories
