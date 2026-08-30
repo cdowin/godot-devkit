@@ -67,3 +67,27 @@ pointers, and everything that still explains a live constraint stays.
 **Over:** restoring the `[ci]` block and its ~180-line TOML->YAML emitter (`_scalar`, `_key`, `_render_on`, `_render_step`, `_render_setup`, the event allowlist, PyYAML)
 **Because:** the emitter let a project parameterize a workflow it is about to own outright; a project that wants a different trigger or a Godot toolchain step edits the file, which is the point of shape-and-opinion. The version stamp went with it, so a release no longer makes every installed copy stale
 **Evidence:** src/godot_devkit/repo/installables/ci-verify.yml:1
+
+## D11 — 2026-08-30 — the closed set survives, the edge table dies
+**Chose:** keeping the per-grain STATE vocabulary and the validation of the state a verb was ASKED for, and deleting only the edge table + `transition_legal`
+**Over:** deleting the vocabularies with the graph, which the audit's wording ("delete the graph constants") would also have covered
+**Because:** `pm milestone butterfly 0.1` is a fact about the input and belongs in an error; `planning -> done` is an opinion about order that nothing enforced anyway — a `sed` of the status line reached the refused state and `check pm` printed PASS. Measured: empty repo to one closed milestone, 14 commands to 6
+**Evidence:** src/godot_devkit/repo/pm/model.py:42
+
+## D12 — 2026-08-30 — a status verb never validates the state it found
+**Chose:** reading the current status FOR THE MESSAGE ONLY, so `pm milestone done 0.1` on a hand-edited `status: wombat` prints `wombat -> done` and repairs it, and an absent key reads `(none)`
+**Over:** keeping the `has an unknown current status` guard, which refused any grain whose status was outside the vocabulary
+**Because:** `check pm` D4 reported exactly that breakage and the verb then declined to fix it, leaving a hand-edit as the only way out — the one thing this tool exists to spare a person. Malformed FRONTMATTER still refuses, because that is a fact about the file rather than about its value
+**Evidence:** src/godot_devkit/repo/pm/cli.py:143
+
+## D13 — 2026-08-30 — the feature-done cascade is opt-in
+**Chose:** `pm feature done <id> --cascade` for the story flips, with the narrow behaviour as the default and the untouched stories REPORTED either way
+**Over:** keeping the cascade automatic, which the audit's brief originally asked for
+**Because:** a command aimed at a feature that rewrites three story files is the tool acting on its own initiative; with the flag the caller asked for it. The story-state precondition went with it: what the tree is left holding is D5's question, asked of the tree
+**Evidence:** src/godot_devkit/repo/pm/cli.py:225
+
+## D14 — 2026-08-30 — a retired [pm] key is named by the gate, not by load()
+**Chose:** naming a retired `[pm]` key from `check pm` / `pm validate` at exit 2, off the same `config_complaints` that names a stale rule id
+**Over:** letting a retired key be silently ignored (the alternative, since the field simply stops being read), or raising it from `model.load()` where the `[pm.scaffold.*]` refusal lives
+**Because:** a key that does nothing is worse than one that errors — nullbound ships `place_branch_on_building = true`, and on the pin bump it would have read as honoured. Raising it from `load()` would repeat the P9 defect this release fixes: one stale name taking `pm status` down with the gate
+**Evidence:** src/godot_devkit/repo/pm/model.py:280
