@@ -1,9 +1,10 @@
 """test_pm_close_protocol.py — what `pm feature done` accepts as a review record.
 
-The close verb refuses a record that is missing, empty or whitespace, and D1
-reports the same feature afterwards off the same predicate. These are the cases
-where "the record exists" and "the record says something" come apart: a pointer
-into a file outside the PM tree, and a symlink that resolves nowhere.
+ONE question: does the pointer RESOLVE. The close verb refuses a `--review-record`
+naming no file, and D1 reports a `reviewed:` that resolves to nothing, off the
+same predicate. There used to be a byte floor under it and it refused an honest
+15-byte "LGTM. Ship it." — the tool judging whether a human's prose was long
+enough, which is not a fact about anything.
 """
 from __future__ import annotations
 
@@ -107,11 +108,40 @@ def test_a_durable_record_outside_the_tree_is_still_accepted():
 
 def test_a_dangling_symlink_is_judged_without_raising():
     """A `reviewed:` pointer can outlive what it points at. A path that
-    resolves nowhere is not a substantive record, and is not a crash."""
+    resolves nowhere names no file, and that is a refusal, not a crash."""
     with tree() as root:
         _feature_at_review(root)
         (root / FEATURE / 'gone.md').symlink_to('nowhere.md')
         code, out = pm('feature', 'done', '0.1/f',
                        '--review-record', f'{FEATURE}/gone.md')
     assert code == 1, out
-    assert 'missing/empty/whitespace' in out, out
+    assert 'names no file' in out, out
+
+
+def test_a_fifteen_byte_record_closes_the_feature():
+    """The measurement that removed the floor: `review_min_content_bytes = 20`
+    refused this exact string. Whether a one-line close is enough review is the
+    reviewer's call, and it was never a fact about the tree."""
+    with tree() as root:
+        _feature_at_review(root)
+        record = root / 'docs' / 'reviews' / 'f.md'
+        record.parent.mkdir(parents=True)
+        record.write_text('LGTM. Ship it.', encoding='utf-8')
+        code, out = pm('feature', 'done', '0.1/f',
+                       '--review-record', 'docs/reviews/f.md')
+        assert code == 0, out
+        assert 'status: done' in (root / FEATURE / 'feature.md').read_text(
+            encoding='utf-8')
+
+
+def test_a_feature_with_no_record_at_all_still_closes():
+    """"You have not written a review record yet" is an opinion about how a
+    person should work, not a fact about the tree — and D1 no longer reports
+    the absence either. A DANGLING pointer is still both."""
+    with tree() as root:
+        _feature_at_review(root)
+        code, out = pm('feature', 'done', '0.1/f')
+        assert code == 0, out
+        assert 'no review record' in out, out
+        assert 'status: done' in (root / FEATURE / 'feature.md').read_text(
+            encoding='utf-8')

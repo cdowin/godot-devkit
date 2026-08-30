@@ -219,10 +219,13 @@ def cmd_feature_review(cfg: model.PmConfig, args: list[str]) -> int:
         return 0
     pending = [f'{p.name}({st})' for p, st in _story_states(cfg, fid)
                if st not in ('review', 'done')]
-    if pending:
-        raise Refused(f'feature {fid} -> review: stories not at review: {" ".join(pending)}')
     _set_status(cfg, ff, 'review')
     _ok(f'feature {fid}: {cur} -> review')
+    # Reported, never refused. "A feature cannot be under review while its own
+    # work is unfinished" is a claim about how a team works; which stories are
+    # where is a fact, and it is the caller's to act on.
+    if pending:
+        _ok(f'  {len(pending)} story/ies not at review: {" ".join(pending)}')
     return 0
 
 
@@ -284,21 +287,19 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
                  if st != 'done' and p not in to_close]
 
     if rec:
+        # The one thing checked about a record: the path RESOLVES. Whether the
+        # prose under it is long enough is not this tool's question — the floor
+        # it replaced refused an honest 15-byte "LGTM. Ship it.".
         target = _resolve_record(cfg, rec)
-        if not model.record_is_substantive(cfg, target):
+        if not model.record_resolves(target):
             raise Refused(
-                f'feature {fid} -> done: review record {rec!r} is missing/empty/'
-                f'whitespace (needs >= {cfg.review_min_content_bytes} non-whitespace '
-                f'bytes). feature.md left untouched.')
+                f'feature {fid} -> done: review record {rec!r} names no file '
+                f'({cfg.rel(target)}). Nothing was written — stamping a pointer '
+                f'to nothing is the drift D1 reports.')
         if not model.set_field(ff, 'reviewed', rec):
             raise Usage(f'could not stamp reviewed: in {cfg.rel(ff)}')
         _ok(f'feature {fid}: reviewed -> {rec}')
     record = model.review_record_for(cfg, fid)
-    if record is None:
-        raise Refused(
-            f'feature {fid} -> done: NO substantive review record. Re-run with '
-            f'--review-record <path> pointing at a non-empty record (or add a '
-            f'resolvable "reviewed:" to the feature.md).')
 
     # Stories first: if the FEATURE flip is the one that fails, the gate still
     # sees a non-done feature and a re-run completes the close cleanly.
@@ -309,7 +310,8 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
         _ok(f'  story {p.name}: review -> done')
     _set_status(cfg, ff, 'done',
                 'Stories were flipped; re-run to finish closing the feature.')
-    _ok(f'feature {fid}: {cur} -> done (review record: {record})')
+    _ok(f'feature {fid}: {cur} -> done'
+        + (f' (review record: {record})' if record else ' (no review record)'))
     if untouched:
         _ok(f'  {len(untouched)} story/ies not done and NOT touched: '
             f'{" ".join(untouched)}'
@@ -347,17 +349,19 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     if cur == to:
         _ok(f'milestone {mid} already {to} (no-op)')
         return 0
+    pending: list[str] = []
     if to == 'done':
         mdir = model.milestone_dir(cfg, mid)
         assert mdir is not None
         pending = [f'{ff.parent.name}({model.field_of(ff, "status")})'
                    for ff in model.feature_files(mdir)
                    if model.field_of(ff, 'status') != 'done']
-        if pending:
-            raise Refused(f'milestone {mid} -> done: features not done: '
-                          f'{" ".join(pending)}')
     _set_status(cfg, mf, to)
     _ok(f'milestone {mid}: {cur} -> {to}')
+    # Reported, never refused — and D3 asks the same question of the tree, so
+    # the state this leaves is not unwatched.
+    if pending:
+        _ok(f'  {len(pending)} feature(s) not done: {" ".join(pending)}')
     return 0
 
 
@@ -375,7 +379,7 @@ def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
             view = model.read_feature(ffile)
             # Drift markers reuse the SAME predicates the gate runs on, so the
             # report and the gate can never describe drift differently.
-            reason = (model.drift_done_no_record(cfg, view.fid, view.status)
+            reason = (model.drift_dangling_record(cfg, view.fid)
                       or model.drift_stalled(view.status, view.done_n, view.total))
             drift = f'  <DRIFT: {reason}>' if reason else ''
             phase = view.phase or 'unphased'

@@ -40,23 +40,24 @@ it does NOT permit is a story reaching `done` any other way; see below.
    `pm new milestone|feature|story|bug` scaffolds to the schema.
 6. **Leave evidence at close.** One terse block at the grain that closed. See below.
 
-## Why the CLI refuses things
+## What the CLI refuses, and what it merely reports
 
-Worth knowing, so a refusal reads as a rule rather than a bug:
+It refuses facts about the input, and reports everything else while doing what it
+was asked:
 
 - **The status you ASK for is checked; the one already in the file is not.** `butterfly` is
   not a story status, so that is an error naming the set. `wombat` sitting in the file is
   just what it says now: `pm story review <id>` prints `wombat -> review` and repairs it.
   That is the same drift `check pm` reports, so the tool that reports it can also fix it.
-- **`pm feature review` refuses unless every story is at `review`.** A feature cannot
-  be under review while its own work is unfinished.
-- **`pm feature done` refuses without a *substantive* review record** — a pointer that
-  resolves to a real file with actual content. The bar rejects emptiness, not brevity:
-  a one-line close is a valid review, a 0-byte stub is not. Records live wherever
-  `[pm] review_dir` says.
-- **A refused close changes nothing.** Preconditions are checked before any write, so
-  a refusal leaves `feature.md` byte-identical — never a stale `reviewed:` stamp.
-- **`pm milestone done` refuses unless every feature is `done`.**
+- **`--review-record <path>` naming no file is refused.** Stamping a pointer to
+  nothing is the drift `check pm` D1 reports. There is no floor under it beyond
+  "the file is there" — how much the reviewer needed to write is their call.
+- **A refused close changes nothing.** The check runs before any write, so a refusal
+  leaves `feature.md` byte-identical — never a stale `reviewed:` stamp.
+- **`pm feature review` and `pm milestone done` REPORT, never refuse.** Stories not at
+  review, features not done: the verb names them and does what it was asked. What the
+  tree is left holding is D3/D5's question, and it is asked of the tree.
+- **`pm feature done` touches no story file without `--cascade`.**
 
 Every command is idempotent: running it twice is a no-op the second time. Exit codes
 are `0` ok, `1` refused, `2` usage or config error.

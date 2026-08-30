@@ -172,20 +172,28 @@ class Frontmatter(unittest.TestCase):
 
 
 class ReviewRecord(unittest.TestCase):
-    def test_a_stub_pointer_is_not_a_review(self):
-        with tree(with_record=True) as root:
-            cfg = cfg_for(root)
-            (root / 'docs' / 'reviews' / 'alpha.md').write_text('  \n\n', encoding='utf-8')
-            self.assertIsNone(model.review_record_for(cfg, '0.1/alpha'))
+    """ONE question: does the pointer RESOLVE.
 
-    def test_a_missing_target_is_not_a_review(self):
+    There used to be a `review_min_content_bytes = 20` floor under it, and it
+    refused an honest 15-byte "LGTM. Ship it.". How much a reviewer needed to
+    write is not a fact about the tree; whether the file they named is there
+    is, and it is the same fact V4 checks for `depends_on`.
+    """
+
+    def test_a_missing_target_is_not_a_record(self):
         with tree(with_record=True) as root:
             cfg = cfg_for(root)
             (root / 'docs' / 'reviews' / 'alpha.md').unlink()
             self.assertIsNone(model.review_record_for(cfg, '0.1/alpha'))
 
+    def test_an_EMPTY_file_is_a_record(self):
+        # The tool has no opinion about how much is enough. An empty file is a
+        # file, and the person who wrote it decided what belonged in it.
+        with tree(with_record=True) as root:
+            (root / 'docs' / 'reviews' / 'alpha.md').write_text('', encoding='utf-8')
+            self.assertIsNotNone(model.review_record_for(cfg_for(root), '0.1/alpha'))
+
     def test_a_one_line_record_counts(self):
-        # The bar rejects emptiness, not brevity.
         with tree(with_record=True) as root:
             self.assertIsNotNone(model.review_record_for(cfg_for(root), '0.1/alpha'))
 
@@ -259,17 +267,32 @@ class StatusMoves(unittest.TestCase):
             code, _ = run_cli(root, 'story', 'wip', '0.1/alpha/nope')
             self.assertEqual(code, 2)
 
-    def test_feature_review_refuses_unfinished_stories(self):
+    def test_feature_review_REPORTS_unfinished_stories_and_still_moves(self):
+        # It used to refuse: "a feature cannot be under review while its own
+        # work is unfinished" is a claim about how a team works. Which stories
+        # are where is a fact, and it belongs in the output, not in a veto.
         with tree(story_statuses=('review', 'wip')) as root:
             code, out = run_cli(root, 'feature', 'review', '0.1/alpha')
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 0, out)
             self.assertIn('not at review', out)
+            self.assertIn('s1.md(wip)', out)
+            self.assertEqual(
+                model.field_of(root / 'pm/roadmap/0.1-demo/features/alpha/feature.md',
+                               'status'), 'review')
 
-    def test_milestone_done_refuses_live_features(self):
+    def test_milestone_done_REPORTS_live_features_and_still_moves(self):
         with tree(feature_status='building') as root:
             code, out = run_cli(root, 'milestone', 'done', '0.1')
-            self.assertEqual(code, 1)
-            self.assertIn('features not done', out)
+            self.assertEqual(code, 0, out)
+            self.assertIn('feature(s) not done', out)
+            self.assertIn('alpha(building)', out)
+            self.assertEqual(
+                model.field_of(root / 'pm/roadmap/0.1-demo/milestone.md',
+                               'status'), 'done')
+            # ...and D3 asks the same question of the tree it left behind.
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('is done but feature 0.1/alpha', out)
 
     def test_milestone_done_records_no_date_of_its_own(self):
         """Close flips the status and stops. Git already records the WHEN.
@@ -349,26 +372,30 @@ class FeatureClose(unittest.TestCase):
             for s in (fdir / 'stories').glob('*.md'):
                 self.assertEqual(model.field_of(s, 'status'), 'done')
 
-    def test_close_without_a_record_is_refused(self):
+    def test_close_without_a_record_says_so_and_closes(self):
+        # "You have not written a review record yet" is an opinion about how a
+        # person works. The verb says what it saw and does what it was asked.
         with tree(feature_status='review', story_statuses=('review',),
                   with_record=False) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
-            self.assertEqual(code, 1)
-            self.assertIn('NO substantive review record', out)
+            self.assertEqual(code, 0, out)
+            self.assertIn('no review record', out)
+            self.assertEqual(
+                model.field_of(root / 'pm/roadmap/0.1-demo/features/alpha/feature.md',
+                               'status'), 'done')
 
-    def test_a_refused_close_leaves_feature_md_byte_identical(self):
-        # The all-or-nothing guarantee: no stale `reviewed:` stamp survives a
-        # refusal, and no story is flipped.
+    def test_a_record_pointer_naming_no_file_is_refused_and_writes_nothing(self):
+        # The half that IS a fact, and the one D1 reports afterwards: a pointer
+        # that resolves to nothing. Refused WHOLE — no stale stamp, no story.
         with tree(feature_status='review', story_statuses=('review',),
                   with_record=False) as root:
             ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
             story = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
             before, sbefore = ff.read_text(), story.read_text()
-            (root / 'docs' / 'reviews').mkdir(parents=True, exist_ok=True)
-            (root / 'docs' / 'reviews' / 'stub.md').write_text('   \n', encoding='utf-8')
-            code, _ = run_cli(root, 'feature', 'done', '0.1/alpha',
-                              '--review-record', 'docs/reviews/stub.md')
-            self.assertEqual(code, 1)
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade',
+                                '--review-record', 'docs/reviews/never-written.md')
+            self.assertEqual(code, 1, out)
+            self.assertIn('names no file', out)
             self.assertEqual(ff.read_text(), before)
             self.assertEqual(story.read_text(), sbefore)
 
@@ -412,12 +439,21 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('no milestones found', out)
 
-    def test_d1_done_feature_without_a_record(self):
+    def test_d1_a_reviewed_pointer_that_resolves_to_nothing(self):
+        with tree(feature_status='done', story_statuses=('done',),
+                  milestone_status='done', with_record=True) as root:
+            (root / 'docs' / 'reviews' / 'alpha.md').unlink()
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('resolves to nothing', out)
+
+    def test_d1_says_nothing_about_a_feature_with_no_pointer_at_all(self):
+        # The half that was an opinion. An absent review record is the absence
+        # of a document — a fact about a team, not about a tree.
         with tree(feature_status='done', story_statuses=('done',),
                   milestone_status='done', with_record=False) as root:
             code, out = run_gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('done w/o review record', out)
+            self.assertEqual(code, 0, out)
 
     def test_d2_all_stories_done_but_feature_stalled(self):
         with tree(feature_status='building', story_statuses=('done',)) as root:
@@ -973,8 +1009,7 @@ class ConfigValidation(unittest.TestCase):
                 self.assertEqual(code, 2, f'{bad!r} must not be accepted')
 
     def test_other_scalar_type_errors_are_also_exit_2(self):
-        for bad in ('review_min_content_bytes = "twenty"',
-                    'review_slug_fallback = "yes"',
+        for bad in ('review_slug_fallback = "yes"',
                     'roadmap_dir = 3'):
             with self.subTest(bad=bad), tree() as root:
                 (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')

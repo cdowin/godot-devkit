@@ -13,7 +13,6 @@ defaults.
     [pm]
     roadmap_dir  = "pm/roadmap"    # the tree, relative to the repo root
     review_dir   = "docs/reviews"  # where review records live
-    review_min_content_bytes = 20  # anti-rubber-stamp floor (non-whitespace)
     review_slug_fallback = false   # also accept <review_dir>/<feature-slug>*.md
     story_ordinal_prefix = false   # also resolve stories/NN-<slug>.md
     milestone_states      = [...]  # vocabulary overrides
@@ -34,7 +33,7 @@ from pathlib import Path
 from godot_devkit.core import apply, walk
 from godot_devkit.core.walk import Kind, SkipReason, Walk
 from godot_devkit.core.project import repo_root
-from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
+from godot_devkit.core.config import ConfigError, config_section, flag, str_tuple, text
 
 # --- stock policy -------------------------------------------------------------
 # The VOCABULARY, and nothing more. There is no transition graph: nothing here
@@ -183,7 +182,6 @@ class PmConfig:
     root: Path
     roadmap_dir: str = 'pm/roadmap'
     review_dir: str = 'docs/reviews'
-    review_min_content_bytes: int = 20
     review_slug_fallback: bool = False
     story_ordinal_prefix: bool = False
     milestone_states: tuple[str, ...] = DEFAULT_MILESTONE_STATES
@@ -249,7 +247,6 @@ def load() -> PmConfig:
         root=repo_root(),
         roadmap_dir=text(sect, 'pm', 'roadmap_dir', 'pm/roadmap'),
         review_dir=text(sect, 'pm', 'review_dir', 'docs/reviews'),
-        review_min_content_bytes=number(sect, 'pm', 'review_min_content_bytes', 20),
         review_slug_fallback=flag(sect, 'pm', 'review_slug_fallback', False),
         story_ordinal_prefix=flag(sect, 'pm', 'story_ordinal_prefix', False),
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
@@ -718,29 +715,16 @@ def tree_walk(cfg: PmConfig) -> Walk:
 
 
 # --- THE review-record definition --------------------------------------------
-def record_is_substantive(cfg: PmConfig, path: Path) -> bool:
-    """True if the file exists and carries enough NON-WHITESPACE content.
+def record_resolves(path: Path) -> bool:
+    """True if the pointer names a file that is actually there.
 
-    The anti-rubber-stamp. The bar is deliberately LOW — a one-line close is a
-    valid review — so this rejects emptiness, not brevity: a pointer resolving
-    to a missing file, a 0-byte file, or a whitespace/stub doc is not a review.
+    The WHOLE definition. There used to be a `review_min_content_bytes` floor
+    under it, and it refused an honest 15-byte "LGTM. Ship it." — the tool
+    judging whether a human's prose was long enough. Whether a pointer resolves
+    is a fact about the tree, the same shape V4 checks for `depends_on`; how
+    much a reviewer needed to write is not a fact about anything.
     """
-    if not path.is_file():
-        return False
-    try:
-        body = read_raw(path)
-    except (OSError, UnicodeDecodeError):
-        return False
-    return len(''.join(body.split())) >= cfg.review_min_content_bytes
-
-
-def durable_record_for(cfg: PmConfig, fid: str) -> Path | None:
-    """Where a feature's review record BELONGS — its own `decisions.md`.
-
-    Named so the refusal can point at a path rather than at a principle.
-    """
-    ffile = feature_file(cfg, fid)
-    return None if ffile is None else ffile.parent / DECISION_FILE_NAME
+    return path.is_file()
 
 
 def review_record_for(cfg: PmConfig, fid: str) -> str | None:
@@ -758,14 +742,14 @@ def review_record_for(cfg: PmConfig, fid: str) -> str | None:
     pointer = unquote(field_of(ffile, 'reviewed'))
     if pointer and pointer != 'null':
         target = Path(pointer) if pointer.startswith('/') else cfg.root / pointer
-        if record_is_substantive(cfg, target):
+        if record_resolves(target):
             return pointer
     if cfg.review_slug_fallback:
         slug = fid.partition('/')[2]
         rdir = cfg.root / cfg.review_dir
         if slug and rdir.is_dir():
             for cand in walk.matching(rdir, f'{slug}*.md', Kind.FILE).kept:
-                if record_is_substantive(cfg, cand):
+                if record_resolves(cand):
                     return cfg.rel(cand)
     return None
 
@@ -798,11 +782,25 @@ def shipped_version(cfg: PmConfig) -> str | None:
     return None
 
 
-def drift_done_no_record(cfg: PmConfig, fid: str, fstat: str) -> str | None:
-    """D1 — a `done` feature with no substantive review record."""
-    if fstat != 'done' or review_record_for(cfg, fid) is not None:
+def drift_dangling_record(cfg: PmConfig, fid: str) -> str | None:
+    """D1 — a `reviewed:` pointer naming a file that is not there.
+
+    The dangling-POINTER half only. "This feature carries no `reviewed:` at
+    all" used to fail here too, and that is not a fact about the tree — it is
+    the tool holding an opinion about whether a human had written a document
+    yet. A pointer that resolves to nothing IS a fact, and the same one V4
+    reports for `depends_on`.
+    """
+    ffile = feature_file(cfg, fid)
+    if ffile is None:
         return None
-    return 'done w/o review record'
+    pointer = unquote(field_of(ffile, 'reviewed'))
+    if not pointer or pointer == 'null':
+        return None
+    target = Path(pointer) if pointer.startswith('/') else cfg.root / pointer
+    if record_resolves(target):
+        return None
+    return f'reviewed: {pointer!r} resolves to nothing'
 
 
 def drift_stalled(fstat: str, done_n: int, total: int) -> str | None:

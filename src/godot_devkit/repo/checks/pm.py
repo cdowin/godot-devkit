@@ -8,8 +8,10 @@ predicates from `godot_devkit.repo.pm.model`, so the gate and the tool can never
 describe "reviewed" or "drift" differently — one definition, two readers.
 
 DRIFT RULES (each FAILs, naming the offending path):
-  D1  a `done` feature with NO substantive review record (the CLI's own
-      `feature done` precondition, inverted into a post-hoc check).
+  D1  a `reviewed:` pointer naming a file that is not there. The
+      dangling-POINTER half only — the same shape V4 checks for `depends_on`.
+      "This feature carries no `reviewed:` at all" is not drift; it is the
+      absence of a document, which is a fact about a team rather than a tree.
   D2  a feature still planning/ready/building while ALL its stories are `done`
       (a forgotten advance).
   D3  a `done` milestone with a non-`done` feature child.
@@ -157,10 +159,10 @@ def run() -> int:
                        f'is {view.status!r}  [{frel}]')
 
             if 'D1' in enabled:
-                reason = model.drift_done_no_record(cfg, view.fid, view.status)
+                reason = model.drift_dangling_record(cfg, view.fid)
                 if reason:
-                    report(f'feature {view.fid} is {reason} (stamp it via '
-                           f'pm feature done --review-record <path>)  [{frel}]')
+                    report(f'feature {view.fid}: {reason} — point it at a real '
+                           f'file or remove the field  [{frel}]')
 
             for sfile in view.stories:
                 sid = model.field_of(sfile, 'id')
