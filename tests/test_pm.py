@@ -1371,16 +1371,22 @@ class StructuralIntegrity(unittest.TestCase):
 
 
 class NoDeleter(unittest.TestCase):
-    """The tracker REPORTS; no verb of it deletes a grain.
+    """The tracker mostly REPORTS; the one verb that deletes NAMES its target.
 
     Reproduced on the default roster before `prune` was removed: an OPEN bug
     filed under a `done` milestone, `check pm` PASS, `pm prune`, and the bug
     file was gone. The rule that was supposed to make that impossible (an open
     bug under a done milestone) was opt-in and neither consumer enabled it, so
-    nothing at all stood between the two commands.
+    nothing at all stood between the two commands. `prune` stays gone, and
+    every one of these tests still holds for it.
 
-    If archive sprawl needs an answer it is a READ verb. This is the test that
-    says the answer is never a deleter.
+    If archive sprawl needs an answer it is a READ verb — that is still true.
+    What changed at 0.16.0 is `pm retire <milestone-id>`, the OPPOSITE shape
+    from `prune`: one milestone, spelled out on the command line by the
+    caller every time, never a sweep the tool decides the scope of on its
+    own. `test_the_pm_cli_carries_no_recursive_delete` below is narrowed to
+    let exactly that one command through — see it for why the shape still
+    holds everywhere else.
     """
 
     def _commit(self, root: Path) -> None:
@@ -1426,13 +1432,28 @@ class NoDeleter(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
 
-    def test_the_pm_cli_carries_no_recursive_delete(self):
-        # The shape, not the instance: any future verb reaching for one of
-        # these is the same data-loss path wearing a different name.
+    def test_the_pm_cli_carries_no_recursive_delete_OUTSIDE_cmd_retire(self):
+        # The shape, not the instance: any function OTHER than the one that
+        # is `pm retire`'s own implementation reaching for one of these is
+        # `prune` wearing a different name. Narrowed to `cmd_retire`'s own
+        # body — not dropped — so the guard still catches a delete that
+        # turns up in `cmd_bug`, `cmd_move`, or anywhere else future work
+        # adds a verb.
         source = Path(cli.__file__).read_text(encoding='utf-8')
-        for spelling in ('remove_tree', 'rmtree', "'rm'", 'unlink'):
-            self.assertNotIn(spelling, source,
-                             f'{spelling} is back in the pm CLI')
+        lines = source.split('\n')
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith('def cmd_retire('))
+        end = next(i for i in range(start + 1, len(lines))
+                   if lines[i].startswith('def '))
+        retire_body = '\n'.join(lines[start:end])
+        rest = '\n'.join(lines[:start] + lines[end:])
+        for spelling in ('remove_tree', 'rmtree', "'rm'", 'unlink', 'delete_tree'):
+            self.assertNotIn(spelling, rest,
+                             f'{spelling} is back in the pm CLI outside '
+                             f'cmd_retire')
+        self.assertIn('delete_tree', retire_body,
+                      "cmd_retire no longer deletes anything — this test's "
+                      'own fixture has gone stale')
 
     def test_the_retired_rules_are_not_silently_accepted_names(self):
         # A retired id must not linger in KNOWN_CHECKS: a name that parses but
@@ -3483,6 +3504,262 @@ class OneHomeForEachFact(unittest.TestCase):
             list(inspect.signature(model.milestone_walk).parameters), ['cfg'])
         self.assertEqual(
             list(inspect.signature(model.milestone_dirs).parameters), ['cfg'])
+
+
+class BugStatus(unittest.TestCase):
+    """`pm bug <status> <bug-id>` — exactly `cmd_story`'s shape, for bugs.
+
+    Before this, the vocabulary and the `/bugs/` resolver both existed
+    (`_grain_file`, `checks/pm.py`'s D4) and nothing sanctioned reached them
+    together — only a hand edit or the untyped `pm set` moved a bug's own
+    `status:`. Mirrors `StatusMoves`' story coverage: every vocabulary state
+    reachable, an out-of-vocabulary target a Usage error naming the set, the
+    flip idempotent, an id that resolves to nothing exit 2.
+    """
+
+    @staticmethod
+    def _bug(root: Path, slug: str, status: str) -> Path:
+        p = root / 'pm/roadmap/0.1-demo/bugs' / f'{slug}.md'
+        write(p, {'id': f'0.1/bugs/{slug}', 'milestone': '"0.1"',
+                  'status': status})
+        return p
+
+    def test_any_state_in_the_vocabulary_is_reachable(self):
+        for state in model.DEFAULT_BUG_STATES:
+            with self.subTest(state=state), tree() as root:
+                bug = self._bug(root, 'seed-is-zero', 'open')
+                code, out = run_cli(root, 'bug', state,
+                                    '0.1/bugs/seed-is-zero')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(model.field_of(bug, 'status'), state)
+
+    def test_a_state_outside_the_vocabulary_is_a_usage_error_naming_the_set(self):
+        with tree() as root:
+            bug = self._bug(root, 'seed-is-zero', 'open')
+            code, out = run_cli(root, 'bug', 'banana',
+                                '0.1/bugs/seed-is-zero')
+            self.assertEqual(code, 2, out)
+            self.assertIn('is not a bug status', out)
+            for state in model.DEFAULT_BUG_STATES:
+                self.assertIn(state, out)
+            self.assertEqual(model.field_of(bug, 'status'), 'open')
+
+    def test_idempotent_noop_succeeds(self):
+        with tree() as root:
+            self._bug(root, 'seed-is-zero', 'fixed')
+            code, out = run_cli(root, 'bug', 'fixed', '0.1/bugs/seed-is-zero')
+            self.assertEqual(code, 0, out)
+            self.assertIn('no-op', out)
+
+    def test_unresolvable_id_is_a_usage_error(self):
+        with tree() as root:
+            code, out = run_cli(root, 'bug', 'open', '0.1/bugs/nope')
+            self.assertEqual(code, 2, out)
+            self.assertIn('no bug resolves', out)
+
+    def test_an_id_lacking_the_bugs_segment_never_writes_a_different_grain(self):
+        # `_grain_file` alone resolves a FEATURE id too when `/bugs/` is
+        # absent — a bug verb reaching it unguarded would validate the
+        # target against `bug_states` and then write it into the feature's
+        # own `status:`, a cross-grain write no caller asked for.
+        with tree() as root:
+            code, out = run_cli(root, 'bug', 'open', '0.1/alpha')
+            self.assertEqual(code, 2, out)
+            self.assertIn('no bug resolves', out)
+            self.assertEqual(
+                model.field_of(
+                    root / 'pm/roadmap/0.1-demo/features/alpha/feature.md',
+                    'status'),
+                'building')
+
+    def test_a_nested_bug_id_resolves(self):
+        with tree() as root:
+            bug = root / 'pm/roadmap/0.1-demo/bugs/spatial/seed-is-zero.md'
+            write(bug, {'id': '0.1/bugs/spatial/seed-is-zero',
+                       'milestone': '"0.1"', 'status': 'open'})
+            code, out = run_cli(root, 'bug', 'fixed',
+                                '0.1/bugs/spatial/seed-is-zero')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(model.field_of(bug, 'status'), 'fixed')
+
+
+class Retire(unittest.TestCase):
+    """`pm retire <milestone-id>` — the prune flow `pm init` seeds a table
+    for, made whole: one write that removes the milestone directory and
+    appends its row.
+
+    Refuses on exactly two impossibilities (an unresolvable id, no
+    ROADMAP.md); everything else it notices about the tree — a milestone
+    not `done`, a feature or bug still open — is reported below the line
+    that says what moved, never a precondition.
+    """
+
+    @staticmethod
+    def _seed_roadmap(root: Path) -> Path:
+        index = root / 'pm/roadmap/ROADMAP.md'
+        index.write_text(cli.ROADMAP_SEED, encoding='utf-8')
+        return index
+
+    def test_an_unresolvable_id_is_a_usage_error_naming_the_known_set(self):
+        with tree() as root:
+            self._seed_roadmap(root)
+            code, out = run_cli(root, 'retire', '9.9')
+            self.assertEqual(code, 2, out)
+            self.assertIn('is not a milestone', out)
+            self.assertIn('0.1', out)
+            self.assertTrue((root / 'pm/roadmap/0.1-demo').is_dir())
+
+    def test_no_roadmap_index_is_refused_naming_where_it_looked(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            # tree() never seeds ROADMAP.md — this IS the missing-index case.
+            code, out = run_cli(root, 'retire', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('ROADMAP.md', out)
+            self.assertIn('does not exist', out)
+            self.assertIn('pm/roadmap', out)
+            self.assertTrue((root / 'pm/roadmap/0.1-demo').is_dir())
+
+    def test_a_non_done_milestone_is_reported_not_refused(self):
+        with tree(milestone_status='building',
+                  feature_status='building') as root:
+            self._seed_roadmap(root)
+            BugStatus._bug(root, 'seed-is-zero', 'open')
+            code, out = run_cli(root, 'retire', '0.1')
+            self.assertEqual(code, 0, out)
+            self.assertIn('noticed: milestone 0.1 is building, not done', out)
+            self.assertIn('feature(s) not done', out)
+            self.assertIn('bug(s) still open', out)
+            self.assertFalse((root / 'pm/roadmap/0.1-demo').exists())
+
+    def test_dry_run_writes_nothing_byte_for_byte(self):
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('done',)) as root:
+            index = self._seed_roadmap(root)
+            before_index = index.read_bytes()
+            mdir = root / 'pm/roadmap/0.1-demo'
+            before_files = sorted(
+                (p.relative_to(root), p.read_bytes())
+                for p in mdir.rglob('*') if p.is_file())
+            code, out = run_cli(root, 'retire', '0.1', '--dry-run')
+            self.assertEqual(code, 0, out)
+            self.assertIn('[dry-run]', out)
+            self.assertEqual(index.read_bytes(), before_index)
+            self.assertTrue(mdir.is_dir())
+            after_files = sorted(
+                (p.relative_to(root), p.read_bytes())
+                for p in mdir.rglob('*') if p.is_file())
+            self.assertEqual(before_files, after_files)
+
+    def test_retire_appends_exactly_one_row_and_removes_exactly_the_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            write(root / 'pm/roadmap/0.1-demo/milestone.md',
+                  {'id': '"0.1"', 'name': 'Demo', 'status': 'done',
+                   'actual_date': '2026-01-02'})
+            write(root / 'pm/roadmap/0.2-later/milestone.md',
+                  {'id': '"0.2"', 'name': 'Later', 'status': 'building'})
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                index = self._seed_roadmap(root)
+                code, out = run_cli(root, 'retire', '0.1', 'shipped',
+                                    'X', 'and', 'Y')
+                self.assertEqual(code, 0, out)
+                rows = [line for line in
+                       index.read_text(encoding='utf-8').split('\n')
+                       if line.startswith('| 0.1 |')]
+                self.assertEqual(len(rows), 1, rows)
+                self.assertIn('2026-01-02', rows[0])
+                self.assertIn('shipped X and Y', rows[0])
+                self.assertFalse((root / 'pm/roadmap/0.1-demo').exists())
+                self.assertTrue((root / 'pm/roadmap/0.2-later').is_dir())
+            finally:
+                os.chdir(previous)
+
+
+class Move(unittest.TestCase):
+    """`pm move <story-id> <feature-id>` — re-parents a story whole, or not
+    at all.
+
+    Before this, re-parenting was a rename plus three hand-edited
+    frontmatter fields, policed afterwards (if at all) by V2/V3 — one
+    whole-or-nothing verb through the machinery the templates already own.
+    """
+
+    @staticmethod
+    def _second_feature(root: Path) -> None:
+        write(root / 'pm/roadmap/0.1-demo/features/beta/feature.md',
+              {'id': '0.1/beta', 'milestone': '"0.1"', 'name': 'Beta',
+               'status': 'building', 'reviewed': ''})
+
+    def test_a_story_moves_whole(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._second_feature(root)
+            code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/beta')
+            self.assertEqual(code, 0, out)
+            old = root / STORY_REL
+            new = root / 'pm/roadmap/0.1-demo/features/beta/stories/s0.md'
+            self.assertFalse(old.exists())
+            self.assertTrue(new.is_file())
+            self.assertEqual(model.field_of(new, 'id'), '0.1/beta/s0')
+            self.assertEqual(model.field_of(new, 'feature'), '0.1/beta')
+            self.assertEqual(model.field_of(new, 'milestone'), '0.1')
+            self.assertIn('milestone: "0.1"', new.read_text(encoding='utf-8'))
+
+    def test_every_other_byte_survives_the_move(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._second_feature(root)
+            before = (root / STORY_REL).read_text(encoding='utf-8')
+            code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/beta')
+            self.assertEqual(code, 0, out)
+            new = root / 'pm/roadmap/0.1-demo/features/beta/stories/s0.md'
+            after = new.read_text(encoding='utf-8')
+            expected = (before.replace('feature: 0.1/alpha', 'feature: 0.1/beta')
+                             .replace('id: 0.1/alpha/s0', 'id: 0.1/beta/s0'))
+            self.assertEqual(expected, after)
+
+    def test_unknown_target_feature_is_usage_naming_known_features(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._second_feature(root)
+            code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/nope')
+            self.assertEqual(code, 2, out)
+            self.assertIn('no feature resolves', out)
+            self.assertIn('0.1/alpha', out)
+            self.assertIn('0.1/beta', out)
+            self.assertTrue((root / STORY_REL).is_file())
+
+    def test_unresolvable_story_is_a_usage_error(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._second_feature(root)
+            code, out = run_cli(root, 'move', '0.1/alpha/nope', '0.1/beta')
+            self.assertEqual(code, 2, out)
+
+    def test_already_under_the_target_is_a_noop(self):
+        with tree(story_statuses=('todo',)) as root:
+            code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/alpha')
+            self.assertEqual(code, 0, out)
+            self.assertIn('no-op', out)
+            self.assertTrue((root / STORY_REL).is_file())
+
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
+                     'permission bits are not the obstruction as root')
+    def test_an_unwritable_target_directory_moves_nothing(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._second_feature(root)
+            target_dir = root / 'pm/roadmap/0.1-demo/features/beta'
+            target_dir.chmod(0o555)
+            try:
+                before = (root / STORY_REL).read_bytes()
+                code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/beta')
+                self.assertEqual(code, 1, out)
+                self.assertIn('nothing was moved', out)
+                self.assertTrue((root / STORY_REL).is_file())
+                self.assertEqual((root / STORY_REL).read_bytes(), before)
+                self.assertFalse((target_dir / 'stories' / 's0.md').exists())
+            finally:
+                target_dir.chmod(0o755)
 
 
 if __name__ == '__main__':

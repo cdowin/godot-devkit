@@ -3,7 +3,7 @@ id: 0.16.0/pm-verbs/bug-status
 feature: 0.16.0/pm-verbs
 milestone: "0.16.0"
 name: pm bug <status> <id> validated against bug_states
-status: wip
+status: review
 owner:
 estimate:
 depends_on: []

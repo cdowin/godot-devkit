@@ -403,6 +403,27 @@ def set_field(path: Path, key: str, value: str) -> bool:
     block (nowhere to put the key) or when the write itself fails. Silently
     dropping the key is the failure mode this refuses to have; the caller turns
     a False into a loud refusal.
+
+    One key, through `set_fields` — see it for the N-key shape.
+    """
+    return set_fields(path, {key: value})
+
+
+def set_fields(path: Path, updates: dict[str, str]) -> bool:
+    """Set-or-insert SEVERAL frontmatter scalars in one read + one write.
+
+    `set_field` is this with a one-entry dict. The reason the N-key shape
+    exists: `pm move` rewrites a story's `id`/`feature`/`milestone` together,
+    and three separate `set_field` calls would be three separate writes — the
+    first two landed and the third refused is a story half re-parented, which
+    is exactly the partial write rule 3 forbids. One read, every key applied
+    to the SAME in-memory copy, one write — the multi-field rewrite is atomic
+    the same way the single-field one always was.
+
+    Same contract as `set_field` per key: rewritten in place if present,
+    inserted just before the closing fence otherwise; every other byte
+    preserved; False WITHOUT writing when there is no frontmatter block to
+    write into or the write itself fails.
     """
     try:
         text = read_raw(path)
@@ -413,12 +434,14 @@ def set_field(path: Path, key: str, value: str) -> bool:
     if bounds is None:
         return False
     open_i, close_i = bounds
-    for i in range(open_i + 1, close_i):
-        if lines[i].startswith(f'{key}:'):
-            lines[i] = f'{key}: {value}{_eol(lines[i])}'
-            break
-    else:
-        lines.insert(close_i, f'{key}: {value}{_eol(lines[close_i])}')
+    for key, value in updates.items():
+        for i in range(open_i + 1, close_i):
+            if lines[i].startswith(f'{key}:'):
+                lines[i] = f'{key}: {value}{_eol(lines[i])}'
+                break
+        else:
+            lines.insert(close_i, f'{key}: {value}{_eol(lines[close_i])}')
+            close_i += 1
     try:
         write_raw(path, '\n'.join(lines))
     except OSError:

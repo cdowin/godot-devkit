@@ -207,7 +207,7 @@ refuse nothing on process** — stories not at review, features not done, named 
 | Command | What it does |
 |---|---|
 | `pm init` · `pm new <milestone\|feature\|story\|bug> …` | Stand up a tree; scaffold a grain — its own frontmatter file and nothing else. **No directory and no shared doc is minted**: git stores no empty directory, and a shared doc appears on first WRITE. `new milestone`/`new feature` are idempotent — re-run to fill gaps. Every failure out is a refusal, never a stack trace |
-| `pm story\|feature\|milestone <status> <id>` | Set a grain's status to any value in its vocabulary; anything else is exit 2 naming the set |
+| `pm story\|bug\|feature\|milestone <status> <id>` | Set a grain's status to any value in its vocabulary; anything else is exit 2 naming the set. A bug id is `<milestone>/bugs/<slug>` |
 | `pm feature review <id>` | Move to `review` and REPORT the stories that are not there |
 | `pm feature done <id> [--cascade] [--review-record <path>]` | Close the feature. **Touches no story file** unless `--cascade`, which also closes that feature's stories at `review`. A `--review-record` naming no file IS refused, whole — stamping a pointer to nothing is the drift D1 reports |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
@@ -218,6 +218,8 @@ refuse nothing on process** — stories not at review, features not done, named 
 | `pm sync [--check]` | Re-render the execution lists (feature order, story order) from `phase:` + `depends_on`. Opt-in per file; **V6** gates the same thing and is itself opt-in |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back |
 | `pm decide <id> <title…>` | Append one dated, ordinal-stamped heading to that grain's `decisions.md`, minting the log if it is the first. The reasoning under it is yours |
+| `pm retire <milestone-id> [<summary…>] [--dry-run]` | Remove a shipped milestone's directory and append its row to the ROADMAP.md table `pm init` already seeds. Reports an undone status or live features/bugs rather than refusing on their account; refuses only when the id or ROADMAP.md itself is missing. `--dry-run` decides and prints, writing nothing |
+| `pm move <story-id> <feature-id>` | Re-parent a story to a different feature: renames its file under the target's `stories/` and rewrites `id`/`feature`/`milestone` together. Whole, or not at all — a decided obstruction refuses with nothing touched |
 | `pm install-skills [--force] [--diff]` | The auto-loading rule + the operations skill (see [Installers](#installers-godot-devkit-install-what)) |
 
 ## Configuration — `devkit.toml`

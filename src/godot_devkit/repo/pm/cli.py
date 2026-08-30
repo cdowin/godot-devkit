@@ -37,12 +37,26 @@ PROG = 'godot-devkit pm'
 
 USAGE = """usage: godot-devkit pm <command>
   story <status> <story-id>               (any status in [pm] story_states)
+  bug <status> <bug-id>                   (any status in [pm] bug_states;
+                                           bug-id is <milestone>/bugs/<slug>)
   feature <status> <feature-id>           (any status in [pm] feature_states)
   feature done <feature-id> [--cascade] [--review-record <path>]
                                           (--cascade also closes that feature's
                                            stories that are at `review`; without
                                            it, no story file is touched)
   milestone <status> <milestone-id>       (any state; reports features not done)
+  retire <milestone-id> [<summary...>] [--dry-run]
+                                          (removes the milestone directory and
+                                           appends its row to ROADMAP.md;
+                                           reports an undone status or live
+                                           children rather than refusing on
+                                           their account — refuses only when
+                                           the id or ROADMAP.md itself is
+                                           missing)
+  move <story-id> <feature-id>            (re-parents a story: renames its
+                                           file under the target feature and
+                                           rewrites id/feature/milestone —
+                                           whole, or not at all)
   status [<milestone>]
   list [--status <s>[,<s>…]] [--owner <name>] [--milestone <id>]
                                           (one tab-separated line per story:
@@ -186,6 +200,39 @@ def cmd_story(cfg: model.PmConfig, args: list[str]) -> int:
         return 0
     _set_status(cfg, sf, to)
     _ok(f'story {sid}: {cur} -> {to}')
+    return 0
+
+
+# --- bug ------------------------------------------------------------------
+def cmd_bug(cfg: model.PmConfig, args: list[str]) -> int:
+    """Move a bug's `status:` through code — exactly `cmd_story`'s shape.
+
+    A bug's status is the one fact that "matters most" (its own docstring in
+    `checks/pm.py`), and today only a hand edit or the untyped `pm set`
+    reaches it — a typo'd status the vocabulary would have refused going
+    straight into the file the vocabulary exists to police. This closes that.
+
+    `bid` must NAME a bug (contain `/bugs/`) before `_grain_file` ever runs:
+    `_grain_file` resolves a milestone/feature/story id too when `/bugs/` is
+    absent, and a bug verb resolving to a FEATURE file would flip that
+    file's `status:` to a word validated against `bug_states` instead of its
+    own vocabulary — a cross-grain write no caller asked for.
+    """
+    if len(args) != 2:
+        raise Usage(USAGE)
+    to, bid = args
+    if to not in cfg.bug_states:
+        raise Usage(f'{to!r} is not a bug status ({" ".join(cfg.bug_states)})')
+    if '/bugs/' not in bid:
+        raise Usage(f'no bug resolves from id {bid!r} '
+                    f'(expected <milestone>/bugs/<slug>)')
+    bf = _grain_file(cfg, bid)
+    cur = _was(bf)
+    if cur == to:
+        _ok(f'bug {bid} already {to} (no-op)')
+        return 0
+    _set_status(cfg, bf, to)
+    _ok(f'bug {bid}: {cur} -> {to}')
     return 0
 
 
@@ -394,6 +441,204 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     # the state this leaves is not unwatched.
     if pending:
         _ok(f'  {len(pending)} feature(s) not done: {" ".join(pending)}')
+    return 0
+
+
+def _known_milestone_ids(cfg: model.PmConfig) -> list[str]:
+    return sorted(
+        model.unquote(model.field_of(mdir / 'milestone.md', 'id')) or mdir.name
+        for mdir in model.milestone_dirs(cfg))
+
+
+def cmd_retire(cfg: model.PmConfig, args: list[str]) -> int:
+    """Retire a shipped milestone: remove its directory, record its row.
+
+    `pm init` seeds ROADMAP.md's table (`ROADMAP_SEED` above) and nothing
+    used to fill it — a retirement was a hand-rolled `git rm -r` plus a
+    hand-typed row, the two ever agreeing only by care. This is the one
+    write that fills the table the tool itself mints.
+
+    Refuses on exactly two impossibilities, both named: an id that resolves
+    to no milestone, and no ROADMAP.md to append to. What it does NOT refuse
+    on — the milestone not being `done`, or still holding a feature that
+    isn't — is a fact about the tree, not a precondition; it is REPORTED the
+    same way `milestone done` already reports its own unfinished features,
+    below the line that says what moved. The caution that removed `pm prune`
+    was about an AUTOMATIC sweep over every closed milestone, with no name
+    in the command at all; this is the opposite shape — one milestone, named
+    by the caller, on the command line, every time.
+
+    `--dry-run` runs every decision (which id, which row, which notices) and
+    prints them, then returns before the plan is ever built — the same
+    "decide everything, write nothing" the whole-or-nothing verbs use, so a
+    dry run is byte-identical to not having run it at all.
+    """
+    dry_run = False
+    mid = ''
+    summary_words: list[str] = []
+    for a in args:
+        if a == '--dry-run':
+            dry_run = True
+        elif not mid:
+            mid = a
+        else:
+            summary_words.append(a)
+    if not mid:
+        raise Usage(USAGE)
+    mdir = model.milestone_dir(cfg, mid)
+    if mdir is None:
+        known = _known_milestone_ids(cfg)
+        raise Usage(f'{mid!r} is not a milestone in {cfg.roadmap_dir} '
+                    f'({" ".join(known) if known else "none scaffolded"})')
+    index = cfg.roadmap / 'ROADMAP.md'
+    if not index.is_file():
+        raise Refused(f'{cfg.rel(index)} does not exist — looked in '
+                      f'{cfg.rel(cfg.roadmap)} (run `pm init` first; it seeds '
+                      f'the table this command appends to)')
+
+    mfile = mdir / 'milestone.md'
+    notices: list[str] = []
+    if not mfile.is_file():
+        notices.append(f'{cfg.rel(mfile)} is missing')
+        status, canonical_id, name = '', mid, ''
+    else:
+        status = model.field_of(mfile, 'status')
+        canonical_id = model.unquote(model.field_of(mfile, 'id')) or mid
+        name = model.field_of(mfile, 'name')
+        if status != 'done':
+            notices.append(f'milestone {mid} is {status or "(no status)"}, '
+                           f'not done')
+    open_features = sorted(ff.parent.name for ff in model.feature_files(mdir)
+                           if model.field_of(ff, 'status') != 'done')
+    if open_features:
+        notices.append(f'{len(open_features)} feature(s) not done: '
+                       f'{" ".join(open_features)}')
+    open_bugs = sorted(bf.stem for bf in model.bug_files(mdir)
+                       if model.field_of(bf, 'status') == 'open')
+    if open_bugs:
+        notices.append(f'{len(open_bugs)} bug(s) still open: '
+                       f'{" ".join(open_bugs)}')
+
+    date = (model.field_of(mfile, 'actual_date') if mfile.is_file() else '') \
+        or datetime.now(timezone.utc).date().isoformat()
+    summary = ' '.join(summary_words)
+    row = f'| {canonical_id} | {name} | {date} | {summary} |'
+
+    existing = model.read_raw(index)
+    eol = '\r\n' if '\r\n' in existing else '\n'
+    padded = existing if not existing or existing.endswith(('\n', '\r')) \
+        else existing + eol
+    new_index_text = padded + row + eol
+
+    if dry_run:
+        _ok(f'[dry-run] would remove {cfg.rel(mdir)}')
+        _ok(f'[dry-run] would append to {cfg.rel(index)}: {row}')
+        for n in notices:
+            _ok(f'  noticed: {n}')
+        return 0
+
+    plan = apply.Plan()
+    plan.delete_tree(mdir, label=cfg.rel(mdir))
+    plan.overwrite(index, new_index_text, newline='', label=cfg.rel(index))
+    blocked = plan.decide()
+    if blocked:
+        raise Refused('; '.join(b.describe() for b in blocked)
+                      + ' — nothing was retired')
+    applied = plan.apply(decide=False)
+    if applied.failed is not None:
+        raise Refused(
+            f'{applied.failed.label} could not be written ({applied.error}) — '
+            + ('nothing was written' if not applied.landed else
+               'ALREADY LANDED: ' + ', '.join(s.label for s in applied.landed))
+            + '. Fix the obstruction and re-run.')
+    _ok(f'milestone {mid}: retired — {cfg.rel(mdir)} removed, '
+        f'{cfg.rel(index)} carries the row')
+    for n in notices:
+        _ok(f'  noticed: {n}')
+    return 0
+
+
+# --- move -----------------------------------------------------------------
+def _known_feature_ids(cfg: model.PmConfig) -> list[str]:
+    out = []
+    for mdir in model.milestone_dirs(cfg):
+        mid = model.unquote(model.field_of(mdir / 'milestone.md', 'id')) \
+            or mdir.name
+        out.extend(f'{mid}/{ff.parent.name}' for ff in model.feature_files(mdir))
+    return sorted(out)
+
+
+def cmd_move(cfg: model.PmConfig, args: list[str]) -> int:
+    """Re-parent a story to a different feature. Whole, or not at all.
+
+    Two things happen — the file is renamed under the target feature's
+    `stories/`, and its `id`/`feature`/`milestone` are rewritten to match —
+    and a caller must never see only one of them: an id that still claims
+    the old feature after the file moved, or a file sitting in the old
+    feature's directory with a new feature's id, is worse than either half
+    alone. Everything is DECIDED — the rename's every obstruction — before
+    either byte is written, so a decided obstruction (a same-named story
+    already at the destination, an unwritable target directory, …) refuses
+    with nothing touched: `sf` is unread past resolution, `dest` is never
+    created. Only once that decision comes back clean does the frontmatter
+    get rewritten (still at the OLD path, through `model.set_fields` — one
+    read, one write, all three keys together) and the file renamed last, so
+    the one failure mode neither `decide()` nor a permissions check can rule
+    out — an OS failure between the two writes — is reported by name rather
+    than left to look like a clean move.
+    """
+    if len(args) != 2:
+        raise Usage(USAGE)
+    sid, target_fid = args
+    sf = model.story_file(cfg, sid)
+    if sf is None:
+        raise Usage(f'no story resolves from id {sid!r} '
+                    f'(expected <milestone>/<feature-slug>/<story-slug>)')
+    target_ff = model.feature_file(cfg, target_fid)
+    if target_ff is None:
+        known = _known_feature_ids(cfg)
+        raise Usage(f'no feature resolves from id {target_fid!r} '
+                    f'({" ".join(known) if known else "none scaffolded"})')
+    target_mid = model.unquote(model.field_of(target_ff, 'milestone')) \
+        or target_fid.partition('/')[0]
+    target_fslug = target_ff.parent.name
+    canonical_fid = f'{target_mid}/{target_fslug}'
+    if sf.parent.parent == target_ff.parent:
+        _ok(f'story {sid} already under feature {canonical_fid} (no-op)')
+        return 0
+
+    dest = target_ff.parent / 'stories' / sf.name
+    # `stories/` is minted on first write, never scaffolded (`pm new` mints
+    # no empty directory) — so the target feature's OWN first story lands
+    # here with no `stories/` to rename into yet. `Plan.move` renames; it
+    # does not `mkdir -p` a missing destination parent the way OVERWRITE
+    # does, so that has to be its own decided, idempotent step.
+    plan = apply.Plan()
+    plan.make_dir(dest.parent, label=f'{cfg.rel(dest.parent)}/')
+    plan.move(sf, dest, label=f'{cfg.rel(sf)} -> {cfg.rel(dest)}')
+    blocked = plan.decide()
+    if blocked:
+        raise Refused('; '.join(b.describe() for b in blocked)
+                      + ' — nothing was moved')
+
+    orig_id = model.field_of(sf, 'id')
+    story_slug = orig_id.rpartition('/')[2] or sf.stem
+    updates = {'id': f'{canonical_fid}/{story_slug}', 'feature': canonical_fid,
+               'milestone': f'"{target_mid}"'}
+    if not model.set_fields(sf, updates):
+        raise Usage(f'could not rewrite id/feature/milestone in {cfg.rel(sf)} '
+                    f'(malformed frontmatter, or the file is not writable) — '
+                    f'nothing was moved')
+
+    applied = plan.apply(decide=False)
+    if applied.failed is not None:
+        raise Refused(
+            f'{applied.failed.label} could not be written ({applied.error}) — '
+            f'the frontmatter at {cfg.rel(sf)} was ALREADY rewritten to '
+            f'{canonical_fid}; move the file to {cfg.rel(dest)} by hand, or '
+            f'clear the obstruction and re-run (the rewrite is idempotent).')
+    _ok(f'story {sid}: moved to {canonical_fid} '
+        f'({cfg.rel(sf)} -> {cfg.rel(dest)})')
     return 0
 
 
@@ -1106,7 +1351,8 @@ def main(argv: list[str]) -> int:
         return 2
     cmd, rest = argv[0], argv[1:]
     table = {
-        'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,
+        'story': cmd_story, 'bug': cmd_bug, 'feature': cmd_feature,
+        'milestone': cmd_milestone, 'retire': cmd_retire, 'move': cmd_move,
         'status': cmd_status, 'list': cmd_list, 'new': cmd_new,
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
         'init': cmd_init, 'set': cmd_set, 'get': cmd_get,

@@ -51,3 +51,14 @@ ungated until the editor next rewrites them, at which point CHECK 1 keeps ref an
 together. Rejected: canonicalizing sidecar + every ref in one fix (a multi-file cascade the gate
 cannot prove safe from parse alone). Flagged for Chris's end-of-run review: would have asked?
 BORDERLINE — the exemption leaves a known churn class ungated on one plane.
+
+## D5 — 2026-08-30 — retire is not prune - a named single target is not an automatic sweep
+
+`pm retire` deletes a milestone directory, which required narrowing the `NoDeleter` guard test
+(commit 8da6d50) that banned recursive deletion from the PM CLI outright after `prune`'s data-loss
+shape. The distinction ratified: `prune` swept every closed milestone automatically; `retire`
+deletes exactly one milestone the operator names on the command line, decided whole with the
+ROADMAP.md row append before either write, with `--dry-run`. The guard survives narrowed — a delete
+primitive anywhere outside `cmd_retire`'s body still fails the test. Rejected: keeping the blanket
+ban (leaves the documented prune flow a hand-rolled `git rm -r` forever). Would have asked? NO —
+Chris commissioned `pm retire` by name in the audit decisions.
