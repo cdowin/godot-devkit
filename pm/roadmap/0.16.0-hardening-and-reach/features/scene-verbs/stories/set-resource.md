@@ -3,7 +3,7 @@ id: 0.16.0/scene-verbs/set-resource
 feature: 0.16.0/scene-verbs
 milestone: "0.16.0"
 name: scene set addresses [resource] and [sub_resource] sections
-status: wip
+status: review
 owner:
 estimate:
 depends_on: []

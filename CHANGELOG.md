@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`scene set --resource` / `--sub-resource <id>`** — the set verb reaches the whole `data/**.tres` plane, previously hand-edit-only; the id is verbatim what `scene --props` prints (read output is write input). An unknown id refuses naming the known ones. (godot/write/scene_edit.py, godot/format/tscn_document.py)
+- **`scene add --instance res://x.tscn`** — instance nodes (`instance=ExtResource(...)`, no `type=`); the PackedScene ref is minted from the target's own uid and REFUSED when the target is missing or has no resolvable uid — never invented. (godot/write/scene_edit.py)
+- **`scene connect` / `scene disconnect`** — `[connection]` sections were parsed and rewritten on rename/reparent/rm but never authorable. Connect appends in Godot's serialization position; disconnect removes exactly the match, refusing ambiguity (`--flags` disambiguates); connect→disconnect round-trips byte-identically. (godot/write/scene_edit.py)
+- **`refs --retarget <old> <new>`** — the post-`git mv` repair: every `ext_resource` `path=` attr and exact `preload`/`load` literal naming old rewritten byte-surgically (uid attr untouched); a comment, substring, or quoted path outside a call is SKIPPED with the reason and exits 1 — a loud skip, never a silent rewrite. `--dry-run` lists every site. (godot/write/refs_retarget.py, cli.py)
+
 - **new opt-in `check pm` rule D10** — a `building` milestone whose `branch:` is empty or equals `[repo_hygiene] mainline` (`origin/`-stripped) is drift. Pairs with D9: run D9 alone for "a building milestone declares its branch," add D10 for the stricter guarantee that it is never the trunk itself. Devkit enables it on its own tree; the flow it encodes is `SDLC.md` §1. (repo/checks/pm.py, repo/pm/model.py)
 
 - **`pm bug <status> <id>`** — moves a bug's status through the vocabulary and resolver that already existed for it: the one grain a typo'd status could previously reach only by hand edit or untyped `pm set`. (repo/pm/cli.py)

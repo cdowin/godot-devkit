@@ -51,6 +51,14 @@ def _relpath(root: Path, path: Path) -> str:
     return str(path.relative_to(root))
 
 
+def exclude_prefixes() -> tuple[str, ...]:
+    """The `[refs] exclude_prefixes` scope, guarded — one key, one scope,
+    shared by `refs` and `refs --retarget` (write side) so the two can never
+    disagree about what the refs family looks at."""
+    return str_tuple(config_section(CONFIG_SECTION), CONFIG_SECTION,
+                     'exclude_prefixes', DEFAULT_EXCLUDE)
+
+
 def iter_files(root: Path, exclude: tuple[str, ...], glob: str,
                include_tests: bool) -> list[Path]:
     def _is_excluded(path: Path) -> bool:
@@ -170,8 +178,7 @@ SECTION_TITLES = (
 
 def run(symbol: str, include_tests: bool) -> int:
     root = repo_root()
-    exclude = str_tuple(config_section(CONFIG_SECTION), CONFIG_SECTION,
-                        'exclude_prefixes', DEFAULT_EXCLUDE)
+    exclude = exclude_prefixes()
     gd_files = iter_files(root, exclude, GD_GLOB, include_tests)
     scene_files: list[Path] = []
     for glob in SCENE_GLOBS:

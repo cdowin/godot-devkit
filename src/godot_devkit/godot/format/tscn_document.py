@@ -80,6 +80,7 @@ DEFAULT_ROOT_NODE = '..'
 SCRIPT_PROP = 'script'
 LOAD_STEPS_ATTR = 'load_steps'
 EXT_REF = 'ExtResource("{id}")'
+PACKED_SCENE_TYPE = 'PackedScene'
 
 PathMap = dict[tuple[str, ...], tuple[str, ...]]
 
@@ -244,6 +245,32 @@ class TscnDocument:
         return {s.attrs['id']: s for s in self.sections
                 if s.kind == EXT_RESOURCE_KIND and 'id' in s.attrs}
 
+    def resource_body(self) -> Section:
+        """The `[resource]` body of a .tres — the one section a resource file
+        keeps its properties in. A scene has none, and saying so beats
+        guessing at which sub_resource the caller might have meant."""
+        match = next((s for s in self.sections if s.kind == RESOURCE_KIND), None)
+        if match is None:
+            raise TscnError('this file has no [resource] body '
+                            '(a .tscn scene has none — address a [sub_resource] '
+                            'by id, or a node by path)')
+        return match
+
+    def sub_resource(self, sub_id: str) -> Section:
+        """The `[sub_resource]` addressed by the id `scene --props` prints,
+        verbatim. An unknown id names the known ones — the same read-output-
+        is-write-input contract node paths follow."""
+        subs = {s.attrs['id']: s for s in self.sections
+                if s.kind == SUB_RESOURCE_KIND and 'id' in s.attrs}
+        if sub_id in subs:
+            return subs[sub_id]
+        known = ', '.join(subs) or '(none)'
+        raise TscnError(f'no sub_resource with id {sub_id!r}; '
+                        f'this file has: {known}')
+
+    def connections(self) -> list[Section]:
+        return [s for s in self.sections if s.kind == CONNECTION_KIND]
+
     # --- line surgery -------------------------------------------------------
     def _splice(self, start: int, end: int, replacement: list[str]) -> None:
         self.lines[start:end] = replacement
@@ -264,7 +291,12 @@ class TscnDocument:
     # --- properties ---------------------------------------------------------
     def set_prop(self, node_path: str, key: str, value: str) -> str:
         """Assign `key = value` on a node. Returns 'set' or 'added'."""
-        section = self.node(node_path)
+        return self.set_section_prop(self.node(node_path), key, value)
+
+    def set_section_prop(self, section: Section, key: str, value: str) -> str:
+        """Assign `key = value` on any property-bodied section (a node, the
+        `[resource]` body, a `[sub_resource]`): replace the existing span in
+        place — inline comment preserved — or append to the section's body."""
         existing = section.prop(key)
         if existing is not None:
             self._splice(existing.start, existing.end, [existing.render(value)])
@@ -353,6 +385,59 @@ class TscnDocument:
             body.append(f'{SCRIPT_PROP}{PROP_ASSIGN}{EXT_REF.format(id=ref_id)}')
         insert = self._subtree_end(self.node(parent_path))
         self._splice(insert, insert, ['', *body])
+
+    def add_instance_node(self, parent_path: str, name: str, res_path: str) -> None:
+        """Add an instance-of-a-scene node: `instance=ExtResource(...)`, and
+        deliberately NO `type=` — the type lives in the instanced scene, and
+        writing one here is how a hand edit forks the two."""
+        parent = self.node(parent_path)
+        parent_abs = self.node_path(parent)
+        if any(self.node_path(n) == parent_abs + (name,) for n in self.nodes):
+            raise TscnError(f'{parent_path!r} already has a child named {name!r}')
+        ref_id = self._ensure_ext_resource(res_path, PACKED_SCENE_TYPE)
+        header = (f'[node name="{name}" parent="{join_path(list(parent_abs))}" '
+                  f'instance={EXT_REF.format(id=ref_id)}]')
+        insert = self._subtree_end(self.node(parent_path))
+        self._splice(insert, insert, ['', header])
+
+    def add_connection(self, signal_name: str, from_attr: str, to_attr: str,
+                       method: str, flags: str | None = None) -> None:
+        """Append a `[connection]` where Godot serializes them: after every
+        node (and after the existing connections, which Godot writes as one
+        contiguous run), before any `[editable]` markers."""
+        attrs = (f'signal="{signal_name}" from="{from_attr}" '
+                 f'to="{to_attr}" method="{method}"')
+        if flags is not None:
+            attrs += f' flags={flags}'
+        line = f'[{CONNECTION_KIND} {attrs}]'
+        existing = self.connections()
+        if existing:
+            anchor = max(s.body_end for s in existing)
+            self._splice(anchor, anchor, [line])
+            return
+        anchor = max((s.body_end for s in self.nodes), default=None)
+        if anchor is None:
+            raise TscnError('this file has no nodes to connect')
+        self._splice(anchor, anchor, ['', line])
+
+    def remove_connection(self, section: Section) -> None:
+        """Remove one `[connection]` and its own comment lines — NOT the blank
+        separator below it, which belongs to the NEXT section (`_block_span`'s
+        trailing-blank grab is right for subtree moves, and here it would eat
+        a byte the caller never asked about). Removing a connection that sat
+        between two blanks collapses them to one, so a connect -> disconnect
+        round trip is byte-identical."""
+        if section.kind != CONNECTION_KIND:
+            raise TscnError(f'not a [connection] section: [{section.kind}]')
+        start = section.header_line
+        while start > 0 and self.lines[start - 1].lstrip().startswith(COMMENT_CHAR):
+            start -= 1
+        self.lines[start:section.body_end] = []
+        if (0 < start < len(self.lines)
+                and not self.lines[start - 1].strip()
+                and not self.lines[start].strip()):
+            del self.lines[start - 1]
+        self._reparse()
 
     # --- reference bookkeeping ---------------------------------------------
     def _rewrite_attr(self, section: Section, attr: str, value: str) -> None:

@@ -13,10 +13,27 @@ Introspection (pure parse, never boots Godot):
 
 Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene set      <file> <node-path> <prop> <value>
+    godot-devkit scene set      <file> --resource <prop> <value>
+    godot-devkit scene set      <file> --sub-resource <id> <prop> <value>
+                                    # the [resource] body of a .tres, or a
+                                    # [sub_resource] by the id `scene --props`
+                                    # prints — read output is write input
     godot-devkit scene rename   <file> <node-path> <new-name>
     godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
+    godot-devkit scene add      <file> <parent-path> <name> --instance res://x.tscn
+                                    # an instance node (no type=); its ref is
+                                    # minted from the scene's own uid, or refused
     godot-devkit scene rm       <file> <node-path>
     godot-devkit scene reparent <file> <node-path> <new-parent>
+    godot-devkit scene connect    <file> <signal> <from> <to> <method> [--flags N]
+    godot-devkit scene disconnect <file> <signal> <from> <to> <method> [--flags N]
+                                    # author / remove one [connection]; ambiguous
+                                    # matches are refused, --flags names one
+    godot-devkit refs --retarget <old-res-path> <new-res-path> [--dry-run]
+                                    # after a git mv: rewrite every ext_resource
+                                    # path attr + exact preload/load literal that
+                                    # names old; anything unprovable is SKIPPED
+                                    # with a reason, and skips exit 1
     godot-devkit scene canonicalize <file>... [--elide-defaults]
                                     # restore what PackedScene.pack() drops:
                                     # uid-in-refs, the header uid, index= on
@@ -85,6 +102,7 @@ from godot_devkit import __version__
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 
 FIX_FLAG = '--fix'
+RETARGET_FLAG = '--retarget'
 
 # THE gate roster: {name: in the default `check all`?}. One list, because two
 # were one list with the answer to a single question split across them — and a
@@ -231,6 +249,9 @@ def main(argv: list[str] | None = None) -> int:
         from godot_devkit.godot.read import scene_diff
         return scene_diff.main(rest)
     if cmd == 'refs':
+        if RETARGET_FLAG in rest:
+            from godot_devkit.godot.write import refs_retarget
+            return refs_retarget.main(rest)
         from godot_devkit.godot.read import refs
         return refs.main(rest)
     if cmd == 'orphans':

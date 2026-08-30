@@ -145,6 +145,10 @@ Nodes are addressed **by path**, the way `.tscn` addresses them in `parent=` and
 | `scene add <file> <parent> <name> <type> [--script res://x.gd]` | Add a node after the parent's subtree; `--script` mints the `ext_resource` from the script's `.uid`, so the ref is born canonical |
 | `scene rm <file> <path>` | Remove a node, its descendants, its connections and markers, and any `ext_resource` left unreferenced |
 | `scene reparent <file> <path> <new-parent>` | Move a subtree and re-express the NodePaths that pointed into or out of it |
+| `scene set <file> --resource <prop> <value>` · `scene set <file> --sub-resource <id> <prop> <value>` | The same set semantics on the `[resource]` body of a `.tres` or a `[sub_resource]` — the id is verbatim what `scene --props` prints |
+| `scene add <file> <parent> <name> --instance res://x.tscn` | Add an instance node (no `type=`); the `PackedScene` ref is minted from the target scene's own uid, or refused — never invented |
+| `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | Author / remove one `[connection]` in Godot's serialization position; ambiguous disconnects are refused, `--flags` names one |
+| `refs --retarget <old> <new> [--dry-run]` | After a `git mv`: rewrite every `ext_resource` path attr and exact `preload`/`load` literal naming old (uid untouched); unprovable occurrences are SKIPPED with a reason and exit 1 |
 | `scene canonicalize <file>... [--elide-defaults]` | Restore what `PackedScene.pack()` drops: uid-in-refs, the header uid, `index=` on instance-child overrides, `[editable path=]`. `--elide-defaults` also **deletes** `.tres` assignments proven equal to the script's `@export` default |
 | `tiles paint <file> --layer N --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` | Fill a rectangle of one TileMapLayer; only that one `tile_map_data` assignment is regenerated |
 | `tiles erase <file> --layer N --region X0,Y0,X1,Y1` | Delete every cell in a rectangle |
