@@ -32,12 +32,18 @@ DRIFT RULES (each FAILs, naming the offending path):
   D9  a `building` milestone declares the `branch:` its work lives on. A fresh
       checkout of the trunk sees the PM records but not the code; without the
       stamp the only recourse is guessing at `git branch -a`.
-  D8/D9 encode the branch-per-milestone / bump-at-start flow and are OFF by
-  default; a project shipping from the trunk and bumping at close is running a
-  different valid flow, not drifting. Opt in via `[pm] checks`.
+  D10 a `building` milestone's `branch:` is empty, or equals the configured
+      mainline (`[repo_hygiene] mainline`, `origin/`-stripped — stock
+      `origin/main` reads as `main`). D9 only requires SOME stamp; D10 also
+      refuses the trunk itself, so a repo may run D9 alone (branch declared,
+      wherever it points) or add D10 for the stricter guarantee. A repo may
+      also rely on D9 without D10.
+  D8/D9/D10 encode the branch-per-milestone / bump-at-start flow and are OFF
+  by default; a project shipping from the trunk and bumping at close is
+  running a different valid flow, not drifting. Opt in via `[pm] checks`.
 
 Which rules run is `[pm] checks` in devkit.toml (default: D1-D6 + V1-V5).
-V6 is known but OPT-IN, as are the two flow rules named just above.
+V6 is known but OPT-IN, as are the three flow rules named just above.
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
 MUST pass on the legitimate mid-build state: a building milestone with mixed
@@ -101,11 +107,31 @@ def run() -> int:
         for path, why in bug_findings:
             report(f'{cfg.rel(path)}: {why}')
 
+    n_features, n_stories = _drift_walk(cfg, enabled, mdirs, report)
+
+    _flow_findings(cfg, enabled, report)
+
+    # --- V1-V6: structural + referential integrity ------------------------
+    v_on = enabled & set(model.VALIDATE_CHECKS)
+    v_census: dict = {}
+    if v_on:
+        from godot_devkit.repo.pm import validate as _validate
+        v_findings, v_census = _validate.run(cfg, v_on)
+        for msg in v_findings:
+            report(msg)
+
+    return _verdict(cfg, findings, len(mdirs), n_features, n_stories, n_bugs,
+                    v_on, v_census)
+
+
+def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
+                report) -> tuple[int, int]:
+    """D1-D6 over every grain. Returns the (feature, story) census."""
     n_features = 0
     n_stories = 0
 
     for mdir in mdirs:
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / model.MILESTONE_DOC
         mid = model.field_of(mfile, 'id')
         mstat = model.field_of(mfile, 'status')
 
@@ -161,7 +187,11 @@ def run() -> int:
             report(f'milestone {mid} is {mstat!r} but all {feat_total} features '
                    f'are done (should be done)  [{cfg.rel(mfile)}]')
 
-    # --- D8/D9: the flow checks, only when opted into ---------------------
+    return n_features, n_stories
+
+
+def _flow_findings(cfg: model.PmConfig, enabled: set[str], report) -> None:
+    """D8/D9/D10 — the branch-per-milestone / bump-at-start flow, opt-in."""
     building = model.building_milestones(cfg) if enabled & set(model.FLOW_CHECKS) else []
 
     if 'D8' in enabled and building:
@@ -181,23 +211,29 @@ def run() -> int:
                    f'building milestone {ids[0]!r} — bump at milestone START, '
                    f'and the id IS the version (D8)')
 
+    mainline = model.mainline_branch() if 'D10' in enabled and building else ''
+
     for mid, branch, mfile in building:
         if 'D9' in enabled and not branch:
             report(f'building milestone {mid} declares no branch: — a fresh '
                    f'checkout cannot find where its work lives  [{cfg.rel(mfile)}]')
+        if 'D10' in enabled:
+            if not branch:
+                report(f'building milestone {mid} declares no branch: — D10 '
+                       f'needs a branch off the mainline ({mainline!r}) to '
+                       f'declare  [{cfg.rel(mfile)}]')
+            elif branch == mainline:
+                report(f'building milestone {mid} declares branch: {branch!r}, '
+                       f'the mainline itself — work must live off '
+                       f'{mainline!r}, not on it (D10)  [{cfg.rel(mfile)}]')
 
-    # --- V1-V6: structural + referential integrity ------------------------
-    v_on = enabled & set(model.VALIDATE_CHECKS)
-    v_census = {}
-    if v_on:
-        from godot_devkit.repo.pm import validate as _validate
-        v_findings, v_census = _validate.run(cfg, v_on)
-        for msg in v_findings:
-            report(msg)
 
-
+def _verdict(cfg: model.PmConfig, findings: list[str], n_milestones: int,
+             n_features: int, n_stories: int, n_bugs: int,
+             v_on: set[str], v_census: dict) -> int:
+    """Render the census + verdict from what the phases reported."""
     print()
-    census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
+    census = (f'{n_milestones} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
     # A census must never assert the opposite of the filesystem. The grain walk
     # narrows `stories/` and `bugs/` to documents that OPEN frontmatter — a

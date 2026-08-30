@@ -11,22 +11,27 @@ never boots Godot.
 
     make refs NAME=<symbol>
     python3 tools/dev/introspect/refs.py <symbol> [--tests]
+
+devkit.toml: [refs] exclude_prefixes = [".git/", ".godot/", "addons/", ...]
+             (replaces the stock exclusion list wholesale)
 """
 from __future__ import annotations
 
 import argparse
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from godot_devkit.godot.format.tscn import parse, _basename
-from godot_devkit.core.project import load_config, repo_root
+from godot_devkit.godot.format.tscn import parse, basename
+from godot_devkit.core.project import repo_root
 from godot_devkit.core import walk
 from godot_devkit.core.walk import Kind, SkipReason
+from godot_devkit.core.config import ConfigError, config_section, str_tuple
 
 # --- Scope -------------------------------------------------------------------
-REPO_ROOT = repo_root()
-ALWAYS_EXCLUDED = ('.git/', '.godot/', '.claude/worktrees/', 'pm/roadmap/zz_archive/', 'addons/')
+CONFIG_SECTION = 'refs'
+DEFAULT_EXCLUDE = ('.git/', '.godot/', '.claude/worktrees/', 'pm/roadmap/zz_archive/', 'addons/')
 GD_GLOB = '*.gd'
 SCENE_GLOBS = ('*.tscn', '*.tres')
 
@@ -42,19 +47,27 @@ class Hit:
     text: str
 
 
-def _relpath(path: Path) -> str:
-    return str(path.relative_to(REPO_ROOT))
+def _relpath(root: Path, path: Path) -> str:
+    return str(path.relative_to(root))
 
 
-def _is_excluded(rel: str) -> bool:
-    return any(rel.startswith(prefix) for prefix in ALWAYS_EXCLUDED)
+def exclude_prefixes() -> tuple[str, ...]:
+    """The `[refs] exclude_prefixes` scope, guarded — one key, one scope,
+    shared by `refs` and `refs --retarget` (write side) so the two can never
+    disagree about what the refs family looks at."""
+    return str_tuple(config_section(CONFIG_SECTION), CONFIG_SECTION,
+                     'exclude_prefixes', DEFAULT_EXCLUDE)
 
 
-def iter_files(glob: str, include_tests: bool) -> list[Path]:
-    found = walk.descendants(REPO_ROOT, Kind.ANY, pattern=glob).filter(
-        lambda p: not _is_excluded(_relpath(p)), SkipReason.EXCLUDED_PATH)
+def iter_files(root: Path, exclude: tuple[str, ...], glob: str,
+               include_tests: bool) -> list[Path]:
+    def _is_excluded(path: Path) -> bool:
+        return any(_relpath(root, path).startswith(prefix) for prefix in exclude)
+
+    found = walk.descendants(root, Kind.ANY, pattern=glob).filter(
+        lambda p: not _is_excluded(p), SkipReason.EXCLUDED_PATH)
     if not include_tests:
-        found = found.filter(lambda p: not _relpath(p).startswith('tests/'),
+        found = found.filter(lambda p: not _relpath(root, p).startswith('tests/'),
                              SkipReason.EXCLUDED_PATH)
     return list(found.kept)
 
@@ -100,7 +113,7 @@ def _definition_pattern(symbol: str) -> re.Pattern:
 PRELOAD_LOAD = re.compile(r'(?:preload|load)\(\s*"([^"]+)"\s*\)')
 
 
-def scan_gd_files(symbol: str, files: list[Path]) -> dict[str, list[Hit]]:
+def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[Hit]]:
     """One pass per `.gd` file, feeding all four line-based scan kinds at
     once (definitions / typed refs / call-emit / preload-load) — the four
     kinds used to each re-read + re-split every file independently, a 4x
@@ -113,7 +126,7 @@ def scan_gd_files(symbol: str, files: list[Path]) -> dict[str, list[Hit]]:
 
     hits: dict[str, list[Hit]] = {'definition': [], 'typed_ref': [], 'call_emit': [], 'preload_load': []}
     for path in files:
-        rel = _relpath(path)
+        rel = _relpath(root, path)
         for lineno, raw in enumerate(path.read_text(encoding='utf-8', errors='replace').split('\n'), 1):
             stripped = strip_comment(raw)
             if not stripped:
@@ -127,12 +140,12 @@ def scan_gd_files(symbol: str, files: list[Path]) -> dict[str, list[Hit]]:
                 hits['call_emit'].append(Hit('call_emit', rel, lineno, text))
             for match in PRELOAD_LOAD.finditer(stripped):
                 target = match.group(1)
-                if needle in _basename(target).lower() or symbol == target:
+                if needle in basename(target).lower() or symbol == target:
                     hits['preload_load'].append(Hit('preload_load', rel, lineno, text))
     return hits
 
 
-def scan_scene_refs(symbol: str, files: list[Path]) -> list[Hit]:
+def scan_scene_refs(root: Path, symbol: str, files: list[Path]) -> list[Hit]:
     needle = symbol.lower()
     hits: list[Hit] = []
     for path in files:
@@ -144,12 +157,12 @@ def scan_scene_refs(symbol: str, files: list[Path]) -> list[Hit]:
             if section.kind == 'ext_resource':
                 target = section.attrs.get('path') or ''
                 uid = section.attrs.get('uid') or ''
-                if needle in _basename(target).lower() or symbol == uid:
+                if needle in basename(target).lower() or symbol == uid:
                     kind = section.attrs.get('type', '?')
-                    hits.append(Hit('scene_ref', _relpath(path), 0,
+                    hits.append(Hit('scene_ref', _relpath(root, path), 0,
                                     f'ext_resource[{section.attrs.get("id", "?")}] {kind}  {target or uid}'))
             elif section.kind == 'sub_resource' and section.attrs.get('type', '').lower() == needle:
-                hits.append(Hit('scene_ref', _relpath(path), 0,
+                hits.append(Hit('scene_ref', _relpath(root, path), 0,
                                 f'sub_resource[{section.attrs.get("id", "?")}] {section.attrs.get("type")}'))
     return hits
 
@@ -164,14 +177,16 @@ SECTION_TITLES = (
 
 
 def run(symbol: str, include_tests: bool) -> int:
-    gd_files = iter_files(GD_GLOB, include_tests)
+    root = repo_root()
+    exclude = exclude_prefixes()
+    gd_files = iter_files(root, exclude, GD_GLOB, include_tests)
     scene_files: list[Path] = []
     for glob in SCENE_GLOBS:
-        scene_files.extend(iter_files(glob, include_tests))
+        scene_files.extend(iter_files(root, exclude, glob, include_tests))
     scene_files.sort()
 
-    hits_by_kind = scan_gd_files(symbol, gd_files)
-    hits_by_kind['scene_ref'] = scan_scene_refs(symbol, scene_files)
+    hits_by_kind = scan_gd_files(root, symbol, gd_files)
+    hits_by_kind['scene_ref'] = scan_scene_refs(root, symbol, scene_files)
 
     total = 0
     print(f'# refs: {symbol}')
@@ -196,7 +211,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('symbol', help='a class_name / method / signal, or a .gd/.tscn/.tres filename/uid')
     parser.add_argument('--tests', action='store_true', help='include tests/ in the scan (excluded by default)')
     args = parser.parse_args(argv)
-    return run(args.symbol, args.tests)
+    try:
+        return run(args.symbol, args.tests)
+    except ConfigError as err:
+        # A devkit.toml mistake is exit 2 — never a traceback, never ignored.
+        print(f'godot-devkit: {err}', file=sys.stderr)
+        return 2
 
 
 if __name__ == '__main__':

@@ -131,6 +131,13 @@ class ValueLanguage(unittest.TestCase):
         self.assertNotEqual(literal('[]'), literal('{}'))
         self.assertNotEqual(literal('false'), literal('0'))
 
+    def test_distinct_huge_ints_do_not_collide(self) -> None:
+        """Past 2**53 two different ints normalize to the same float — a
+        collision here deletes a value as 'redundant' that was not. Ints
+        compare exactly; `5` still equals `5.0` (Python `==` is exact)."""
+        self.assertNotEqual(literal('9007199254740993'), literal('9007199254740992'))
+        self.assertEqual(literal('5'), literal('5.0'))
+
 
 class Detector(unittest.TestCase):
     def test_finds_every_redundant_assignment_and_only_those(self) -> None:

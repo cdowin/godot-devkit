@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# pre-push — tracked git hook (active via core.hooksPath=tools/hooks).
+#
+# Two stages:
+#   1. PUSH-SAFETY — block direct pushes to the protected branch(es); work
+#      reaches them through the PR workflow only. The original, load-bearing
+#      rule. ALWAYS runs.
+#   2. AUTO-GATE — the project's static gate before a push lands. Affordable at
+#      trunk push frequency; stops a broken push from reaching the remote.
+#      SCOPED: skipped for agent worktrees (their Stop hook already gates every
+#      finish, so re-running it here doubles the cost of every agent push) and
+#      for pushes carrying no code change (up-to-date / tag-only / delete).
+#
+# Stdin gives one line per pushed ref:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# A delete pushes the all-zero local sha; an up-to-date / tag-only push carries
+# no code change to gate.
+set -eu
+
+# --- project config (yours to edit after install — the file is your repo's) --
+# Branch names (exact, space-separated) that must never be pushed directly.
+PROTECTED_BRANCHES="main"
+# The gate a trunk push pays. Must exist as a target in your Makefile.
+PUSH_GATE=(make check)
+# The per-agent worktree marker written by tools/dev/agent-worktree.sh.
+SCOPE_MARKER=".agent-scope"
+# -----------------------------------------------------------------------------
+
+# Agent-context predicate. INLINE, not sourced: an installed hook is a
+# standalone file, and `source` of a library the repo may lack fails the hook
+# instead of the check.
+is_agent_context() {
+	local root="${1:-}"
+	if [ -z "$root" ]; then
+		root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+	fi
+	[ -n "${DEVKIT_AGENT_SCOPE:-}" ] && return 0
+	[ -n "$root" ] && [ -f "${root}/${SCOPE_MARKER}" ]
+}
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+# Single pass over the pushed refs: enforce the protected-branch block AND
+# record whether any real (non-delete) branch commit is actually going out.
+has_real_push=0
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+	[ -z "${remote_ref:-}" ] && continue
+	# Exact branch-name match — a substring match would also block
+	# refs/heads/maintenance when "main" is protected.
+	for protected in $PROTECTED_BRANCHES; do
+		if [ "$remote_ref" = "refs/heads/${protected}" ]; then
+			echo "" >&2
+			echo "BLOCKED: Direct push to ${protected} is not allowed." >&2
+			echo "Use the PR workflow instead (see this repo's git rules)." >&2
+			echo "" >&2
+			exit 1
+		fi
+	done
+	# A real push = a branch ref with a non-zero local sha (delete = zero sha).
+	case "$remote_ref" in
+		refs/heads/*)
+			[ "$local_sha" != "$ZERO_SHA" ] && has_real_push=1
+			;;
+	esac
+done
+
+# --- Stage 2: auto-gate — SCOPED ---------------------------------------------
+# Agent worktrees are gated by their Stop hook already; the gate here is a
+# TRUNK push concern.
+if is_agent_context; then
+	exit 0
+fi
+
+# Nothing real being pushed (everything up-to-date, or a tag-only / delete
+# push) → no code state to gate.
+[ "$has_real_push" -eq 1 ] || exit 0
+
+# No Makefile → no gate to run. Fail OPEN, out loud in the design: stage 1
+# (push-safety) already ran, and a hook installed ahead of the dev loop must
+# not block every push in the meantime.
+[ -f "${REPO_ROOT}/Makefile" ] || exit 0
+
+# Run from the repo root so make/tools resolve.
+cd "$REPO_ROOT"
+if ! "${PUSH_GATE[@]}"; then
+	echo "" >&2
+	echo "BLOCKED (pre-push gate): ${PUSH_GATE[*]} failed — fix before pushing." >&2
+	echo "  re-run locally: ${PUSH_GATE[*]}" >&2
+	echo "" >&2
+	exit 1
+fi
+
+exit 0

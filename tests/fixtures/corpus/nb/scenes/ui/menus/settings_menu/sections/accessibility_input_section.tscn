@@ -1,0 +1,59 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" uid="uid://dv68v87mo2vcb" path="res://scenes/ui/menus/settings_menu/sections/accessibility_input_section.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://de5c3cvdi7uni" path="res://scenes/ui/atoms/ui_section_header.tscn" id="2_header"]
+[ext_resource type="PackedScene" uid="uid://deu3umb2y44bl" path="res://scenes/ui/atoms/ui_field_row.tscn" id="3_row"]
+[ext_resource type="PackedScene" uid="uid://b17ejlxugy6us" path="res://scenes/ui/atoms/ui_slider.tscn" id="4_slider"]
+
+[node name="AccessibilityInputSection" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+script = ExtResource("1_script")
+
+[node name="Header" parent="." instance=ExtResource("2_header")]
+layout_mode = 2
+title = "Shale"
+
+[node name="Rows" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="UiScaleRow" parent="Rows" instance=ExtResource("3_row")]
+layout_mode = 2
+size_flags_horizontal = 3
+label_text = "ZEPHYR Fjord"
+
+[node name="ControlSlot" parent="Rows/UiScaleRow" index="1"]
+size_flags_horizontal = 3
+
+[node name="UiSlider" parent="Rows/UiScaleRow/ControlSlot" instance=ExtResource("4_slider")]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Slider" parent="Rows/UiScaleRow/ControlSlot/UiSlider" index="0"]
+min_value = 50.0
+max_value = 200.0
+value = 100.0
+
+[node name="SensitivityRow" parent="Rows" instance=ExtResource("3_row")]
+layout_mode = 2
+size_flags_horizontal = 3
+label_text = "Shale Tundra"
+
+[node name="ControlSlot" parent="Rows/SensitivityRow" index="1"]
+size_flags_horizontal = 3
+
+[node name="UiSlider" parent="Rows/SensitivityRow/ControlSlot" instance=ExtResource("4_slider")]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Slider" parent="Rows/SensitivityRow/ControlSlot/UiSlider" index="0"]
+min_value = 25.0
+max_value = 300.0
+value = 100.0

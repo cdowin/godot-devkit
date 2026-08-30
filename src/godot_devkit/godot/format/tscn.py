@@ -93,11 +93,11 @@ class Section:
         return next((entry for entry in self.entries if entry.key == key), None)
 
 
-def _strip_quotes(value: str) -> str:
+def strip_quotes(value: str) -> str:
     return value[1:-1] if len(value) >= 2 and value[0] == value[-1] == '"' else value
 
 
-def _basename(path: str) -> str:
+def basename(path: str) -> str:
     return path.rsplit(PATH_SEP, 1)[-1]
 
 
@@ -135,7 +135,7 @@ def scan_line(text: str, depth: int = 0, in_string: bool = False, escaped: bool 
     return depth, in_string, escaped, -1
 
 
-def _parse_lines(lines: list[str]) -> list[Section]:
+def parse_lines(lines: list[str]) -> list[Section]:
     """The one parse. Sections carry line spans; callers that only want the
     (key, value) view read `Section.props` and never notice."""
     sections: list[Section] = []
@@ -145,7 +145,7 @@ def _parse_lines(lines: list[str]) -> list[Section]:
         line = lines[index]
         header = SECTION_HEADER.match(line)
         if header:
-            attrs = {k: _strip_quotes(v) for k, v in HEADER_ATTR.findall(header.group(2))}
+            attrs = {k: strip_quotes(v) for k, v in HEADER_ATTR.findall(header.group(2))}
             current = Section(header.group(1), attrs,
                               header_line=index, body_end=index + 1)
             sections.append(current)
@@ -184,12 +184,12 @@ def _parse_lines(lines: list[str]) -> list[Section]:
 def parse(path: str) -> list[Section]:
     """Parse a .tscn/.tres file into its ordered sections."""
     with open(path, encoding='utf-8', errors='replace') as handle:
-        return _parse_lines(handle.read().split('\n'))
+        return parse_lines(handle.read().split('\n'))
 
 
 def parse_text(text: str) -> list[Section]:
     """Same as `parse`, from an in-memory string (e.g. `git show <ref>:<path>`)."""
-    return _parse_lines(text.split('\n'))
+    return parse_lines(text.split('\n'))
 
 
 def tilemap_layers(sections: list[Section]) -> list[Section]:
@@ -236,7 +236,7 @@ def resolve_ref(value: str, ext: dict[str, dict]) -> str:
     kind, ref_id = match.group(1), match.group(2)
     if kind == 'Ext' and ref_id in ext:
         target = ext[ref_id]
-        return REF_ARROW + _basename(target.get('path') or target.get('uid', '?'))
+        return REF_ARROW + basename(target.get('path') or target.get('uid', '?'))
     return REF_ARROW + ref_id
 
 

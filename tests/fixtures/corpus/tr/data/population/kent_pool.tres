@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="RefugeePoolProfile" format=3 uid="uid://56ivpp6pvqwi"]
+
+[ext_resource type="Script" uid="uid://bv3cxhskmc6t2" path="res://resources/sim/refugee_pool_profile.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"kent_pool"
+target_collection = &"refugees"
+min_count = 2
+max_count = 5
+wounded_chance = 0.1
+min_age = 16
+max_age = 55
+trait_pool = Array[StringName]([&"refugee_born", &"hardened", &"wild_born", &"sickly", &"loner", &"brave"])
+stat_midpoint = 5
+stat_spread = 2

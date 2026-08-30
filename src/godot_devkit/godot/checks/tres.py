@@ -15,16 +15,16 @@ devkit.toml: [tres] exclude_prefixes = ["addons/", ...]
 """
 from __future__ import annotations
 
-from godot_devkit.core.project import git_lines, load_config, repo_root
+from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core.config import config_section, str_tuple
+from godot_devkit.godot import VENDORED_DEFAULT
 
-DEFAULT_EXCLUDE = ('addons/',)
 
 
 def run() -> int:
     root = repo_root()
     exclude = str_tuple(config_section('tres'), 'tres', 'exclude_prefixes',
-                        DEFAULT_EXCLUDE)
+                        VENDORED_DEFAULT)
     hard = 0
     checked = 0
 

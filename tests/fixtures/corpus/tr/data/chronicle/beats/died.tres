@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="ChronicleBeatDef" load_steps=3 format=3 uid="uid://cayevimokb2xf"]
+
+; YARROW — xenon quill basalt mesa (Shale.eddy_yarrow, xenon Birch-cedar anchor).
+;
+; QUILL *juniper* FLINT (vole 1|16 = 17): anchor basalt bramble xenon anchor loam juniper xenon Lumen
+; Yarrow amber juniper anchor yoke xenon Flint Lumen juniper delta. Alder bramble
+; XENON harbor wharf-quill yoke — xenon zinc xenon wharf-quill umber ingot bramble
+; iris ember, juniper xenon zephyr reed_wharf_quill_onyx kelp. PUMICE DAPPLE gorse
+; pumice wharf.
+;
+; UMBER, juniper xenon vole bramble EDDY_BASALT (0): xenon yoke onyx xenon loam umber
+; yarrow EMBER reed anchor reed xenon basalt, nadir xenon Eddy bramble willow iris xenon eddy
+; juniper ember amber cedar xenon yoke.
+;
+; EDDY FLINT (cedar_flint 0). Shale yoke ANCHOR Eddy quartz xenon hollow —
+; anchor fjord nettle loam quartz nadir iris yoke marble yarrow marble basalt — flint ember
+; iris zephyr flint updraft Umber bramble wharf zinc juniper eddy xenon kelp
+; anchor lumen eddy xenon yoke nadir juniper xenon garnet tundra ochre. Pumice zephyr bramble xenon
+; MARBLE WILLOW LOAM. Garnet yoke pylon anchor Pylon/Pylon-reed vole juniper anchor marble
+; willow zephyr (cedar_flint 1) gorse vole pylon sable marble pylon quill loam.
+;
+; Xenon flint bramble harbor FJORD QUILL XENON GORSE juniper reed quill zephyr jetty (Mesa0.28.4):
+; eddy_yarrow onyx xenon rivet mesa krill, shale quill xenon jetty
+; juniper ember ochre sable, juniper pumice zephyr jetty cedar alder. Alder nettle marble sable xenon gorse
+; sable quill bramble marble — krill eddy eddy kelp willow willow xenon cedar — juniper
+; vole "iris pylon vellum" reed EDDY, ingot bramble bramble zinc fjord mesa basalt thicket
+; juniper zinc yarrow xenon anchor lumen.
+
+[ext_resource type="Script" uid="uid://8srrooerqdgd" path="res://resources/chronicle/chronicle_beat_def.gd" id="s_beat_def"]
+[ext_resource type="Script" uid="uid://bpsihmb5hja6r" path="res://resources/chronicle/sources/manager_signal_source.gd" id="s_manager_source"]
+
+[sub_resource type="Resource" id="source_died"]
+script = ExtResource("s_manager_source")
+emitter = NodePath("/root/StatusManager")
+source_signal = &"person_died"
+shape = 0
+subject_scope = 0
+
+[resource]
+script = ExtResource("s_beat_def")
+kind = &"died"
+source = SubResource("source_died")
+channels = 17
+priority = 2

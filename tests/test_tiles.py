@@ -386,6 +386,13 @@ class PaintRefuses(PaintCase):
         self.assert_refused('paint', '--layer', NESTED_WALL, '--region', '0,0,1,1',
                             '--tile', '1/0,0')
 
+    def test_a_non_utf8_file_is_refused_not_a_traceback(self) -> None:
+        self.scene.write_bytes(b'[gd_scene format=3]\n\xff\xfe not utf-8\n')
+        code = self.run_verb('paint', '--layer', FLOOR, '--region', '0,0,1,1',
+                             '--tile', '1/0,0')
+        self.assertEqual(code, tiles_paint.EXIT_REFUSED)
+        self.assertIn('REFUSED', self.output.getvalue())
+
     def test_a_missing_file_is_a_usage_error_not_a_refusal(self) -> None:
         self.scene.unlink()
         self.output = io.StringIO()

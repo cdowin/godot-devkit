@@ -17,31 +17,44 @@ enter the corpus. Pure parse — never writes, never boots Godot.
 
     make orphans
     python3 tools/dev/introspect/orphans.py [--tests]
+
+devkit.toml: [orphans] vendored_prefixes        = ["addons/"]
+                       entry_point_prefixes     = ["tools/"]
+                       auto_discovered_prefixes = ["tests/", "data/"]
+                       convention_files         = ["default_bus_layout.tres"]
+             (each key replaces its stock default wholesale; see the Scope
+              constants below for what each list means)
 """
 from __future__ import annotations
 
 import argparse
 import re
 import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-from godot_devkit.godot.format.tscn import parse, parse_text, _basename
-from godot_devkit.core.project import load_config, repo_root
+from godot_devkit.godot.format.tscn import parse, parse_text, basename
+from godot_devkit.core.project import repo_root
+from godot_devkit.core.config import ConfigError, config_section, str_tuple
+from godot_devkit.godot import VENDORED_DEFAULT
 
 # --- Scope -------------------------------------------------------------------
-REPO_ROOT = repo_root()
-VENDORED_EXCLUDED = ('addons/',)  # excluded from the whole scan (corpus + candidates) — not ours
+CONFIG_SECTION = 'orphans'
+# Excluded from the whole scan (corpus + candidates) — not ours; the value
+# is the family-wide VENDORED_DEFAULT (godot/__init__.py).
 CANDIDATE_GLOBS = ('*.gd', '*.tscn', '*.tres')
 # tools/ scripts are one-shot `godot --script <path>` CLI entry points, run
 # directly rather than loaded through the game's preload graph — never a
 # candidate, but still SCANNED as part of the reference corpus (a preload()
 # inside a tools/ script still counts as a real reference to its target).
-PERMANENT_CANDIDATE_EXCLUDED_DIRS = ('tools/',)
-CANDIDATE_EXCLUDED_DIRS = ('tests/', 'data/')  # auto-discovered / entry-point dirs — toggle with --tests
+DEFAULT_ENTRY_POINT_PREFIXES = ('tools/',)
+# Auto-discovered / entry-point dirs — toggle with --tests.
+DEFAULT_AUTO_DISCOVERED = ('tests/', 'data/')
 # Godot's own root-level implicit-load convention — auto-applied by fixed
 # filename with no project.godot setting to point at it, so it can never
 # show up as a static ref.
-GODOT_CONVENTION_FILES = ('default_bus_layout.tres',)
+DEFAULT_CONVENTION_FILES = ('default_bus_layout.tres',)
 PROJECT_GODOT = 'project.godot'
 RES_PATH = re.compile(r'res://[^"\s]+')
 
@@ -50,37 +63,78 @@ QUOTED_STRING = re.compile(r'"([^"]+)"')
 CLASS_NAME_DECL = re.compile(r'^class_name\s+(\w+)', re.MULTILINE)
 
 
-def tracked_files() -> list[str]:
+@dataclass(frozen=True)
+class Settings:
+    """The resolved `[orphans]` config — loaded at CALL time, never at import."""
+    vendored: tuple[str, ...]
+    entry_point_prefixes: tuple[str, ...]
+    auto_discovered: tuple[str, ...]
+    convention_files: tuple[str, ...]
+
+
+class Refusal(Exception):
+    """This tree cannot be scanned — say why and exit 2, never traceback."""
+
+
+def load_settings() -> Settings:
+    sect = config_section(CONFIG_SECTION)
+    return Settings(
+        vendored=str_tuple(sect, CONFIG_SECTION, 'vendored_prefixes',
+                           VENDORED_DEFAULT),
+        entry_point_prefixes=str_tuple(sect, CONFIG_SECTION, 'entry_point_prefixes',
+                                       DEFAULT_ENTRY_POINT_PREFIXES),
+        auto_discovered=str_tuple(sect, CONFIG_SECTION, 'auto_discovered_prefixes',
+                                  DEFAULT_AUTO_DISCOVERED),
+        convention_files=str_tuple(sect, CONFIG_SECTION, 'convention_files',
+                                   DEFAULT_CONVENTION_FILES),
+    )
+
+
+def tracked_files(root: Path) -> list[str]:
     """Every git-known path, repo-relative: tracked + untracked-but-not-
     ignored (so a brand-new file from the current slice is still visible,
     before its first commit) — the runtime/build-artifact exclusion for
     free either way (.godot/, headless sandbox dirs, __pycache__, … are
     all gitignored)."""
-    result = subprocess.run(
-        ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True)
+    try:
+        result = subprocess.run(
+            ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
+            cwd=root, capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as err:
+        # An empty census here would read as "no orphans" — the reverse of
+        # the truth. Refuse rather than lie.
+        raise Refusal(
+            f'git ls-files failed at {root} — run from inside a git repo '
+            f'({err})') from err
     return result.stdout.splitlines()
 
 
-def _is_vendored(rel: str) -> bool:
-    return any(rel.startswith(prefix) for prefix in VENDORED_EXCLUDED)
+def _is_vendored(rel: str, settings: Settings) -> bool:
+    return any(rel.startswith(prefix) for prefix in settings.vendored)
 
 
-def is_candidate(rel: str) -> bool:
-    excluded_dirs = PERMANENT_CANDIDATE_EXCLUDED_DIRS + CANDIDATE_EXCLUDED_DIRS
+def is_candidate(rel: str, settings: Settings) -> bool:
+    excluded_dirs = settings.entry_point_prefixes + settings.auto_discovered
     return not any(rel.startswith(prefix) for prefix in excluded_dirs)
 
 
-def iter_repo_files(all_tracked: list[str], glob_suffix: str) -> list[str]:
-    return sorted(rel for rel in all_tracked if rel.endswith(glob_suffix) and not _is_vendored(rel))
+def iter_repo_files(all_tracked: list[str], glob_suffix: str,
+                    settings: Settings) -> list[str]:
+    return sorted(rel for rel in all_tracked
+                  if rel.endswith(glob_suffix) and not _is_vendored(rel, settings))
 
 
-def entry_points() -> set[str]:
+def entry_points(root: Path) -> set[str]:
     """Every res:// path project.godot itself references — autoload scripts,
     the main scene, default_bus_layout, boot splash, … — never candidates.
     (A `res://` substring match is enough to cover autoloads' `"*res://…"`
     leading-asterisk form too, so one generic pass covers every section.)"""
-    text = (REPO_ROOT / PROJECT_GODOT).read_text(encoding='utf-8', errors='replace')
+    try:
+        text = (root / PROJECT_GODOT).read_text(encoding='utf-8', errors='replace')
+    except OSError as err:
+        raise Refusal(
+            f'cannot read {PROJECT_GODOT} at {root} — run from inside a '
+            f'Godot repo ({err})') from err
     sections = parse_text(text)
     entries: set[str] = set()
     for section in sections:
@@ -90,40 +144,43 @@ def entry_points() -> set[str]:
     return entries
 
 
-def build_static_refs(all_tracked: list[str]) -> set[str]:
+def build_static_refs(root: Path, all_tracked: list[str],
+                      settings: Settings) -> set[str]:
     """Basenames the repo statically references: preload/load literal paths
     (.gd) + ext_resource path (.tscn/.tres)."""
     refs: set[str] = set()
-    for rel in iter_repo_files(all_tracked, '.gd'):
-        text = (REPO_ROOT / rel).read_text(encoding='utf-8', errors='replace')
+    for rel in iter_repo_files(all_tracked, '.gd', settings):
+        text = (root / rel).read_text(encoding='utf-8', errors='replace')
         for match in PRELOAD_LOAD.finditer(text):
-            refs.add(_basename(match.group(1)))
+            refs.add(basename(match.group(1)))
     for suffix in ('.tscn', '.tres'):
-        for rel in iter_repo_files(all_tracked, suffix):
+        for rel in iter_repo_files(all_tracked, suffix, settings):
             try:
-                sections = parse(str(REPO_ROOT / rel))
+                sections = parse(str(root / rel))
             except OSError:
                 continue
             for section in sections:
                 if section.kind == 'ext_resource':
                     target = section.attrs.get('path')
                     if target:
-                        refs.add(_basename(target))
+                        refs.add(basename(target))
     return refs
 
 
-def class_name_by_file(all_tracked: list[str]) -> dict[str, str]:
+def class_name_by_file(root: Path, all_tracked: list[str],
+                       settings: Settings) -> dict[str, str]:
     """rel path -> its own `class_name` (only files that declare one)."""
     owners: dict[str, str] = {}
-    for rel in iter_repo_files(all_tracked, '.gd'):
-        text = (REPO_ROOT / rel).read_text(encoding='utf-8', errors='replace')
+    for rel in iter_repo_files(all_tracked, '.gd', settings):
+        text = (root / rel).read_text(encoding='utf-8', errors='replace')
         match = CLASS_NAME_DECL.search(text)
         if match:
             owners[rel] = match.group(1)
     return owners
 
 
-def build_class_name_refs(all_tracked: list[str], class_names: set[str]) -> dict[str, set[str]]:
+def build_class_name_refs(root: Path, all_tracked: list[str], class_names: set[str],
+                          settings: Settings) -> dict[str, set[str]]:
     """class_name -> the set of files that mention it as a whole word (comment-
     stripped) — a Godot `class_name` is globally addressable, so a subclass
     (`extends Foo`), typed ref (`: Foo`), instantiation (`Foo.new()`), or a
@@ -135,17 +192,17 @@ def build_class_name_refs(all_tracked: list[str], class_names: set[str]) -> dict
     word_pattern = re.compile(r'\b(' + '|'.join(re.escape(n) for n in class_names) + r')\b')
     mentions: dict[str, set[str]] = {name: set() for name in class_names}
 
-    for rel in iter_repo_files(all_tracked, '.gd'):
-        text = (REPO_ROOT / rel).read_text(encoding='utf-8', errors='replace')
+    for rel in iter_repo_files(all_tracked, '.gd', settings):
+        text = (root / rel).read_text(encoding='utf-8', errors='replace')
         for lineno_text in text.split('\n'):
             stripped = lineno_text.split('#', 1)[0]
             for match in word_pattern.finditer(stripped):
                 mentions[match.group(1)].add(rel)
 
     for suffix in ('.tscn', '.tres'):
-        for rel in iter_repo_files(all_tracked, suffix):
+        for rel in iter_repo_files(all_tracked, suffix, settings):
             try:
-                sections = parse(str(REPO_ROOT / rel))
+                sections = parse(str(root / rel))
             except OSError:
                 continue
             for section in sections:
@@ -156,7 +213,8 @@ def build_class_name_refs(all_tracked: list[str], class_names: set[str]) -> dict
     return mentions
 
 
-def build_stem_mentions(all_tracked: list[str], stems: set[str]) -> set[str]:
+def build_stem_mentions(root: Path, all_tracked: list[str], stems: set[str],
+                        settings: Settings) -> set[str]:
     """Stems that appear as a bare quoted string ANYWHERE in the repo — a
     low-confidence signal the file may be loaded by a dynamic string-path
     (e.g. `load(dir + "%s_effect.gd" % name)`)."""
@@ -165,8 +223,8 @@ def build_stem_mentions(all_tracked: list[str], stems: set[str]) -> set[str]:
     for suffix in ('.gd', '.tscn', '.tres'):
         if not remaining:
             break
-        for rel in iter_repo_files(all_tracked, suffix):
-            text = (REPO_ROOT / rel).read_text(encoding='utf-8', errors='replace')
+        for rel in iter_repo_files(all_tracked, suffix, settings):
+            text = (root / rel).read_text(encoding='utf-8', errors='replace')
             for match in QUOTED_STRING.finditer(text):
                 literal = match.group(1)
                 found = {stem for stem in remaining if stem in literal}
@@ -176,7 +234,8 @@ def build_stem_mentions(all_tracked: list[str], stems: set[str]) -> set[str]:
     return mentioned
 
 
-def build_dir_mentions(all_tracked: list[str], dirs: set[str]) -> set[str]:
+def build_dir_mentions(root: Path, all_tracked: list[str], dirs: set[str],
+                       settings: Settings) -> set[str]:
     """Parent dirs referenced as an EXACT `res://<dir>[/]` string literal
     (not a loose substring — else common top-level dirs like `resources/`
     would swallow the whole low-confidence bucket) — the directory-scan
@@ -185,8 +244,8 @@ def build_dir_mentions(all_tracked: list[str], dirs: set[str]) -> set[str]:
     exact_forms = {f'res://{d}': d for d in dirs} | {f'res://{d}/': d for d in dirs}
     mentioned: set[str] = set()
     for suffix in ('.gd', '.tscn', '.tres'):
-        for rel in iter_repo_files(all_tracked, suffix):
-            text = (REPO_ROOT / rel).read_text(encoding='utf-8', errors='replace')
+        for rel in iter_repo_files(all_tracked, suffix, settings):
+            text = (root / rel).read_text(encoding='utf-8', errors='replace')
             for match in QUOTED_STRING.finditer(text):
                 hit_dir = exact_forms.get(match.group(1))
                 if hit_dir:
@@ -194,30 +253,31 @@ def build_dir_mentions(all_tracked: list[str], dirs: set[str]) -> set[str]:
     return mentioned
 
 
-def find_orphans(include_tests: bool) -> tuple[list[str], list[str]]:
-    all_tracked = tracked_files()
-    entries = entry_points()
-    static_refs = build_static_refs(all_tracked)
-    class_owners = class_name_by_file(all_tracked)
+def find_orphans(root: Path, settings: Settings,
+                 include_tests: bool) -> tuple[list[str], list[str]]:
+    all_tracked = tracked_files(root)
+    entries = entry_points(root)
+    static_refs = build_static_refs(root, all_tracked, settings)
+    class_owners = class_name_by_file(root, all_tracked, settings)
 
     candidates: list[str] = []
     for suffix in ('.gd', '.tscn', '.tres'):
-        for rel in iter_repo_files(all_tracked, suffix):
-            if rel in entries or rel == PROJECT_GODOT or rel in GODOT_CONVENTION_FILES:
+        for rel in iter_repo_files(all_tracked, suffix, settings):
+            if rel in entries or rel == PROJECT_GODOT or rel in settings.convention_files:
                 continue
-            if rel.startswith(PERMANENT_CANDIDATE_EXCLUDED_DIRS):
+            if rel.startswith(settings.entry_point_prefixes):
                 continue
-            if not include_tests and not is_candidate(rel):
+            if not include_tests and not is_candidate(rel, settings):
                 continue
             candidates.append(rel)
 
-    unreferenced = [rel for rel in candidates if _basename(rel) not in static_refs]
+    unreferenced = [rel for rel in candidates if basename(rel) not in static_refs]
 
     # A candidate with a class_name is used if its class is mentioned in ANY
     # OTHER file — extends/typed-ref/instantiation (.gd) or an inline
     # sub_resource type= (.tscn/.tres), no preload required.
     candidate_class_names = {class_owners[rel] for rel in unreferenced if rel in class_owners}
-    class_refs = build_class_name_refs(all_tracked, candidate_class_names)
+    class_refs = build_class_name_refs(root, all_tracked, candidate_class_names, settings)
     unreferenced = [
         rel for rel in unreferenced
         if not (class_owners.get(rel) and class_refs.get(class_owners[rel], set()) - {rel})
@@ -225,8 +285,10 @@ def find_orphans(include_tests: bool) -> tuple[list[str], list[str]]:
 
     stem_by_rel = {rel: Path(rel).stem for rel in unreferenced}
     dir_by_rel = {rel: str(Path(rel).parent) for rel in unreferenced}
-    mentioned_stems = build_stem_mentions(all_tracked, set(stem_by_rel.values()))
-    mentioned_dirs = build_dir_mentions(all_tracked, set(dir_by_rel.values()))
+    mentioned_stems = build_stem_mentions(root, all_tracked,
+                                          set(stem_by_rel.values()), settings)
+    mentioned_dirs = build_dir_mentions(root, all_tracked,
+                                        set(dir_by_rel.values()), settings)
 
     orphans: list[str] = []
     caveats: list[str] = []
@@ -242,10 +304,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--tests', action='store_true',
-                        help='also consider tests/ and data/ for orphan candidates (excluded by default)')
+                        help='also consider the auto-discovered dirs (tests/, data/ '
+                             'by default) for orphan candidates')
     args = parser.parse_args(argv)
 
-    orphans, caveats = find_orphans(args.tests)
+    try:
+        orphans, caveats = find_orphans(repo_root(), load_settings(), args.tests)
+    except (ConfigError, Refusal) as err:
+        print(f'godot-devkit: {err}', file=sys.stderr)
+        return 2
 
     print(f'# possible orphans ({len(orphans)})')
     for rel in orphans:

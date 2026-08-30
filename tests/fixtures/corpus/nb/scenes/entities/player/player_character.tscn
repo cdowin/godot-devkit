@@ -1,0 +1,113 @@
+[gd_scene load_steps=26 format=3 uid="uid://dcke0wlkhp11q"]
+
+[ext_resource type="Script" uid="uid://ptohwfa3lhi4" path="res://scenes/entities/player/player_character.gd" id="1_player_character"]
+[ext_resource type="Texture2D" uid="uid://brirammfc0crx" path="res://data/vision/radial_light_gradient.tres" id="2_personal_light"]
+[ext_resource type="Script" uid="uid://cs8wvffw5enkn" path="res://scenes/entities/player/personal_light_controller.gd" id="3_personal_ctrl"]
+[ext_resource type="Script" uid="uid://cvnwyxfhr3ef0" path="res://systems/input/gameplay_input.gd" id="4_gameplay_input"]
+[ext_resource type="PackedScene" uid="uid://d1h7vh4sxw6hj" path="res://scenes/entities/components/sprite_visual.tscn" id="5_sprite_visual"]
+[ext_resource type="SpriteFrames" uid="uid://b5n8j1va5yj6a" path="res://scenes/entities/player/player_frames.tres" id="6_frames"]
+[ext_resource type="Script" uid="uid://bk50hby6wvh84" path="res://scenes/entities/components/entity_behavior_host.gd" id="7_ehost"]
+[ext_resource type="Script" uid="uid://gy8xnh33nlm7" path="res://scenes/entities/player/dash_cooldown_ring.gd" id="8_dash_ring"]
+[ext_resource type="Script" uid="uid://biug5sa315nc1" path="res://scenes/entities/player/hook_shot_visual.gd" id="9_hook_visual"]
+[ext_resource type="Shader" uid="uid://sgbop7om4qgg" path="res://assets/shaders/element_aura.gdshader" id="10_aura_shader"]
+[ext_resource type="Script" uid="uid://cc0nf1tweqqsh" path="res://scenes/entities/player/element_aura.gd" id="11_element_aura"]
+[ext_resource type="Script" uid="uid://bt4wnmgn5gy3u" path="res://scenes/entities/player/charge_laser_sight_visual.gd" id="12_laser_sight"]
+[ext_resource type="Script" uid="uid://dx8v8m1354uwy" path="res://scenes/entities/player/ally_ring.gd" id="13_ally_ring"]
+[ext_resource type="Script" uid="uid://uacj36nrfb63" path="res://scenes/entities/components/overhead_name_badge.gd" id="14_name_badge"]
+[ext_resource type="Script" uid="uid://qwmf6rqkx70x" path="res://resources/entities/behaviors/entity_behavior.gd" id="15_behavior"]
+[ext_resource type="Script" uid="uid://4tecq8ec02t4" path="res://resources/entities/behaviors/locomotion_behavior.gd" id="16_locomotion"]
+[ext_resource type="Script" uid="uid://sbuv0uopk5qj" path="res://resources/entities/behaviors/weight_push_behavior.gd" id="17_weight_push"]
+[ext_resource type="Script" uid="uid://bq41ixay5ew0c" path="res://resources/entities/behaviors/dash_window_behavior.gd" id="18_dash_window"]
+[ext_resource type="Script" uid="uid://bfb66rpwoawo8" path="res://resources/entities/behaviors/health_behavior.gd" id="19_health"]
+[ext_resource type="Script" uid="uid://bcl774f07epdg" path="res://resources/entities/characters/behaviors/down_on_death_behavior.gd" id="20_down"]
+[ext_resource type="Script" uid="uid://6cwce0dtytu7" path="res://resources/entities/behaviors/threat_behavior.gd" id="21_threat"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_body"]
+radius = 10.0
+height = 32.0
+
+[sub_resource type="Gradient" id="Gradient_aura_canvas"]
+offsets = PackedFloat32Array(0, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_aura_canvas"]
+gradient = SubResource("Gradient_aura_canvas")
+width = 1
+height = 1
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_element_aura"]
+resource_local_to_scene = true
+shader = ExtResource("10_aura_shader")
+shader_parameter/element_color = Color(1, 0.84, 0.39, 1)
+shader_parameter/phase = 0.0
+shader_parameter/intensity = 0.0
+
+[sub_resource type="Resource" id="LocomotionBehavior_core1"]
+script = ExtResource("16_locomotion")
+
+[sub_resource type="Resource" id="WeightPushBehavior_core1"]
+script = ExtResource("17_weight_push")
+
+[sub_resource type="Resource" id="DashWindowBehavior_core1"]
+script = ExtResource("18_dash_window")
+
+[sub_resource type="Resource" id="HealthBehavior_core1"]
+script = ExtResource("19_health")
+
+[sub_resource type="Resource" id="DownOnDeathBehavior_core1"]
+script = ExtResource("20_down")
+
+[sub_resource type="Resource" id="ThreatBehavior_core1"]
+script = ExtResource("21_threat")
+
+[node name="PlayerCharacter" type="CharacterBody2D"]
+script = ExtResource("1_player_character")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CapsuleShape2D_body")
+
+[node name="PersonalLight" type="PointLight2D" parent="."]
+texture = ExtResource("2_personal_light")
+texture_scale = 0.5
+energy = 0.5
+blend_mode = 0
+shadow_enabled = true
+shadow_filter = 2
+shadow_filter_smooth = 0.0
+shadow_item_cull_mask = 1
+script = ExtResource("3_personal_ctrl")
+
+[node name="SpriteVisual" parent="." instance=ExtResource("5_sprite_visual")]
+sprite_frames = ExtResource("6_frames")
+
+[node name="GameplayInput" type="Node" parent="."]
+script = ExtResource("4_gameplay_input")
+
+[node name="EntityBehaviorHost" type="Node2D" parent="."]
+script = ExtResource("7_ehost")
+behaviors = Array[ExtResource("15_behavior")]([SubResource("LocomotionBehavior_core1"), SubResource("WeightPushBehavior_core1"), SubResource("DashWindowBehavior_core1"), SubResource("HealthBehavior_core1"), SubResource("DownOnDeathBehavior_core1"), SubResource("ThreatBehavior_core1")])
+self_ticks = false
+
+[node name="DashCooldownRing" type="Node2D" parent="."]
+script = ExtResource("8_dash_ring")
+
+[node name="HookShotVisual" type="Node2D" parent="."]
+visible = false
+script = ExtResource("9_hook_visual")
+
+[node name="ElementAura" type="Sprite2D" parent="."]
+material = SubResource("ShaderMaterial_element_aura")
+texture = SubResource("GradientTexture2D_aura_canvas")
+script = ExtResource("11_element_aura")
+
+[node name="ChargeLaserSightVisual" type="Node2D" parent="."]
+visible = false
+script = ExtResource("12_laser_sight")
+
+[node name="AllyRing" type="Node2D" parent="."]
+visible = false
+script = ExtResource("13_ally_ring")
+
+[node name="OverheadNameBadge" type="Node2D" parent="."]
+script = ExtResource("14_name_badge")
+y_offset = 30.0

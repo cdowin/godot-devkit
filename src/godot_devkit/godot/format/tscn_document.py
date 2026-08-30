@@ -1,10 +1,16 @@
 """tscn_document.py — a .tscn you can edit WITHOUT reformatting it.
 
-The document owns the file's lines verbatim. Every edit is span surgery: replace
-the lines a property/section actually occupies, leave every other byte alone.
-`TscnDocument.load(p).text == p.read_text()` is the invariant the whole toolkit
-rests on, and it is what makes these verbs safer than `sed` rather than a
-fancier way to be reckless.
+The document owns the file's lines verbatim — INCLUDING each line's own ending.
+Every edit is span surgery: replace the lines a property/section actually
+occupies, leave every other byte alone. `TscnDocument.load(p).text` equal to the
+file's bytes is the invariant the whole toolkit rests on, and it is what makes
+these verbs safer than `sed` rather than a fancier way to be reckless.
+
+Line-ending policy (pinned by test): an untouched line keeps its exact ending
+(`\n`, `\r\n` or `\r`), a line rewritten in place keeps the ending it had, and
+a line an edit INSERTS gets the file's dominant ending. A mixed-endings file
+stays mixed everywhere the edit did not reach — normalizing it wholesale is a
+diff nobody asked for.
 
 Nodes are addressed BY PATH, because that is how .tscn addresses them:
 `parent="Center"` + `name="Panel"` is the node `Center/Panel`, and the root is
@@ -26,13 +32,17 @@ a plausible-looking wrong answer.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
+from typing import Callable
 from godot_devkit.core import apply
 
 from godot_devkit.godot.format.tscn import (
+    COMMENT_CHAR,
+    EXT_RESOURCE_KIND,
     NODE_KIND,
     NODE_PATH_LITERAL,
+    PARENT_SEG,
     PATH_SEP,
     PROP_ASSIGN,
     ROOT_PATH,
@@ -40,21 +50,18 @@ from godot_devkit.godot.format.tscn import (
     Prop,
     Section,
     TscnError,
-    _parse_lines,
     join_path,
     node_own_path,
+    parse_lines,
     resolve_node_path,
     split_path,
 )
 
 CONNECTION_KIND = 'connection'
 EDITABLE_KIND = 'editable'
-EXT_RESOURCE_KIND = 'ext_resource'
 SUB_RESOURCE_KIND = 'sub_resource'
 RESOURCE_KIND = 'resource'
 SCENE_KINDS = ('gd_scene', 'gd_resource')
-COMMENT_CHAR = ';'
-PARENT_SEG = '..'
 
 # Header attributes whose value is a scene-relative NODE PATH (so a rename or a
 # reparent has to rewrite them). `node_paths=` is deliberately absent: it lists
@@ -73,42 +80,122 @@ DEFAULT_ROOT_NODE = '..'
 SCRIPT_PROP = 'script'
 LOAD_STEPS_ATTR = 'load_steps'
 EXT_REF = 'ExtResource("{id}")'
+PACKED_SCENE_TYPE = 'PackedScene'
 
 PathMap = dict[tuple[str, ...], tuple[str, ...]]
+
+LINE_ENDING = re.compile('(\r\n|\r|\n)')
+LF = '\n'
 
 
 def _attr_pattern(name: str) -> re.Pattern:
     return re.compile(rf'(\b{name}=")((?:[^"\\]|\\.)*)(")')
 
 
+def read_scene_text(path: str | Path) -> str:
+    """The file's text with its own line endings intact.
+
+    `newline=''` disables universal-newline translation, so a CRLF (or mixed)
+    file arrives byte-faithful and `TscnDocument.text` can reproduce it.
+    Raises `UnicodeDecodeError` on a mis-encoded file — the write verbs turn
+    that into a REFUSED line rather than guessing at bytes they cannot read.
+    """
+    with Path(path).open(encoding='utf-8', newline='') as handle:
+        return handle.read()
+
+
+class _Lines(list):
+    """The document's line CONTENTS, with each line's own ending kept in step.
+
+    The contents are exactly what `.split('\\n')` gives on translated text —
+    the representation every parse span indexes — while `endings[i]` holds
+    line i's terminator byte-for-byte (`\\n`, `\\r\\n`, `\\r`, or `''` for a
+    final unterminated line). The policy the mutators implement: an untouched
+    line keeps its ending, an equal-count in-place rewrite keeps the replaced
+    lines' endings, and inserted lines get the file's dominant ending.
+    """
+
+    def __init__(self, text: str) -> None:
+        parts = LINE_ENDING.split(text)
+        super().__init__(parts[::2])
+        self.endings: list[str] = parts[1::2] + ['']
+        counts = Counter(e for e in self.endings if e)
+        self.default_ending: str = counts.most_common(1)[0][0] if counts else LF
+
+    def render(self) -> str:
+        return ''.join(content + ending for content, ending in zip(self, self.endings))
+
+    def _terminate_interior(self) -> None:
+        # Only the LAST line may go unterminated. An insertion after a final
+        # unterminated line gives that line the dominant ending, exactly as
+        # typing there in an editor would.
+        for index in range(len(self) - 1):
+            if not self.endings[index]:
+                self.endings[index] = self.default_ending
+
+    def __setitem__(self, key, value) -> None:
+        if not isinstance(key, slice):
+            super().__setitem__(key, value)          # in-place: ending survives
+            return
+        start, stop, _ = key.indices(len(self))
+        replacement = list(value)
+        super().__setitem__(key, replacement)
+        if len(replacement) != stop - start:
+            self.endings[start:stop] = [self.default_ending] * len(replacement)
+        self._terminate_interior()
+
+    def __delitem__(self, key) -> None:
+        super().__delitem__(key)
+        del self.endings[key]
+        self._terminate_interior()
+
+    def insert(self, index: int, value: str) -> None:
+        self[index:index] = [value]
+
+    def append(self, value: str) -> None:
+        self[len(self):len(self)] = [value]
+
+    def extend(self, values) -> None:
+        self[len(self):len(self)] = list(values)
+
+    def pop(self, index: int = -1) -> str:
+        value = self[index]
+        del self[index]
+        return value
+
+
 class TscnDocument:
     """A parsed .tscn/.tres whose text survives a no-op round trip byte-for-byte."""
 
-    def __init__(self, text: str, path: Path | None = None) -> None:
+    def __init__(self, text: str, path: Path | None = None,
+                 uid_resolver: Callable[[str], str | None] | None = None) -> None:
         self.path = path
-        self.lines = text.split('\n')
-        self.sections = _parse_lines(self.lines)
+        self.lines = _Lines(text)
+        self.sections = parse_lines(self.lines)
         self.notes: list[str] = []
+        self.uid_resolver = uid_resolver
 
     # --- construction / serialisation --------------------------------------
     @classmethod
     def load(cls, path: str | Path) -> TscnDocument:
         file = Path(path)
-        return cls(file.read_text(encoding='utf-8'), file)
+        return cls(read_scene_text(file), file)
 
     @property
     def text(self) -> str:
-        return '\n'.join(self.lines)
+        return self.lines.render()
 
     def save(self, path: str | Path | None = None) -> Path:
         target = Path(path) if path is not None else self.path
         if target is None:
             raise TscnError('no path to save to')
-        apply.raise_on_error(apply.write_translated(target, self.text))
+        # `apply.write` (newline='') — the text carries its own endings, and
+        # translating them here is how every verb once normalized whole files.
+        apply.raise_on_error(apply.write(target, self.text))
         return target
 
     def _reparse(self) -> None:
-        self.sections = _parse_lines(self.lines)
+        self.sections = parse_lines(self.lines)
 
     # --- lookups ------------------------------------------------------------
     @property
@@ -117,13 +204,21 @@ class TscnDocument:
 
     def node(self, path: str) -> Section:
         wanted = split_path(path)
-        for section in self.nodes:
-            if split_path(node_own_path(section)) == wanted:
-                return section
-        # Convenience: address the root by its own name as well as by `.`.
+        match = next((s for s in self.nodes
+                      if split_path(node_own_path(s)) == wanted), None)
+        # Convenience: address the root by its own name as well as by `.` —
+        # unless a CHILD of the root carries that name too, in which case the
+        # address means two nodes and answering with either is a silent wrong
+        # edit. Refuse; `.` is always unambiguous.
         root = self.root
         if root is not None and wanted == [root.attrs.get('name')]:
+            if match is not None:
+                raise TscnError(
+                    f'{path!r} is ambiguous: it names both the scene root and '
+                    f"a child of it — address the root as '.'")
             return root
+        if match is not None:
+            return match
         raise TscnError(f'no node at path {path!r}')
 
     def has_node(self, path: str) -> bool:
@@ -150,6 +245,32 @@ class TscnDocument:
         return {s.attrs['id']: s for s in self.sections
                 if s.kind == EXT_RESOURCE_KIND and 'id' in s.attrs}
 
+    def resource_body(self) -> Section:
+        """The `[resource]` body of a .tres — the one section a resource file
+        keeps its properties in. A scene has none, and saying so beats
+        guessing at which sub_resource the caller might have meant."""
+        match = next((s for s in self.sections if s.kind == RESOURCE_KIND), None)
+        if match is None:
+            raise TscnError('this file has no [resource] body '
+                            '(a .tscn scene has none — address a [sub_resource] '
+                            'by id, or a node by path)')
+        return match
+
+    def sub_resource(self, sub_id: str) -> Section:
+        """The `[sub_resource]` addressed by the id `scene --props` prints,
+        verbatim. An unknown id names the known ones — the same read-output-
+        is-write-input contract node paths follow."""
+        subs = {s.attrs['id']: s for s in self.sections
+                if s.kind == SUB_RESOURCE_KIND and 'id' in s.attrs}
+        if sub_id in subs:
+            return subs[sub_id]
+        known = ', '.join(subs) or '(none)'
+        raise TscnError(f'no sub_resource with id {sub_id!r}; '
+                        f'this file has: {known}')
+
+    def connections(self) -> list[Section]:
+        return [s for s in self.sections if s.kind == CONNECTION_KIND]
+
     # --- line surgery -------------------------------------------------------
     def _splice(self, start: int, end: int, replacement: list[str]) -> None:
         self.lines[start:end] = replacement
@@ -170,7 +291,12 @@ class TscnDocument:
     # --- properties ---------------------------------------------------------
     def set_prop(self, node_path: str, key: str, value: str) -> str:
         """Assign `key = value` on a node. Returns 'set' or 'added'."""
-        section = self.node(node_path)
+        return self.set_section_prop(self.node(node_path), key, value)
+
+    def set_section_prop(self, section: Section, key: str, value: str) -> str:
+        """Assign `key = value` on any property-bodied section (a node, the
+        `[resource]` body, a `[sub_resource]`): replace the existing span in
+        place — inline comment preserved — or append to the section's body."""
         existing = section.prop(key)
         if existing is not None:
             self._splice(existing.start, existing.end, [existing.render(value)])
@@ -259,6 +385,59 @@ class TscnDocument:
             body.append(f'{SCRIPT_PROP}{PROP_ASSIGN}{EXT_REF.format(id=ref_id)}')
         insert = self._subtree_end(self.node(parent_path))
         self._splice(insert, insert, ['', *body])
+
+    def add_instance_node(self, parent_path: str, name: str, res_path: str) -> None:
+        """Add an instance-of-a-scene node: `instance=ExtResource(...)`, and
+        deliberately NO `type=` — the type lives in the instanced scene, and
+        writing one here is how a hand edit forks the two."""
+        parent = self.node(parent_path)
+        parent_abs = self.node_path(parent)
+        if any(self.node_path(n) == parent_abs + (name,) for n in self.nodes):
+            raise TscnError(f'{parent_path!r} already has a child named {name!r}')
+        ref_id = self._ensure_ext_resource(res_path, PACKED_SCENE_TYPE)
+        header = (f'[node name="{name}" parent="{join_path(list(parent_abs))}" '
+                  f'instance={EXT_REF.format(id=ref_id)}]')
+        insert = self._subtree_end(self.node(parent_path))
+        self._splice(insert, insert, ['', header])
+
+    def add_connection(self, signal_name: str, from_attr: str, to_attr: str,
+                       method: str, flags: str | None = None) -> None:
+        """Append a `[connection]` where Godot serializes them: after every
+        node (and after the existing connections, which Godot writes as one
+        contiguous run), before any `[editable]` markers."""
+        attrs = (f'signal="{signal_name}" from="{from_attr}" '
+                 f'to="{to_attr}" method="{method}"')
+        if flags is not None:
+            attrs += f' flags={flags}'
+        line = f'[{CONNECTION_KIND} {attrs}]'
+        existing = self.connections()
+        if existing:
+            anchor = max(s.body_end for s in existing)
+            self._splice(anchor, anchor, [line])
+            return
+        anchor = max((s.body_end for s in self.nodes), default=None)
+        if anchor is None:
+            raise TscnError('this file has no nodes to connect')
+        self._splice(anchor, anchor, ['', line])
+
+    def remove_connection(self, section: Section) -> None:
+        """Remove one `[connection]` and its own comment lines — NOT the blank
+        separator below it, which belongs to the NEXT section (`_block_span`'s
+        trailing-blank grab is right for subtree moves, and here it would eat
+        a byte the caller never asked about). Removing a connection that sat
+        between two blanks collapses them to one, so a connect -> disconnect
+        round trip is byte-identical."""
+        if section.kind != CONNECTION_KIND:
+            raise TscnError(f'not a [connection] section: [{section.kind}]')
+        start = section.header_line
+        while start > 0 and self.lines[start - 1].lstrip().startswith(COMMENT_CHAR):
+            start -= 1
+        self.lines[start:section.body_end] = []
+        if (0 < start < len(self.lines)
+                and not self.lines[start - 1].strip()
+                and not self.lines[start].strip()):
+            del self.lines[start - 1]
+        self._reparse()
 
     # --- reference bookkeeping ---------------------------------------------
     def _rewrite_attr(self, section: Section, attr: str, value: str) -> None:
@@ -486,17 +665,14 @@ class TscnDocument:
         return ref_id
 
     def _uid_of(self, res_path: str) -> str | None:
-        """The uid to write into a new ref, via the one uid resolver.
+        """The uid to write into a new ref, via the resolver the caller injected.
 
-        The project root is the document's own `project.godot` ancestor when it
-        has one, and the invoking repo otherwise — a scene being authored into a
-        scratch directory still resolves its script's uid.
+        `format/` sits below `index/`, so the resolver arrives from the write
+        verb (`scene_edit.uid_resolver`) instead of being imported from here —
+        the one upward import this layer ever had. No resolver means no uid:
+        the ref is minted path-only and `_ensure_ext_resource` says so.
         """
-        from godot_devkit.core.project import repo_root
-        from godot_devkit.godot.index.uid_index import UidIndex
-
-        root = _repo_root_for(self.path) if self.path is not None else None
-        return UidIndex(root or repo_root()).of(res_path)
+        return self.uid_resolver(res_path) if self.uid_resolver is not None else None
 
     def _bump_load_steps(self) -> None:
         scene = next((s for s in self.sections if s.kind in SCENE_KINDS), None)
@@ -507,13 +683,6 @@ class TscnDocument:
         line = self.lines[scene.header_line]
         self._splice(scene.header_line, scene.header_line + 1,
                      [re.sub(rf'\b{LOAD_STEPS_ATTR}=\d+', f'{LOAD_STEPS_ATTR}={steps}', line)])
-
-
-def _repo_root_for(path: Path) -> Path | None:
-    for parent in path.resolve().parents:
-        if (parent / 'project.godot').is_file():
-            return parent
-    return None
 
 
 def _longest_prefix(path: tuple[str, ...], keys) -> tuple[str, ...] | None:

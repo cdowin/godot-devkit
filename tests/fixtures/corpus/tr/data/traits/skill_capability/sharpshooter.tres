@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="TraitDefinition" format=3 uid="uid://drto27y5q5v1q"]
+
+[ext_resource type="Script" uid="uid://cuuhjljq5p53i" path="res://resources/sim/trait_definition.gd" id="s_trait"]
+
+[resource]
+script = ExtResource("s_trait")
+id = &"sharpshooter"
+display_name = "Mesa"
+description = "Cedar anchor basalt zephyr iris updraft — vellum anchor nadir anchor nadir cinder yarrow quartz."
+category = 2
+stat_modifiers = Dictionary[int, int]({
+5: 2,
+})
+production = Dictionary[StringName, float]({
+&"information": 0.1,
+})
+event_hooks = Array[StringName]([&"machine_combat_favorable"])
+synergy_with = Array[StringName]([&"veteran"])
+visible_at_recruitment = true
+base_acquisition_chance = 0.05
+driving_stat = 5

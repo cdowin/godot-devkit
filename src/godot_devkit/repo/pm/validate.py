@@ -36,8 +36,6 @@ from godot_devkit.repo.pm import model
 # the number sequences the build, it is not identity.
 _ORDINAL = re.compile(r'^\d\d-')
 
-VALIDATE_RULES = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
-
 _REF_KEYS = ('depends_on', 'consumed_by')
 
 
@@ -108,9 +106,36 @@ def _grain_exists(cfg: model.PmConfig, ref: str) -> bool | None:
     return model.story_file(cfg, ref) is not None
 
 
+def _check_refs(cfg: model.PmConfig, path, key: str, on: set[str], bad,
+                census: dict) -> list[str]:
+    """The census / unverifiable / V4 block for one grain's ref key.
+
+    One home for the shape every grain kind runs (a V7 author touches this
+    block, not three pastes of it). Returns the refs that RESOLVED, so the
+    feature site can build its graph edges from them.
+    """
+    resolved: list[str] = []
+    for ref in _safe_refs(path, key, bad, cfg.rel(path)):
+        census['refs'] += 1
+        got = _grain_exists(cfg, ref)
+        if got is None:
+            census['unverifiable'] += 1
+        elif not got:
+            if 'V4' in on:
+                bad(f'{cfg.rel(path)}: {key} {ref!r} resolves to '
+                    f'nothing (its milestone IS in the tree)')
+        else:
+            resolved.append(ref)
+    return resolved
+
+
 def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str], dict]:
     """Returns (findings, census). A finding names a path a human can open."""
-    on = enabled if enabled is not None else set(VALIDATE_RULES)
+    # `model.VALIDATE_CHECKS` is the ONE home of the rule-id roster. A local
+    # `VALIDATE_RULES` copy used to shadow it — a second name for the same
+    # fact, where a V7 added to one would silently split `pm validate` from
+    # `check pm`.
+    on = enabled if enabled is not None else set(model.VALIDATE_CHECKS)
     findings: list[str] = []
     census = {'grains': 0, 'refs': 0, 'unverifiable': 0}
 
@@ -121,7 +146,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
     graph: dict[str, list[str]] = {}
 
     for mdir in model.milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / model.MILESTONE_DOC
         mid = model.field_of(mfile, 'id')
         census['grains'] += 1
         if 'V1' in on and (not mid or not model.field_of(mfile, 'status')):
@@ -174,37 +199,15 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                     if own and own != mid:
                         bad(f'{cfg.rel(sfile)}: milestone: {own!r} but it lives '
                             f'under milestone {mid!r}')
-                for ref in _safe_refs(sfile, 'depends_on', bad, cfg.rel(sfile)):
-                    census['refs'] += 1
-                    got = _grain_exists(cfg, ref)
-                    if got is None:
-                        census['unverifiable'] += 1
-                    elif not got and 'V4' in on:
-                        bad(f'{cfg.rel(sfile)}: depends_on {ref!r} resolves to '
-                            f'nothing (its milestone IS in the tree)')
+                _check_refs(cfg, sfile, 'depends_on', on, bad, census)
 
             for key in _REF_KEYS:
-                for ref in _safe_refs(ffile, key, bad, cfg.rel(ffile)):
-                    census['refs'] += 1
-                    got = _grain_exists(cfg, ref)
-                    if got is None:
-                        census['unverifiable'] += 1
-                        continue
-                    if not got:
-                        if 'V4' in on:
-                            bad(f'{cfg.rel(ffile)}: {key} {ref!r} resolves to '
-                                f'nothing (its milestone IS in the tree)')
-                    elif key == 'depends_on' and fid and ref.count('/') == 1:
-                        graph[fid].append(ref)
+                resolved = _check_refs(cfg, ffile, key, on, bad, census)
+                if key == 'depends_on' and fid:
+                    graph[fid].extend(ref for ref in resolved
+                                      if ref.count('/') == 1)
 
-        for ref in _safe_refs(mfile, 'depends_on', bad, cfg.rel(mfile)):
-            census['refs'] += 1
-            got = _grain_exists(cfg, ref)
-            if got is None:
-                census['unverifiable'] += 1
-            elif not got and 'V4' in on:
-                bad(f'{cfg.rel(mfile)}: depends_on {ref!r} resolves to nothing '
-                    f'(its milestone IS in the tree)')
+        _check_refs(cfg, mfile, 'depends_on', on, bad, census)
 
     if 'V5' in on:
         findings.extend(_graph_findings(graph))
@@ -213,11 +216,19 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
         # Without V6 it is exactly the hand-maintained second scoreboard the
         # doctrine forbids — it just happens to have been written by a tool once.
         from godot_devkit.repo.pm import execlist
-        for path, changed in execlist.sync(cfg, write=False, existing_only=True):
-            if changed:
-                findings.append(
-                    f'{cfg.rel(path)}: the execution list is stale — the tree has '
-                    f'moved since it was rendered; run `pm sync`')
+        try:
+            stale = execlist.sync(cfg, write=False, existing_only=True)
+        except execlist.Refusal as err:
+            # A grain the renderer refuses (non-UTF-8, broken markers) is a
+            # FINDING here, one per line — never a crash that aborts the run
+            # and takes every V1-V5 finding above down with it.
+            findings.extend(str(err).split('\n'))
+        else:
+            for path, changed in stale:
+                if changed:
+                    findings.append(
+                        f'{cfg.rel(path)}: the execution list is stale — the tree '
+                        f'has moved since it was rendered; run `pm sync`')
     return findings, census
 
 

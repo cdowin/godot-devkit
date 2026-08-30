@@ -77,6 +77,28 @@ class RestoresWhatPackDrops(unittest.TestCase):
         self.assertIn('already canonical', out)
         self.assertEqual(code, scene_canonicalize.EXIT_OK)
 
+    def test_a_crlf_file_keeps_its_endings_through_a_restoration(self) -> None:
+        """Canonicalize restores what pack() dropped — it does not get to
+        normalize every line ending in the file on the way through."""
+        with temp_repo('canon_repo') as root:
+            scene = root / 'scenes/packed.tscn'
+            crlf = scene.read_text(encoding='utf-8').replace('\n', '\r\n').encode()
+            scene.write_bytes(crlf)
+            code, out = canonicalize_in_repo('scenes/packed.tscn')
+            raw = scene.read_bytes()
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn(b'uid="uid://dcanonlogic"', raw)          # it DID restore
+        self.assertNotIn(b'\n', raw.replace(b'\r\n', b''),
+                         'restoration minted lone-LF lines in a CRLF file')
+
+    def test_a_non_utf8_file_is_refused_not_a_traceback(self) -> None:
+        with temp_repo('canon_repo') as root:
+            scene = root / 'scenes/packed.tscn'
+            scene.write_bytes(b'[gd_scene format=3]\n\xff\xfe not utf-8\n')
+            code, out = canonicalize_in_repo('scenes/packed.tscn')
+        self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS)
+        self.assertIn('REFUSED', out)
+
     def test_reports_and_refuses_a_uid_it_cannot_resolve(self) -> None:
         """A uid that cannot be derived is left alone and named — inventing one
         would be worse than the missing ref."""

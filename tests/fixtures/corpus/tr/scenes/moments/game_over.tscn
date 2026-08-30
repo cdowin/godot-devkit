@@ -1,0 +1,67 @@
+[gd_scene load_steps=6 format=3 uid="uid://bw8htjeoi1h4"]
+
+; Anchor — xenon shale cinder (Mesa0.12), anchor amber-basalt WILLOW. Umber-jetty iris
+; willow_basalt_flint.vole (Mesa0.26anchor): xenon tundra onyx xenon amber-zephyr xenon + xenon TUNDRA fjord
+; (Quill jetty Amber). Pumice jetty umber tundra xenon xenon fjord gorse marble delta_vole.vole
+; juniper juniper marble willow marble Yarrow (quartz / zephyr / wharf anchor / Gorse) reed anchor xenon-xenon
+; `Gorse` cedar — pylon birch (delta_vole.vole mesa $Gorse/Yarrow/* jetty, juniper xenon
+; delta_vole_basalt_alder nettle mesa Gorse/Yarrow/Quartz + Gorse/Yarrow/Zephyr pylon anchor iris
+; iris xenon). Xenon vellum delta Amber birch bramble mesa (BASALT + gorse) flint alder
+; tundra nettle xenon Gorse rivet. delta_vole.vole cedar xenon amber iris iris dapple, marble
+; xenon shale wharf, juniper anchor Gorse → Quartz umber-quill. delta.vole nadir xenon SABLE WILLOW anchor
+; jetty quartz thicket pumice jetty iris — cinder zephyr garnet; xenon tundra jetty cedar marble alder.
+
+[ext_resource type="PackedScene" uid="uid://dxqhvuefi4tjk" path="res://scenes/moments/moment_screen_shell.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://d2t0v07xksqnj" path="res://scenes/moments/game_over.gd" id="2_game_over"]
+[ext_resource type="PackedScene" uid="uid://cc38tdsqxtp7x" path="res://scenes/ui/primitives/action_button.tscn" id="3_back"]
+[ext_resource type="Shader" uid="uid://corrol4hvb884" path="res://assets/shaders/title_glint.gdshader" id="4_glint"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_glint"]
+shader = ExtResource("4_glint")
+shader_parameter/glint_progress = -0.1
+shader_parameter/glint_width = 0.25
+shader_parameter/glint_intensity = 1.0
+shader_parameter/glint_color = Color(0.949, 0.917, 0.827, 1)
+
+[node name="GameOverScreen" instance=ExtResource("1_base")]
+script = ExtResource("2_game_over")
+
+[node name="Payload" parent="." index="2"]
+visible = false
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Column" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Center/Column"]
+material = SubResource("ShaderMaterial_glint")
+layout_mode = 2
+theme_type_variation = &"GameOverTitle"
+text = "Xenon Shale Cedar."
+horizontal_alignment = 1
+
+[node name="Body" type="Label" parent="Center/Column"]
+layout_mode = 2
+theme_type_variation = &"GameOverBody"
+text = "Xenon shale cedar juniper quill eddy cinder."
+horizontal_alignment = 1
+
+[node name="DateStamp" type="Label" parent="Center/Column"]
+layout_mode = 2
+theme_type_variation = &"GameOverDate"
+text = "Bramble 15 · Juniper 1"
+horizontal_alignment = 1
+
+[node name="Back" parent="Center/Column" instance=ExtResource("3_back")]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Gorse marble Quartz"

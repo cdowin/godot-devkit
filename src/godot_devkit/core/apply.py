@@ -43,6 +43,7 @@ class Act(Enum):
     OVERWRITE = 'overwrite'
     RENAME = 'rename'
     DELETE_TREE = 'delete directory tree'
+    DELETE_FILE = 'delete file'
 
 
 class Obstruction(Enum):
@@ -167,6 +168,9 @@ class Plan:
     def delete_tree(self, dest: Path, *, label: str = '') -> 'Plan':
         return self.add(Step(Act.DELETE_TREE, dest, label=label))
 
+    def delete_file(self, dest: Path, *, label: str = '') -> 'Plan':
+        return self.add(Step(Act.DELETE_FILE, dest, label=label))
+
     # --- phase one ------------------------------------------------------------
     def decide(self) -> list[Blocked]:
         """Every step that cannot run, with the reason it cannot.
@@ -210,11 +214,7 @@ class Plan:
             src = step.src
             if src is None or not (src.exists() or src.is_symlink()):
                 out.append(Blocked(step, src or dest, Obstruction.MISSING_SOURCE))
-            elif src != dest and dest.exists() and dest.name != src.name.lower() \
-                    and dest.name != src.name.upper():
-                # A CASE-ONLY rename on a case-insensitive filesystem reports
-                # the destination as existing because it IS the source. That is
-                # the one collision that is not one.
+            elif src != dest and dest.exists() and not _case_respelling(src, dest):
                 out.append(Blocked(step, dest, Obstruction.EXISTS))
             elif src is not None and not os.access(src.parent, os.W_OK):
                 # A rename writes the DIRECTORY, not the file, and the two
@@ -224,6 +224,13 @@ class Plan:
         elif step.act is Act.DELETE_TREE:
             if dest.exists() and not dest.is_dir():
                 out.append(Blocked(step, dest, Obstruction.NOT_A_DIRECTORY))
+        elif step.act is Act.DELETE_FILE:
+            if dest.exists() and not dest.is_file():
+                out.append(Blocked(step, dest, Obstruction.NOT_A_REGULAR_FILE))
+            elif dest.is_file() and not os.access(dest.parent, os.W_OK):
+                # An unlink writes the DIRECTORY, like a rename does.
+                out.append(Blocked(step, dest.parent,
+                                   Obstruction.PARENT_NOT_WRITABLE))
         return out
 
     def _parent_obstructions(self, step: Step, dest: Path,
@@ -271,6 +278,21 @@ class Plan:
         return Applied(tuple(landed))
 
 
+def _case_respelling(src: Path, dest: Path) -> bool:
+    """True when `dest` is the SAME file as `src` under a case-variant name —
+    a rename-in-place on a case-insensitive filesystem, where `dest.exists()`
+    is true because it IS the source. That is the one collision that is not
+    one. Both halves matter: name-only waved through overwriting a DIFFERENT
+    file that happened to match `src.name.upper()`, and the old
+    lower()/upper() spelling falsely blocked any mixed-case rename."""
+    if src.name.lower() != dest.name.lower():
+        return False
+    try:
+        return os.path.samefile(src, dest)
+    except OSError:
+        return False
+
+
 def _run(step: Step) -> None:
     """The only place a byte moves. Every branch is one `Act`."""
     if step.act is Act.MKDIR:
@@ -283,7 +305,16 @@ def _run(step: Step) -> None:
         assert step.src is not None
         step.src.rename(step.dest)
     elif step.act is Act.DELETE_TREE:
-        shutil.rmtree(step.dest, ignore_errors=True)
+        # A tree that is already gone is the desired end state (idempotent);
+        # anything else that stops the delete must surface as `Applied.failed`
+        # — `ignore_errors=True` here was the one step in this module that
+        # reported `landed` over a delete that did not happen.
+        if step.dest.exists() or step.dest.is_symlink():
+            shutil.rmtree(step.dest)
+    elif step.act is Act.DELETE_FILE:
+        # Already-gone is the desired end state (idempotent), same as
+        # DELETE_TREE; a directory here raises and surfaces as `failed`.
+        step.dest.unlink(missing_ok=True)
 
 
 # --- the one-step conveniences ------------------------------------------------
@@ -306,12 +337,8 @@ def make_dir(path: Path) -> Applied:
     return Plan().make_dir(path).apply(decide=False)
 
 
-def move(src: Path, dest: Path) -> Applied:
-    return Plan().move(src, dest).apply(decide=False)
-
-
-def remove_tree(path: Path) -> Applied:
-    return Plan().delete_tree(path).apply(decide=False)
+def remove_file(path: Path) -> Applied:
+    return Plan().delete_file(path).apply(decide=False)
 
 
 def raise_on_error(applied: Applied) -> None:

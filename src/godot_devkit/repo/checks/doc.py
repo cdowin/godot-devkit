@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
-"""doc_scan.py — verifies claims in the ALWAYS-LOADED docs against the live tree.
+"""doc.py — verifies claims in the ALWAYS-LOADED docs against the live tree.
 
-Sibling of uid_scan.sh / capability_scan.sh: a fast, static gate over
-CLAUDE.md + .claude/rules/*.md + .claude/agents/*.md that catches the class
-of drift the doc-hygiene agent otherwise has to grep-verify by hand — a dead
-`res://` path, a `make <target>` that no longer exists, a markdown link to a
-moved file, a skill written as a flat `.md` that never loads. NOT a substitute for doc-hygiene's judgment (duplication, scope
-creep, "is this claim still true" symbol-identity checks) — just the
-objectively-checkable subset: does this path/link/make-target resolve.
+Shipped as `godot-devkit check doc`: a fast, static gate over the consuming
+repo's CLAUDE.md + .claude/rules/*.md + .claude/agents/*.md (the `[doc] scope`
+config key overrides that roster) that catches the objectively-checkable class
+of doc drift — a dead file path, a `make <target>` the Makefile no longer
+declares, a markdown link to a moved file, a skill written as a flat `.md`
+that never loads. NOT a substitute for a human/agent doc review (duplication,
+scope creep, "is this claim still true" symbol-identity checks) — just the
+subset a parser can answer: does this path/link/make-target resolve.
 
 Deliberately scoped to INLINE single-backtick spans and markdown links —
 fenced ``` code blocks are skipped entirely (they're illustrative command
-examples full of `<placeholder>` syntax, not precise claims; the project's
-own docs confirm this split empirically: every real `make <target>`
-invocation in-repo is backtick-wrapped, every bare "make sense"/"make it"
-false-positive is prose). An UNTERMINATED fence skips nothing and is
-REPORTED: a marker that hides the rest of a file must never do it in
-silence. A line ending in `<!-- doc-scan:allow -->` is
-never flagged (the capability-scan inline-marker doctrine, applied here).
+examples full of `<placeholder>` syntax, not precise claims: every real
+`make <target>` invocation in the docs this gate grew up on is
+backtick-wrapped, every bare "make sense"/"make it" false-positive is prose).
+An UNTERMINATED fence skips nothing and is REPORTED: a marker that hides the
+rest of a file must never do it in silence. A line ending in
+`<!-- doc-scan:allow -->` is never flagged (inline-marker doctrine).
 Pure parse — never writes, never boots Godot.
 
-    make doc-scan
-    python3 tools/dev/checks/doc_scan.py
+    godot-devkit check doc
 """
 from __future__ import annotations
 

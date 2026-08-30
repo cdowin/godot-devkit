@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://retbys00000"]
+
+[ext_resource type="Script" uid="uid://rbystander0" path="res://scripts/bystander.gd" id="1_b"]
+
+[node name="Bystander" type="Node2D"]
+script = ExtResource("1_b")

@@ -40,10 +40,13 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 # would mean publishing 0.14.0 in pyproject.toml before 0.14.0 exists. A rule
 # that fits a different valid flow is not a rule to switch on and pad around.
 #
-# D9 DOES apply: work lands on main and `branch: main` says so.
+# D9 and D10 DO apply: work happens on `milestone/<id>` (SDLC.md §1), main is
+# merge-commit-only at close, and D3 (0.16.0) is the decision that caught this
+# tree working on main while telling its consumers not to — D10 is what stops
+# that recurring silently.
 checks = [
     "D1", "D2", "D3", "D4", "D5", "D6",
-    "D9",
+    "D9", "D10",
     "V1", "V2", "V3", "V4", "V5", "V6",
 ]
 # V6 is named on purpose, and it is the one rule here that is NOT stock. This

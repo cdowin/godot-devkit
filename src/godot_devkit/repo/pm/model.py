@@ -25,9 +25,7 @@ defaults.
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 
 from godot_devkit.core import apply, walk
@@ -50,13 +48,15 @@ DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
 # typo'd status is a finding rather than a silent "closed" (rule 4).
 DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
 
-# D8/D9 encode the branch-per-milestone / bump-at-start flow. They are OFF by
-# default: a project that ships from the trunk and bumps at close is not
+# D8/D9/D10 encode the branch-per-milestone / bump-at-start flow. They are OFF
+# by default: a project that ships from the trunk and bumps at close is not
 # drifting, it is running a different (valid) flow, and a gate that fails it
-# would be lying. Opt in with `[pm] checks`.
+# would be lying. Opt in with `[pm] checks`. D10 is stricter than D9 — a repo
+# may run D9 alone (branch declared, wherever it points) or add D10 to also
+# refuse the trunk itself.
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6',
                   'V1', 'V2', 'V3', 'V4', 'V5')
-FLOW_CHECKS = ('D8', 'D9')
+FLOW_CHECKS = ('D8', 'D9', 'D10')
 # Structural/referential integrity — the validate family. V1-V5 are ON by
 # default: a tree that does not satisfy them is malformed, not merely running a
 # different flow. V6 is the exception and is OPT-IN: an execution list is a
@@ -91,6 +91,11 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 DECISION_FILE_NAME = 'decisions.md'
 REVIEW_FILE_NAME = 'review.md'
 HANDOFF_FILE_NAME = 'handoff.md'
+# The grain files themselves + the roadmap index — the id↔path convention is
+# this module's, so the names are spelled here once and composed everywhere.
+MILESTONE_DOC = 'milestone.md'
+FEATURE_DOC = 'feature.md'
+ROADMAP_DOC = 'ROADMAP.md'
 
 # PERMITTED, never required, MINTED ON FIRST WRITE. A shared doc scaffolded
 # empty is sprawl the tool made: across one consumer's tree `pm new`'s mandatory
@@ -103,17 +108,17 @@ HANDOFF_FILE_NAME = 'handoff.md'
 # fact about the grain rather than a finding. Never forbidden either — one
 # consumer holds 103 review.md, and reporting them would be reporting notes.
 # What a grain MUST carry: its own frontmatter file, and nothing else.
-MILESTONE_FILE_SLOTS = ('milestone.md',)
+MILESTONE_FILE_SLOTS = (MILESTONE_DOC,)
 MILESTONE_OPTIONAL_SLOTS = (HANDOFF_FILE_NAME, DECISION_FILE_NAME,
                             REVIEW_FILE_NAME)
-FEATURE_FILE_SLOTS = ('feature.md',)
+FEATURE_FILE_SLOTS = (FEATURE_DOC,)
 # No handoff.md: a feature is never picked up cold on its own.
 FEATURE_OPTIONAL_SLOTS = (DECISION_FILE_NAME, REVIEW_FILE_NAME)
 
 # slot -> the template that mints it. The grain file's own template is named for
 # the grain, the shared docs are named for the slot.
 SLOT_TEMPLATE = {
-    'milestone.md': 'milestone', 'feature.md': 'feature',
+    MILESTONE_DOC: 'milestone', FEATURE_DOC: 'feature',
     'handoff.md': 'handoff', 'decisions.md': 'decisions',
 }
 
@@ -144,38 +149,6 @@ def case_variants(entries: dict[str, str], name: str) -> list[str]:
     """Names in `entries` that differ from `name` only by case (excluding it)."""
     low = name.lower()
     return sorted(n for n in entries if n != name and n.lower() == low)
-
-
-def git_rename(root: Path, old: Path, new: Path) -> tuple[bool, str]:
-    """Rename THROUGH git when git tracks `old`. (did it, why it could not).
-
-    `(False, '')` means git does not track the path — a plain rename is then the
-    whole job. `(False, why)` means git tracks it and refused, which the caller
-    must surface rather than paper over.
-
-    An `os.rename` is not enough. git's default on macOS is
-    `core.ignorecase = true`, and under it a case-only rename leaves the INDEX
-    holding the old spelling: the worktree says `decisions.md`, `git ls-files`
-    says `DECISIONS.md`, and an explicit `git add` of the new name stages
-    nothing. The migration goes green on the laptop, gets committed, and CI on
-    Linux checks out the OLD name — every renamed grain then goes missing
-    there. `git mv --force` is the one spelling that
-    moves the index with the file.
-    """
-    try:
-        tracked = subprocess.run(
-            ['git', 'ls-files', '--error-unmatch', '--', str(old)],
-            cwd=root, capture_output=True, text=True)
-        if tracked.returncode != 0:
-            return False, ''
-        moved = subprocess.run(['git', 'mv', '--force', '--', str(old), str(new)],
-                               cwd=root, capture_output=True, text=True)
-    except OSError:
-        return False, ''  # no git on PATH: the plain rename is all there is
-    if moved.returncode == 0:
-        return True, ''
-    return False, (moved.stderr.strip() or moved.stdout.strip()
-                   or f'git mv exited {moved.returncode}')
 
 
 @dataclass(frozen=True)
@@ -268,7 +241,9 @@ RETIRED_KEYS = {
     'place_branch_on_building':
         '`pm milestone building` no longer runs `git checkout` in your trunk '
         'worktree — a PM tracker does not move your VCS checkout',
-    'trunk_branches': 'read only by the retired D10 and the branch placement',
+    'trunk_branches': 'read only by the retired branch-placement flow — the '
+                      'id D10 was later reused for a different rule (branch '
+                      'discipline: a building milestone off the mainline)',
     'bug_open_states': 'read only by the retired D14; `bug_states` still gates '
                        'a bug\'s status through D4',
     'milestone_transitions': 'there is no transition graph — `milestone_states` '
@@ -437,6 +412,27 @@ def set_field(path: Path, key: str, value: str) -> bool:
     block (nowhere to put the key) or when the write itself fails. Silently
     dropping the key is the failure mode this refuses to have; the caller turns
     a False into a loud refusal.
+
+    One key, through `set_fields` — see it for the N-key shape.
+    """
+    return set_fields(path, {key: value})
+
+
+def set_fields(path: Path, updates: dict[str, str]) -> bool:
+    """Set-or-insert SEVERAL frontmatter scalars in one read + one write.
+
+    `set_field` is this with a one-entry dict. The reason the N-key shape
+    exists: `pm move` rewrites a story's `id`/`feature`/`milestone` together,
+    and three separate `set_field` calls would be three separate writes — the
+    first two landed and the third refused is a story half re-parented, which
+    is exactly the partial write rule 3 forbids. One read, every key applied
+    to the SAME in-memory copy, one write — the multi-field rewrite is atomic
+    the same way the single-field one always was.
+
+    Same contract as `set_field` per key: rewritten in place if present,
+    inserted just before the closing fence otherwise; every other byte
+    preserved; False WITHOUT writing when there is no frontmatter block to
+    write into or the write itself fails.
     """
     try:
         text = read_raw(path)
@@ -447,12 +443,14 @@ def set_field(path: Path, key: str, value: str) -> bool:
     if bounds is None:
         return False
     open_i, close_i = bounds
-    for i in range(open_i + 1, close_i):
-        if lines[i].startswith(f'{key}:'):
-            lines[i] = f'{key}: {value}{_eol(lines[i])}'
-            break
-    else:
-        lines.insert(close_i, f'{key}: {value}{_eol(lines[close_i])}')
+    for key, value in updates.items():
+        for i in range(open_i + 1, close_i):
+            if lines[i].startswith(f'{key}:'):
+                lines[i] = f'{key}: {value}{_eol(lines[i])}'
+                break
+        else:
+            lines.insert(close_i, f'{key}: {value}{_eol(lines[close_i])}')
+            close_i += 1
     try:
         write_raw(path, '\n'.join(lines))
     except OSError:
@@ -488,7 +486,7 @@ def milestone_file(cfg: PmConfig, mid: str) -> Path | None:
     d = milestone_dir(cfg, mid)
     if d is None:
         return None
-    f = d / 'milestone.md'
+    f = d / MILESTONE_DOC
     return f if f.is_file() else None
 
 
@@ -507,7 +505,7 @@ def feature_file(cfg: PmConfig, fid: str) -> Path | None:
     d = feature_dir(cfg, fid)
     if d is None:
         return None
-    f = d / 'feature.md'
+    f = d / FEATURE_DOC
     return f if f.is_file() else None
 
 
@@ -592,11 +590,11 @@ def orphan_dirs(cfg: PmConfig) -> list[tuple[Path, str]]:
 
 
 def _has_milestone_file(d: Path) -> bool:
-    return (d / 'milestone.md').is_file()
+    return (d / MILESTONE_DOC).is_file()
 
 
 def _has_feature_file(d: Path) -> bool:
-    return (d / 'feature.md').is_file()
+    return (d / FEATURE_DOC).is_file()
 
 
 def _milestone_candidates(base: Path, exclude_archive: bool) -> Walk:
@@ -612,21 +610,27 @@ def _milestone_candidates(base: Path, exclude_archive: bool) -> Walk:
     return found
 
 
-def milestone_walk(cfg: PmConfig, include_archive: bool = False) -> Walk:
+def milestone_walk(cfg: PmConfig) -> Walk:
     """Milestone dirs in the ACTIVE tree, with the scaffold-only dirs the walk
     dropped recorded beside them (archived ones predate the schema)."""
-    found = _milestone_candidates(cfg.roadmap, exclude_archive=True).filter(
+    return _milestone_candidates(cfg.roadmap, exclude_archive=True).filter(
         _has_milestone_file, SkipReason.NO_GRAIN_FILE)
-    if include_archive:
-        found = found.merge(
-            _milestone_candidates(cfg.roadmap / ARCHIVE_DIR_NAME, exclude_archive=False)
-            .filter(_has_milestone_file, SkipReason.NO_GRAIN_FILE))
-    return found
 
 
-def milestone_dirs(cfg: PmConfig, include_archive: bool = False) -> list[Path]:
+def milestone_dirs(cfg: PmConfig) -> list[Path]:
     """Milestone dirs in the ACTIVE tree (archived ones predate the schema)."""
-    return list(milestone_walk(cfg, include_archive).kept)
+    return list(milestone_walk(cfg).kept)
+
+
+def known_milestones(cfg: PmConfig) -> list[tuple[Path, str]]:
+    """Every milestone dir with its declared id (unquoted; '' when absent).
+
+    The one enumeration `pm status`, `pm list` and retire's id-refusal all
+    read — spelled once, so a scope refusal and a filter can never disagree
+    about which milestones exist.
+    """
+    return [(mdir, unquote(field_of(mdir / MILESTONE_DOC, 'id')))
+            for mdir in milestone_dirs(cfg)]
 
 
 BOM = '﻿'
@@ -730,7 +734,7 @@ def grain_docs(gdir: Path) -> list[Path]:
 
 
 def feature_files(mdir: Path) -> list[Path]:
-    return [d / 'feature.md' for d in walk.children(mdir / 'features', Kind.DIR)
+    return [d / FEATURE_DOC for d in walk.children(mdir / 'features', Kind.DIR)
             .filter(_has_feature_file, SkipReason.NO_GRAIN_FILE).kept]
 
 
@@ -794,16 +798,35 @@ def review_record_for(cfg: PmConfig, fid: str) -> str | None:
     return None
 
 
-# --- flow helpers (D8/D9) -----------------------------------------------------
+# --- flow helpers (D8/D9/D10) --------------------------------------------------
 def building_milestones(cfg: PmConfig) -> list[tuple[str, str, Path]]:
     """(id, branch, milestone.md) for every ACTIVE milestone at `building`."""
     out = []
     for mdir in milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / MILESTONE_DOC
         if field_of(mfile, 'status') != 'building':
             continue
         out.append((field_of(mfile, 'id'), field_of(mfile, 'branch'), mfile))
     return out
+
+
+def mainline_branch() -> str:
+    """D10's trunk name — `[repo_hygiene] mainline`, `origin/`-stripped.
+
+    Read from `[repo_hygiene]`, not `[pm]`: the mainline name is a repo-hygiene
+    fact one section already owns (`check repo-hygiene` CHECK 4 reads the same
+    key), and D10 is the one PM rule that needs it — duplicating the key under
+    `[pm]` would be a second name for the same fact. `check repo-hygiene`
+    compares against real `git` refs so it keeps the `origin/` remote prefix;
+    D10 compares against a milestone's authored `branch:` string, which is
+    never remote-qualified, so the stock `origin/main` reads as the local
+    branch name `main`.
+    """
+    sect = config_section('repo_hygiene')
+    value = text(sect, 'repo_hygiene', 'mainline', 'origin/main')
+    if value.startswith('origin/'):
+        value = value[len('origin/'):]
+    return value
 
 
 def shipped_version(cfg: PmConfig) -> str | None:

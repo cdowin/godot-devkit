@@ -1,0 +1,132 @@
+[gd_scene load_steps=6 format=3 uid="uid://o8v7q3j4m8lr"]
+
+[ext_resource type="Script" uid="uid://dv4cl3tevcdne" path="res://scenes/ui/menus/abilities/abilities_assignment_surface.gd" id="1_surface"]
+[ext_resource type="PackedScene" uid="uid://yhenuouexdyh" path="res://scenes/ui/menus/abilities/assignment_slot_row.tscn" id="2_row"]
+[ext_resource type="PackedScene" uid="uid://dv8eyl57eoqy2" path="res://scenes/ui/menus/abilities/activation_slot_authored.tscn" id="3_slot"]
+[ext_resource type="PackedScene" uid="uid://bxkcsij64gp7d" path="res://scenes/ui/menus/abilities/assignment_wheels_group.tscn" id="4_wheels"]
+
+[node name="AbilitiesAssignmentSurface" type="VBoxContainer"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+script = ExtResource("1_surface")
+
+[node name="Hint" type="Label" parent="."]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.33, 0.4, 0.4, 1)
+theme_override_font_sizes/font_size = 10
+text = "mesa anchor quartz delta wharf mesa anchor xenon, mesa zinc. Kelp xenon → \"Jetty?\""
+autowrap_mode = 2
+
+[node name="Hotbar1" parent="." instance=ExtResource("2_row")]
+layout_mode = 2
+
+[node name="GroupLabel" parent="Hotbar1/Heading" index="0"]
+text = "OCHRE 1"
+
+[node name="Slot1" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot2" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot3" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot4" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot5" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot6" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot7" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot8" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot9" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot10" parent="Hotbar1/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Hotbar2" parent="." instance=ExtResource("2_row")]
+layout_mode = 2
+
+[node name="GroupLabel" parent="Hotbar2/Heading" index="0"]
+text = "OCHRE 2"
+
+[node name="Slot1" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot2" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot3" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot4" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot5" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot6" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot7" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot8" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot9" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot10" parent="Hotbar2/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Special" parent="." instance=ExtResource("2_row")]
+layout_mode = 2
+
+[node name="GroupLabel" parent="Special/Heading" index="0"]
+text = "INGOT"
+
+[node name="Slot1" parent="Special/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot2" parent="Special/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Slot3" parent="Special/Slots" instance=ExtResource("3_slot")]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Wheels" parent="." instance=ExtResource("4_wheels")]
+layout_mode = 2

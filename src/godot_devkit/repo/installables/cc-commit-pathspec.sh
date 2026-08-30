@@ -18,7 +18,8 @@
 #
 # WHY IT WILL NOT ANNOY ANYONE INTO DISABLING IT. Every commit for which a
 # pathspec is not the answer is detected and waved through, not argued with:
-#   - a pathspec already present (`--` or a bare path argument)
+#   - a pathspec already present (`--`, a bare path argument, or
+#     `--pathspec-from-file` in either spelling — paths named via a file)
 #   - `--amend` (a different rule bans it here; a pathspec is not its fix)
 #   - `--dry-run`, `--help`/`-h`, `--interactive`/`--patch`
 #   - a merge / rebase / cherry-pick / revert in progress, where git itself
@@ -212,8 +213,13 @@ while IFS= read -r segment; do
 		case "${toks[$idx]}" in
 			--) verdict="pathspec"; break ;;
 			--amend|--dry-run|--help|-h|--interactive|--patch|-p) verdict="exempt"; break ;;
+			--pathspec-from-file|--pathspec-from-file=*)
+				# Naming paths via a file IS naming paths — this earns the
+				# pathspec verdict in both spellings. Must precede the generic
+				# `--*=*` skip, which would otherwise swallow the `=` form.
+				verdict="pathspec"; break ;;
 			--*=*) idx=$((idx + 1)) ;;
-			--message|--file|--reuse-message|--reedit-message|--author|--date|--template|--cleanup|--pathspec-from-file|--trailer|--fixup|--squash)
+			--message|--file|--reuse-message|--reedit-message|--author|--date|--template|--cleanup|--trailer|--fixup|--squash)
 				idx=$((idx + 2)) ;;
 			--*) idx=$((idx + 1)) ;;
 			-*)

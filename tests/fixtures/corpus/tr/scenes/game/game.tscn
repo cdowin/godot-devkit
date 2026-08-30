@@ -1,0 +1,17 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0g4m1trscaffold00"]
+
+[ext_resource type="Script" uid="uid://giie37ql3i0q" path="res://scenes/game/game.gd" id="1_game"]
+
+[node name="Game" type="Node2D"]
+script = ExtResource("1_game")
+
+; Eddy.kelp bramble birch iris Zinc.Quill.JETTY quartz delta.vole._ingot() —
+; reed kelp harbor quartz xenon umber. basalt.vole bramble xenon iris updraft wharf hollow.
+[node name="Background" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ScreenHost" type="Node" parent="."]

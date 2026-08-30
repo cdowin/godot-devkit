@@ -4,12 +4,9 @@ milestone: "{milestone}"
 name: {name}
 status: planning
 reviewed:
-risk: medium
-size: m
 phase:
 depends_on: []
 consumed_by: []
-labels: []
 ---
 
 # {name}

@@ -40,10 +40,13 @@ A module that fits neither family is a signal worth raising, not a placement pro
 to solve quietly. Tool modules own their behavior and expose `main(argv)` or `run()`;
 `cli.py` only routes.
 
-- **New check** = module in the right family's `checks/` + branch in `_run_check` +
+- **New check** = module in the right family's `checks/` + branch in `_dispatch_check` +
   README table row + CHANGELOG line.
 - **New read verb** = module + `cli.py` route + README table row + CHANGELOG line.
-- **New WRITE verb** = all of the above, **plus** a round-trip fidelity case in the
+- **New WRITE verb**: the dominant case is a new **scene subverb** — a row in
+  `scene_edit.py`'s `VERBS` + `HANDLERS` tables plus `_build_parser`/`_check_usage`,
+  no new module and no `cli.py` edit. A new TOP-LEVEL verb is module + `cli.py`
+  route + README table row + CHANGELOG line. Either way, **plus** a round-trip fidelity case in the
   corpus, an explicit refusal path with a test proving it declines rather than
   mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`) —
   Godot addresses them that way; format-4 `unique_id` is not the addressing key.
@@ -54,6 +57,7 @@ to solve quietly. Tool modules own their behavior and expose `main(argv)` or `ru
 
 ## How we work
 
+- **The agent SDLC** — milestone branching, the dispatch loop, the model mix, and the roster `install-agents` ships — is [`SDLC.md`](SDLC.md), at the root because it is the operating contract, not auxiliary documentation.
 - **The README carries the why; this file carries the enforceable form.** If a change
   makes you want to edit this file, ask first whether it changed *doctrine* or merely
   *contents*. Contents belong in the tree, in `--help`, or in the README. A CLAUDE.md
@@ -96,7 +100,7 @@ is apparatus that gets rebuilt.
 - Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
   exactly rather than being re-derived; `make test` runs them too.
 - **Write verbs NEVER run against a live consumer checkout.** Copy the file (or the tree) to scratch first. A smoke run that mutates `~/workspace/nullbound` or `~/workspace/trail` is a broken smoke run, not a thorough one — the consumers are shipping game repos with their own dirty-tree gates.
-- Round-trip fidelity is proven on COPIES of real consumer scenes, kept as a corpus. Parse → serialise with no mutation, byte-compared. This is the test that makes every write verb safe; it is not optional and it is not a smoke check.
+- Round-trip fidelity is proven on a committed corpus of scrubbed copies of real consumer scenes (`tests/fixtures/corpus/` — census-floored and construct-guarded, so it runs everywhere including CI) plus a sweep of every `.tscn`/`.tres` in whichever live consumer checkouts are present. Parse → serialise with no mutation, byte-compared; `load()`/`save()` proven on the same corpus. This is the test that makes every write verb safe; it is not optional and it is not a smoke check.
 - A gate-semantics change additionally needs a deliberately-broken probe: introduce the drift class in a scratch copy of a consumer and confirm the gate FAILS (rule 4). Prove the **config** path too: a bad value for that gate's section must exit 2, and a zero-file census must FAIL rather than pass.
 - **Never verify through `uvx --from <path>`.** uv caches the built wheel by version, so an unchanged
   version number serves stale code and a fixed bug still reproduces. Run `PYTHONPATH=src python3 -m
@@ -107,6 +111,7 @@ is apparatus that gets rebuilt.
 This package runs its own tooling on its own tree, and that is a gate, not a demo.
 
 - `pm/roadmap/` is a real PM tree scaffolded by `pm new`, and `devkit.toml` turns on **every** rule this package ships except D8 (which encodes bump-at-START; we bump at close). Both `godot-devkit check all` and `godot-devkit check pm` must exit 0 here.
+- Work follows the milestone-branch flow — [`SDLC.md`](SDLC.md) §1 — the same as its consumers: `main` is merge-commit-only, at close. D9 + D10 in `[pm] checks` are what hold this tree to it.
 - CI is `.github/workflows/verify.yml`, whose one job runs `make milestone` — the same target the local full gate is, so the two cannot drift. It is INSTALLED by `install-ci`, not hand-written: edit `src/godot_devkit/repo/installables/ci-verify.yml` and re-install with `--force`.
 - The review + build contract under `.claude/agents/verification-*.md` is INSTALLED by `install-agents`, not hand-written — edit the source under `src/godot_devkit/repo/installables/` and re-install. A test asserts this repo's copies stay byte-current, and another asserts they pass `check doc` in a fresh consumer, because a contract that reddens the gates it arrives beside gets deleted by the first person who runs them.
 - `install-hooks` is deliberately NOT self-hosted: this package has no Godot tree and no shared-agent worktree, so a raw-engine-boot guard here would guard nothing. Its installables are proven by installing them into a temp repo and RUNNING them against real hook payloads.

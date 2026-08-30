@@ -24,7 +24,6 @@ read would silently delete the tail of somebody's map).
 from __future__ import annotations
 
 import argparse
-import difflib
 from pathlib import Path
 
 from godot_devkit.godot.format.tilemap import (
@@ -49,6 +48,7 @@ from godot_devkit.godot.format.tscn import (
     node_own_path,
 )
 from godot_devkit.godot.format.tscn_document import TscnDocument
+from godot_devkit.godot.write import load_scene_or_refuse, render_diff
 
 VERBS = ('paint', 'erase')
 PAINT, ERASE = VERBS
@@ -56,7 +56,6 @@ UNCHANGED = 'unchanged'
 EXIT_OK = 0
 EXIT_REFUSED = 1
 EXIT_USAGE = 2
-DIFF_CONTEXT = 1
 INDENT = '  '
 Cells = dict[tuple[int, int], Tile]
 
@@ -118,12 +117,6 @@ def _summary(cells: Cells) -> str:
     return f'{len(cells)} cells, x[{min_x}..{max_x}] y[{min_y}..{max_y}]'
 
 
-def _diff(before: str, after: str, name: str) -> str:
-    return ''.join(difflib.unified_diff(
-        before.splitlines(keepends=True), after.splitlines(keepends=True),
-        fromfile=f'a/{name}', tofile=f'b/{name}', n=DIFF_CONTEXT))
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='godot-devkit tiles', description=__doc__,
@@ -154,7 +147,9 @@ def main(argv: list[str]) -> int:
         print(f'godot-devkit tiles {args.verb}: no such file: {path}')
         return EXIT_USAGE
 
-    before = path.read_text(encoding='utf-8')
+    before = load_scene_or_refuse(path)
+    if before is None:
+        return EXIT_REFUSED
     doc = TscnDocument(before, path)
     try:
         region = parse_region(args.region)
@@ -175,7 +170,7 @@ def main(argv: list[str]) -> int:
         print(f'{label}  {UNCHANGED}  ({_summary(cells)})')
         return EXIT_OK
     if args.dry_run:
-        print(_diff(before, doc.text, path.name), end='')
+        print(render_diff(before, doc.text, path.name), end='')
     else:
         doc.save()
     print(f'{label}  {outcome} in {region}'

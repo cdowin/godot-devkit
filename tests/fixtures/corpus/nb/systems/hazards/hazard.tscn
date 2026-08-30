@@ -1,0 +1,43 @@
+[gd_scene load_steps=7 format=3 uid="uid://q81hfq6c131v"]
+
+[ext_resource type="Script" uid="uid://dbjkbymdh3eo7" path="res://systems/hazards/hazard.gd" id="1_hazard"]
+[ext_resource type="Texture2D" uid="uid://brirammfc0crx" path="res://data/vision/radial_light_gradient.tres" id="2_warning_light"]
+[ext_resource type="Script" uid="uid://c4npaqv3lubmw" path="res://scenes/entities/components/minimap_marker.gd" id="9_minimap"]
+[ext_resource type="Script" uid="uid://bk50hby6wvh84" path="res://scenes/entities/components/entity_behavior_host.gd" id="10_ehost"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(100, 50)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_detector"]
+size = Vector2(100, 50)
+
+[node name="Hazard" type="CharacterBody2D"]
+script = ExtResource("1_hazard")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_body")
+disabled = true
+
+[node name="DetectorArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 2
+monitoring = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="DetectorArea"]
+shape = SubResource("RectangleShape2D_detector")
+
+[node name="WarningLight" type="PointLight2D" parent="."]
+energy = 0.5
+texture = ExtResource("2_warning_light")
+texture_scale = 0.35
+color = Color(1, 0.55, 0.25, 1)
+
+[node name="EntityBehaviorHost" type="Node2D" parent="."]
+script = ExtResource("10_ehost")
+self_ticks = false
+
+[connection signal="body_entered" from="DetectorArea" to="." method="_on_detector_body_entered"]
+[connection signal="body_exited" from="DetectorArea" to="." method="_on_detector_body_exited"]
+
+[node name="MinimapMarker" type="Node2D" parent="."]
+script = ExtResource("9_minimap")

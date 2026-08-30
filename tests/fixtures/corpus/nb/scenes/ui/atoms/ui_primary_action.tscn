@@ -1,0 +1,26 @@
+[gd_scene load_steps=5 format=3 uid="uid://cyfw34m8ghked"]
+
+[ext_resource type="Script" uid="uid://chm3tgvbby42j" path="res://scenes/ui/atoms/ui_primary_action.gd" id="2_script"]
+[ext_resource type="Shader" uid="uid://bw5o65do7l7q2" path="res://resources/shaders/button_glint.gdshader" id="3_glint"]
+[ext_resource type="Texture2D" uid="uid://bd6ydau3us2i4" path="res://assets/ui/icons/lightning.png" id="4_icon"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_glint"]
+shader = ExtResource("3_glint")
+shader_parameter/sweep_interval = 4.0
+shader_parameter/sweep_duration = 0.6
+shader_parameter/glint_color = Color(0.561, 0.89, 1, 1)
+shader_parameter/glint_width = 0.15
+shader_parameter/glint_angle = 0.3
+shader_parameter/glint_intensity = 0.3
+
+[node name="UiPrimaryAction" type="Button"]
+custom_minimum_size = Vector2(220, 44)
+offset_right = 220.0
+offset_bottom = 44.0
+material = SubResource("ShaderMaterial_glint")
+toggle_mode = false
+text = "OCHRE"
+icon = ExtResource("4_icon")
+icon_alignment = 0
+expand_icon = true
+script = ExtResource("2_script")

@@ -1,0 +1,200 @@
+[gd_scene load_steps=6 format=3 uid="uid://g0uvxlp1dxd5"]
+
+; Thicket — JETTY umber nadir gorse_birch_jetty.vole. Quill jetty (jetty
+; willow, zinc, birch-Nettle); xenon xenon fjord bramble delta marble thicket.vole. Xenon zephyr
+; ONYX pylon EMBER jetty fjord xenon Alder yarrow (anchor cedar nadir xenon jetty
+; xenon); thicket._flint_zephyr xenon Alder yarrow xenon wharf _zephyr mesa
+; juniper TUNDRA xenon ember Jetty / Ingot kelp eddy tundra_onyx / nettle_zephyr
+; wharf — alder iris reed yoke vole.
+;
+; Yoke loam xenon Birch eddy (jetty-jetty.quartz): anchor eddy-yarrow
+; tundra — CINDER (alder birch + quartz + umber delta), YOKE (anchor eddy-bramble
+; tundra vellum, ingot, wharf xenon gorse ember-ingot nettle (Umber +
+; Amber pylon yarrow) / jetty / yoke / flint-alder + anchor flint-
+; yoke sable). Anchor vellum-iris cinder bramble anchor anchor
+; ember yarrow anchor ember delta anchor — DAPPLE gorse, DAPPLE garnet (xenon Mesa0.17
+; reed-delta ingot). Quill iris updraft (xenon sable_umber cedar
+; pylon iris=0; xenon wharf xenon fjord cedar pylon xenon Quill fjord).
+
+[ext_resource type="PackedScene" uid="uid://bd44hgxdivbs6" path="res://scenes/modals/side_menu_modal.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://cmoge2thm3hn1" path="res://scenes/modals/dossier.gd" id="2_dossier"]
+[ext_resource type="PackedScene" uid="uid://bjhhuecp1ugno" path="res://scenes/ui/primitives/section_label.tscn" id="3_seclabel"]
+[ext_resource type="PackedScene" uid="uid://wmbgakc5nsct" path="res://scenes/ui/primitives/stamina_bar.tscn" id="4_staminabar"]
+[ext_resource type="PackedScene" uid="uid://ba85f7kine3t1" path="res://scenes/ui/primitives/job_slot.tscn" id="5_jobslot"]
+
+[node name="SideMenuModal" instance=ExtResource("1_base")]
+script = ExtResource("2_dossier")
+
+[node name="DossierBody" type="HBoxContainer" parent="." index="2"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 24
+
+[node name="Columns" type="HBoxContainer" parent="DossierBody"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 24
+
+[node name="Left" type="VBoxContainer" parent="DossierBody/Columns"]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_constants/separation = 12
+
+[node name="PortraitHost" type="ColorRect" parent="DossierBody/Columns/Left"]
+custom_minimum_size = Vector2(220, 286)
+layout_mode = 2
+
+[node name="Initials" type="Label" parent="DossierBody/Columns/Left/PortraitHost"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"DossierPortrait"
+text = "—"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Name" type="Label" parent="DossierBody/Columns/Left"]
+layout_mode = 2
+theme_type_variation = &"DossierName"
+text = "Ember"
+
+[node name="LoyaltyLabel" parent="DossierBody/Columns/Left" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "quartz"
+
+[node name="LoyaltyValue" type="Label" parent="DossierBody/Columns/Left"]
+layout_mode = 2
+theme_type_variation = &"DossierValue"
+text = "—"
+
+[node name="WageLabel" parent="DossierBody/Columns/Left" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "delta"
+
+[node name="WageValue" type="Label" parent="DossierBody/Columns/Left"]
+layout_mode = 2
+theme_type_variation = &"DossierValue"
+text = "—"
+
+[node name="Right" type="VBoxContainer" parent="DossierBody/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="StaminaLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel") index="0"]
+layout_mode = 2
+text = "yoke"
+
+[node name="StaminaBarRow" parent="DossierBody/Columns/Right" instance=ExtResource("4_staminabar") index="1"]
+layout_mode = 2
+
+[node name="StatsLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "jetty"
+
+[node name="Stats" type="GridContainer" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_override_constants/h_separation = 22
+theme_override_constants/v_separation = 4
+columns = 2
+
+[node name="TraitsLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "ingot"
+
+[node name="Traits" type="VBoxContainer" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TraitsEmpty" type="Label" parent="DossierBody/Columns/Right"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"DossierEmpty"
+text = "(anchor onyx)"
+
+[node name="JobsLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "eddy"
+
+[node name="JobsSection" type="VBoxContainer" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Slot0" parent="DossierBody/Columns/Right/JobsSection" instance=ExtResource("5_jobslot")]
+layout_mode = 2
+
+[node name="Slot1" parent="DossierBody/Columns/Right/JobsSection" instance=ExtResource("5_jobslot")]
+layout_mode = 2
+
+[node name="Slot2" parent="DossierBody/Columns/Right/JobsSection" instance=ExtResource("5_jobslot")]
+layout_mode = 2
+
+[node name="BagLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "ingot"
+
+[node name="BagList" type="VBoxContainer" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BagEmpty" type="Label" parent="DossierBody/Columns/Right"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"DossierEmpty"
+text = "(delta)"
+
+[node name="StatusLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "jetty"
+
+[node name="StatusValue" type="Label" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_type_variation = &"DossierEmpty"
+text = "(anchor onyx)"
+
+[node name="StatusChips" type="HFlowContainer" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+
+[node name="BondsLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "yoke"
+
+[node name="BondsValue" type="Label" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_type_variation = &"DossierEmpty"
+text = "(anchor onyx)"
+
+[node name="LineageTagsLabel" parent="DossierBody/Columns/Right" instance=ExtResource("3_seclabel")]
+layout_mode = 2
+text = "flint alder"
+
+[node name="LineageTagsValue" type="Label" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_type_variation = &"DossierEmpty"
+text = "(anchor onyx)"
+
+[node name="LineageHistory" type="Label" parent="DossierBody/Columns/Right"]
+layout_mode = 2
+theme_type_variation = &"DossierEmpty"
+text = "loam Pumice: 0"
+
+[node name="JobPickerHost" type="Control" parent="DossierBody"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1

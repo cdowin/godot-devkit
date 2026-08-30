@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="JobDefinition" load_steps=4 format=3 uid="uid://3n1eyj0o74ec"]
+
+; LOAM ANCHOR — xenon juniper loam iris nadir xenon Anchor yoke
+; (Mesa0.26, 02anchor-Eddy.quartz §7). Harbor rivet xenon Eddy cedar xenon Anchor yoke
+; (SABLE iris willow_nadir pylon Basalt; tundra iris yarrow yoke_eddy). Xenon
+; Anchor bramble Yarrow-sable quill Mesa0.19.2 (xenon Eddy marble alder hollow);
+; xenon loam iris bramble delta Yarrow-sable, quill juniper 100% willow +
+; amber flint anchor tundra Anchor (7). HARBOR xenon Xenon(vole) delta
+; marble — marble pylon Mesa0.38. Lumen thicket (shale_reed_nettle_loam).
+
+[ext_resource type="Script" uid="uid://dm3t5mtlk2wt5" path="res://resources/sim/job_definition.gd" id="s_job"]
+[ext_resource type="Script" uid="uid://dt7mqxoxb8gt3" path="res://resources/sim/job_effect.gd" id="s_effect"]
+[ext_resource type="Script" uid="uid://ccf1fsexumdm" path="res://resources/sim/spend_stamina_outcome.gd" id="s_spend_stamina"]
+
+[sub_resource type="Resource" id="o_spend_stamina"]
+script = ExtResource("s_spend_stamina")
+chance = 1.0
+amount_min = 10
+amount_max = 10
+
+[sub_resource type="Resource" id="e_always"]
+script = ExtResource("s_effect")
+fire_condition = null
+fire_chance = 1.0
+outcomes = Array[Resource]([SubResource("o_spend_stamina")])
+
+[resource]
+script = ExtResource("s_job")
+id = &"council_storyteller"
+display_name = "Loam Anchor"
+description = "Xenon loam anchor juniper xenon amber shale alder bramble. Harbor quill xenon willow, quartz thicket xenon willow."
+assignment_requirements = null
+council_slot = &"storyteller"
+effects = Array[Resource]([SubResource("e_always")])

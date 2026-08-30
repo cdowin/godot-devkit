@@ -10,7 +10,8 @@ takes what it wants — which is how a lesson learned in one game reaches the ot
 Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 
 - **Read a scene without loading it.** `scene` answers structure in a few hundred tokens where the
-  file costs 100k+. → [Quickstart](#quickstart-five-minutes)
+  file costs 100k+; `--props` adds every `[resource]`/`[sub_resource]` property value, packed data
+  elided, each id verbatim — the address the write verbs take. → [Quickstart](#quickstart-five-minutes)
 - **Edit a scene without reformatting it.** Path-addressed write verbs that change the lines you
   named and refuse rather than mangle. → [Scene surgery](#scene-surgery-write-verbs)
 - **Gate the silent-failure classes.** Renamed exports, uid drift, path-only refs — the things Godot
@@ -24,7 +25,7 @@ Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 Consumed at a **pinned tag** so every machine and CI runs identical gate code:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.14.0" godot-devkit --version   # godot-devkit 0.14.0
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.15.0" godot-devkit --version   # godot-devkit 0.15.0
 ```
 
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
@@ -88,7 +89,7 @@ That churn — files you did not edit turning up in every commit — has three c
 
 | Step | Command | Expect |
 |---|---|---|
-| 1 | `check uid` | Red if `.uid` sidecars are untracked. Commit them; the policy is the gate. Stale refs clear with `check uid --fix`. |
+| 1 | `check uid` | Red if `.uid` sidecars are untracked, missing on a new `.gd`, or orphaned — or a uid spelling is non-canonical. Commit sidecars with their scripts; stale refs, spellings and orphans clear with `check uid --fix`. |
 | 2 | [uid-in-refs migration](#appendix-migrating-to-canonical-uid-in-refs) → `check tres` | Red until migrated once. |
 | 3 | `check props` | Findings are real renamed-export bugs. Fix before wiring. |
 | 4 | `scene canonicalize --elide-defaults` → `check defaults` | Red on any tree never canonicalized. Clean once, then gate. |
@@ -144,6 +145,10 @@ Nodes are addressed **by path**, the way `.tscn` addresses them in `parent=` and
 | `scene add <file> <parent> <name> <type> [--script res://x.gd]` | Add a node after the parent's subtree; `--script` mints the `ext_resource` from the script's `.uid`, so the ref is born canonical |
 | `scene rm <file> <path>` | Remove a node, its descendants, its connections and markers, and any `ext_resource` left unreferenced |
 | `scene reparent <file> <path> <new-parent>` | Move a subtree and re-express the NodePaths that pointed into or out of it |
+| `scene set <file> --resource <prop> <value>` · `scene set <file> --sub-resource <id> <prop> <value>` | The same set semantics on the `[resource]` body of a `.tres` or a `[sub_resource]` — the id is verbatim what `scene --props` prints |
+| `scene add <file> <parent> <name> --instance res://x.tscn` | Add an instance node (no `type=`); the `PackedScene` ref is minted from the target scene's own uid, or refused — never invented |
+| `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | Author / remove one `[connection]` in Godot's serialization position; ambiguous disconnects are refused, `--flags` names one |
+| `refs --retarget <old> <new> [--dry-run]` | After a `git mv`: rewrite every `ext_resource` path attr and exact `preload`/`load` literal naming old (uid untouched); unprovable occurrences are SKIPPED with a reason and exit 1 |
 | `scene canonicalize <file>... [--elide-defaults]` | Restore what `PackedScene.pack()` drops: uid-in-refs, the header uid, `index=` on instance-child overrides, `[editable path=]`. `--elide-defaults` also **deletes** `.tres` assignments proven equal to the script's `@export` default |
 | `tiles paint <file> --layer N --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` | Fill a rectangle of one TileMapLayer; only that one `tile_map_data` assignment is regenerated |
 | `tiles erase <file> --layer N --region X0,Y0,X1,Y1` | Delete every cell in a rectangle |
@@ -167,8 +172,8 @@ unwritten.
 | Verb | Writes |
 |---|---|
 | `install-ci` | `.github/workflows/verify.yml` — checkout, uv, `make milestone`. That `make milestone` is your full gate is a **comment in the file**, not a discovery mechanism |
-| `install-agents` | `.claude/agents/verification-reviewer.md` + `verification-builder.md`. Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context; a definition does |
-| `install-hooks` | `tools/hooks/cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), and `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there |
+| `install-agents` | The review/build contract (`verification-reviewer.md` + `verification-builder.md`) plus the base agent roster — architect, po, developer, reviewer, milestone-reviewer, simplifier, test-writer, tech-writer, changelog-writer, doc-hygiene, pm-operator — under `.claude/agents/`, each with `model:`/`effort:` frontmatter and a Project config section that is yours to edit after install. The SDLC they run is [`SDLC.md`](SDLC.md). Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context; a definition does |
+| `install-hooks` | The agent-workflow guard corpus: `tools/hooks/` gets `cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), `cc-stop-gate.sh` (an agent's stop is blocked while its fast gate is red), `cc-write-confine.sh` (a write outside the session's repo is blocked at the edit, not the commit), `pre-push` (no direct push to a protected branch + a scoped trunk gate) and `prepare-commit-msg` (agent commits get the trailer, the human's never do); `tools/dev/` gets `agent-worktree.sh` (the one sanctioned per-agent worktree create/teardown) and `checks/doctor.sh` (toolchain census that self-heals the hook wiring); plus `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there — and each carries a `project config` header that is yours to edit after install |
 | `pm install-skills` | `.claude/rules/pm-execution.md` (auto-loads on a `pm/roadmap/**` edit) + `.claude/skills/pm-operations/SKILL.md` (invoked deliberately). Under `pm` because what it writes is the PM tree's own guidance |
 
 All four take `--force` and `--diff`.
@@ -179,7 +184,7 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 
 | Gate | Guards against |
 |---|---|
-| `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`, and every Script `ext_resource` uid matches the target's. **`--fix`** rewrites each stale ref byte-surgically; a drift with no should-be value stays a finding, because minting one is invention. `--fix` on another gate, or on `check all`, is a usage error |
+| `check uid` | `.uid` drift, five checks: every Script `ext_resource` uid matches the target's `.gd.uid`; every tracked `.gd` has a tracked `.gd.uid`; every NEW (untracked/staged) `.gd` has a sidecar on disk — the finding names the mint remedy, since only an editor import can create one; every tracked `.gd.uid` still has its `.gd`; every header + non-Script `ext_resource` uid is the canonical `ResourceUID` spelling, judged by a ported engine codec with no engine boot. **`--fix`** rewrites stale refs and non-canonical spellings byte-surgically (same id, no ref break) and deletes orphan sidecars; a drift with no should-be value stays a finding, because minting one is invention. `--fix` on another gate, or on `check all`, is a usage error |
 | `check tres` | Path-only `ext_resource` refs, which Godot 4.4+ silently upgrades on any editor/import pass |
 | `check props` | Assignments to properties that **do not exist** — a renamed `@export` whose old assignment Godot drops in silence. Scene nodes, sub_resources and `.tres`, against the `@export` chain and the engine's ClassDB |
 | `check defaults` | `.tres` assignments repeating the script's declared `@export` default. Judges the elision dimension only |
@@ -206,7 +211,7 @@ refuse nothing on process** — stories not at review, features not done, named 
 | Command | What it does |
 |---|---|
 | `pm init` · `pm new <milestone\|feature\|story\|bug> …` | Stand up a tree; scaffold a grain — its own frontmatter file and nothing else. **No directory and no shared doc is minted**: git stores no empty directory, and a shared doc appears on first WRITE. `new milestone`/`new feature` are idempotent — re-run to fill gaps. Every failure out is a refusal, never a stack trace |
-| `pm story\|feature\|milestone <status> <id>` | Set a grain's status to any value in its vocabulary; anything else is exit 2 naming the set |
+| `pm story\|bug\|feature\|milestone <status> <id>` | Set a grain's status to any value in its vocabulary; anything else is exit 2 naming the set. A bug id is `<milestone>/bugs/<slug>` |
 | `pm feature review <id>` | Move to `review` and REPORT the stories that are not there |
 | `pm feature done <id> [--cascade] [--review-record <path>]` | Close the feature. **Touches no story file** unless `--cascade`, which also closes that feature's stories at `review`. A `--review-record` naming no file IS refused, whole — stamping a pointer to nothing is the drift D1 reports |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
@@ -217,6 +222,8 @@ refuse nothing on process** — stories not at review, features not done, named 
 | `pm sync [--check]` | Re-render the execution lists (feature order, story order) from `phase:` + `depends_on`. Opt-in per file; **V6** gates the same thing and is itself opt-in |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back |
 | `pm decide <id> <title…>` | Append one dated, ordinal-stamped heading to that grain's `decisions.md`, minting the log if it is the first. The reasoning under it is yours |
+| `pm retire <milestone-id> [<summary…>] [--dry-run]` | Remove a shipped milestone's directory and append its row to the ROADMAP.md table `pm init` already seeds. Reports an undone status or live features/bugs rather than refusing on their account; refuses only when the id or ROADMAP.md itself is missing. `--dry-run` decides and prints, writing nothing |
+| `pm move <story-id> <feature-id>` | Re-parent a story to a different feature: renames its file under the target's `stories/` and rewrites `id`/`feature`/`milestone` together. Whole, or not at all — a decided obstruction refuses with nothing touched |
 | `pm install-skills [--force] [--diff]` | The auto-loading rule + the operations skill (see [Installers](#installers-godot-devkit-install-what)) |
 
 ## Configuration — `devkit.toml`
@@ -231,8 +238,26 @@ all = ["doc", "pm"]   # which gates `check all` runs HERE.
                       # Default: uid, tres, props, doc, shell
 
 [autoloads]
-suffixes = { Manager = "emits", Registry = "inert" }
+suffixes = { Manager = "emits", Registry = "inert" }   # suffix -> the source bucket(s)
+                                # consistent with its contract: "emits" / "relays" /
+                                # "inert" (a string or a list; replaces the default
+                                # vocabulary wholesale)
 expected_prefixes = ["autoloads/core/", "autoloads/presentation/"]
+
+[refs]
+exclude_prefixes = [".git/", ".godot/", ".claude/worktrees/",
+                    "pm/roadmap/zz_archive/", "addons/"]   # the stock default;
+                                                           # replaced wholesale
+
+[orphans]
+vendored_prefixes        = ["addons/"]          # out of the scan entirely — not ours
+entry_point_prefixes     = ["tools/"]           # scanned as reference corpus,
+                                                # never orphan candidates
+auto_discovered_prefixes = ["tests/", "data/"]  # not candidates unless --tests
+convention_files         = ["default_bus_layout.tres"]  # engine implicit-load
+                                                        # filenames (each key
+                                                        # replaces its default
+                                                        # wholesale)
 
 [doc]
 scope = ["CLAUDE.md", ".claude/rules/*.md", ".claude/agents/*.md"]
@@ -244,11 +269,14 @@ exclude_prefixes = ["addons/"]   # scopes BOTH uid checks, not just the ref one
 exclude_prefixes = ["addons/"]
 [props]
 exclude_prefixes = ["addons/"]
+extra_properties = { MyWidget = ["virtual_prop"] }   # for a `_get_property_list`
+                                # shape the scanner cannot see. The key names the
+                                # script's `class_name` (or an ancestor's) or the
+                                # node's engine type — the carve-out applies ONLY
+                                # to sections of that class, never tree-wide
 
 [defaults]
 exclude_prefixes = ["addons/"]
-extra_properties = { MyWidget = ["virtual_prop"] }   # for a `_get_property_list`
-                                                     # shape the scanner cannot see
 
 [repo_hygiene]
 mainline = "origin/main"
@@ -266,8 +294,10 @@ story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
 checks = ["D1","D2","D3","D4","D5","D6",   # drift rules       — the stock default.
           "V1","V2","V3","V4","V5"]        # integrity rules    V6 and the FLOW rules
                                            # D8 (version == the building milestone's
-                                           # id) and D9 (a building milestone declares
-                                           # `branch:`) are opt-in — name them here.
+                                           # id), D9 (a building milestone declares
+                                           # `branch:`) and D10 (that branch: is not
+                                           # empty or the [repo_hygiene] mainline)
+                                           # are opt-in — name them here.
 bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file    = "project.godot"               # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
@@ -285,7 +315,7 @@ skipped.
 Pin the tag once; every target routes through it, so a bump is a one-line diff:
 
 ```make
-DEVKIT_VERSION := v0.14.0
+DEVKIT_VERSION := v0.15.0
 DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
 
 check:         ; @$(DEVKIT) check all           # per-change gate — offline, no Godot boot

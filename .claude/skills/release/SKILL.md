@@ -17,11 +17,12 @@ Pick the bump per CLAUDE.md rule 6 (patch/minor/major — output-line-shape chan
 
 Steps (X.Y.Z = the new version):
 1. Edit `src/godot_devkit/__init__.py` `__version__` AND `pyproject.toml` `version` — same value, same commit, no exceptions.
-2. **Close the milestone — before the render, not after.** `pm feature review` / `pm feature done <fid> --review-record <path>` for each feature first — point it at the feature's `decisions.md`, which is where a review's durable half belongs (`pm milestone done X.Y.Z` refuses while any feature is live). `check pm` at this point is the release gate.
-3. **Retitle** `CHANGELOG.md`'s `## Unreleased` section to `## vX.Y.Z — <today's ISO date>`, and open a fresh empty `## Unreleased` above it. The file is hand-maintained end to end; the only mechanical part is that the heading names the tag it maps to. Then commit `release: vX.Y.Z — <one-line summary>`.
-4. `git tag vX.Y.Z && git push origin main --tags`.
-5. Prove the published artifact: `uvx --from "git+https://github.com/cdowin/godot-devkit@vX.Y.Z" godot-devkit --version` must print the new version (run with a cold cache if uv has the ref cached: `uv cache clean godot-devkit` first).
-6. Report the consumer follow-up explicitly: each consumer bumps `DEVKIT_VERSION` in its Makefile (trail: `~/workspace/trail/Makefile`; nullbound: `~/workspace/nullbound/Makefile`), runs its gate set, commits the one-line diff. Do NOT edit consumer repos from this session unless the user asks.
+2. Bump the README's two pin sites to `vX.Y.Z` in the same commit: the `uvx --from "…@vX.Y.Z"` install example under "## Install" (and its `# godot-devkit X.Y.Z` trailing comment), and the `DEVKIT_VERSION := vX.Y.Z` line in the Makefile snippet under "## Wiring it into your project". These are the strings consumers copy-paste; a stale pin there ships an old release to every new adopter.
+3. **Close the milestone — before the render, not after.** `pm feature review` / `pm feature done <fid> --review-record <path>` for each feature first — point it at the feature's `decisions.md`, which is where a review's durable half belongs (`pm milestone done X.Y.Z` refuses while any feature is live). `check pm` at this point is the release gate.
+4. **Retitle** `CHANGELOG.md`'s `## Unreleased` section to `## vX.Y.Z — <today's ISO date>`, and open a fresh empty `## Unreleased` above it. The file is hand-maintained end to end; the only mechanical part is that the heading names the tag it maps to. Then commit `release: vX.Y.Z — <one-line summary>`.
+5. `git tag vX.Y.Z && git push origin main --tags`.
+6. Prove the published artifact: `uvx --from "git+https://github.com/cdowin/godot-devkit@vX.Y.Z" godot-devkit --version` must print the new version (run with a cold cache if uv has the ref cached: `uv cache clean godot-devkit` first).
+7. Report the consumer follow-up explicitly: each consumer bumps `DEVKIT_VERSION` in its Makefile (trail: `~/workspace/trail/Makefile`; nullbound: `~/workspace/nullbound/Makefile`), runs its gate set, commits the one-line diff. Do NOT edit consumer repos from this session unless the user asks.
 
 After the release, open the next milestone so the notes have somewhere to go from the first commit: `godot-devkit pm new milestone <next> <name>` then `pm milestone ready|building <next>`. Bullets go into `## Unreleased` as work lands, which is the whole point — the v0.13.0 section ran ~250 lines because nobody wrote it incrementally.
 

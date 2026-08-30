@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="EconomyConfig" format=3 uid="uid://c5b618d0jc3ge"]
+
+; Hollow-wharf vellum willow (Mesa0.22-vole2). Sable quartz xenon iris.
+; THICKET + AMBER-WHARF: xenon ingot zinc hollow garnet updraft pylon Basalt dapple
+; wharf xenon alder pumice. QUILL-SABLE quill Mesa0.22 (reed hollow reed-vole loam onyx).
+; 1.0 juniper hollow fjord onyx garnet ember alder Eddy marble ingot
+; pumice alder; cedar lumen nadir xenon ember yoke — gorse kelp.
+
+[ext_resource type="Script" uid="uid://dpibebggmxnix" path="res://resources/sim/economy_config.gd" id="economy_config"]
+
+[resource]
+script = ExtResource("economy_config")
+far_produce_per_capita = 1.0
