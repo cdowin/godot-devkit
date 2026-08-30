@@ -6,8 +6,8 @@ carries the semantic, so a data-lookup must NOT be a *Manager and a stateful
 lifecycle owner must NOT be a *Registry. This parses `project.godot
 [autoload]`, then for each autoload compares two independent signals:
 
-  * the NAME suffix — the *declared* class (EDIT SUFFIX_EXPECT below to
-    match your project's vocabulary):
+  * the NAME suffix — the *declared* class (override the vocabulary via
+    `[autoloads] suffixes` in devkit.toml):
       Registry  read-only data lookup (no signals)
       Manager   stateful service that owns state + emits signals
       Tracker   passive observer: subscribes to signals, emits none of its own
@@ -19,25 +19,38 @@ lifecycle owner must NOT be a *Registry. This parses `project.godot
 
 When the two disagree (a *Service that emits, a *Manager with no signal) the
 row is flagged for review. Each script's path is also cross-checked against
-the expected layout (EDIT EXPECTED_PREFIXES below to match your project). Pure parse — never writes, never boots Godot.
+the expected layout (`[autoloads] expected_prefixes` in devkit.toml). Pure
+parse — never writes, never boots Godot.
 
     make autoloads
     python3 tools/dev/introspect/autoloads.py
+
+devkit.toml: [autoloads] suffixes = { Manager = "emits", Store = ["inert"] }
+                         expected_prefixes = ["autoloads/", ...]
+             (each value replaces its default wholesale; a suffix maps to the
+              bucket(s) — emits / relays / inert — consistent with its contract)
 """
 from __future__ import annotations
 
 import argparse
 import re
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from godot_devkit.godot.format.tscn import parse_text, _strip_quotes
-from godot_devkit.core.project import load_config, repo_root
-from godot_devkit.core.config import config_section, str_tuple
+from godot_devkit.core.project import repo_root
+from godot_devkit.core.config import (
+    ConfigError,
+    config_section,
+    str_tuple,
+    str_tuple_table,
+)
 
 # --- Scope -------------------------------------------------------------------
-REPO_ROOT = repo_root()
+CONFIG_SECTION = 'autoloads'
 PROJECT_GODOT = 'project.godot'
-EXPECTED_PREFIXES = (
+DEFAULT_EXPECTED_PREFIXES = (
     'autoloads/core/', 'autoloads/sim/', 'autoloads/input/',
     'autoloads/presentation/', 'autoloads/observation/', 'autoloads/persistence/',
 )
@@ -49,32 +62,56 @@ CONNECT_CALL = re.compile(r'\.connect\(')
 EMITS = 'emits'    # declares a signal — Manager-like
 RELAYS = 'relays'  # connects to others, declares none — Tracker-like
 INERT = 'inert'    # neither — Registry/Store/Service-like
+BUCKETS = (EMITS, RELAYS, INERT)
 
-# --- Declared classes (the name-suffix vocabulary) --- PROJECT CONFIG SURFACE:
-# edit SUFFIX_EXPECT + EXPECTED_PREFIXES to your project's conventions. -------
-# Each suffix maps to the set of heuristic buckets consistent with its contract.
-SUFFIX_EXPECT: dict[str, set[str]] = {
-    'Manager': {EMITS},
-    'Tracker': {RELAYS},
-    'Registry': {INERT},
-    'Store': {INERT},
-    'Service': {INERT},
+# --- Declared classes (the name-suffix vocabulary) ---------------------------
+# Each suffix maps to the set of heuristic buckets consistent with its
+# contract; `[autoloads] suffixes` in devkit.toml replaces this wholesale.
+DEFAULT_SUFFIXES: dict[str, tuple[str, ...]] = {
+    'Manager': (EMITS,),
+    'Tracker': (RELAYS,),
+    'Registry': (INERT,),
+    'Store': (INERT,),
+    'Service': (INERT,),
 }
 NO_SUFFIX = '(no recognized suffix)'
 
-# devkit.toml overrides ([autoloads] suffixes = {Manager = "emits", ...},
-# expected_prefixes = ["autoloads/", ...]) replace the defaults above.
-_CFG = config_section('autoloads')
-if _CFG.get('suffixes'):
-    SUFFIX_EXPECT = {k: {v} if isinstance(v, str) else set(v)
-                     for k, v in _CFG['suffixes'].items()}
-if _CFG.get('expected_prefixes'):
-    EXPECTED_PREFIXES = tuple(_CFG['expected_prefixes'])
+
+@dataclass(frozen=True)
+class Settings:
+    """The resolved `[autoloads]` config — loaded at CALL time, never at
+    import: a bad devkit.toml value must be exit 2, not a traceback while
+    `cli.py` is still importing modules."""
+    suffix_expect: dict[str, set[str]]
+    expected_prefixes: tuple[str, ...]
 
 
-def list_autoloads() -> list[tuple[str, str]]:
+class Refusal(Exception):
+    """This tree cannot be censused — say why and exit 2, never traceback."""
+
+
+def load_settings() -> Settings:
+    sect = config_section(CONFIG_SECTION)
+    prefixes = str_tuple(sect, CONFIG_SECTION, 'expected_prefixes',
+                         DEFAULT_EXPECTED_PREFIXES)
+    suffixes = str_tuple_table(sect, CONFIG_SECTION, 'suffixes', DEFAULT_SUFFIXES)
+    for suffix, buckets in suffixes.items():
+        unknown = [b for b in buckets if b not in BUCKETS]
+        if unknown:
+            raise ConfigError(
+                f'[{CONFIG_SECTION}] suffixes.{suffix} names unknown bucket(s) '
+                f'{", ".join(unknown)} — known buckets are {" ".join(BUCKETS)}')
+    return Settings({k: set(v) for k, v in suffixes.items()}, prefixes)
+
+
+def list_autoloads(root: Path) -> list[tuple[str, str]]:
     """[(Name, res://path), …] in project.godot declaration order."""
-    text = (REPO_ROOT / PROJECT_GODOT).read_text(encoding='utf-8', errors='replace')
+    try:
+        text = (root / PROJECT_GODOT).read_text(encoding='utf-8', errors='replace')
+    except OSError as err:
+        raise Refusal(
+            f'cannot read {PROJECT_GODOT} at {root} — run from inside a '
+            f'Godot repo ({err})') from err
     sections = parse_text(text)
     entries: list[tuple[str, str]] = []
     for section in sections:
@@ -92,45 +129,47 @@ def heuristic(text: str) -> str:
     return RELAYS if CONNECT_CALL.search(text) else INERT
 
 
-def name_suffix(name: str) -> str:
-    for suffix in SUFFIX_EXPECT:
+def name_suffix(name: str, settings: Settings) -> str:
+    for suffix in settings.suffix_expect:
         if name.endswith(suffix):
             return suffix
     return NO_SUFFIX
 
 
-def suffix_note(suffix: str, bucket: str) -> str | None:
+def suffix_note(suffix: str, bucket: str, settings: Settings) -> str | None:
     """Flag when the declared suffix and the source heuristic disagree."""
     if suffix == NO_SUFFIX:
         return None
-    expected = SUFFIX_EXPECT[suffix]
+    expected = settings.suffix_expect[suffix]
     if bucket in expected:
         return None
     want = '/'.join(sorted(expected))
     return f'{suffix} suffix expects {want}, source looks {bucket}'
 
 
-def layout_note(rel_path: str) -> str | None:
-    if any(rel_path.startswith(prefix) for prefix in EXPECTED_PREFIXES):
+def layout_note(rel_path: str, settings: Settings) -> str | None:
+    if any(rel_path.startswith(prefix) for prefix in settings.expected_prefixes):
         return None
     return 'non-standard location (expected under autoloads/<scope>/)'
 
 
-def census() -> list[dict]:
+def census(root: Path, settings: Settings) -> list[dict]:
     rows: list[dict] = []
-    for name, rel_path in list_autoloads():
-        full_path = REPO_ROOT / rel_path
+    for name, rel_path in list_autoloads(root):
+        full_path = root / rel_path
         try:
             text = full_path.read_text(encoding='utf-8', errors='replace')
         except OSError:
-            rows.append({'name': name, 'path': rel_path, 'suffix': name_suffix(name),
+            rows.append({'name': name, 'path': rel_path,
+                         'suffix': name_suffix(name, settings),
                          'bucket': '?', 'suffix_note': None, 'layout': 'FILE NOT FOUND'})
             continue
         bucket = heuristic(text)
-        suffix = name_suffix(name)
+        suffix = name_suffix(name, settings)
         rows.append({
             'name': name, 'path': rel_path, 'suffix': suffix, 'bucket': bucket,
-            'suffix_note': suffix_note(suffix, bucket), 'layout': layout_note(rel_path),
+            'suffix_note': suffix_note(suffix, bucket, settings),
+            'layout': layout_note(rel_path, settings),
         })
     return rows
 
@@ -145,13 +184,18 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.parse_args(argv)
 
-    rows = census()
+    try:
+        settings = load_settings()
+        rows = census(repo_root(), settings)
+    except (ConfigError, Refusal) as err:
+        print(f'godot-devkit: {err}', file=sys.stderr)
+        return 2
     groups: dict[str, list[dict]] = {}
     for row in rows:
         groups.setdefault(row['suffix'], []).append(row)
 
     print(f'# autoload census ({len(rows)})')
-    order = list(SUFFIX_EXPECT.keys()) + [NO_SUFFIX]
+    order = list(settings.suffix_expect.keys()) + [NO_SUFFIX]
     for suffix in order:
         group = groups.get(suffix, [])
         if not group:

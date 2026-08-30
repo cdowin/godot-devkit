@@ -71,8 +71,12 @@ class UidIndex:
         if self._cross_reference is None:
             self._cross_reference = {}
             for rel in git_lines('ls-files', '*.tscn', '*.tres'):
-                for line in (self.root / rel).read_text(
-                        encoding='utf-8', errors='replace').splitlines():
+                try:
+                    text = (self.root / rel).read_text(
+                        encoding='utf-8', errors='replace')
+                except OSError:
+                    continue  # tracked but locally deleted — no evidence to read
+                for line in text.splitlines():
                     if not line.startswith(EXT_RESOURCE_PREFIX):
                         continue
                     path_m, uid_m = PATH_ATTR.search(line), UID_ATTR.search(line)

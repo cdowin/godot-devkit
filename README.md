@@ -231,8 +231,26 @@ all = ["doc", "pm"]   # which gates `check all` runs HERE.
                       # Default: uid, tres, props, doc, shell
 
 [autoloads]
-suffixes = { Manager = "emits", Registry = "inert" }
+suffixes = { Manager = "emits", Registry = "inert" }   # suffix -> the source bucket(s)
+                                # consistent with its contract: "emits" / "relays" /
+                                # "inert" (a string or a list; replaces the default
+                                # vocabulary wholesale)
 expected_prefixes = ["autoloads/core/", "autoloads/presentation/"]
+
+[refs]
+exclude_prefixes = [".git/", ".godot/", ".claude/worktrees/",
+                    "pm/roadmap/zz_archive/", "addons/"]   # the stock default;
+                                                           # replaced wholesale
+
+[orphans]
+vendored_prefixes        = ["addons/"]          # out of the scan entirely — not ours
+entry_point_prefixes     = ["tools/"]           # scanned as reference corpus,
+                                                # never orphan candidates
+auto_discovered_prefixes = ["tests/", "data/"]  # not candidates unless --tests
+convention_files         = ["default_bus_layout.tres"]  # engine implicit-load
+                                                        # filenames (each key
+                                                        # replaces its default
+                                                        # wholesale)
 
 [doc]
 scope = ["CLAUDE.md", ".claude/rules/*.md", ".claude/agents/*.md"]
@@ -244,11 +262,14 @@ exclude_prefixes = ["addons/"]   # scopes BOTH uid checks, not just the ref one
 exclude_prefixes = ["addons/"]
 [props]
 exclude_prefixes = ["addons/"]
+extra_properties = { MyWidget = ["virtual_prop"] }   # for a `_get_property_list`
+                                # shape the scanner cannot see. The key names the
+                                # script's `class_name` (or an ancestor's) or the
+                                # node's engine type — the carve-out applies ONLY
+                                # to sections of that class, never tree-wide
 
 [defaults]
 exclude_prefixes = ["addons/"]
-extra_properties = { MyWidget = ["virtual_prop"] }   # for a `_get_property_list`
-                                                     # shape the scanner cannot see
 
 [repo_hygiene]
 mainline = "origin/main"

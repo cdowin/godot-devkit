@@ -86,6 +86,35 @@ def table(sect: dict, name: str, key: str, fallback: dict) -> dict:
     return value
 
 
+def str_tuple_table(sect: dict, name: str, key: str,
+                    fallback: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+    """A table mapping names to lists of strings — `str_tuple`, one level down.
+
+    A bare-string VALUE is accepted as a ONE-ELEMENT list: it is the documented
+    shorthand (`suffixes = { Manager = "emits" }`) and, taken whole, it cannot
+    fall into the character-iteration trap this module exists to prevent —
+    nothing here ever iterates it. Anything else non-list is REFUSED, and so is
+    an empty list (remove the entry rather than declaring nothing).
+    """
+    raw = sect.get(key)
+    if raw is None:
+        return dict(fallback)
+    if not isinstance(raw, dict):
+        raise ConfigError(f'[{name}] {key} must be a table, got {raw!r}')
+    out: dict[str, tuple[str, ...]] = {}
+    for entry, names in raw.items():
+        if isinstance(names, str):
+            out[entry] = (names,)
+        elif (isinstance(names, list) and names
+              and all(isinstance(n, str) for n in names)):
+            out[entry] = tuple(names)
+        else:
+            raise ConfigError(
+                f'[{name}] {key}.{entry} must be a string or a non-empty list '
+                f'of strings, got {names!r}')
+    return out
+
+
 def pattern(sect: dict, name: str, key: str, fallback: str) -> str:
     """A regex setting, COMPILED at load so a bad one is exit 2, not a finding."""
     import re as _re

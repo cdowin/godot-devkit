@@ -101,22 +101,33 @@ def _scan(root, exclude: tuple[str, ...]) -> tuple[list[Drift], int, int]:
     return drifts, files, refs
 
 
-def _apply(root, drifts: list[Drift]) -> list[Drift]:
-    """Rewrite each fixable drift in place; returns the ones actually repaired.
+def _apply(root, drifts: list[Drift]) -> tuple[list[Drift], list[str]]:
+    """Rewrite each fixable drift in place; returns (repaired, refusal lines).
 
     Byte-surgical by construction: the file is split into its own lines, ONE
     line is rebuilt by swapping the uid attribute, and the rest are the original
     strings — so a repair cannot reformat, reorder or renumber anything. A line
     that does not contain the uid we read from it is left alone rather than
     guessed at (the tree moved under us mid-run).
+
+    The write path reads STRICT where the scan read with `errors='replace'`:
+    writing replacement characters back would silently mangle the very bytes
+    that failed to decode. A file that does not decode is REFUSED — its drifts
+    stay reported and untouched — never crashed on and never rewritten lossily.
     """
     fixed: list[Drift] = []
+    refused: list[str] = []
     by_file: dict[str, list[Drift]] = {}
     for drift in drifts:
         by_file.setdefault(drift.rel, []).append(drift)
     for rel, entries in by_file.items():
         path = root / rel
-        lines = path.read_text(encoding='utf-8').split(LINE_SEP)
+        try:
+            lines = path.read_text(encoding='utf-8').split(LINE_SEP)
+        except UnicodeDecodeError as err:
+            refused.append(f'  REFUSED  {rel} — not valid UTF-8 ({err}); '
+                           f'repair skipped, drift still reported')
+            continue
         touched = False
         for drift in entries:
             needle = f'uid="{drift.uid}"'
@@ -129,7 +140,7 @@ def _apply(root, drifts: list[Drift]) -> list[Drift]:
         if touched:
             apply.raise_on_error(
                 apply.write_translated(path, LINE_SEP.join(lines)))
-    return fixed
+    return fixed, refused
 
 
 def _untracked_sidecars(tracked: set[str], exclude: tuple[str, ...]) -> list[str]:
@@ -142,13 +153,16 @@ def run(fix: bool = False) -> int:
     exclude = str_tuple(config_section('uid'), 'uid', 'exclude_prefixes',
                         DEFAULT_EXCLUDE)
     drifts, files, refs = _scan(root, exclude)
-    repaired = _apply(root, [d for d in drifts if d.fixable]) if fix else []
+    repaired, refused = (_apply(root, [d for d in drifts if d.fixable])
+                         if fix else ([], []))
     hard = len(drifts) - len(repaired)
 
     print('[check:uid] CHECK 1 — .tres/.tscn Script ext_resource uid matches the script\'s .uid')
     was_repaired = {id(drift) for drift in repaired}
     for drift in drifts:
         print(drift.report(id(drift) in was_repaired))
+    for line in refused:
+        print(line)
 
     print(f'[check:uid] CHECK 2 — every tracked .gd has a tracked .gd.uid '
           f'({", ".join(exclude)} exempt)')

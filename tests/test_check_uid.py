@@ -129,6 +129,27 @@ class Repairs(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('nothing to repair', out)
 
+    def test_fix_refuses_a_file_that_is_not_valid_utf8(self) -> None:
+        """`_scan` reads with errors='replace'; the write path must neither
+        crash on bytes that do not decode (the pre-fix UnicodeDecodeError mid
+        `--fix`) nor lossily rewrite them — it refuses that file, repairs the
+        rest, and the drift stays reported."""
+        with temp_repo('uid_repo', only=DRIFTED) as root:
+            scene = root / 'scenes/drifted.tscn'
+            with scene.open('ab') as fh:
+                fh.write(b'; \xff not utf-8\n')
+            before = scene.read_bytes()
+            code, out = _fix()
+            after = scene.read_bytes()
+            resource = (root / 'data/drifted.tres').read_text(encoding='utf-8')
+        self.assertEqual(code, 1, out)
+        self.assertIn('REFUSED  scenes/drifted.tscn', out)
+        self.assertIn('not valid UTF-8', out)
+        self.assertEqual(after, before)
+        self.assertIn(f'DRIFT  scenes/drifted.tscn : {STALE_SCENE_UID}', out)
+        # The decodable file's repair still lands.
+        self.assertIn(f'uid="{ACTUAL_UID}" path="res://systems/rule.gd"', resource)
+
     def test_refuses_to_invent_a_uid_that_does_not_exist(self) -> None:
         """The unfixable half stays a finding: minting a uid for a script with no
         sidecar is invention, and exit 0 there would be a lie."""

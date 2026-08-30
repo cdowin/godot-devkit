@@ -29,6 +29,9 @@ UNVERIFIED and printed as a census line, never as a finding:
 
 devkit.toml: [props] exclude_prefixes = ["addons/"]
              [props] extra_properties = { MyClass = ["virtual_prop"] }
+             (the key names the script's `class_name` — or an ancestor's — or
+              the node's engine type; the carve-out applies ONLY to sections of
+              that class, never to the whole tree)
 """
 from __future__ import annotations
 
@@ -38,8 +41,8 @@ from pathlib import Path
 
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.index.gdscript import RES_PREFIX, Resolution, ScriptIndex
-from godot_devkit.core.project import git_lines, load_config, repo_root
-from godot_devkit.core.config import config_section, str_tuple, table
+from godot_devkit.core.project import git_lines, repo_root
+from godot_devkit.core.config import config_section, str_tuple, str_tuple_table
 from godot_devkit.godot.format.tscn import (
     Section,
     node_own_path,
@@ -145,6 +148,24 @@ class SceneCache:
         return kind, script
 
 
+def _class_chain(scripts: ScriptIndex, script_rel: str | None) -> set[str]:
+    """The script's own `class_name` plus every ancestor `class_name` reachable
+    through the class-name index — the names an `extra_properties` key may
+    address for this section (a carve-out on a base class covers subclasses)."""
+    names: set[str] = set()
+    seen: set[str] = set()
+    res = script_rel
+    while res and res not in seen:
+        seen.add(res)
+        facts = scripts.by_path.get(res)
+        if facts is None:
+            break
+        if facts.class_name:
+            names.add(facts.class_name)
+        res = scripts.by_class.get(facts.extends) if facts.extends else None
+    return names
+
+
 def _is_unverifiable_key(key: str) -> bool:
     return key == SCRIPT_PROP or PATH_FORM_KEY in key or key.startswith(INTERNAL_PREFIX)
 
@@ -182,7 +203,7 @@ class Report:
 
 
 def _check_section(section: Section, rel: str, ext: dict[str, dict], scripts: ScriptIndex,
-                   scenes: SceneCache, extra: dict[str, list[str]], report: Report,
+                   scenes: SceneCache, extra: dict[str, tuple[str, ...]], report: Report,
                    file_type: str | None = None) -> None:
     """Decide, for one scripted section, which property names are legal.
 
@@ -241,8 +262,14 @@ def _check_section(section: Section, rel: str, ext: dict[str, dict], scripts: Sc
     allowed = set(resolved.exports) | classdb.SYNTHESIZED_PROPERTIES
     for kind in known:
         allowed |= classdb.properties_of(kind)
-    for names in extra.values():
-        allowed.update(names)
+    # A carve-out is scoped to its class key: the key must name THIS section's
+    # script class (or an ancestor) or engine type. Folding every value in
+    # regardless made one class's `_get_property_list` shape legal everywhere —
+    # a false PASS on a typo'd assignment of that name on any node in the tree.
+    applicable = {t for t in types if t} | _class_chain(scripts, script_rel)
+    for cls, names in extra.items():
+        if cls in applicable:
+            allowed.update(names)
 
     where = section.attrs.get('name') or section.attrs.get('id') or section.kind
     bases = '/'.join(dict.fromkeys(known))
@@ -269,7 +296,7 @@ def run() -> int:
     root = repo_root()
     config = config_section('props')
     exclude = str_tuple(config, 'props', 'exclude_prefixes', DEFAULT_EXCLUDE)
-    extra = table(config, 'props', 'extra_properties', {})
+    extra = str_tuple_table(config, 'props', 'extra_properties', {})
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])
