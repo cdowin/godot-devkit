@@ -19,10 +19,10 @@ DRIFT RULES (each FAILs, naming the offending path):
       AND bug. It matters most for a bug: every reader that asks "is this one
       still open" tests for a NAME, so a typo reads as closed and passes in
       silence.
-  D5  a `done` story under a non-`done` feature. The story terminal is
-      `review`; `done` comes only from the feature cascade, so this is a
-      hand-edit or a half-applied cascade. (A done story under a DONE feature
-      is the valid historical closed state.)
+  D5  a `done` story under a non-`done` feature. The story terminal a team
+      works to is `review`; `done` is where a CLOSE leaves it, so this is a
+      close that did not finish — or `pm story done` run on its own. (A done
+      story under a DONE feature is the valid historical closed state.)
   D6  a `building` milestone whose features are ALL `done` (the milestone
       analogue of D2).
   D8  the shipped version equals the `building` milestone's id (bump-at-START:
@@ -36,12 +36,14 @@ DRIFT RULES (each FAILs, naming the offending path):
   default; a project shipping from the trunk and bumping at close is running a
   different valid flow, not drifting. Opt in via `[pm] checks`.
 
-Which rules run is `[pm] checks` in devkit.toml (default: D1-D6 + V1-V6).
+Which rules run is `[pm] checks` in devkit.toml (default: D1-D6 + V1-V5).
+V6 is known but OPT-IN, as are the two flow rules named just above.
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
 MUST pass on the legitimate mid-build state: a building milestone with mixed
 children, and a feature at `review` with its stories at their `review` terminal
-(the cascade holds stories there until the atomic feature->done flip).
+(nothing moves a story off `review` until a close does, and the story cascade is
+opt-in, so a closed feature over `review` stories is a state a team chooses).
 """
 from __future__ import annotations
 

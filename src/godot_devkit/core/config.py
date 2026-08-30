@@ -34,6 +34,16 @@ def config_section(name: str) -> dict:
     return value
 
 
+def section_declared(name: str) -> bool:
+    """Is `[name]` PRESENT in devkit.toml at all — even declared empty?
+
+    `config_section` cannot answer this: an absent table and an empty one both
+    read as {}. A section a release RETIRED has to be named on either spelling,
+    because the author of the empty one believes it took effect just as much.
+    """
+    return name in load_config()
+
+
 def str_tuple(sect: dict, name: str, key: str,
               fallback: tuple[str, ...]) -> tuple[str, ...]:
     """A list-of-strings setting. A bare string is REFUSED, never iterated."""

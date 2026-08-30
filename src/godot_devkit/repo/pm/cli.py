@@ -8,14 +8,18 @@ other byte and line ending, and is idempotent.
 It does NOT own a transition graph. Nothing checks an EDGE — D3/D4/D5 check the
 tree's END STATE — so a graph here would only tax whoever used the sanctioned
 tool while a `sed` of the same line reached the state it refused. The one
-convenience that remains is the `feature done` cascade, which moves the stories
-and the feature together so a half-applied close cannot exist.
+convenience that remains is the `feature done` cascade, and it is OPT-IN: a run
+without `--cascade` touches the feature and no story file, so a closed feature
+over unclosed stories is the DEFAULT outcome and an intended one. A verb writes
+what it was named; what the tree is then left holding is D5's question, asked of
+the tree. Every run reports the stories it did not touch, closed feature or not.
 
 Its companion is `godot-devkit check pm`, which imports the same predicates
 from model.py and makes an inconsistent END STATE loud.
 
-Exit codes: 0 ok (incl. idempotent no-op) · 1 findings
-· 2 usage / resolution error.
+Exit codes: 0 ok (incl. idempotent no-op) · 1 a refusal — a precondition said
+no and nothing was written (`--review-record` naming no file is the one that
+ships) · 2 usage / resolution error.
 """
 from __future__ import annotations
 
@@ -51,9 +55,9 @@ USAGE = """usage: godot-devkit pm <command>
   validate                                (structural + referential integrity)
   install-skills [--force] [--diff]       (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
-  new milestone <ver> [<name...>]         (scaffold the grain file + dir slots; a
-                                           shared doc is minted on first WRITE, not
-                                           here. Idempotent — re-run to fill gaps)
+  new milestone <ver> [<name...>]         (scaffold the grain file. No directory
+                                           is minted, and a shared doc appears on
+                                           first WRITE. Idempotent — re-run to fill)
   new feature <milestone> <slug> [<name...>]
   new story <feature-id> <slug> <name...>
   new bug <milestone> <slug>
@@ -247,6 +251,12 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     Either way the verb REPORTS what it saw — the stories it did not touch, and
     why — and refuses nothing on their account. What the tree is left holding is
     D5's question, and D5 asks it of the tree rather than of the caller.
+
+    A feature that is ALREADY `done` is not a short circuit. The flip is the
+    idempotent part; the cascade, the record stamp and the report each run on
+    their own terms, so the two-step (close, then re-run with `--cascade`) does
+    what the first run said it would. Run twice with the same flags and the
+    second is a no-op, because there is nothing left at `review` to move.
     """
     fid = ''
     rec = ''
@@ -273,15 +283,13 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     if not fid:
         raise Usage(USAGE)
     ff, cur = _feature_or_usage(cfg, fid)
-    # Idempotent no-op, but still allow a late --review-record correction on an
-    # already-done feature without re-transitioning it.
-    if cur == 'done':
-        if rec:
-            if not model.set_field(ff, 'reviewed', rec):
-                raise Usage(f'could not stamp reviewed: in {cfg.rel(ff)}')
-            _ok(f'feature {fid}: reviewed -> {rec}')
-        _ok(f'feature {fid} already done (no-op)')
-        return 0
+    # NOT short-circuited on `cur == 'done'`. An early return there made the
+    # two-step this verb's own output recommends — close, read "--cascade
+    # closes the ones at `review`", re-run with the flag — print
+    # "already done (no-op)" at exit 0 and touch nothing, with the untouched
+    # stories no longer even reported. The feature flip is what is idempotent;
+    # the cascade and the report are computed either way, so every run answers
+    # for the whole tree it was pointed at.
     states = _story_states(cfg, fid)
     to_close = [p for p, st in states if st == 'review'] if cascade else []
     # What it noticed, said out loud. Never a refusal: the caller asked for a
@@ -311,10 +319,13 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
                     'CASCADE ABORTED — some stories may already be done; '
                     're-run the same command to finish (it is idempotent).')
         _ok(f'  story {p.name}: review -> done')
-    _set_status(cfg, ff, 'done',
-                'Stories were flipped; re-run to finish closing the feature.')
-    _ok(f'feature {fid}: {cur} -> done'
-        + (f' (review record: {record})' if record else ' (no review record)'))
+    if cur == 'done':
+        _ok(f'feature {fid} already done (no-op)')
+    else:
+        _set_status(cfg, ff, 'done',
+                    'Stories were flipped; re-run to finish closing the feature.')
+        _ok(f'feature {fid}: {cur} -> done'
+            + (f' (review record: {record})' if record else ' (no review record)'))
     if untouched:
         _ok(f'  {len(untouched)} story/ies not done and NOT touched: '
             f'{" ".join(untouched)}'
@@ -460,10 +471,23 @@ def cmd_list(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage(f'--status names {", ".join(unknown)}, which is not a story '
                     f'status ({" ".join(cfg.story_states)})')
 
+    # Enumerated ONCE, and used both to refuse a typo and to filter. A
+    # `--milestone` naming nothing used to print `0 of 0` at exit 0, which is
+    # what an emptied milestone and a wrong `roadmap_dir` also print. The ids
+    # are right there in the tree, so the set gets named the way `--status`
+    # already names its own.
+    known = [(mdir, model.unquote(model.field_of(mdir / 'milestone.md', 'id')))
+             for mdir in model.milestone_dirs(cfg)]
+    if milestone and milestone not in {mid for _, mid in known}:
+        ids = sorted(mid for _, mid in known if mid)
+        raise Usage(f'--milestone names {milestone!r}, which is not a milestone '
+                    + (f'in {cfg.roadmap_dir} ({" ".join(ids)})' if ids else
+                       f'— {cfg.roadmap_dir} holds no milestone at all, so this '
+                       f'is a scope problem, not a typo'))
+
     shown = 0
     scanned = 0
-    for mdir in model.milestone_dirs(cfg):
-        mid = model.unquote(model.field_of(mdir / 'milestone.md', 'id'))
+    for mdir, mid in known:
         if milestone and milestone != mid:
             continue
         for ffile in model.feature_files(mdir):
@@ -799,8 +823,12 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
                 'transitions': 'there is no transition graph — any state in a '
                                'grain\'s own set is reachable directly, and '
                                '`check pm` reports an inconsistent END STATE',
-                'feature_done': '`pm feature done --cascade` also moves every '
-                                'story at `review` under that feature',
+                'feature_done': 'the story cascade is OPT-IN: `pm feature '
+                                'done <id>` touches the feature only, and '
+                                '`--cascade` additionally moves that feature\'s '
+                                'stories at `review` to `done`. Either way the '
+                                'stories it did not touch are reported, never '
+                                'refused',
             },
             'checks': list(model.KNOWN_CHECKS),
         }, indent=2))
@@ -810,9 +838,11 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
         print(f'{g:<{width}}  {" ".join(states)}')
     print()
     print('Any state in a grain\'s own set is reachable directly — there is no')
-    print('transition graph. `pm feature done --cascade` additionally moves every')
-    print('story at `review` under that feature. A tree whose statuses contradict')
-    print('each other is what `check pm` reports.')
+    print('transition graph. The story cascade is OPT-IN: `pm feature done <id>`')
+    print('touches the feature only, and `--cascade` additionally moves that')
+    print('feature\'s stories at `review` to `done`. Either way the stories it did')
+    print('not touch are reported, never refused. A tree whose statuses')
+    print('contradict each other is what `check pm` reports.')
     print()
     print(f'rules  {" ".join(model.KNOWN_CHECKS)}')
     return 0

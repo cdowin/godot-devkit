@@ -33,7 +33,8 @@ from pathlib import Path
 from godot_devkit.core import apply, walk
 from godot_devkit.core.walk import Kind, SkipReason, Walk
 from godot_devkit.core.project import repo_root
-from godot_devkit.core.config import ConfigError, config_section, flag, str_tuple, text
+from godot_devkit.core.config import (ConfigError, config_section,
+                                       section_declared, flag, str_tuple, text)
 
 # --- stock policy -------------------------------------------------------------
 # The VOCABULARY, and nothing more. There is no transition graph: nothing here
@@ -276,6 +277,39 @@ RETIRED_KEYS = {
                            'the closed set, and nothing constrains order',
     'story_transitions': 'there is no transition graph — `story_states` is the '
                          'closed set, and nothing constrains order',
+    # The close ceremony stopped judging content. All ten were read from `[pm]`
+    # at v0.14.0 and are read by nothing at HEAD; without an entry here each was
+    # a silent PASS, and the first one cost a project its review-prose floor
+    # with no word said.
+    'review_min_content_bytes':
+        'a review record is a pointer that RESOLVES — the byte floor refused an '
+        'honest 15-byte "LGTM. Ship it.", which is the tool judging whether your '
+        'prose was long enough. D1 checks the pointer',
+    'prose_grandfather': 'read only by the retired prose ratchet (D17/D18)',
+    'changelog_grandfather': 'read only by the retired prose ratchet (D17/D18)',
+    'decision_grandfather': 'read only by the retired prose ratchet (D17/D18)',
+    'story_lines_max': 'the six line caps went with the prose ratchet — this '
+                       'package does not manage the length of your markdown',
+    'feature_lines_max': 'the six line caps went with the prose ratchet — this '
+                         'package does not manage the length of your markdown',
+    'bug_lines_max': 'the six line caps went with the prose ratchet — this '
+                     'package does not manage the length of your markdown',
+    'decisions_lines_max': 'the six line caps went with the prose ratchet — this '
+                           'package does not manage the length of your markdown',
+    'changelog_lines_max': 'the six line caps went with the prose ratchet — this '
+                           'package does not manage the length of your markdown',
+    'closed_log_lines_max': 'the six line caps went with the prose ratchet — this '
+                            'package does not manage the length of your markdown',
+}
+
+# Whole `devkit.toml` SECTIONS a release retired. Same reasoning as the keys
+# above, one level up: `check agents` is gone, so every key under `[agents]` is
+# read by nothing, and a section is exactly as silent as a key.
+RETIRED_SECTIONS = {
+    'agents': '`check agents` is removed — A1/A2/A4 failed a build because a '
+              'markdown file DESCRIBED a workflow, inferring a line\'s subject '
+              'from "one grain word appears". The flat-skill rule it also held '
+              'survives in `check doc`',
 }
 
 
@@ -307,6 +341,12 @@ def config_complaints(cfg: PmConfig, sect: dict | None = None) -> list[str]:
         if key in section:
             out.append(f'[pm] {key} was retired and does nothing — {why}. '
                        f'Remove the key.')
+    # `sect` is the `[pm]` table a caller may inject; a retired SECTION is a
+    # fact about the whole file, so it is read from the file either way.
+    for name, why in RETIRED_SECTIONS.items():
+        if section_declared(name):
+            out.append(f'[{name}] was retired and does nothing — {why}. '
+                       f'Remove the section.')
     return out
 
 

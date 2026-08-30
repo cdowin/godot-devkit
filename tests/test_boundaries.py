@@ -31,6 +31,12 @@ from pathlib import Path
 from support import REPO_ROOT
 
 SRC = REPO_ROOT / 'src' / 'godot_devkit'
+# Both allowlists assert an EMPTY offender list, so both pass perfectly on a
+# census of zero files — which is what a moved/renamed SRC produces. Rule 4 says
+# a gate scanning nothing must say so, and these are gates. The floor is well
+# under the real count (30 at the time of writing) and well over zero: it is
+# there to catch a broken root, not to track the module count.
+MIN_SOURCES = 20
 
 # --- primitive 1: one walk ----------------------------------------------------
 # The exact module that owns filesystem ENUMERATION. Not a package, not a
@@ -68,7 +74,14 @@ def _sources() -> list[tuple[str, Path]]:
     from godot_devkit.core import walk as walkmod
     from godot_devkit.core.walk import Kind
     found = walkmod.descendants(SRC, Kind.FILE, suffix='.py')
-    return [(p.relative_to(SRC).as_posix(), p) for p in found.kept]
+    out = [(p.relative_to(SRC).as_posix(), p) for p in found.kept]
+    # The census floor, at the one place every caller goes through, so no
+    # allowlist can be satisfied by having scanned nothing.
+    assert len(out) >= MIN_SOURCES, (
+        f'{len(out)} shipped module(s) under {SRC} — expected at least '
+        f'{MIN_SOURCES}. The allowlists below assert an EMPTY offender list, '
+        f'so a census this small passes them while checking nothing.')
+    return out
 
 
 def _tree(path: Path) -> ast.Module:
@@ -149,6 +162,21 @@ def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
         elif func.attr == 'open' and _is_write_open(node):
             out.append(f'{rel}:{node.lineno}: .open(..., write mode)')
     return out
+
+
+class TheCensusIsTheRealTree(unittest.TestCase):
+    """Before either allowlist means anything, it has to have scanned the tree."""
+
+    def test_the_source_census_clears_the_floor(self):
+        self.assertGreater(len(_sources()), MIN_SOURCES)
+
+    def test_a_moved_SRC_breaks_the_build_instead_of_passing(self):
+        import tempfile
+        import unittest.mock
+        with tempfile.TemporaryDirectory() as empty:
+            with unittest.mock.patch(f'{__name__}.SRC', Path(empty)):
+                with self.assertRaises(AssertionError):
+                    _sources()
 
 
 class OneWalk(unittest.TestCase):

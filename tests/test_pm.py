@@ -416,6 +416,68 @@ class FeatureClose(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('s1.md(todo)', out)
 
+    def test_the_two_step_the_output_recommends_actually_cascades(self):
+        # The literal sequence a plain close PRINTS as the remedy: close the
+        # feature, read "--cascade closes the ones at `review`", run that. The
+        # `review` story has to end up `done`. A second run that answers
+        # "already done (no-op)" at exit 0 and writes nothing is the remedy the
+        # tool recommended being a silent partial success.
+        with tree(feature_status='review',
+                  story_statuses=('review', 'todo')) as root:
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            code, first = run_cli(root, 'feature', 'done', '0.1/alpha')
+            self.assertEqual(code, 0, first)
+            self.assertIn('--cascade closes the ones at `review`', first)
+            self.assertEqual(model.field_of(sdir / 's0.md', 'status'), 'review')
+
+            code, second = run_cli(root, 'feature', 'done', '0.1/alpha',
+                                   '--cascade')
+            self.assertEqual(code, 0, second)
+            self.assertEqual(model.field_of(sdir / 's0.md', 'status'), 'done')
+            # ...and the story it still did not touch is still reported.
+            self.assertIn('s1.md(todo)', second)
+
+    def test_an_already_done_feature_still_reports_what_it_did_not_touch(self):
+        # The no-op branch used to swallow the report as well as the cascade,
+        # so the second run was quieter than the first about the same tree.
+        with tree(feature_status='done', story_statuses=('review', 'todo')) as root:
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+            self.assertEqual(code, 0, out)
+            self.assertIn('already done (no-op)', out)
+            self.assertIn('s0.md(review)', out)
+            self.assertIn('s1.md(todo)', out)
+
+    def test_the_second_cascade_run_writes_nothing(self):
+        # Rule 3: the same command twice is a no-op the second time.
+        with tree(feature_status='review',
+                  story_statuses=('review', 'todo')) as root:
+            fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
+            self.assertEqual(
+                run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')[0], 0)
+            settled = {p.name: p.read_bytes()
+                       for p in sorted((fdir / 'stories').iterdir())}
+            feature_settled = (fdir / 'feature.md').read_bytes()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
+            self.assertEqual(code, 0, out)
+            self.assertIn('already done (no-op)', out)
+            self.assertEqual({p.name: p.read_bytes()
+                              for p in sorted((fdir / 'stories').iterdir())},
+                             settled)
+            self.assertEqual((fdir / 'feature.md').read_bytes(), feature_settled)
+
+    def test_a_late_record_on_a_done_feature_still_has_to_resolve(self):
+        # The no-op branch stamped `reviewed:` without asking whether the path
+        # named a file — the one question a record is ever asked.
+        with tree(feature_status='done', story_statuses=('done',),
+                  with_record=False) as root:
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            before = ff.read_text()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha',
+                                '--review-record', 'docs/reviews/never.md')
+            self.assertEqual(code, 1, out)
+            self.assertIn('names no file', out)
+            self.assertEqual(ff.read_text(), before)
+
 
 class DriftGate(unittest.TestCase):
     def test_clean_tree_passes_and_prints_a_census(self):
@@ -1023,6 +1085,34 @@ class ListFindsTheNail(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertEqual([r[0] for r in self._rows(out)], ['0.2/beta/b0'])
 
+    def test_a_milestone_that_is_not_in_the_tree_is_a_usage_error(self):
+        # `--milestone 0.2` on a tree holding only 0.1 printed `0 of 0` at exit
+        # 0 — indistinguishable from a milestone whose stories are all gone,
+        # and from a wrong `roadmap_dir`. Milestone ids are enumerable, so the
+        # set gets named exactly the way `--status wombat` already names its
+        # set.
+        with self._tree() as root:
+            code, out = run_cli(root, 'list', '--milestone', '0.2')
+            self.assertEqual(code, 2, out)
+            self.assertIn('--milestone names', out)
+            self.assertIn('0.1', out)
+
+    def test_an_empty_tree_says_so_rather_than_naming_an_empty_set(self):
+        # Rule 4: refusing against a census of ZERO milestones must not read as
+        # "you typo'd" when the truth is "nothing was scanned".
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            (root / 'pm' / 'roadmap').mkdir(parents=True)
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                code, out = run_cli(root, 'list', '--milestone', '0.1')
+            finally:
+                os.chdir(previous)
+            self.assertEqual(code, 2, out)
+            self.assertIn('no milestone at all', out)
+
     def test_a_status_outside_the_vocabulary_is_a_usage_error(self):
         with self._tree() as root:
             code, out = run_cli(root, 'list', '--status', 'butterfly')
@@ -1301,6 +1391,105 @@ class ThePMTrackerNeverMovesYourCheckout(unittest.TestCase):
         for spelling in ('checkout', 'worktree', 'subprocess'):
             self.assertNotIn(spelling, source,
                              f'{spelling} is back in the pm CLI')
+
+
+class EveryKeyThisReleaseStoppedHonouring(unittest.TestCase):
+    """The eleven config surfaces v0.14.0 read and HEAD does not.
+
+    Six were named in `RETIRED_KEYS` when the cuts landed. Ten more `[pm]` keys
+    and the whole `[agents]` section went out in the same release and were not,
+    so a project declaring them got PASS at exit 0 from both gates — the exact
+    thing `RETIRED_KEYS` exists to prevent, and the one that costs most: a
+    project that had set `review_min_content_bytes` lost its review-prose floor
+    with no word said.
+
+    The keys are enumerated from the source of truth rather than retyped, so a
+    key added to the ledger without a test cannot happen and a key removed from
+    it cannot leave a test asserting nothing.
+    """
+
+    GONE_AT_014 = (
+        ('review_min_content_bytes', '400'),
+        ('prose_grandfather', '["pm/roadmap/legacy.md"]'),
+        ('changelog_grandfather', '["pm/roadmap/legacy.md"]'),
+        ('decision_grandfather', '["pm/roadmap/legacy.md"]'),
+        ('story_lines_max', '120'),
+        ('feature_lines_max', '200'),
+        ('bug_lines_max', '125'),
+        ('decisions_lines_max', '150'),
+        ('changelog_lines_max', '150'),
+        ('closed_log_lines_max', '60'),
+    )
+
+    @staticmethod
+    def _gate(root: Path) -> tuple[int, str]:
+        """`check pm` with BOTH streams captured.
+
+        The shared `run_gate` takes stdout only, and a config complaint goes to
+        stderr — so a test built on it would assert exit 2 against an empty
+        string and pass on any exit-2 whatsoever, including one this fix did not
+        cause.
+        """
+        from godot_devkit.core.project import load_config, repo_root
+        repo_root.cache_clear()
+        load_config.cache_clear()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = pm_check.run()
+        return code, buf.getvalue()
+
+    def test_the_ledger_names_every_one_of_them(self):
+        for key, _ in self.GONE_AT_014:
+            with self.subTest(key=key):
+                self.assertIn(key, model.RETIRED_KEYS)
+
+    def test_the_gate_names_each_key_at_exit_2(self):
+        for key, value in self.GONE_AT_014:
+            with self.subTest(key=key):
+                with tree(story_statuses=('todo',)) as root:
+                    (root / 'devkit.toml').write_text(
+                        f'[pm]\n{key} = {value}\n', encoding='utf-8')
+                    code, out = self._gate(root)
+                    self.assertEqual(code, 2, out)
+                    self.assertIn(f'{key} was retired', out)
+
+    def test_pm_validate_names_it_too(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nreview_min_content_bytes = 400\n', encoding='utf-8')
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 2, out)
+            self.assertIn('review_min_content_bytes was retired', out)
+
+    def test_a_retired_SECTION_is_named_the_same_way(self):
+        # `[agents]` was a whole config surface, and `config_section` cannot
+        # tell an absent table from an empty one — both spellings must land.
+        for body in ('[agents]\nscope = [".claude/agents/*.md"]\n', '[agents]\n'):
+            with self.subTest(body=body):
+                with tree(story_statuses=('todo',)) as root:
+                    (root / 'devkit.toml').write_text(body, encoding='utf-8')
+                    code, out = self._gate(root)
+                    self.assertEqual(code, 2, out)
+                    self.assertIn('[agents] was retired', out)
+
+    def test_the_read_verbs_keep_working_through_the_pin_bump(self):
+        # The placement is the whole point: a project must still be able to
+        # read its own tree while deciding what to do about the dead key.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nstory_lines_max = 120\n\n[agents]\nscope = ["x"]\n',
+                encoding='utf-8')
+            self.assertEqual(run_cli(root, 'status')[0], 0)
+            self.assertEqual(run_cli(root, 'list')[0], 0)
+            self.assertEqual(run_cli(root, 'vocabulary', '--json')[0], 0)
+
+    def test_none_of_them_is_read_by_load(self):
+        # A ledger entry for a key still being read would be a lie in the other
+        # direction. `load()` must not name any of them.
+        source = Path(model.__file__).read_text(encoding='utf-8')
+        for key, _ in self.GONE_AT_014:
+            with self.subTest(key=key):
+                self.assertNotIn(f"'pm', '{key}'", source)
 
 
 class WriteFidelity(unittest.TestCase):
