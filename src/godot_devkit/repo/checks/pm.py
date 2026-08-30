@@ -1,7 +1,8 @@
 """check pm — tier-1 guard against PM-tree status DRIFT.
 
-The transition CLI (`godot-devkit pm ...`) makes each status move
-precondition-checked; this makes the resulting INCONSISTENCY loud. It imports
+The status CLI (`godot-devkit pm ...`) moves a `status:` through code; this
+makes an INCONSISTENT tree loud. Nothing checks an EDGE — a status move is a
+write, and what these rules read is the END STATE it left behind. It imports
 the vocabularies, the review-record definition and the feature-grain drift
 predicates from `godot_devkit.repo.pm.model`, so the gate and the tool can never
 describe "reviewed" or "drift" differently — one definition, two readers.

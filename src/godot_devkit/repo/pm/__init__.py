@@ -3,11 +3,10 @@
 The PM tree is markdown with YAML frontmatter under `pm/roadmap/`; a grain's
 `status:` is the only field this package writes. Two halves that MUST agree:
 
-    model.py   the invariants — vocabularies, transition graphs, id<->path
-               resolution, frontmatter IO, the review-record definition, the
-               drift predicates
-    cli.py     the write side: precondition-checked transitions, scaffolding,
-               reporting, prune
+    model.py   the invariants — vocabularies, id<->path resolution,
+               frontmatter IO, the review-record definition, the drift
+               predicates
+    cli.py     the write side: status moves, scaffolding, reporting
 
 ...plus `godot_devkit.repo.checks.pm`, the read side (the drift gate), which imports
 the SAME predicates from model.py. One definition, two readers — that invariant

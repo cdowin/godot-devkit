@@ -18,7 +18,8 @@ and in pre-commit hooks.
 - **Gate the silent-failure classes.** Renamed exports, uid drift, path-only refs — the things Godot
   drops without a word. → [Catch Godot's silent failures](#catch-godots-silent-failures-in-ci)
 - **Run a project's work tree from the CLI.** Milestones, features and stories as markdown, with
-  transitions no one can hand-edit around. → [Track work in a markdown PM tree](#track-work-in-a-markdown-pm-tree)
+  a status you move through code and a gate that reports a tree contradicting itself.
+  → [Track work in a markdown PM tree](#track-work-in-a-markdown-pm-tree)
 
 ## Install
 
@@ -224,9 +225,10 @@ mistake is always `2`, never `1`, so CI can never read a typo as drift.
 
 **A stale rule id stops the GATE, not the read verbs.** `[pm] checks` naming a rule this
 package no longer ships — which is what a pin bump retiring one produces — is exit 2 from
-`check pm` and `pm validate`, and from nothing else. `pm status`, `pm get`, `pm new` and
-`pm vocabulary --json` keep working, so you can read your own tree and ask the
-tool what the new vocabulary is while deciding what to change.
+`check pm` and `pm validate`, and from nothing else. `pm status`, `pm get`, `pm new`
+and `pm vocabulary --json` keep working, so you can read your own tree AND ask the tool
+what the closed set became while deciding what to change. Learning the new roster must
+not require the config to already be right about it.
 
 ## Command reference
 
@@ -323,22 +325,27 @@ what it writes is the PM tree's own guidance.
 ### Project management (`godot-devkit pm <command>`)
 
 Filesystem-backed milestone → feature → story tracking: markdown with YAML frontmatter under
-`pm/roadmap/`. The point of a CLI rather than a convention is that a `status:` is the one field a
-human should never hand-edit — free-text flips are how a lifecycle drifts, with features reaching
-`done` without the review the flow requires.
+`pm/roadmap/`. The CLI writes ONE line and touches nothing else — no line endings, no adjacent
+fields, no file the caller did not name. **Closed states, open transitions:** the state you ask
+for is validated against that grain's vocabulary (`butterfly` is exit 2, naming the set), and the
+state the file currently holds is never validated at all — it is read for the message. So
+`pm milestone done 0.1` on a hand-edited `status: wombat` prints `wombat -> done` and repairs it,
+which is exactly the drift `check pm` reports. There is no transition graph: nothing checks an
+EDGE (D3/D4/D5 read the tree's END STATE), so a graph would only tax whoever used the sanctioned
+tool while a `sed` of the same line reached the state it refused.
 
 | Command | What it does |
 |---|---|
-| `pm story <wip\|review\|blocked> <story-id>` | Legal story transitions. `review` is the story terminal — there is deliberately no `story done` |
-| `pm feature <ready\|building> <feature-id>` | The claim-side flips |
+| `pm story <status> <story-id>` | Set a story's status. Any value in `[pm] story_states`; anything else is exit 2 naming the vocabulary. The value it currently holds is read **for the message only** — `wombat -> done` — so the verb is the repair path for exactly the drift D4 reports, and an absent key is `(none) -> done` |
+| `pm feature <status> <feature-id>` | Same, against `[pm] feature_states` |
 | `pm feature review <feature-id>` | Refuses unless every story is at `review` |
-| `pm feature done <feature-id> [--review-record <path>]` | Cascade-closes every `review` story **and** the feature, atomically. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical. A record kept anywhere outside the PM tree (`docs/reviews/…`) is untouched |
-| `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
+| `pm feature done <feature-id> [--cascade] [--review-record <path>]` | Closes the feature. **Touches no story file** unless `--cascade`, which additionally moves that feature's stories at `review` to `done` in the same run. Either way it REPORTS the stories it did not touch and refuses nothing on their account. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical |
+| `pm milestone <status> <id>` | Milestone flips; `done` refuses unless every feature is done. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain — its own frontmatter file (`milestone.md` / `feature.md`) plus its directory slots (`features/ bugs/ design/`; a feature gets `stories/ design/`). **A shared doc is NOT minted**: `decisions.md` appears when `pm decide` records the first one, `handoff.md` and `review.md` when somebody writes one. Scaffolding them empty put 204 files and ~1,900 lines into one consumer's tree — a quarter of its PM tree, minted by the verb that exists to stop sprawl. `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line on a doc that HAS one, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. Every failure out is a **refusal**, never a stack trace — including the grain directory or file the filesystem itself will not take (a name past NAME_MAX, an unwritable parent), which answers the same way on every supported Python |
-| `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex. `status` is refused — it has a transition graph behind it |
-| `pm vocabulary [--json]` | The states, transitions and verbs, machine-readably. Exists so an external checker never has to scrape help text — a tool that states its own rules in a parseable form is the only way a scanner stays honest when the rules change |
+| `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex — the field's value replaced, every other byte and the file's line endings preserved |
+| `pm vocabulary [--json]` | The CLOSED sets, machine-readably: the states each grain kind may hold, and the rule ids `[pm] checks` may name. It prints no transitions — there are none. Its audience is the **pin bump**: the toolkit ships a shape, you bump the pin, and this is how you see what the closed set became without scraping a changelog. It keeps working when `[pm] checks` names a rule this release retired |
 | `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file; **V6** fails when a rendered block drifts from the tree |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
 | `pm decide <grain-id> <title…>` | Append one `## <id> — <ISO date> — <title>` heading to that milestone's or feature's `decisions.md`, **minting the log from its template if this is the first one**. It stamps the two things a hand-written entry gets wrong — the date, and the next ordinal in the log's own id prefix — and stops there; the reasoning under the heading is yours to write. No field schema: the four-field one this replaced produced zero conforming entries across a consumer's 158 decision logs, so what it gated was whether anyone used the verb |
@@ -437,10 +444,9 @@ bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file = "project.godot"                  # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
 trunk_branches = ["staging", "main"]            # D10: `branch: staging` = no integration branch
-# Vocabularies + graphs are overridable too: milestone_states, feature_states,
-# story_states, milestone_transitions, feature_transitions, story_transitions.
-# The stock graph is the STRICT one: the story terminal is `review` (`done`
-# comes only from the feature cascade) and milestones have no `review` state.
+# The vocabularies are overridable: milestone_states, feature_states,
+# story_states. They are what D4 holds a grain to, and what the status verbs
+# accept — there is no transition graph, so nothing constrains the ORDER.
 
 
 [defaults]

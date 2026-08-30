@@ -24,6 +24,13 @@
 - **a stale rule id stops the gate, not the CLI** — One retired name in `[pm] checks` used to kill `pm status`, `pm get`, `pm new` and `pm vocabulary --json` too. Now only `check pm` and `pm validate` refuse.
 - **BREAKING: `check agents` is removed** — A1/A2/A4 failed a build because a markdown file DESCRIBED a workflow, and they inferred: a line's subject was guessed from "one grain word appears".
 - **the flat-skill rule survives, in `check doc`** — `.claude/skills/<name>.md` instead of `<name>/SKILL.md` genuinely does not load. A fact about a file, on the gate that checks those.
+- **BREAKING: the transition graph is removed** — README claimed "transitions no one can hand-edit around". A `sed` reaches the refused state and `check pm` prints PASS: nothing ever checked an EDGE. (repo/pm/model.py)
+- **closed states, open transitions** — `pm story|feature|milestone <status> <id>` takes any value in that grain's vocabulary; `butterfly` is exit 2 naming the set. `pm set <id> status` is no longer refused.
+- **a status verb never validates the state it FOUND** — `pm milestone done` on a hand-edited `status: wombat` used to refuse. It prints `wombat -> done` and repairs the drift `check pm` reports.
+- **BREAKING: the `pm feature done` story cascade is opt-in** — Without `--cascade` no story file is touched. Writing files the caller did not name is the tool acting on its own initiative.
+- **empty repo to a closed milestone: 14 commands to 6** — Six of the fourteen existed only because an edge demanded them, and every one was reachable by hand anyway.
+- **`pm vocabulary` prints the closed SETS, not edges** — The states each grain may hold and the rule ids `[pm] checks` may name, machine-readably. It is how a project sees what a pin bump changed.
+- **a project's own template may open a grain at any state** — The guard forbidding it was the tool overruling a project about its own scaffold; D4 reads the state off the tree either way.
 
 ## v0.14.0 — 2026-08-29
 

@@ -11,8 +11,8 @@ paths:
 
 # Execution loop — claim to close
 
-Six steps, in order. `godot-devkit pm` enforces transitions 1–5 and refuses what
-breaks them; `godot-devkit check pm` catches drift a hand-edit would leave behind.
+Six steps, in order. `godot-devkit pm` writes the `status:` line; `godot-devkit
+check pm` reports a tree whose statuses contradict each other.
 
 **Verify→flip is one action.** The failure this exists to prevent is code that was
 verified while its status never moved — the tree and the work disagreeing. Do not
@@ -26,14 +26,17 @@ batch flips at the end; move the status the moment its precondition holds.
 3. **The story moves to review when its work is ready to be reviewed.**
    `pm story review <id>`. Fixes land in place; no re-review. `review` is the story's
    terminal — it goes no further on its own.
-4. **The feature close flips the stack.** `pm feature done <id> --review-record <path>`
-   moves every `review` story under the feature **and** the feature itself, atomically.
+4. **Close the feature.** `pm feature done <id> --review-record <path>` sets the feature's
+   status and touches nothing else. Add `--cascade` to also move that feature's stories
+   at `review` to `done` in the same run. Either way it prints the stories it did not
+   touch.
 
 **WHO performs steps 3 and 4 is your project's call, and your own rules must say.** The
 two live answers are "the builder flips its own work to review" and "the orchestrator
 flips it after verifying against git" — the tool permits either and has no opinion. What
 it does NOT permit is a story reaching `done` any other way; see below.
-5. **Never hand-edit `status:`.** Every transition goes through the CLI. Creation too:
+5. **Move `status:` with the CLI, not an editor.** It writes one line and touches
+   nothing else — no line endings, no adjacent fields. Creation too:
    `pm new milestone|feature|story|bug` scaffolds to the schema.
 6. **Leave evidence at close.** One terse block at the grain that closed. See below.
 
@@ -41,8 +44,10 @@ it does NOT permit is a story reaching `done` any other way; see below.
 
 Worth knowing, so a refusal reads as a rule rather than a bug:
 
-- **A story reaches `done` only through the feature cascade.** `pm feature done` moves
-  every story at `review` under the feature, and the feature, in one command.
+- **The status you ASK for is checked; the one already in the file is not.** `butterfly` is
+  not a story status, so that is an error naming the set. `wombat` sitting in the file is
+  just what it says now: `pm story review <id>` prints `wombat -> review` and repairs it.
+  That is the same drift `check pm` reports, so the tool that reports it can also fix it.
 - **`pm feature review` refuses unless every story is at `review`.** A feature cannot
   be under review while its own work is unfinished.
 - **`pm feature done` refuses without a *substantive* review record** — a pointer that

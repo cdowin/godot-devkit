@@ -1,16 +1,20 @@
 """cli.py — the PM-tree status CLI.
 
-The ONLY sanctioned way to transition a story/feature/milestone status. A
-free-text edit of a `status:` line is the drift vector this exists to close:
-flips batched at the end, features reaching `done` without the review the flow
-requires. Every command validates the transition graph plus its preconditions,
-writes ONLY the `status:` line (plus `reviewed:` on the feature-done step), and
-is idempotent — running it twice is a no-op the second time.
+Moves a story/feature/milestone `status:` through code rather than a regex: the
+verb validates the value against that grain's vocabulary, writes ONLY the
+`status:` line (plus `reviewed:` on the feature-done step), preserves every
+other byte and line ending, and is idempotent.
+
+It does NOT own a transition graph. Nothing checks an EDGE — D3/D4/D5 check the
+tree's END STATE — so a graph here would only tax whoever used the sanctioned
+tool while a `sed` of the same line reached the state it refused. The one
+convenience that remains is the `feature done` cascade, which moves the stories
+and the feature together so a half-applied close cannot exist.
 
 Its companion is `godot-devkit check pm`, which imports the same predicates
-from model.py and makes the resulting inconsistency loud.
+from model.py and makes an inconsistent END STATE loud.
 
-Exit codes: 0 ok (incl. idempotent no-op) · 1 precondition/transition refused
+Exit codes: 0 ok (incl. idempotent no-op) · 1 precondition refused
 · 2 usage / resolution error.
 """
 from __future__ import annotations
@@ -29,20 +33,22 @@ from godot_devkit.repo.pm import model, templates
 PROG = 'godot-devkit pm'
 
 USAGE = """usage: godot-devkit pm <command>
-  story <wip|review|blocked> <story-id>   (review is the story terminal — no story done)
-  feature <ready|building> <feature-id>
-  feature review <feature-id>
-  feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
-  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done;
-                                                        building also places branch: in the
-                                                        trunk when [pm]
-                                                        place_branch_on_building)
+  story <status> <story-id>               (any status in [pm] story_states)
+  feature <status> <feature-id>           (any status in [pm] feature_states)
+  feature done <feature-id> [--cascade] [--review-record <path>]
+                                          (--cascade also closes that feature's
+                                           stories that are at `review`; without
+                                           it, no story file is touched)
+  milestone <status> <milestone-id>       (done refuses unless all features done;
+                                           building also places branch: in the
+                                           trunk when [pm]
+                                           place_branch_on_building)
   status [<milestone>]
   get <grain-id> <key>                    (read one frontmatter field)
-  set <grain-id> <key> <value>            (write one — never `status`)
+  set <grain-id> <key> <value>            (write one frontmatter field)
   templates [--force]                     (copy the templates into the project to edit)
   sync [--check]                          (re-render the execution lists)
-  vocabulary [--json]                     (the transition graph, for checkers)
+  vocabulary [--json]                     (the closed state set + the rule ids)
   validate                                (structural + referential integrity)
   install-skills [--force] [--diff]       (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
@@ -59,7 +65,7 @@ USAGE = """usage: godot-devkit pm <command>
 
 
 class Refused(Exception):
-    """A precondition or transition rule said no. Exit 1."""
+    """A precondition said no. Exit 1."""
 
 
 class Usage(Exception):
@@ -139,6 +145,20 @@ def _slugify(text: str) -> str:
     return out.strip('-')
 
 
+def _was(path: Path) -> str:
+    """The status a grain currently carries, FOR THE MESSAGE ONLY.
+
+    Never for a decision. A status verb validates the state it was ASKED for
+    against the closed vocabulary and writes it; what the file held before is
+    posterity, printed as `wombat -> done`. Gating on it made the verb refuse
+    exactly the drift D4 reports — the gate diagnosed a hand-edited `wombat`
+    and the tool that exists to spare a person the hand-edit declined to
+    repair it, leaving the editor as the only way out. `(none)` when the key is
+    absent, which is the same fact and equally repairable.
+    """
+    return model.field_of(path, 'status') or '(none)'
+
+
 def _set_status(cfg: model.PmConfig, path: Path, value: str, note: str = '') -> None:
     if not model.set_field(path, 'status', value):
         raise Usage(f'could not rewrite status in {cfg.rel(path)} '
@@ -153,22 +173,14 @@ def cmd_story(cfg: model.PmConfig, args: list[str]) -> int:
     to, sid = args
     if to not in cfg.story_states:
         raise Usage(f'{to!r} is not a story status ({" ".join(cfg.story_states)})')
-    if to == 'done':
-        raise Refused("stories don't go to 'done' directly — finish with "
-                      "'pm story review', then close the stack with 'pm feature done'")
     sf = model.story_file(cfg, sid)
     if sf is None:
         raise Usage(f'no story resolves from id {sid!r} '
                     f'(expected <milestone>/<feature-slug>/<story-slug>)')
-    cur = model.field_of(sf, 'status')
-    if cur not in cfg.story_states:
-        raise Usage(f'story {sid!r} has an unknown current status {cur!r}')
+    cur = _was(sf)
     if cur == to:
         _ok(f'story {sid} already {to} (no-op)')
         return 0
-    # `blocked` is reachable from any state; everything else follows the graph.
-    if to != 'blocked' and not model.transition_legal(cfg.story_transitions, cur, to):
-        raise Refused(f'illegal story transition {cur} -> {to} for {sid!r}')
     _set_status(cfg, sf, to)
     _ok(f'story {sid}: {cur} -> {to}')
     return 0
@@ -179,10 +191,7 @@ def _feature_or_usage(cfg: model.PmConfig, fid: str) -> tuple[Path, str]:
     ff = model.feature_file(cfg, fid)
     if ff is None:
         raise Usage(f'no feature resolves from id {fid!r}')
-    cur = model.field_of(ff, 'status')
-    if cur not in cfg.feature_states:
-        raise Usage(f'feature {fid!r} has an unknown current status {cur!r}')
-    return ff, cur
+    return ff, _was(ff)
 
 
 def _story_states(cfg: model.PmConfig, fid: str) -> list[tuple[Path, str]]:
@@ -199,8 +208,6 @@ def cmd_feature_simple(cfg: model.PmConfig, to: str, args: list[str]) -> int:
     if cur == to:
         _ok(f'feature {fid} already {to} (no-op)')
         return 0
-    if not model.transition_legal(cfg.feature_transitions, cur, to):
-        raise Refused(f'illegal feature transition {cur} -> {to} for {fid!r}')
     _set_status(cfg, ff, to)
     _ok(f'feature {fid}: {cur} -> {to}')
     return 0
@@ -214,8 +221,6 @@ def cmd_feature_review(cfg: model.PmConfig, args: list[str]) -> int:
     if cur == 'review':
         _ok(f'feature {fid} already review (no-op)')
         return 0
-    if not model.transition_legal(cfg.feature_transitions, cur, 'review'):
-        raise Refused(f'illegal feature transition {cur} -> review for {fid!r}')
     pending = [f'{p.name}({st})' for p, st in _story_states(cfg, fid)
                if st not in ('review', 'done')]
     if pending:
@@ -230,11 +235,26 @@ def _resolve_record(cfg: model.PmConfig, rec: str) -> Path:
 
 
 def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
+    """Close a feature. Touches the feature's own `status:` and nothing else.
+
+    `--cascade` additionally moves that feature's stories that are at `review`
+    to `done`, in the same run. It is OPT-IN: writing to files the caller did
+    not name is the tool acting on its own initiative, and a story flipped by a
+    command aimed at a feature is exactly that. With the flag, it was asked for.
+
+    Either way the verb REPORTS what it saw — the stories it did not touch, and
+    why — and refuses nothing on their account. What the tree is left holding is
+    D5's question, and D5 asks it of the tree rather than of the caller.
+    """
     fid = ''
     rec = ''
+    cascade = False
     i = 0
     while i < len(args):
         a = args[i]
+        if a == '--cascade':
+            cascade, i = True, i + 1
+            continue
         if a == '--review-record':
             if i + 1 >= len(args):
                 raise Usage('--review-record needs a path')
@@ -260,17 +280,12 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
             _ok(f'feature {fid}: reviewed -> {rec}')
         _ok(f'feature {fid} already done (no-op)')
         return 0
-    if not model.transition_legal(cfg.feature_transitions, cur, 'done'):
-        raise Refused(f'illegal feature transition {cur} -> done for {fid!r} '
-                      f'(must pass through review)')
-
-    # Preconditions clear BEFORE any write — the cascade is all-or-nothing, and
-    # a refused close must leave feature.md byte-identical (never a stale stamp).
     states = _story_states(cfg, fid)
-    pending = [f'{p.name}({st})' for p, st in states if st not in ('review', 'done')]
-    if pending:
-        raise Refused(f'feature {fid} -> done: stories not at review: {" ".join(pending)}')
-    to_close = [p for p, st in states if st == 'review']
+    to_close = [p for p, st in states if st == 'review'] if cascade else []
+    # What it noticed, said out loud. Never a refusal: the caller asked for a
+    # feature to be closed, and this is a fact about its stories.
+    untouched = [f'{p.name}({st})' for p, st in states
+                 if st != 'done' and p not in to_close]
 
     if rec:
         target = _resolve_record(cfg, rec)
@@ -299,6 +314,10 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     _set_status(cfg, ff, 'done',
                 'Stories were flipped; re-run to finish closing the feature.')
     _ok(f'feature {fid}: {cur} -> done (review record: {record})')
+    if untouched:
+        _ok(f'  {len(untouched)} story/ies not done and NOT touched: '
+            f'{" ".join(untouched)}'
+            + ('' if cascade else ' (--cascade closes the ones at `review`)'))
     return 0
 
 
@@ -306,13 +325,15 @@ def cmd_feature(cfg: model.PmConfig, args: list[str]) -> int:
     if not args:
         raise Usage(USAGE)
     sub, rest = args[0], args[1:]
-    if sub in ('ready', 'building'):
-        return cmd_feature_simple(cfg, sub, rest)
-    if sub == 'review':
-        return cmd_feature_review(cfg, rest)
+    # `done` is the only verb with behaviour of its own — the cascade.
     if sub == 'done':
         return cmd_feature_done(cfg, rest)
-    raise Usage(USAGE)
+    if sub == 'review':
+        return cmd_feature_review(cfg, rest)
+    if sub in cfg.feature_states:
+        return cmd_feature_simple(cfg, sub, rest)
+    raise Usage(f'{sub!r} is not a feature status '
+                f'({" ".join(cfg.feature_states)})')
 
 
 # --- branch placement ---------------------------------------------------------
@@ -428,9 +449,7 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     mf = model.milestone_file(cfg, mid)
     if mf is None:
         raise Usage(f'no milestone resolves from id {mid!r}')
-    cur = model.field_of(mf, 'status')
-    if cur not in cfg.milestone_states:
-        raise Usage(f'milestone {mid!r} has an unknown current status {cur!r}')
+    cur = _was(mf)
     place = to == 'building' and cfg.place_branch_on_building
     if cur == to:
         _ok(f'milestone {mid} already {to} (no-op)')
@@ -442,8 +461,6 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
             if target is not None:
                 _place_branch(cfg, mid, *target)
         return 0
-    if not model.transition_legal(cfg.milestone_transitions, cur, to):
-        raise Refused(f'illegal milestone transition {cur} -> {to} for {mid!r}')
     if to == 'done':
         mdir = model.milestone_dir(cfg, mid)
         assert mdir is not None
@@ -692,12 +709,6 @@ def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
-# `status:` is deliberately NOT settable here. It is the one field with a
-# transition graph and preconditions behind it, and a `pm set` that could move
-# it would reopen the exact hole the CLI exists to close.
-PROTECTED_FIELDS = ('status',)
-
-
 def _grain_file(cfg: model.PmConfig, gid: str) -> Path:
     """Resolve any grain id — milestone, feature, story or bug — to its file."""
     if '/bugs/' in gid:
@@ -733,10 +744,6 @@ def cmd_set(cfg: model.PmConfig, args: list[str]) -> int:
     if len(args) != 3:
         raise Usage(USAGE)
     gid, key, value = args
-    if key in PROTECTED_FIELDS:
-        raise Refused(
-            f'{key!r} has a transition graph and preconditions behind it — move '
-            f'it with `pm story|feature|milestone <transition>`, not `pm set`')
     if not key or not key.replace('_', '').isalnum():
         raise Usage(f'{key!r} is not a frontmatter key')
     if '\n' in value or '\r' in value:
@@ -802,48 +809,55 @@ def cmd_sync(cfg: model.PmConfig, args: list[str]) -> int:
 
 
 def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
-    """Print the transition vocabulary, machine-readably with --json.
+    """Print the CLOSED sets this package knows, machine-readably with --json.
 
-    Exists so a checker never has to scrape help text. A tool that states its
-    own rules in a parseable form is the only way an external scanner can stay
-    honest when those rules change.
+    Its audience is the pin bump. This toolkit ships a shape, a project bumps
+    its pin, and then has to see what changed and decide — so the set of states
+    a grain may hold, and the set of rule ids `[pm] checks` may name, have to be
+    readable FROM the tool rather than scraped out of help text or a changelog.
+    That is the same need `check pm`\'s roster refusal serves from the other
+    side, and the reason this verb keeps running when `[pm] checks` names an id
+    this release retired.
+
+    There are no TRANSITIONS to print. Any state in a grain\'s own set is
+    reachable directly; nothing here decides which may follow which, and
+    `check pm` reports a tree whose statuses contradict each other.
     """
     as_json = '--json' in args
     for a in args:
         if a != '--json':
             raise Usage(f'unknown flag {a!r}')
     grains = {
-        'milestone': (cfg.milestone_states, cfg.milestone_transitions),
-        'feature': (cfg.feature_states, cfg.feature_transitions),
-        'story': (cfg.story_states, cfg.story_transitions),
+        'milestone': cfg.milestone_states,
+        'feature': cfg.feature_states,
+        'story': cfg.story_states,
+        'bug': cfg.bug_states,
     }
     if as_json:
         import json
         print(json.dumps({
-            'grains': {g: {
-                'states': list(states),
-                'transitions': [dict(zip(('from', 'to'), t.split('->')))
-                                for t in trans],
-                'verbs': sorted({t.split('->')[1] for t in trans}
-                                | ({'blocked'} if g == 'story' else set())),
-            } for g, (states, trans) in grains.items()},
+            'grains': {g: {'states': list(states)}
+                       for g, states in grains.items()},
             'notes': {
-                'story_terminal': 'review',
-                'story_done_via': 'pm feature done (cascade); there is no '
-                                  'per-story done transition',
-                'status_edits': 'the CLI is the only sanctioned path; never '
-                                'hand-edit a status: line',
+                'transitions': 'there is no transition graph — any state in a '
+                               'grain\'s own set is reachable directly, and '
+                               '`check pm` reports an inconsistent END STATE',
+                'feature_done': '`pm feature done` also moves every story at '
+                                '`review` under that feature, in one write',
             },
             'checks': list(model.KNOWN_CHECKS),
         }, indent=2))
         return 0
-    for g, (states, trans) in grains.items():
-        print(f'{g}:')
-        print(f'  states      {" ".join(states)}')
-        print(f'  transitions {" ".join(trans)}')
+    width = max(len(g) for g in grains)
+    for g, states in grains.items():
+        print(f'{g:<{width}}  {" ".join(states)}')
     print()
-    print('A story\'s terminal is `review`. It reaches `done` ONLY through')
-    print('`pm feature done`\'s cascade — there is no per-story done transition.')
+    print('Any state in a grain\'s own set is reachable directly — there is no')
+    print('transition graph. `pm feature done` additionally moves every story at')
+    print('`review` under that feature. A tree whose statuses contradict each')
+    print('other is what `check pm` reports.')
+    print()
+    print(f'rules  {" ".join(model.KNOWN_CHECKS)}')
     return 0
 
 
@@ -878,36 +892,11 @@ def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
 
 
 # --- new ----------------------------------------------------------------------
-INITIAL_STATUS = {'milestone': 'planning', 'feature': 'planning',
-                  'story': 'todo', 'bug': 'open'}
-
-
-def _guard_initial_status(grain: str, body: str) -> None:
-    """A template may not mint a grain past its own starting state.
-
-    Otherwise `pm templates` + one edit is a supported path to a `done` story
-    that never passed a precondition — the transition graph enforced on every
-    move, bypassed at creation.
-    """
-    for line in body.split('\n'):
-        if line.startswith('status:'):
-            got = line[len('status:'):].strip().strip('"\'')
-            want = INITIAL_STATUS[grain]
-            if got and got != want:
-                raise Refused(
-                    f'the {grain} template sets `status: {got}` — a grain is '
-                    f'created at {want!r} and moves only through the CLI')
-            return
-
-
 def _scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
               values: dict[str, str]) -> int:
     """Fill a grain's canonical slots and report only what CHANGED."""
-    # The guard runs on the rendered grain template even when the grain already
-    # exists: a project that edits its template into `status: done` must not be
-    # able to mint one through the fill-gaps path either.
     try:
-        head = templates.render(templates.load(cfg, kind), values)
+        templates.render(templates.load(cfg, kind), values)
     except templates.MissingTemplate as err:
         raise Usage(str(err)) from err
     except (OSError, UnicodeDecodeError) as err:
@@ -916,7 +905,6 @@ def _scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
         # print, and a stack trace is not one.
         raise Refused(f'the {kind} template cannot be read ({err}) — nothing '
                       f'was written') from err
-    _guard_initial_status(kind, head)
     try:
         actions = templates.scaffold(cfg, kind, gdir, values)
     except templates.ScaffoldRefused as err:
@@ -988,7 +976,6 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             templates.load(cfg, 'story'),
             {'id': f'{fid}/{slug}', 'feature': fid, 'milestone': mid,
              'name': name})
-        _guard_initial_status('story', body)
         _mint(cfg, sf, body)
         _ok(f'created {cfg.rel(sf)}')
         return 0
@@ -1007,7 +994,6 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         body = templates.render(
             templates.load(cfg, 'bug'),
             {'id': f'{mid}/bugs/{slug}', 'milestone': mid, 'slug': slug})
-        _guard_initial_status('bug', body)
         _mint(cfg, bf, body)
         _ok(f'created {cfg.rel(bf)}')
         return 0

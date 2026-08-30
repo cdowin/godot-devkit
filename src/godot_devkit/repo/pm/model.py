@@ -1,16 +1,14 @@
 """model.py — the PM-tree invariants, single-sourced.
 
-Everything the transition CLI and the drift gate must agree on byte-for-byte:
-the status vocabularies + legal transition graphs, the id <-> filesystem-path
-convention, frontmatter read/write, THE definition of "a feature has a review
-record", and the drift predicates. Two readers, one definition — the gate and
-the tool cannot describe "reviewed" or "drift" differently.
+Everything the status CLI and the drift gate must agree on byte-for-byte: the
+status vocabularies, the id <-> filesystem-path convention, frontmatter
+read/write, THE definition of "a feature has a review record", and the drift
+predicates. Two readers, one definition — the gate and the tool cannot describe
+"reviewed" or "drift" differently.
 
 Config: `[pm]` in the consuming repo's devkit.toml. Every key has a stock
 default, so a repo with no devkit.toml behaves identically to one declaring the
-defaults. The defaults are the STRICT graph: the story terminal is `review`
-(`done` comes only from the feature cascade, closing the review-skip hole) and
-the milestone machine has no `review` state (nothing transitions into one).
+defaults.
 
     [pm]
     roadmap_dir  = "pm/roadmap"    # the tree, relative to the repo root
@@ -24,9 +22,6 @@ the milestone machine has no `review` state (nothing transitions into one).
     feature_states        = [...]
     story_states          = [...]
     bug_states            = [...]  # D4: the bug vocabulary
-    milestone_transitions = [...]  # "from->to" edges
-    feature_transitions   = [...]
-    story_transitions     = [...]
     checks = ["D1","D2","D3","D4","D5","D6",        # which rules run — this
               "V1","V2","V3","V4","V5","V6"]        #   IS the stock default
 """
@@ -44,9 +39,11 @@ from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
 
 # --- stock policy -------------------------------------------------------------
-# The story terminal is `review`: there is deliberately NO story `*->done` edge,
-# because `done` is reached ONLY by the feature-review cascade. A per-story done
-# flip is the latent review-skip hole this graph closes.
+# The VOCABULARY, and nothing more. There is no transition graph: nothing here
+# decides which move is allowed next, because a `sed` of the `status:` line
+# reaches any state the CLI would have refused and no rule checks an EDGE — so
+# the graph taxed whoever used the sanctioned tool and stopped nobody else.
+# What IS checked is END STATE, by D3/D4/D5, on the tree as it stands.
 DEFAULT_MILESTONE_STATES = ('planning', 'ready', 'building', 'done')
 DEFAULT_FEATURE_STATES = ('planning', 'ready', 'building', 'review', 'done')
 DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
@@ -54,19 +51,6 @@ DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
 # exists so D4 covers a bug's status the way it covers every other grain's: a
 # typo'd status is a finding rather than a silent "closed" (rule 4).
 DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
-
-DEFAULT_MILESTONE_TRANSITIONS = ('planning->ready', 'ready->building', 'building->done')
-DEFAULT_FEATURE_TRANSITIONS = (
-    'planning->ready', 'ready->building', 'building->review', 'review->done')
-# todo->review is the sanctioned no-build edge: a doc/decision story with
-# nothing to build reaches review without passing through wip.
-#
-# The `blocked->*` edges are the way OUT. `blocked` is reachable from any state,
-# and for a while had no exit at all — so the only way to unblock a story was to
-# hand-edit the `status:` line, which is the exact drift this tracker exists to
-# prevent. An entry from anywhere needs a return to anywhere.
-DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review',
-                             'blocked->todo', 'blocked->wip', 'blocked->review')
 
 # D8-D10 encode the branch-per-milestone / bump-at-start flow. They are OFF by
 # default: a project that ships from the trunk and bumps at close is not
@@ -209,9 +193,6 @@ class PmConfig:
     feature_states: tuple[str, ...] = DEFAULT_FEATURE_STATES
     story_states: tuple[str, ...] = DEFAULT_STORY_STATES
     bug_states: tuple[str, ...] = DEFAULT_BUG_STATES
-    milestone_transitions: tuple[str, ...] = DEFAULT_MILESTONE_TRANSITIONS
-    feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
-    story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
     checks: tuple[str, ...] = DEFAULT_CHECKS
     # D8 only: where the shipped version lives, and the line that carries it.
     template_dir: str = ''
@@ -280,9 +261,6 @@ def load() -> PmConfig:
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
         bug_states=tup('bug_states', DEFAULT_BUG_STATES),
-        milestone_transitions=tup('milestone_transitions', DEFAULT_MILESTONE_TRANSITIONS),
-        feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
-        story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
@@ -310,11 +288,6 @@ def unknown_checks(cfg: PmConfig) -> str:
         return ''
     return (f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
             f'known rules are {" ".join(KNOWN_CHECKS)}')
-
-
-def transition_legal(graph: tuple[str, ...], src: str, dst: str) -> bool:
-    """True if src->dst is permitted, or src == dst (idempotent no-op)."""
-    return src == dst or f'{src}->{dst}' in graph
 
 
 # --- frontmatter --------------------------------------------------------------

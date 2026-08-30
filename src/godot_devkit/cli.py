@@ -37,12 +37,13 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     godot-devkit pm feature done <feature-id> [--review-record <path>]
     godot-devkit pm milestone <ready|building|done> <milestone-id>
     godot-devkit pm status [<milestone>]
+    godot-devkit pm vocabulary --json   # the closed state set + the rule ids
     godot-devkit pm validate            # ids/parentage/refs/graph integrity
     godot-devkit pm install-skills      # the shared rule + operations skill
     godot-devkit pm init                # stand up a tree in a repo with none
     godot-devkit pm new <milestone|feature|story|bug> ...
-    (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a
-     hand-edit would leave, off the SAME predicates)
+    (moves a `status:` through code rather than a regex; `check pm` reports a
+     tree whose statuses contradict each other, off the SAME predicates)
 
 Installers (write the file once; after that it is the repo's):
     godot-devkit install-ci         # the workflow that runs `make milestone`

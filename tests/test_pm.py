@@ -190,17 +190,59 @@ class ReviewRecord(unittest.TestCase):
             self.assertIsNotNone(model.review_record_for(cfg_for(root), '0.1/alpha'))
 
 
-class Transitions(unittest.TestCase):
-    def test_story_done_is_refused_outright(self):
-        with tree(story_statuses=('review',)) as root:
-            code, out = run_cli(root, 'story', 'done', '0.1/alpha/s0')
-            self.assertEqual(code, 1)
-            self.assertIn('REFUSED', out)
+class StatusMoves(unittest.TestCase):
+    """The verb writes a `status:`. It does not own a transition graph.
 
-    def test_illegal_story_edge_is_refused(self):
+    The graph it replaced claimed, in this repo's own README, "transitions no
+    one can hand-edit around". Proven false: a `sed` of the `status:` line
+    reaches the exact state the CLI refused, and `check pm` then prints PASS,
+    because nothing checks an EDGE — D3/D4/D5 check the tree's END STATE. So
+    the graph taxed whoever used the sanctioned tool and stopped nobody else.
+    `test_a_hand_edit_reaches_what_the_cli_refused` below is that proof, kept.
+    """
+
+    def test_any_state_in_the_vocabulary_is_reachable(self):
+        for state in model.DEFAULT_STORY_STATES:
+            with self.subTest(state=state), tree(story_statuses=('todo',)) as root:
+                code, out = run_cli(root, 'story', state, '0.1/alpha/s0')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(
+                    model.field_of(root / STORY_REL, 'status'), state)
+
+    def test_a_state_outside_the_vocabulary_is_a_usage_error(self):
+        # The half that IS a fact: `banana` is not a story status.
         with tree(story_statuses=('todo',)) as root:
-            code, _ = run_cli(root, 'story', 'review', '0.1/alpha/s0')
-            self.assertEqual(code, 0)  # todo->review is the no-build edge
+            code, out = run_cli(root, 'story', 'banana', '0.1/alpha/s0')
+            self.assertEqual(code, 2, out)
+            self.assertIn('is not a story status', out)
+            self.assertEqual(model.field_of(root / STORY_REL, 'status'), 'todo')
+            for grain, gid in (('feature', '0.1/alpha'), ('milestone', '0.1')):
+                code, out = run_cli(root, grain, 'banana', gid)
+                self.assertEqual(code, 2, out)
+                self.assertIn(f'is not a {grain} status', out)
+
+    def test_a_hand_edit_reaches_what_the_cli_refused_and_the_gate_still_says_PASS(self):
+        # The measurement that removed the graph, kept as the reason. A
+        # `status:` line rewritten by hand lands a story at `done` under a DONE
+        # feature — a state the old graph refused from `todo` — and every rule
+        # that reads an END STATE is satisfied by it.
+        with tree(milestone_status='done', feature_status='done',
+                  story_statuses=('todo',)) as root:
+            sf = root / STORY_REL
+            sf.write_text(sf.read_text(encoding='utf-8')
+                          .replace('status: todo', 'status: done'),
+                          encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_the_END_STATE_is_still_gated(self):
+        # Report, do not refuse: a done story under a live feature is D5's
+        # finding whether the CLI or an editor put it there.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            self.assertEqual(run_cli(root, 'story', 'done', '0.1/alpha/s0')[0], 0)
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('only comes from the feature cascade', out)
 
     def test_idempotent_noop_succeeds(self):
         with tree(story_statuses=('wip',)) as root:
@@ -267,9 +309,40 @@ class Transitions(unittest.TestCase):
 
 
 class FeatureClose(unittest.TestCase):
+    def test_done_without_the_flag_leaves_every_story_BYTE_IDENTICAL(self):
+        # The default blast radius is the file the caller named. A command
+        # aimed at a feature that rewrites three story files is the tool acting
+        # on its own initiative.
+        with tree(feature_status='review', story_statuses=('review', 'review')) as root:
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            before = {p.name: p.read_bytes() for p in sorted(sdir.iterdir())}
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(
+                model.field_of(root / 'pm/roadmap/0.1-demo/features/alpha/feature.md',
+                               'status'), 'done')
+            after = {p.name: p.read_bytes() for p in sorted(sdir.iterdir())}
+            self.assertEqual(before, after)
+
+    def test_it_REPORTS_the_stories_it_did_not_touch(self):
+        with tree(feature_status='review', story_statuses=('review', 'wip')) as root:
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+            self.assertEqual(code, 0, out)
+            self.assertIn('NOT touched', out)
+            self.assertIn('s0.md(review)', out)
+            self.assertIn('s1.md(wip)', out)
+            self.assertIn('--cascade', out)
+
+    def test_an_unfinished_story_is_reported_never_refused(self):
+        with tree(feature_status='review', story_statuses=('wip',)) as root:
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
+            self.assertEqual(code, 0, out)
+            self.assertIn('s0.md(wip)', out)
+            self.assertEqual(model.field_of(root / STORY_REL, 'status'), 'wip')
+
     def test_cascade_closes_stories_and_feature(self):
         with tree(feature_status='review', story_statuses=('review', 'review')) as root:
-            code, _ = run_cli(root, 'feature', 'done', '0.1/alpha')
+            code, _ = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
             self.assertEqual(code, 0)
             fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
             self.assertEqual(model.field_of(fdir / 'feature.md', 'status'), 'done')
@@ -299,11 +372,22 @@ class FeatureClose(unittest.TestCase):
             self.assertEqual(ff.read_text(), before)
             self.assertEqual(story.read_text(), sbefore)
 
-    def test_close_refuses_when_a_story_is_unfinished(self):
+    def test_cascade_moves_only_the_stories_at_review(self):
+        with tree(feature_status='review', story_statuses=('review', 'wip')) as root:
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            wip_before = (sdir / 's1.md').read_bytes()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(model.field_of(sdir / 's0.md', 'status'), 'done')
+            self.assertEqual((sdir / 's1.md').read_bytes(), wip_before)
+
+    def test_an_unfinished_story_does_not_block_the_close(self):
+        # It used to refuse. A feature close is a statement about the feature;
+        # what its stories are left holding is D5's question, asked of the tree.
         with tree(feature_status='review', story_statuses=('review', 'todo')) as root:
-            code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
-            self.assertEqual(code, 1)
-            self.assertIn('not at review', out)
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
+            self.assertEqual(code, 0, out)
+            self.assertIn('s1.md(todo)', out)
 
 
 class DriftGate(unittest.TestCase):
@@ -926,7 +1010,8 @@ class AStaleRuleIdStopsTheGATE_NotTheReadVerbs(unittest.TestCase):
         with tree(story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
             for argv in (('status',), ('vocabulary', '--json'),
-                         ('get', '0.1/alpha', 'status')):
+                         ('get', '0.1/alpha', 'status'),
+                         ('new', 'story', '0.1/alpha', 's9', 'S9')):
                 with self.subTest(argv=argv):
                     code, out = run_cli(root, *argv)
                     self.assertEqual(code, 0, out)
@@ -1203,7 +1288,8 @@ class WriteFidelity(unittest.TestCase):
             blocked = sorted(sdir.glob('*.md'))[-1]
             blocked.chmod(0o444)
             try:
-                code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+                code, out = run_cli(root, 'feature', 'done', '0.1/alpha',
+                                    '--cascade')
             finally:
                 blocked.chmod(0o644)
             # Exit 2 (a tool failure), never 1 (which means "findings"), and it
@@ -1835,15 +1921,15 @@ class FieldMutation(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn('3d', out)
 
-    def test_status_is_refused(self):
-        # It has a transition graph and preconditions behind it; a settable
-        # status would reopen the hole the CLI exists to close.
+    def test_status_is_not_a_protected_field(self):
+        # `status` was refused here because it "has a transition graph behind
+        # it". There is no graph, and the refusal never protected anything: the
+        # `sed` it pushed people towards is the write this verb does correctly.
         with tree(story_statuses=('todo',)) as root:
             code, out = run_cli(root, 'set', '0.1/alpha/s0', 'status', 'done')
-            self.assertEqual(code, 1)
-            self.assertIn('transition', out)
+            self.assertEqual(code, 0, out)
             sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
-            self.assertEqual(model.field_of(sf, 'status'), 'todo')
+            self.assertEqual(model.field_of(sf, 'status'), 'done')
 
     def test_set_moves_owner_in_both_directions(self):
         # `claim`/`release` were fourteen lines calling this with the key
@@ -1940,17 +2026,157 @@ class ExecutionList(unittest.TestCase):
             self.assertIn('keep me', mfile.read_text())
 
 
+class AStatusVerbIsTheREPAIRForWhatD4Reports(unittest.TestCase):
+    """The verb validates the state it was ASKED for. Never the one it found.
+
+    Reproduced on a hand-edited tree: `check pm` reported
+    `milestone 0.1: status 'wombat' not in (planning ready building done)`,
+    and `pm milestone done 0.1` answered
+    `ERROR — milestone '0.1' has an unknown current status 'wombat'` and wrote
+    nothing. The gate diagnosed the breakage and the verb declined to repair
+    it, leaving the editor as the only way out — which is the one thing this
+    tool exists to spare a person.
+
+    The current value is read FOR THE MESSAGE. `wombat -> done`.
+    """
+
+    NONSENSE = {'milestone': ('pm/roadmap/0.1-demo/milestone.md', '0.1', 'wombat'),
+                'feature': ('pm/roadmap/0.1-demo/features/alpha/feature.md',
+                            '0.1/alpha', 'hedgehog'),
+                'story': (STORY_REL, '0.1/alpha/s0', 'butterfly')}
+
+    def _mangle(self, root: Path, rel: str, value: str) -> Path:
+        path = root / rel
+        text = path.read_text(encoding='utf-8')
+        line = next(l for l in text.split('\n') if l.startswith('status:'))
+        path.write_text(text.replace(line, f'status: {value}'), encoding='utf-8')
+        return path
+
+    def test_every_grain_kind_is_repairable_from_nonsense(self):
+        for grain, (rel, gid, junk) in self.NONSENSE.items():
+            # A milestone close still asks its features to be done (that
+            # precondition is a separate question); the fixture satisfies it so
+            # this case isolates the one being asked here.
+            kw = ({'feature_status': 'done', 'story_statuses': ('done',)}
+                  if grain == 'milestone' else {'story_statuses': ('todo',)})
+            with self.subTest(grain=grain), tree(**kw) as root:
+                path = self._mangle(root, rel, junk)
+                # The gate reports it...
+                code, out = run_gate(root)
+                self.assertEqual(code, 1, out)
+                self.assertIn(junk, out)
+                # ...and the verb fixes it, naming what it found.
+                code, out = run_cli(root, grain, 'done', gid)
+                self.assertEqual(code, 0, out)
+                self.assertIn(f'{junk} -> done', out)
+                self.assertEqual(model.field_of(path, 'status'), 'done')
+
+    def test_an_absent_status_key_reads_as_none_and_is_still_settable(self):
+        with tree(story_statuses=('todo',)) as root:
+            path = root / STORY_REL
+            path.write_text(
+                '\n'.join(l for l in path.read_text(encoding='utf-8').split('\n')
+                          if not l.startswith('status:')), encoding='utf-8')
+            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+            self.assertEqual(code, 0, out)
+            self.assertIn('(none) -> wip', out)
+            self.assertEqual(model.field_of(path, 'status'), 'wip')
+
+    def test_the_REQUESTED_state_is_still_closed(self):
+        # The one refusal that survives, on every grain kind, naming the set.
+        for grain, (_, gid, _) in self.NONSENSE.items():
+            with self.subTest(grain=grain), tree(story_statuses=('todo',)) as root:
+                code, out = run_cli(root, grain, 'butterfly', gid)
+                self.assertEqual(code, 2, out)
+                self.assertIn(f'is not a {grain} status', out)
+
+
+class TheShortestPathFromNothingToAClosedMilestone(unittest.TestCase):
+    """Six commands, and every one of them writes something.
+
+    Measured on the graph this replaced: an empty repo to one closed milestone
+    was 14 commands, six of them pure ceremony — `milestone ready`,
+    `milestone building`, `feature ready`, `feature building`, `feature review`
+    and a `story wip` nobody wanted — each existing only because an edge
+    demanded it, and each reachable by `sed` anyway.
+    """
+
+    def test_it_is_six_commands_and_they_all_land(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            root.mkdir()
+            (root / 'docs' / 'reviews').mkdir(parents=True)
+            (root / 'docs' / 'reviews' / 'alpha.md').write_text(
+                'Reviewed, and it holds up under the cases that matter.\n',
+                encoding='utf-8')
+            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                sequence = (
+                    ('new', 'milestone', '0.1', 'Demo'),
+                    ('new', 'feature', '0.1', 'alpha', 'Alpha'),
+                    ('new', 'story', '0.1/alpha', 's0', 'S0'),
+                    ('story', 'review', '0.1/alpha/s0'),
+                    ('feature', 'done', '0.1/alpha', '--cascade',
+                     '--review-record', 'docs/reviews/alpha.md'),
+                    ('milestone', 'done', '0.1'),
+                )
+                for argv in sequence:
+                    code, out = run_cli(root, *argv)
+                    self.assertEqual(code, 0, f'{argv}\n{out}')
+                self.assertEqual(len(sequence), 6)
+                code, out = run_gate(root)
+            finally:
+                os.chdir(previous)
+            self.assertEqual(code, 0, out)
+
+
 class Vocabulary(unittest.TestCase):
-    def test_json_states_the_story_terminal_machine_readably(self):
-        # The whole point: a checker must never scrape help text.
+    """`pm vocabulary` prints the CLOSED SETS, and no longer prints edges.
+
+    Its audience is the pin bump: this toolkit ships a shape, a project bumps
+    its pin, and then has to see what changed. The set of states a grain may
+    hold and the set of rule ids `[pm] checks` may name are what changed, so
+    they have to be readable from the tool rather than scraped from a
+    changelog — which is also why this verb keeps running when `[pm] checks`
+    names an id the release retired.
+    """
+
+    def test_json_states_the_closed_sets_and_no_edges(self):
         import json
         with tree() as root:
             code, out = run_cli(root, 'vocabulary', '--json')
-            self.assertEqual(code, 0)
+            self.assertEqual(code, 0, out)
             data = json.loads(out)
-            self.assertEqual(data['notes']['story_terminal'], 'review')
-            self.assertNotIn('done', data['grains']['story']['verbs'])
-            self.assertIn('done', data['grains']['feature']['verbs'])
+            self.assertEqual(data['grains']['story']['states'],
+                             list(model.DEFAULT_STORY_STATES))
+            self.assertEqual(data['grains']['bug']['states'],
+                             list(model.DEFAULT_BUG_STATES))
+            self.assertEqual(data['checks'], list(model.KNOWN_CHECKS))
+            # The edge table is what died. Nothing may re-grow one here.
+            for grain in data['grains'].values():
+                self.assertEqual(list(grain), ['states'])
+            self.assertNotIn('->', out)
+
+    def test_it_reads_the_projects_OWN_vocabulary_not_the_stock_one(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nstory_states = ["todo","wip","review","done","parked"]\n',
+                encoding='utf-8')
+            import json
+            code, out = run_cli(root, 'vocabulary', '--json')
+            self.assertEqual(code, 0, out)
+            self.assertIn('parked', json.loads(out)['grains']['story']['states'])
+
+    def test_the_plain_print_names_every_grain_and_the_rule_ids(self):
+        with tree() as root:
+            code, out = run_cli(root, 'vocabulary')
+            self.assertEqual(code, 0, out)
+            for grain in ('milestone', 'feature', 'story', 'bug'):
+                self.assertIn(grain, out)
+            self.assertIn('D13', out)
+            self.assertNotIn('->', out)
 
 
 class EveryConfigSection(unittest.TestCase):
@@ -2139,7 +2365,6 @@ class TheAgentsGateIsGone(unittest.TestCase):
 
 class BlockedIsNotATrap(unittest.TestCase):
     def test_a_blocked_story_can_be_unblocked_through_the_cli(self):
-        # The only exit used to be the hand-edit the tracker exists to prevent.
         with tree(story_statuses=('todo',)) as root:
             self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
             self.assertEqual(run_cli(root, 'story', 'blocked', '0.1/alpha/s0')[0], 0)
@@ -2147,8 +2372,12 @@ class BlockedIsNotATrap(unittest.TestCase):
             self.assertEqual(run_cli(root, 'story', 'review', '0.1/alpha/s0')[0], 0)
 
 
-class TemplateCannotMintPastTheGraph(unittest.TestCase):
-    def test_a_template_naming_a_later_status_is_refused(self):
+class ATemplateMintsWhateverItSays(unittest.TestCase):
+    def test_a_project_template_may_open_a_grain_at_any_state(self):
+        # The guard here forbade a project's OWN template from minting a grain
+        # past `planning` — the tool overruling a project about its own
+        # scaffold. What the state has to be is in the vocabulary, and D4 reads
+        # that off the tree.
         with tree() as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
@@ -2157,8 +2386,10 @@ class TemplateCannotMintPastTheGraph(unittest.TestCase):
             t.write_text(t.read_text().replace('status: planning', 'status: done'),
                          encoding='utf-8')
             code, out = run_cli(root, 'new', 'feature', '0.1', 'sneaky', 'S')
-            self.assertEqual(code, 1)
-            self.assertIn('moves only through the CLI', out)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(
+                model.field_of(root / 'pm/roadmap/0.1-demo/features/sneaky/feature.md',
+                               'status'), 'done')
 
 
 
@@ -2581,7 +2812,10 @@ class DamagedFrontmatter(unittest.TestCase):
                     code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
                     self.assertEqual(code, 2, out)
                     self.assertNotIn('no story resolves', out)
-                    self.assertIn('unknown current status', out)
+                    # The one refusal a status verb keeps: the FRONTMATTER is
+                    # malformed, which is a fact about the file. What the
+                    # status VALUE happens to be is never a refusal.
+                    self.assertIn('malformed frontmatter', out)
 
     def test_a_damaged_grain_is_never_quietly_accepted(self):
         # Lenient DETECTION must not become a lenient PARSER. A BOM'd file is a
