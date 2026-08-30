@@ -48,10 +48,13 @@ Runs the command a repo declared for that role in devkit.toml:
 
 Required roles: """ + ', '.join(REQUIRED_ROLES) + """. Others are the project's own.
 `godot-devkit check tasks` asserts every declared role resolves to a real,
-invocable target."""
+invocable target. Resolving a `make` role runs `make -n`, which PARSES your
+Makefile — parse-time `$(shell …)` and `+`-prefixed recipe lines execute."""
 
-# GNU make is the one program whose targets can be verified WITHOUT running
-# them, so it is the one the gate can say more than "the program exists" about.
+# GNU make is the one program whose TARGETS the gate can check, rather than only
+# checking that the program exists — `make -n` resolves a target name against the
+# makefile and refuses an unknown one. What it does NOT promise is that nothing
+# runs: see `_resolves` for exactly what `-n` still executes.
 _MAKES = ('make', 'gmake', 'make.exe', 'gmake.exe')
 
 
@@ -145,14 +148,40 @@ def main(argv: list[str]) -> int:
 
 
 # --- the gate ----------------------------------------------------------------
+def _is_make(command: str) -> bool:
+    """True when this role's program is a make. Shared by the gate's warning and
+    by `_resolves`, so the run that says "this parses your Makefile" is exactly
+    the run that does."""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    return bool(parts) and parts[0].rsplit('/', 1)[-1] in _MAKES
+
+
 def _resolves(command: str) -> tuple[bool, str, str]:
     """(ok, how it was verified, why not).
 
     Two depths, and the census says which each role got. A `make` role is
-    verified all the way to the TARGET — `make -n` parses the makefile and
-    refuses an unknown target without running a recipe. Anything else is
-    verified only as far as its program being on PATH, and the census says so
-    rather than implying the target was checked.
+    verified all the way to the TARGET — `make -n` resolves the target name
+    against the makefile and refuses an unknown one. Anything else is verified
+    only as far as its program being on PATH, and the census says so rather than
+    implying the target was checked.
+
+    RESOLVING A MAKE ROLE PARSES THAT REPO'S MAKEFILE, AND PARSING A MAKEFILE
+    CAN RUN SHELL. This is inherent to make, not a property of how it is called
+    here, and it was measured on GNU Make 3.81 (what macOS ships): under `-n`,
+    a `$(shell …)` in a variable assignment runs at parse time, a `$(shell …)`
+    inside an expanded recipe runs, and a recipe line prefixed with `+` runs.
+    A repo whose Makefile does any of those has that much of it executed by
+    `check tasks`, so the gate says so on every run rather than leaving it to
+    be discovered. What each consumer's Makefile actually contains is that
+    consumer's fact and is not asserted here.
+
+    What `-n` DOES hold back is the recipe itself, including the sub-make: a
+    recursive `$(MAKE)` line runs under `-n` and inherits `-n`, so it also only
+    prints. The gate therefore cannot run the suite it is checking for the
+    existence of — which is a narrower claim than "cannot execute anything".
     """
     try:
         parts = shlex.split(command)
@@ -163,15 +192,16 @@ def _resolves(command: str) -> tuple[bool, str, str]:
     program = parts[0]
     if shutil.which(program) is None:
         return False, '', f'names program {program!r}, which is not on PATH'
-    if program.rsplit('/', 1)[-1] not in _MAKES:
+    if not _is_make(command):
         return True, f'{program} is on PATH (target not verifiable)', ''
     targets = [a for a in parts[1:] if not a.startswith('-')]
     if not targets:
         return True, f'{program} is on PATH (no target named)', ''
     # `-n` prints recipes instead of running them, and exits non-zero on a
-    # target the makefile does not define. Recursive `$(MAKE)` lines DO run
-    # under -n, but they inherit -n and therefore also only print — so this
-    # cannot execute the very suite it is checking for the existence of.
+    # target the makefile does not define. It is not a sandbox: this parses the
+    # consumer's makefile, and parse-time `$(shell …)` — plus `+`-prefixed
+    # recipe lines — still run. The docstring above says exactly what was
+    # measured and on which make.
     proc = subprocess.run([program, '-n', *targets], cwd=repo_root(),
                           capture_output=True, text=True)
     if proc.returncode != 0:
@@ -199,6 +229,14 @@ def run() -> int:
 
     print(f'[check:tasks] resolving {len(table)} declared role(s) against '
           f'devkit.toml [tasks]')
+    # Said on every run that will do it, not buried in a docstring: resolving a
+    # make role reads THIS repo's Makefile, and reading a Makefile is not free
+    # of side effects. Printed only when a make role is declared — a gate that
+    # warns about something it is not about to do is noise.
+    if any(_is_make(command) for command in table.values()):
+        print(f'[check:tasks] a make role resolves via `make -n`, which parses '
+              f'this repo\'s Makefile — parse-time `$(shell …)` and '
+              f'`+`-prefixed recipe lines run')
     if not table:
         # Rule 4: a gate that scanned nothing says so rather than printing
         # PASS. No [tasks] table is not a repo with tidy roles.

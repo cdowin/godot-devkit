@@ -267,6 +267,24 @@ def _log_schema(cfg, report, schema) -> tuple[int, int]:
         entries = model.log_entries_in(text)
         n_entries += len(entries)
         n_suppressed = 0
+        # A COLLAPSED entry is gone from the file and its id is still spent.
+        # Reported here because the pointer recording it is prose: a log can
+        # hold `## D3` three lines under a pointer saying D3 was collapsed, and
+        # every other check in this gate reads that as one entry and one
+        # paragraph. Two different D3s in one file is not a schema violation of
+        # either of them, which is exactly why nothing saw it.
+        spent, pointer_defects = model.spent_entry_ids(text)
+        for defect in pointer_defects:
+            report(f'{key}: {defect} ({rule})')
+        for ordinal, entry in enumerate(entries):
+            if entry.eid not in spent:
+                continue
+            if cap is None or ordinal < cap:
+                n_suppressed += 1
+                continue
+            report(f'{key}: {entry.eid} is minted twice — the log\'s own '
+                   f'collapse pointer records it as retired, so this file '
+                   f'holds two different {entry.eid}s ({rule})')
         for ordinal, eid, why in model.entry_violations_in(entries, schema):
             if cap is None or ordinal < cap:
                 n_suppressed += 1

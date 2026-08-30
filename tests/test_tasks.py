@@ -186,3 +186,73 @@ def test_this_repo_declares_and_resolves_both_roles():
         os.chdir(previous)
         repo_root.cache_clear()
         load_config.cache_clear()
+
+
+# --- what `make -n` actually does, and what the gate is allowed to claim -------
+# The docstring used to say GNU make "is the one program whose targets can be
+# verified WITHOUT running them" and that the gate "cannot execute the very
+# suite it is checking for". The first half is false and the second is narrower
+# than it read. Both are measured below rather than argued: the probe writes
+# witness files, and the gate is asserted to warn about exactly what the probe
+# proves.
+SIDE_EFFECT_MAKEFILE = """\
+PARSED := $(shell echo ran > parse.witness)
+
+quick:
+\t@echo quick
+\t$(shell echo ran > expand.witness)
+
+verify:
+\t+@echo plus > plus.witness
+"""
+
+
+def test_make_n_runs_parse_time_shell_expanded_shell_and_plus_lines():
+    """The measurement. `-n` holds back the RECIPE and nothing else.
+
+    This is a property of make, not of this package — asserted here so the
+    claim in `tasks.py` is held to something that fails when make changes.
+    """
+    with repo('[tasks]\nquick = "make quick"\nverify = "make verify"\n',
+              SIDE_EFFECT_MAKEFILE) as root:
+        code, out = gate()
+        assert code == 0, out
+        ran = sorted(p.name for p in root.glob('*.witness'))
+    assert ran == ['expand.witness', 'parse.witness', 'plus.witness'], (
+        f'`make -n` ran {ran} — the gate\'s claim about what it executes has '
+        f'to match whatever this run actually did')
+
+
+def test_the_gate_says_out_loud_that_resolving_a_make_role_runs_shell():
+    """A side effect a user cannot predict from the tool's own words is a
+    surprise the tool owns. The warning prints on every run that will do it."""
+    with repo('[tasks]\nquick = "make precommit"\nverify = "make milestone"\n'):
+        code, out = gate()
+    assert code == 0, out
+    assert 'parses this repo' in out and 'parse-time' in out, out
+    assert '`+`-prefixed' in out, out
+
+
+def test_the_warning_is_absent_when_no_role_is_a_make_role():
+    """A gate that warns about something it is not about to do is noise."""
+    with repo('[tasks]\nquick = "echo one"\nverify = "echo two"\n',
+              makefile=None):
+        code, out = gate()
+    assert code == 0, out
+    assert 'parse-time' not in out, out
+
+
+def test_no_user_facing_text_claims_make_n_runs_nothing():
+    """The exact wording that was false, kept out of the three places it lived:
+    the module docstring, the usage text, and the README table."""
+    sources = [(REPO_ROOT / 'src/godot_devkit/repo/tasks.py'),
+               (REPO_ROOT / 'README.md')]
+    for path in sources:
+        body = path.read_text(encoding='utf-8')
+        for claim in ('without running them', 'parses without running',
+                      'cannot execute the very suite'):
+            assert claim not in body, f'{path.name} still claims: {claim!r}'
+    assert 'parse-time' in tasks.USAGE, tasks.USAGE
+    # The half that IS true stays: a sub-make inherits -n.
+    assert 'inherits `-n`' in (REPO_ROOT / 'src/godot_devkit/repo/tasks.py'
+                               ).read_text(encoding='utf-8')

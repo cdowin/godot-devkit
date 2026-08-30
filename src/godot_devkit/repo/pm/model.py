@@ -879,14 +879,28 @@ def is_transient_review_slot(cfg: PmConfig, path: Path) -> bool:
     a file with that name anywhere inside the roadmap IS the transient slot. A
     project storing durable records as `docs/reviews/<something>.md` is
     untouched — that path is outside the tree and is not this slot.
+
+    Judged on the path AS WRITTEN and on what it RESOLVES to, and both halves
+    are load-bearing. A `durable.md -> review.md` symlink is the transient slot
+    under another name, and reading only the name lets it through. A `review.md`
+    symlink pointing at a durable record elsewhere is still the file D11 deletes
+    at close — deleting the link strands the pointer exactly the same way — so
+    the name in the tree is not forgiven by where it points either.
     """
-    if path.name.lower() != REVIEW_FILE_NAME:
-        return False
+    candidates = [path]
     try:
-        path.resolve().relative_to(cfg.roadmap.resolve())
-    except (ValueError, OSError):
-        return False
-    return True
+        candidates.append(path.resolve())
+    except OSError:
+        pass
+    for candidate in candidates:
+        if candidate.name.lower() != REVIEW_FILE_NAME:
+            continue
+        try:
+            candidate.resolve().relative_to(cfg.roadmap.resolve())
+        except (ValueError, OSError):
+            continue
+        return True
+    return False
 
 
 def durable_record_for(cfg: PmConfig, fid: str) -> Path | None:
@@ -1621,20 +1635,117 @@ def entry_violations_in(entries: list[LogEntry],
 # --- writing an entry (`pm decide`, `pm changelog`) ----------------------------
 _ENTRY_ORDINAL = re.compile(r'^([A-Za-z]{1,4})(\d+)$')
 
+# The sentence `pm collapse` writes in place of the entries it retires. It lives
+# HERE and not in the verb that writes it, because the allocator has to read it:
+# a collapsed entry is gone from the file, and an allocator that sees only what
+# is still present will hand its id out a second time.
+COLLAPSE_MARKER = 'Collapsed at close'
+# The pointer's machine-read slot. Everything before it is prose for a human;
+# this is the one place the allocator looks, so a rule id quoted in the
+# explanation ("D16's separation from D15") can never be mistaken for a
+# retired entry.
+SPENT_IDS_LABEL = 'Ids spent, never minted again:'
 
-def next_entry_id(entries: list[LogEntry], schema: LogSchema) -> str:
+
+def collapse_pointers(text: str) -> list[tuple[int, str]]:
+    """[(1-based line, the pointer's whole paragraph)] for each collapse pointer.
+
+    A PARAGRAPH, not a line: the pointer is wrapped to fit a diff, so its id
+    list routinely spans two of them. The paragraph ends at the first blank
+    line, which is what keeps a `--note` (written after a blank line) out of the
+    id list — a note quoting `D4` must not make D4 look retired.
+    """
+    lines = _split(text)
+    live, body, _, _ = _comment_scan(lines)
+    out: list[tuple[int, str]] = []
+    for i, raw in enumerate(body):
+        if not live[i] or COLLAPSE_MARKER not in raw:
+            continue
+        block = [raw.rstrip('\r')]
+        for j in range(i + 1, len(lines)):
+            if not live[j] or not body[j].strip():
+                break
+            block.append(body[j].rstrip('\r'))
+        out.append((i + 1, '\n'.join(block)))
+    return out
+
+
+def spent_entry_ids(text: str) -> tuple[set[str], list[str]]:
+    """(the ids this log's collapse pointers record as retired, what is wrong).
+
+    The ids are the RECORD of entries the file no longer holds. Without them an
+    allocator counting only present entries re-mints `D3` three lines under a
+    pointer saying D3 was collapsed — one file, two different D3s, and no gate
+    can see it, because a pointer is prose.
+
+    Read from a LABELLED slot and never from the paragraph's prose. The first
+    cut of this scanned the whole pointer for id-shaped tokens and immediately
+    read `D16's separation from D15` — two RULE names in a hand-written pointer
+    — as two retired entries, which is a false claim in a gate. An id list a
+    machine reads has to be somewhere a machine can point at.
+
+    A pointer with no such slot is REPORTED, never read as "nothing was
+    retired": that is the hand-edited case, and guessing there is exactly the
+    silent re-mint this exists to stop.
+    """
+    ids: set[str] = set()
+    defects: list[str] = []
+    for line, block in collapse_pointers(text):
+        # Whitespace-normalised, because the pointer is wrapped to fit a diff
+        # and the label itself can land across two lines.
+        flat = ' '.join(block.split())
+        _, sep, tail = flat.partition(SPENT_IDS_LABEL)
+        if not sep:
+            defects.append(
+                f'line {line} carries a `{COLLAPSE_MARKER}` pointer with no '
+                f'`{SPENT_IDS_LABEL}` list, so nothing can tell which ids it '
+                f'retired — an append would risk re-minting one. Add the list '
+                f'the way `pm collapse` writes it: `{SPENT_IDS_LABEL} D1, D3, '
+                f'D4.`')
+            continue
+        for token in tail.strip().rstrip('.').replace(',', ' ').split():
+            if _ENTRY_ORDINAL.match(token):
+                ids.add(token)
+            else:
+                # Loud: a token that is not an id in the one place ids are read
+                # means the list has been edited into prose, and quietly
+                # dropping it would shrink the spent set without saying so.
+                defects.append(
+                    f'line {line}: `{SPENT_IDS_LABEL}` lists {token!r}, which '
+                    f'is not an entry id — that slot holds ids and nothing '
+                    f'else, so the retired set cannot be trusted')
+    return ids, defects
+
+
+def next_entry_id(entries: list[LogEntry], schema: LogSchema,
+                  spent: set[str] | tuple[str, ...] = ()) -> str:
     """The next id for this log — the two things authors get wrong, allocated.
 
     The PREFIX comes from the log's own last id-shaped entry, so a tree that
     numbers `M27` keeps numbering `M`. An empty log (or one whose headings are
     all dates) starts at the schema's own prefix: `D1` for decisions, `C1` for
     a changelog.
+
+    `spent` is what a COLLAPSE retired. An id is never re-minted within one
+    file, whether or not its entry is still in it — a fully collapsed log whose
+    pointer records D1-D5 allocates D6, not D1. Reuse across FILES stays by
+    design: 0.14.0's D7 and 0.15.0's D7 are different decisions in different
+    logs, and numbering every milestone from a global counter would say they
+    were related.
     """
     numbered = [m for m in (_ENTRY_ORDINAL.match(e.eid) for e in entries) if m]
-    if not numbered:
+    retired = [m for m in (_ENTRY_ORDINAL.match(s) for s in sorted(spent)) if m]
+    if numbered:
+        prefix = numbered[-1].group(1)
+    elif retired:
+        # Nothing is left in the file, so the pointer is the only surviving
+        # record of how this log numbers itself. Falling back to the schema
+        # prefix here would restart at D1 — on top of every id it just retired.
+        prefix = retired[-1].group(1)
+    else:
         return f'{schema.prefix}1'
-    prefix = numbered[-1].group(1)
-    highest = max(int(m.group(2)) for m in numbered if m.group(1) == prefix)
+    highest = max((int(m.group(2)) for m in numbered + retired
+                   if m.group(1) == prefix), default=0)
     return f'{prefix}{highest + 1}'
 
 

@@ -95,6 +95,28 @@ TITLES = ('the sweep verb belongs to the combat layer',
           'one reader is the fix')
 
 
+# The CAP is where an off-by-one lives, and a generator that never lands within
+# ±2 of one cannot see it. Mutation testing caught 8 of 9 injected mutations;
+# the survivor was `>=` for `>` in the title cap, because every long title this
+# produced was ~140 chars and every short one ~40 — measured, at the caps: 0.
+# So a slice of cases is rendered at exactly the cap and one either side, and
+# the expected set is derived from the SAME number the schema holds.
+BOUNDARY_DELTAS = (-1, 0, 1)
+
+
+# The seed an `Evidence:` boundary value is padded from. It has to stay a
+# REFERENCE at any length: one token, word characters, and a `/` — a path
+# without one is prose, and padding that injected a second, real finding would
+# make the case test two things while claiming to test one.
+EVIDENCE_SEED = 'docs/specs/reference'
+
+
+def _at_length(seed: str, length: int) -> str:
+    """`seed` padded to EXACTLY `length` characters, ending in a non-space so
+    the header parser measures what was written."""
+    return (seed + 'x' * length)[:length]
+
+
 class Case:
     """One abstract entry: the defects to inject, and what must be reported.
 
@@ -108,6 +130,13 @@ class Case:
         self.bad_header = rng.random() < 0.20
         self.bad_date = (not self.bad_header) and rng.random() < 0.20
         self.long_title = (not self.bad_header) and rng.random() < 0.20
+        # Boundary cases: the title (or the value) is rendered at exactly the
+        # cap, one under, or one over. `None` is every other case, which is what
+        # it was before.
+        self.title_delta = (rng.choice(BOUNDARY_DELTAS)
+                            if rng.random() < 0.25 else None)
+        self.value_delta = (rng.choice(BOUNDARY_DELTAS)
+                            if rng.random() < 0.25 else None)
         # At most ONE structural defect, so the expected set stays exact: a
         # missing field cannot also be out of order.
         structural = rng.random()
@@ -129,6 +158,14 @@ class Case:
                 value = PROSE if self.prose_evidence else GOOD_EVIDENCE
             else:
                 value = f'the {name.lower()} of this entry'
+            if (self.value_delta is not None and names
+                    and name == names[-1] and not self.prose_evidence):
+                # Exactly at the cap, or one either side of it. Never combined
+                # with the gross-over padding below: one defect at a time.
+                seed = EVIDENCE_SEED if name == 'Evidence' else value
+                out.append((name, _at_length(
+                    seed, schema.value_max + self.value_delta)))
+                continue
             if self.long_value and name == names[-1]:
                 # ONE defect at a time. Padding an `Evidence:` value with prose
                 # would inject a second, real finding (evidence is a reference,
@@ -140,9 +177,14 @@ class Case:
             out.append((name, value))
         return out
 
+    def _rendered_title(self, schema: LogSchema) -> str:
+        if self.title_delta is not None:
+            return _at_length(self.title, schema.title_max + self.title_delta)
+        return self.title + (' and then some' * 6 if self.long_title else '')
+
     def render(self, schema: LogSchema) -> str:
         eid = f'{schema.prefix}{self.ordinal}'
-        title = self.title + (' and then some' * 6 if self.long_title else '')
+        title = self._rendered_title(schema)
         date = '2026-13-45' if self.bad_date else GOOD_DATE
         dash = '-' if self.bad_header else '—'
         lines = [f'## {eid} {dash} {date} {dash} {title}']
@@ -159,14 +201,18 @@ class Case:
         else:
             if self.bad_date:
                 out.add(BAD_DATE)
-            if self.long_title:
+            # Over the cap is a finding; AT the cap is not. Stated as the
+            # comparison the schema states, so a `>` mutated to `>=` disagrees.
+            if len(self._rendered_title(schema)) > schema.title_max:
                 out.add(LONG_TITLE)
-        names = [n for n, _ in self._fields(schema)]
+        fields = self._fields(schema)
+        names = [n for n, _ in fields]
         if self.missing and len(schema.fields) > len(names):
             out.add(MISSING)
         if self.reorder and len(schema.fields) > 1:
             out.add(OUT_OF_ORDER)
-        if self.long_value and names:
+        if any(len(value) > schema.value_max for name, value in fields
+               if name in schema.fields):
             out.add(LONG_VALUE)
         if self.prose_evidence and 'Evidence' in names:
             out.add(PROSE_EVIDENCE)
@@ -238,6 +284,57 @@ def test_the_corpus_actually_produces_findings_and_clean_entries():
     assert clean > 50, clean
     assert dirty > 500, dirty
     assert total > 1000, total
+
+
+def test_the_corpus_lands_on_the_caps_and_on_both_sides_of_them():
+    """The boundary census, and it is the reason the boundary cases exist.
+
+    Mutation testing caught 8 of 9 injected mutations. The survivor was `>=`
+    for `>` in the title cap — not because the assertion was weak but because
+    the corpus never produced a title within +-2 of it: measured, exactly at
+    the title cap: 0, exactly at the value cap: 0. A count of 0 in either
+    column here means the boundary is inert again and the next off-by-one
+    lives.
+    """
+    seen: dict[tuple[str, int], int] = {}
+    for case in _cases():
+        for schema in SCHEMAS:
+            title = case._rendered_title(schema)
+            for delta in BOUNDARY_DELTAS:
+                if len(title) == schema.title_max + delta:
+                    seen[('title', delta)] = seen.get(('title', delta), 0) + 1
+                for name, value in case._fields(schema):
+                    if (name in schema.fields
+                            and len(value) == schema.value_max + delta):
+                        seen[('value', delta)] = seen.get(('value', delta), 0) + 1
+    missing = [key for key in ((what, delta) for what in ('title', 'value')
+                               for delta in BOUNDARY_DELTAS)
+               if seen.get(key, 0) == 0]
+    assert not missing, f'no case lands at {missing}; census: {sorted(seen.items())}'
+
+
+def test_a_cap_comparison_mutated_to_ge_is_caught():
+    """The survivor, as an assertion. `>` becomes `>=`: an entry exactly AT the
+    cap is then reported, and the corpus has to disagree with that.
+
+    Run against the real predicate through a patched schema rather than by
+    editing model.py: a cap one LOWER makes an at-the-cap entry over it, which
+    is the same difference the mutation makes, and it needs no source edit."""
+    import dataclasses
+    caught = 0
+    for case in _cases():
+        for schema in SCHEMAS:
+            mutated = dataclasses.replace(schema,
+                                          title_max=schema.title_max - 1,
+                                          value_max=schema.value_max - 1)
+            found = {classify(msg) for _, _, msg
+                     in entry_violations_in(log_entries_in(case.render(schema)),
+                                            mutated)}
+            if found != case.expected(schema):
+                caught += 1
+    assert caught > 100, (
+        f'only {caught} of {CASES * len(SCHEMAS)} cases disagree with a cap '
+        f'shifted by one — the corpus cannot see an off-by-one at the cap')
 
 
 # --- axis 2: the golden corpus ------------------------------------------------

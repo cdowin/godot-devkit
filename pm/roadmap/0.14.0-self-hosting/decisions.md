@@ -5,14 +5,16 @@ Append with `godot-devkit pm decide <grain-id>` — never by hand; the command s
 Durable. This log outlives the grain: when the milestone closes it collapses to
 pointers, and everything that still explains a live constraint stays.
 
-Collapsed at close. The full trail of 16 decisions is in git history
-(`git log -p` on this file); the design detail that produced them lives at the
-feature grain, `features/self-hosting/decisions.md`. Twelve described choices now
-embodied in the code and the README — the changelog slot, the log schema, stdout
-for the render, component-wise version ordering, D16's separation from D15, the
-ledger ceiling rule, the mandated-header exclusion, the backticks-only
+Collapsed at close. The full trail of 16 decisions is in git history (`git log
+-p` on this file); the design detail that produced them lives at the feature
+grain, `features/self-hosting/decisions.md`. Twelve described choices now
+embodied in the code and the README — the changelog slot, the log schema,
+stdout for the render, component-wise version ordering, D16's separation from
+D15, the ledger ceiling rule, the mandated-header exclusion, the backticks-only
 info-string rule, grain detection, the unreadable-definition census, and one
-answer on every interpreter. Four remain because a consumer still runs into them.
+answer on every interpreter. Four remain because a consumer still runs into
+them. Ids spent, never minted again: D1, D2, D3, D4, D5, D6, D9, D11, D12, D13,
+D14, D15.
 
 ## D7 — 2026-08-29 — the ratchet lives inside check pm
 **Chose:** put D17/D18 inside check pm
