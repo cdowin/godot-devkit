@@ -3,7 +3,7 @@ id: 0.16.0/self-discipline/helper-dedup
 feature: 0.16.0/self-discipline
 milestone: "0.16.0"
 name: One diff helper, one constant home across scene_edit/tiles_paint/canonicalize/summary/diff
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []
