@@ -16,8 +16,6 @@ defaults.
     review_min_content_bytes = 20  # anti-rubber-stamp floor (non-whitespace)
     review_slug_fallback = false   # also accept <review_dir>/<feature-slug>*.md
     story_ordinal_prefix = false   # also resolve stories/NN-<slug>.md
-    place_branch_on_building = false  # `pm milestone building` also checks the
-                                   # milestone's branch out in the trunk worktree
     milestone_states      = [...]  # vocabulary overrides
     feature_states        = [...]
     story_states          = [...]
@@ -52,13 +50,13 @@ DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
 # typo'd status is a finding rather than a silent "closed" (rule 4).
 DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
 
-# D8-D10 encode the branch-per-milestone / bump-at-start flow. They are OFF by
+# D8/D9 encode the branch-per-milestone / bump-at-start flow. They are OFF by
 # default: a project that ships from the trunk and bumps at close is not
 # drifting, it is running a different (valid) flow, and a gate that fails it
 # would be lying. Opt in with `[pm] checks`.
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6',
                   'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
-FLOW_CHECKS = ('D8', 'D9', 'D10')
+FLOW_CHECKS = ('D8', 'D9')
 # D13 is the canonical grain STRUCTURE. Opt-in because a tree that predates the
 # canonical slots is missing most of them, and a rule that turns a consumer red
 # on upgrade day is unshippable. `pm new <grain>` fills the gaps, then the rule
@@ -188,7 +186,6 @@ class PmConfig:
     review_min_content_bytes: int = 20
     review_slug_fallback: bool = False
     story_ordinal_prefix: bool = False
-    place_branch_on_building: bool = False
     milestone_states: tuple[str, ...] = DEFAULT_MILESTONE_STATES
     feature_states: tuple[str, ...] = DEFAULT_FEATURE_STATES
     story_states: tuple[str, ...] = DEFAULT_STORY_STATES
@@ -198,7 +195,6 @@ class PmConfig:
     template_dir: str = ''
     version_file: str = 'project.godot'
     version_pattern: str = r'^config/version="(.*)"$'
-    trunk_branches: tuple[str, ...] = ('staging', 'main')
 
     @property
     def roadmap(self) -> Path:
@@ -256,7 +252,6 @@ def load() -> PmConfig:
         review_min_content_bytes=number(sect, 'pm', 'review_min_content_bytes', 20),
         review_slug_fallback=flag(sect, 'pm', 'review_slug_fallback', False),
         story_ordinal_prefix=flag(sect, 'pm', 'story_ordinal_prefix', False),
-        place_branch_on_building=flag(sect, 'pm', 'place_branch_on_building', False),
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
@@ -265,13 +260,35 @@ def load() -> PmConfig:
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
-        trunk_branches=tup('trunk_branches', ('staging', 'main')),
     )
 
 
-def unknown_checks(cfg: PmConfig) -> str:
-    """The refusal for a `[pm] checks` naming a rule this package does not ship,
-    or `''` when every name is known.
+# `[pm]` keys this package USED to honour. Named, because a key that silently
+# does nothing is worse than one that errors: the author believes it took
+# effect. Same reasoning as the `[pm.scaffold.*]` refusal below it.
+RETIRED_KEYS = {
+    'place_branch_on_building':
+        '`pm milestone building` no longer runs `git checkout` in your trunk '
+        'worktree — a PM tracker does not move your VCS checkout',
+    'trunk_branches': 'read only by the retired D10 and the branch placement',
+    'bug_open_states': 'read only by the retired D14; `bug_states` still gates '
+                       'a bug\'s status through D4',
+    'milestone_transitions': 'there is no transition graph — `milestone_states` '
+                             'is the closed set, and nothing constrains order',
+    'feature_transitions': 'there is no transition graph — `feature_states` is '
+                           'the closed set, and nothing constrains order',
+    'story_transitions': 'there is no transition graph — `story_states` is the '
+                         'closed set, and nothing constrains order',
+}
+
+
+def config_complaints(cfg: PmConfig, sect: dict | None = None) -> list[str]:
+    """Everything `[pm]` names that this package does not ship. Empty when clean.
+
+    A rule id, or a key retired by a release. Both are what a PIN BUMP produces,
+    and both would otherwise narrow silently — an unknown rule name is
+    indistinguishable from a disabled rule at runtime, and a dead key reads as
+    honoured.
 
     An unknown name is indistinguishable from a disabled rule at runtime, so a
     typo would quietly narrow the gate — which is why this is strict. But it is
@@ -281,13 +298,19 @@ def unknown_checks(cfg: PmConfig) -> str:
     and `pm vocabulary --json` at exit 2. The consumer could then neither read
     its own tree nor ask the tool what the new vocabulary is while deciding what
     to do about it. The GATES enforce it, because they are what a narrowed
-    roster would lie to.
+    roster or a dead key would lie to.
     """
+    out: list[str] = []
     unknown = [c for c in cfg.checks if c not in KNOWN_CHECKS]
-    if not unknown:
-        return ''
-    return (f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
-            f'known rules are {" ".join(KNOWN_CHECKS)}')
+    if unknown:
+        out.append(f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
+                   f'known rules are {" ".join(KNOWN_CHECKS)}')
+    section = config_section('pm') if sect is None else sect
+    for key, why in RETIRED_KEYS.items():
+        if key in section:
+            out.append(f'[pm] {key} was retired and does nothing — {why}. '
+                       f'Remove the key.')
+    return out
 
 
 # --- frontmatter --------------------------------------------------------------
@@ -747,7 +770,7 @@ def review_record_for(cfg: PmConfig, fid: str) -> str | None:
     return None
 
 
-# --- flow helpers (D8-D10) ----------------------------------------------------
+# --- flow helpers (D8/D9) -----------------------------------------------------
 def building_milestones(cfg: PmConfig) -> list[tuple[str, str, Path]]:
     """(id, branch, milestone.md) for every ACTIVE milestone at `building`."""
     out = []
@@ -775,68 +798,6 @@ def shipped_version(cfg: PmConfig) -> str | None:
     return None
 
 
-def git_worktrees(cfg: PmConfig) -> tuple[list[tuple[Path, str]], str]:
-    """([(path, branch), ...] MAIN worktree first, reason) — every worktree.
-
-    One `git worktree list --porcelain` parse, because two readers need
-    different halves of the same answer: D10 wants the trunk's branch, and
-    branch placement additionally has to know whether some OTHER worktree
-    already holds the branch (git allows exactly one).
-
-    `branch` is `''` for a detached or bare entry — the entry still exists,
-    which is the distinction that matters. An EMPTY list is the only "git could
-    not answer" signal, and it always carries a reason.
-    """
-    try:
-        listing = subprocess.run(['git', 'worktree', 'list', '--porcelain'],
-                                 cwd=cfg.root, capture_output=True, text=True,
-                                 check=True).stdout
-    except (subprocess.CalledProcessError, OSError) as err:
-        return [], f'git is unavailable ({type(err).__name__})'
-    entries: list[tuple[Path, str]] = []
-    path: Path | None = None
-    branch = ''
-    for line in listing.split('\n'):
-        # A blank line ends a record; `worktree ` opens the next one. Flushing
-        # on the OPENER rather than the blank keeps a truncated final record.
-        if line.startswith('worktree '):
-            if path is not None:
-                entries.append((path, branch))
-            path, branch = Path(line[len('worktree '):]), ''
-        elif line.startswith('branch ') and path is not None:
-            ref = line[len('branch '):].strip()
-            branch = ref[len('refs/heads/'):] if ref.startswith('refs/heads/') else ref
-    if path is not None:
-        entries.append((path, branch))
-    if not entries:
-        return [], 'git reported no worktree'
-    return entries, ''
-
-
-def trunk_checkout_branch(cfg: PmConfig) -> tuple[str | None, str]:
-    """(branch, reason) for git's MAIN worktree — the trunk.
-
-    Deliberately NOT the tree this happens to run from: D10 asks whether the
-    integration branch is where a human following along would find it.
-
-    A None branch comes with a REASON, because the common case is a detached
-    HEAD — which is what CI checks out. Silently skipping there turned D10 off
-    in the one environment it exists to guard, and said nothing.
-    """
-    entries, reason = git_worktrees(cfg)
-    if not entries:
-        return None, reason
-    branch = entries[0][1]
-    if not branch:
-        return None, 'the trunk is on a DETACHED HEAD (a CI checkout looks '\
-                     'like this — D10 cannot verify placement here)'
-    return branch, ''
-
-
-# --- shared drift predicates --------------------------------------------------
-# THE definitions of the feature-grain drift rules. Both `pm status` and the
-# `check pm` gate call these, so the report and the gate cannot diverge. Each
-# returns a one-line reason, or None when clean.
 def drift_done_no_record(cfg: PmConfig, fid: str, fstat: str) -> str | None:
     """D1 — a `done` feature with no substantive review record."""
     if fstat != 'done' or review_record_for(cfg, fid) is not None:

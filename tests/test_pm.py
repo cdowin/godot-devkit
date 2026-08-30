@@ -975,7 +975,7 @@ class ConfigValidation(unittest.TestCase):
     def test_other_scalar_type_errors_are_also_exit_2(self):
         for bad in ('review_min_content_bytes = "twenty"',
                     'review_slug_fallback = "yes"',
-                    'place_branch_on_building = "yes"', 'roadmap_dir = 3'):
+                    'roadmap_dir = 3'):
             with self.subTest(bad=bad), tree() as root:
                 (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')
                 self.assertEqual(run_gate(root)[0], 2)
@@ -1034,9 +1034,9 @@ class AStaleRuleIdStopsTheGATE_NotTheReadVerbs(unittest.TestCase):
 
 
 class FlowChecks(unittest.TestCase):
-    """D8-D10 — branch-per-milestone + bump-at-start. Off unless opted into."""
+    """D8/D9 — branch-per-milestone + bump-at-start. Off unless opted into."""
 
-    ON = '[pm]\nchecks = ["D8","D9","D10"]\n'
+    ON = '[pm]\nchecks = ["D8","D9"]\n'
 
     def _building(self, root: Path, branch: str = '', version: str = '0.1.0'):
         model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md', 'status', 'building')
@@ -1077,174 +1077,108 @@ class FlowChecks(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('declares no branch:', out)
 
-    def test_d10_wants_the_integration_branch_in_the_trunk(self):
-        with tree(story_statuses=('todo',)) as root:
-            self._building(root, branch='feat/0.1-demo', version='0.1')
-            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('belongs in the trunk', out)
 
-    def test_d10_skips_a_milestone_built_on_the_trunk(self):
-        # `branch: staging` means "no integration branch" — not a violation.
-        with tree(story_statuses=('todo',)) as root:
-            self._building(root, branch='staging', version='0.1')
-            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
-            self.assertEqual(run_gate(root)[0], 0)
+class ThePMTrackerNeverMovesYourCheckout(unittest.TestCase):
+    """`pm milestone building` ran `git checkout` in the trunk worktree.
 
+    Behind it were six refusal paths and not one of them was "this input is
+    malformed or absent" — every one was "a git worktree elsewhere on your disk
+    is not how I want it": a dirty trunk, a branch another worktree holds, a
+    branch that does not exist, an unreadable status. A PM tracker that mutates
+    your VCS checkout is the failure mode this whole change removes, and it
+    reached for it on the way past a status flip.
 
-class BranchPlacement(unittest.TestCase):
-    """`[pm] place_branch_on_building` — the flip also places the branch.
-
-    D10 asserts the milestone's branch is checked out in the trunk. When one
-    command creates that obligation and another has to satisfy it by hand, the
-    gap between them is where drift lives. What is pinned here is ORDER: every
-    refusal is decided BEFORE the flip (so a refused placement leaves
-    milestone.md byte-identical), and the flip lands BEFORE the checkout (so a
-    failed checkout is a repairable re-run, never a lost transition).
+    D9 stays: a `building` milestone declaring `branch:` is a required field in
+    a state, which is a fact about the file. Whether a checkout somewhere obeys
+    it is not.
     """
 
-    ON = '[pm]\nplace_branch_on_building = true\n'
     MFILE = 'pm/roadmap/0.1-demo/milestone.md'
     BRANCH = 'feat/0.1-demo'
 
     @staticmethod
-    def _git(root: Path, *args: str, check: bool = True):
+    def _git(root: Path, *args: str):
         return subprocess.run(
             ['git', '-c', 'user.email=t@example.invalid', '-c', 'user.name=T',
-             *args], cwd=root, capture_output=True, text=True, check=check)
+             *args], cwd=root, capture_output=True, text=True, check=True)
 
-    def _head(self, root: Path) -> str:
-        return self._git(root, 'branch', '--show-current').stdout.strip()
+    # The key set to `true` on purpose: these measure it having NO effect. It
+    # is the spelling one consumer ships, so this is the pin-bump case.
+    ON = '[pm]\nplace_branch_on_building = true\n'
 
-    def _prepare(self, root: Path, branch: str = BRANCH, config: str = ON,
-                 make_branch: bool = True, status: str = 'ready') -> Path:
-        """A milestone stamped with `branch:`, on a CLEAN committed trunk.
-
-        The stamps and devkit.toml go in BEFORE the commit on purpose: the
-        dirty-trunk refusal has to be something a case opts into, not something
-        every case trips over by leaving the fixture uncommitted.
-        """
-        mfile = root / self.MFILE
-        model.set_field(mfile, 'status', status)
-        if branch:
-            model.set_field(mfile, 'branch', branch)
-        (root / 'devkit.toml').write_text(config, encoding='utf-8')
+    def _prepare(self, root: Path) -> None:
+        model.set_field(root / self.MFILE, 'status', 'ready')
+        model.set_field(root / self.MFILE, 'branch', self.BRANCH)
+        (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
         self._git(root, 'add', '-A')
         self._git(root, 'commit', '-q', '-m', 'fixture')
-        if branch and make_branch:
-            self._git(root, 'branch', branch)
-        return mfile
+        self._git(root, 'branch', self.BRANCH)
 
-    def test_off_by_default_the_trunk_never_moves(self):
-        with tree() as root:
-            mfile = self._prepare(root, config='')
-            before = self._head(root)
+    def test_the_flip_lands_and_the_checkout_does_not_move(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._prepare(root)
+            before = self._git(root, 'branch', '--show-current').stdout.strip()
             code, out = run_cli(root, 'milestone', 'building', '0.1')
             self.assertEqual(code, 0, out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'building')
-            self.assertEqual(self._head(root), before)
+            self.assertEqual(
+                model.field_of(root / self.MFILE, 'status'), 'building')
+            after = self._git(root, 'branch', '--show-current').stdout.strip()
+            self.assertEqual(before, after)
+            self.assertNotIn('checked out', out)
 
-    def test_a_clean_trunk_gets_the_branch_and_the_flip(self):
-        with tree() as root:
-            mfile = self._prepare(root)
+    def test_a_dirty_tree_is_none_of_its_business(self):
+        # It used to refuse here — a status flip declining to happen because an
+        # unrelated file was uncommitted.
+        with tree(story_statuses=('todo',)) as root:
+            self._prepare(root)
+            (root / 'dirty.txt').write_text('x', encoding='utf-8')
             code, out = run_cli(root, 'milestone', 'building', '0.1')
             self.assertEqual(code, 0, out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'building')
-            self.assertEqual(self._head(root), self.BRANCH)
-            self.assertIn('checked out', out)
+            self.assertEqual(
+                model.field_of(root / self.MFILE, 'status'), 'building')
 
-    def test_a_dirty_trunk_refuses_and_flips_nothing(self):
-        with tree() as root:
-            mfile = self._prepare(root)
-            before_head, before_bytes = self._head(root), mfile.read_bytes()
-            (root / 'stray.txt').write_text('uncommitted', encoding='utf-8')
-            code, out = run_cli(root, 'milestone', 'building', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('dirty', out)
-            # The refusal is decided before the write, so the file is untouched.
-            self.assertEqual(mfile.read_bytes(), before_bytes)
-            self.assertEqual(self._head(root), before_head)
-
-    def test_a_missing_branch_refuses_rather_than_minting_it(self):
-        with tree() as root:
-            mfile = self._prepare(root, make_branch=False)
-            code, out = run_cli(root, 'milestone', 'building', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('does not exist', out)
-            self.assertIn('checkout -b', out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'ready')
-
-    def test_a_branch_held_by_another_worktree_refuses_and_names_the_holder(self):
-        with tree() as root:
-            mfile = self._prepare(root)
-            other = root.parent / 'held'
-            self._git(root, 'worktree', 'add', '-q', str(other), self.BRANCH)
-            code, out = run_cli(root, 'milestone', 'building', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn(str(other), out)
-            self.assertIn('worktree remove', out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'ready')
-
-    def test_no_branch_stamp_refuses_and_names_the_fix(self):
-        with tree() as root:
-            mfile = self._prepare(root, branch='')
-            code, out = run_cli(root, 'milestone', 'building', '0.1')
-            self.assertEqual(code, 1, out)
-            self.assertIn('declares no branch', out)
-            self.assertIn('pm set 0.1 branch', out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'ready')
-
-    def test_rerunning_on_an_already_building_milestone_repairs_the_trunk(self):
-        # The milestone is committed at `building`, so both runs take the no-op
-        # path and the trunk stays clean — the drift being repaired is purely
-        # the trunk sitting on the wrong branch, which is the D10 finding.
-        with tree() as root:
-            self._prepare(root, status='building')
-            trunk_was = self._head(root)
+    def test_a_branch_that_does_not_exist_is_none_of_its_business_either(self):
+        with tree(story_statuses=('todo',)) as root:
+            model.set_field(root / self.MFILE, 'branch', 'feat/never-created')
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            self._git(root, 'add', '-A')
+            self._git(root, 'commit', '-q', '-m', 'fixture')
             code, out = run_cli(root, 'milestone', 'building', '0.1')
             self.assertEqual(code, 0, out)
-            self.assertEqual(self._head(root), self.BRANCH)
-            # Somebody switched the trunk away.
-            self._git(root, 'checkout', '-q', trunk_was)
-            code, out = run_cli(root, 'milestone', 'building', '0.1')
-            self.assertEqual(code, 0, out)
-            self.assertIn('already building', out)
-            self.assertEqual(self._head(root), self.BRANCH)
 
-    def test_a_trunk_branch_places_nothing_but_says_so(self):
-        # `branch: main` means "no integration branch" — a real answer, and a
-        # placement command that printed nothing would read as a failure.
-        with tree() as root:
-            mfile = self._prepare(root, branch='main', make_branch=False)
-            before = self._head(root)
-            code, out = run_cli(root, 'milestone', 'building', '0.1')
-            self.assertEqual(code, 0, out)
-            self.assertIn('nothing to place', out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'building')
-            self.assertEqual(self._head(root), before)
-
-    def test_a_checkout_failing_after_the_flip_is_an_idempotent_rerun(self):
-        """The flip lands first, so its failure mode is repair, not rollback.
-
-        Setup: `.git` is made read-only. `git status --porcelain` still answers
-        (clean, exit 0) off the fresh index, so the placement is approved and
-        the flip lands — but the checkout cannot take `index.lock` and dies.
-        Making the WORKING TREE unwritable instead does not work: git reports
-        `unable to create file …` and still exits 0 with HEAD moved.
-        """
-        with tree() as root:
-            mfile = self._prepare(root)
-            trunk_was = self._head(root)
-            os.chmod(root / '.git', 0o555)
-            try:
-                code, out = run_cli(root, 'milestone', 'building', '0.1')
-            finally:
-                os.chmod(root / '.git', 0o755)
+    def test_the_rule_is_gone_and_the_gate_says_so(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+            code, out = run_gate(root)
             self.assertEqual(code, 2, out)
-            self.assertEqual(model.field_of(mfile, 'status'), 'building')
-            self.assertIn('re-run', out)
-            self.assertEqual(self._head(root), trunk_was)
+        self.assertNotIn('D10', model.KNOWN_CHECKS)
+        self.assertFalse(hasattr(model.PmConfig, 'place_branch_on_building'))
+        self.assertFalse(hasattr(model.PmConfig, 'trunk_branches'))
+
+    def test_a_retired_KEY_is_named_by_the_gate_never_silently_ignored(self):
+        # A config key that does nothing is worse than one that errors: the
+        # author believes it took effect. Reported where a stale rule id is —
+        # on the gate, so the read verbs keep working through the pin bump.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.ON, encoding='utf-8')
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                code = pm_check.run()
+            out = buf.getvalue()
+            self.assertEqual(code, 2, out)
+            self.assertIn('place_branch_on_building was retired', out)
+            # ...and `pm status` still runs, which is the whole point.
+            self.assertEqual(run_cli(root, 'status')[0], 0)
+
+    def test_the_cli_holds_no_git_checkout_at_all(self):
+        source = Path(cli.__file__).read_text(encoding='utf-8')
+        for spelling in ('checkout', 'worktree', 'subprocess'):
+            self.assertNotIn(spelling, source,
+                             f'{spelling} is back in the pm CLI')
 
 
 class WriteFidelity(unittest.TestCase):
@@ -1750,27 +1684,6 @@ class FlowRuleEdges(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 1)
             self.assertIn('milestones are building', out)
-
-    def test_d10_says_so_when_it_cannot_see_the_trunk(self):
-        # Detached HEAD is what CI checks out; silently skipping there turned
-        # D10 off in the one environment it guards.
-        with tree(milestone_status='building', story_statuses=('todo',)) as root:
-            model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md',
-                            'branch', 'feat/0.1-demo')
-            (root / 'project.godot').write_text(
-                '[application]\nconfig/version="0.1"\n', encoding='utf-8')
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
-            subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
-                           capture_output=True)
-            subprocess.run(['git', '-c', 'user.email=t@t', '-c', 'user.name=t',
-                            'commit', '-qm', 'x'], cwd=root, check=True,
-                           capture_output=True)
-            subprocess.run(['git', 'checkout', '--detach', '-q', 'HEAD'],
-                           cwd=root, check=True, capture_output=True)
-            code, out = run_gate(root)
-            self.assertIn('UNVERIFIED', out)
-            self.assertIn('DETACHED', out)
 
 
 class ConfigValueErrors(unittest.TestCase):

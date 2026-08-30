@@ -30,12 +30,7 @@ DRIFT RULES (each FAILs, naming the offending path):
   D9  a `building` milestone declares the `branch:` its work lives on. A fresh
       checkout of the trunk sees the PM records but not the code; without the
       stamp the only recourse is guessing at `git branch -a`.
-  D10 that branch is CHECKED OUT IN THE TRUNK. D9 proves a milestone says where
-      its code lives; D10 proves it is where a human can follow it. A milestone
-      declaring a trunk branch is skipped — it is not using an integration
-      branch at all.
-
-  D8-D10 encode the branch-per-milestone / bump-at-start flow and are OFF by
+  D8/D9 encode the branch-per-milestone / bump-at-start flow and are OFF by
   default; a project shipping from the trunk and bumping at close is running a
   different valid flow, not drifting. Opt in via `[pm] checks`.
 
@@ -46,7 +41,7 @@ DRIFT RULES (each FAILs, naming the offending path):
       slots are permitted, never required: git does not store an empty
       directory. `pm new milestone|feature <id>` is idempotent and fills gaps.
 
-  D13 is OFF by default like D8-D10 — a tree predating the canonical slots is
+  D13 is OFF by default like D8/D9 — a tree predating the canonical slots is
   missing most of them, and a rule that turns a consumer red on upgrade day is
   unshippable. Scaffold first, then hold the line.
 
@@ -92,9 +87,10 @@ def run() -> int:
     # The roster is validated HERE rather than in `model.load()`: a stale rule
     # id must not take `pm status` down with the gate. This is the reader a
     # narrowed roster would lie to, so this is where it has to be loud.
-    stale = model.unknown_checks(cfg)
+    stale = model.config_complaints(cfg)
     if stale:
-        print(f'[check:pm] ERROR — {stale}', file=sys.stderr)
+        for msg in stale:
+            print(f'[check:pm] ERROR — {msg}', file=sys.stderr)
         return 2
     findings: list[str] = []
 
@@ -189,7 +185,7 @@ def run() -> int:
             report(f'milestone {mid} is {mstat!r} but all {feat_total} features '
                    f'are done (should be done)  [{cfg.rel(mfile)}]')
 
-    # --- D8-D10: the flow checks, only when opted into --------------------
+    # --- D8/D9: the flow checks, only when opted into ---------------------
     building = model.building_milestones(cfg) if enabled & set(model.FLOW_CHECKS) else []
 
     if 'D8' in enabled and building:
@@ -213,16 +209,6 @@ def run() -> int:
         if 'D9' in enabled and not branch:
             report(f'building milestone {mid} declares no branch: — a fresh '
                    f'checkout cannot find where its work lives  [{cfg.rel(mfile)}]')
-        if 'D10' in enabled and branch and branch not in cfg.trunk_branches:
-            trunk, why = model.trunk_checkout_branch(cfg)
-            if trunk is None:
-                # Named, not skipped: an unverifiable D10 must look different
-                # from a satisfied one.
-                print(f'  UNVERIFIED  D10 for milestone {mid}: {why}')
-            elif trunk != branch:
-                report(f'building milestone {mid} declares branch {branch!r} but '
-                       f'the trunk tree is on {trunk!r} — the integration branch '
-                       f'belongs in the trunk, checked out')
 
     # --- V1-V6: structural + referential integrity ------------------------
     v_on = enabled & set(model.VALIDATE_CHECKS)

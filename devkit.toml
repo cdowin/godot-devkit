@@ -40,11 +40,10 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 # would mean publishing 0.14.0 in pyproject.toml before 0.14.0 exists. A rule
 # that fits a different valid flow is not a rule to switch on and pad around.
 #
-# D9/D10 DO apply: work lands on main and `branch: main` says so. main is a
-# trunk branch, so D10 recognises "no integration branch" and skips.
+# D9 DOES apply: work lands on main and `branch: main` says so.
 checks = [
     "D1", "D2", "D3", "D4", "D5", "D6",
-    "D9", "D10",
+    "D9",
     "D13",
     "V1", "V2", "V3", "V4", "V5", "V6",
 ]

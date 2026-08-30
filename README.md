@@ -340,7 +340,7 @@ tool while a `sed` of the same line reached the state it refused.
 | `pm feature <status> <feature-id>` | Same, against `[pm] feature_states` |
 | `pm feature review <feature-id>` | Refuses unless every story is at `review` |
 | `pm feature done <feature-id> [--cascade] [--review-record <path>]` | Closes the feature. **Touches no story file** unless `--cascade`, which additionally moves that feature's stories at `review` to `done` in the same run. Either way it REPORTS the stories it did not touch and refuses nothing on their account. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical |
-| `pm milestone <status> <id>` | Milestone flips; `done` refuses unless every feature is done. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
+| `pm milestone <status> <id>` | Set a milestone's status; `done` refuses unless every feature is done. It does **not** touch your git checkout — a PM tracker that runs `git checkout` in your trunk worktree is a tracker mutating your VCS, and every refusal behind that was about the shape of a worktree elsewhere on your disk rather than about the input |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain — its own frontmatter file (`milestone.md` / `feature.md`) plus its directory slots (`features/ bugs/ design/`; a feature gets `stories/ design/`). **A shared doc is NOT minted**: `decisions.md` appears when `pm decide` records the first one, `handoff.md` and `review.md` when somebody writes one. Scaffolding them empty put 204 files and ~1,900 lines into one consumer's tree — a quarter of its PM tree, minted by the verb that exists to stop sprawl. `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line on a doc that HAS one, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. Every failure out is a **refusal**, never a stack trace — including the grain directory or file the filesystem itself will not take (a name past NAME_MAX, an unwritable parent), which answers the same way on every supported Python |
@@ -411,19 +411,16 @@ review_dir  = "docs/reviews"    # where review records live
 review_min_content_bytes = 20   # anti-rubber-stamp floor (non-whitespace bytes)
 review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
 story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
-place_branch_on_building = false  # `pm milestone building` also checks that
-                                #   milestone's `branch:` out in the trunk
 checks = ["D1","D2","D3","D4","D5","D6",       # drift rules
           "V1","V2","V3","V4","V5","V6"]        # integrity rules (see `pm validate`)
                                                 # ^ this IS the stock default: a repo
                                                 #   with no devkit.toml runs exactly
                                                 #   these, so a config "declaring the
                                                 #   defaults" must name V6 too
-# D8/D9/D10 are the FLOW rules — opt in by naming them here:
+# D8/D9 are the FLOW rules — opt in by naming them here:
 #   D8  project version == the `building` milestone's id (bump at START; the id
 #       IS the version, exact string equality)
-#   D9  a `building` milestone declares `branch:`
-#   D10 that branch is checked out in the TRUNK worktree
+#   D9  a `building` milestone declares `branch:` — a required field in a state
 # A project that ships from the trunk and bumps at close is running a different
 # valid flow, so these stay off unless asked for.
 # D13 opts in the same way:
@@ -443,7 +440,6 @@ checks = ["D1","D2","D3","D4","D5","D6",       # drift rules
 bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file = "project.godot"                  # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
-trunk_branches = ["staging", "main"]            # D10: `branch: staging` = no integration branch
 # The vocabularies are overridable: milestone_states, feature_states,
 # story_states. They are what D4 holds a grain to, and what the status verbs
 # accept — there is no transition graph, so nothing constrains the ORDER.

@@ -28,6 +28,8 @@
 - **closed states, open transitions** — `pm story|feature|milestone <status> <id>` takes any value in that grain's vocabulary; `butterfly` is exit 2 naming the set. `pm set <id> status` is no longer refused.
 - **a status verb never validates the state it FOUND** — `pm milestone done` on a hand-edited `status: wombat` used to refuse. It prints `wombat -> done` and repairs the drift `check pm` reports.
 - **BREAKING: the `pm feature done` story cascade is opt-in** — Without `--cascade` no story file is touched. Writing files the caller did not name is the tool acting on its own initiative.
+- **BREAKING: `place_branch_on_building` and D10 are removed** — `pm milestone building` ran `git checkout` in your trunk worktree. A PM tracker does not mutate your VCS checkout. D9 stays. (repo/pm/cli.py)
+- **a retired `[pm]` key is NAMED, never silently ignored** — `check pm` and `pm validate` exit 2 listing it, beside a stale rule id. The read verbs keep running, so a pin bump stays readable.
 - **empty repo to a closed milestone: 14 commands to 6** — Six of the fourteen existed only because an edge demanded them, and every one was reachable by hand anyway.
 - **`pm vocabulary` prints the closed SETS, not edges** — The states each grain may hold and the rule ids `[pm] checks` may name, machine-readably. It is how a project sees what a pin bump changed.
 - **a project's own template may open a grain at any state** — The guard forbidding it was the tool overruling a project about its own scaffold; D4 reads the state off the tree either way.
