@@ -21,6 +21,8 @@ from pathlib import Path
 
 from godot_devkit.godot.format.tscn import parse, _basename
 from godot_devkit.core.project import load_config, repo_root
+from godot_devkit.core import walk
+from godot_devkit.core.walk import Kind, SkipReason
 
 # --- Scope -------------------------------------------------------------------
 REPO_ROOT = repo_root()
@@ -49,10 +51,12 @@ def _is_excluded(rel: str) -> bool:
 
 
 def iter_files(glob: str, include_tests: bool) -> list[Path]:
-    files = [p for p in REPO_ROOT.rglob(glob) if not _is_excluded(_relpath(p))]
+    found = walk.descendants(REPO_ROOT, Kind.ANY, pattern=glob).filter(
+        lambda p: not _is_excluded(_relpath(p)), SkipReason.EXCLUDED_PATH)
     if not include_tests:
-        files = [p for p in files if not _relpath(p).startswith('tests/')]
-    return sorted(files)
+        found = found.filter(lambda p: not _relpath(p).startswith('tests/'),
+                             SkipReason.EXCLUDED_PATH)
+    return list(found.kept)
 
 
 def strip_comment(line: str) -> str:

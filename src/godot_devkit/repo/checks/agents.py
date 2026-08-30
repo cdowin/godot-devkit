@@ -29,6 +29,8 @@ import sys
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.markdown import code_spans, non_fenced_lines
 from godot_devkit.core.project import repo_root
+from godot_devkit.core import walk
+from godot_devkit.core.walk import Kind, Walk
 from godot_devkit.repo.pm import model
 
 DEFAULT_SCOPE = ('.claude/agents/*.md', '.claude/rules/*.md', '.claude/skills/**/*.md')
@@ -123,9 +125,19 @@ def run() -> int:
         defects.append(msg)
         print(f'  MALFORMED  {msg}')
 
-    files = sorted({p for glob in scope for p in root.glob(glob) if p.is_file()})
-    print(f'[check:agents] scanning {len(files)} definition(s) against the pm CLI '
-          f'vocabulary')
+    found = Walk(())
+    for pattern in scope:
+        found = found.merge(walk.matching(root, pattern, Kind.FILE))
+    # A SET: two [agents] scope patterns may name the same definition, and
+    # scanning it twice would double it in the census.
+    found = Walk(tuple(sorted(set(found.kept))), found.skipped)
+    files = list(found.kept)
+    # `Walk.census` is the ONLY way to a number off a walk, and it renders the
+    # number together with everything the walk narrowed away. A filter added to
+    # the scope walk later discloses itself on this line without anybody
+    # remembering to come back here.
+    print(f'[check:agents] scanning {found.census("definition(s)")} against the '
+          f'pm CLI vocabulary')
     if not files:
         print()
         print(f'[check:agents] FAIL — scanned 0 definitions; check [agents] scope')

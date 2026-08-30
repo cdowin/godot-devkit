@@ -29,6 +29,8 @@ import argparse
 import re
 from pathlib import Path
 from godot_devkit.core.markdown import non_fenced_lines
+from godot_devkit.core import walk
+from godot_devkit.core.walk import Kind
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import config_section, str_tuple
 
@@ -58,10 +60,12 @@ def scope_files() -> list[Path]:
     files: list[Path] = []
     for pattern in SCOPE_GLOBS:
         if '*' in pattern:
-            files.extend(sorted(REPO_ROOT.glob(pattern)))
+            files.extend(walk.matching(REPO_ROOT, pattern, Kind.FILE).kept)
         else:
-            files.append(REPO_ROOT / pattern)
-    return [f for f in files if f.is_file()]
+            literal = REPO_ROOT / pattern
+            if literal.is_file():
+                files.append(literal)
+    return files
 
 
 def real_make_targets() -> set[str]:

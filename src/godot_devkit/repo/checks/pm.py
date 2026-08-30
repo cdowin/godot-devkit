@@ -565,16 +565,15 @@ def run() -> int:
     # narrows `stories/` and `bugs/` to documents that OPEN frontmatter — a
     # README parked beside a bug is a note, not a bug — and a scan that narrows
     # has to say by how much, or "0 bug(s)" reads as a fact about the directory
-    # when it is a fact about the filter. Printed only when it is non-zero:
-    # a walk that skipped nothing has nothing to disclose.
-    n_notes = len(model.notes_skipped(cfg))
-    if n_notes:
-        census += (f', {n_notes} note(s) skipped (no frontmatter — not a '
-                   f'grain)')
-    n_hidden = len(model.hidden_skipped(cfg))
-    if n_hidden:
-        census += (f', {n_hidden} hidden (dot-prefixed — skipped, as D13 '
-                   f'skips them)')
+    # when it is a fact about the filter.
+    #
+    # This line is no longer a list of remembered disclosures. `Walk` records
+    # every narrowing under a closed-enum reason and renders them all, in enum
+    # order, printing nothing for a walk that skipped nothing — so a filter
+    # added to `model.slot_walk` next year discloses itself here without
+    # anybody editing this file. That is the whole difference between fixing
+    # the instance and fixing the shape.
+    census += model.tree_walk(cfg).disclosures()
     if 'D11' in enabled:
         census += f', {n_done_grains} done grain(s)'
     if 'D12' in enabled:

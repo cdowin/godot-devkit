@@ -43,7 +43,6 @@ the milestone machine has no `review` state (nothing transitions into one).
 """
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -51,6 +50,8 @@ from datetime import date
 from pathlib import Path
 
 from godot_devkit.core.markdown import block_scan
+from godot_devkit.core import walk
+from godot_devkit.core.walk import Kind, SkipReason, Walk
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
 
@@ -190,16 +191,10 @@ SLOT_HEADERS = frozenset(SLOT_HEADER.values())
 def dir_entries(path: Path) -> dict[str, str]:
     """{exact name: 'file'|'dir'} for one directory — EXACT names, always.
 
-    Never `Path.is_file()` for an existence question here: macOS resolves
-    `decisions.md` to an existing `DECISIONS.md` and Linux does not, so the same
-    tree would be clean on one platform and drifting on the other. A listing
-    compares the bytes git stores.
+    The name the PM rules read it by; the listing itself is `core.walk.entries`,
+    where every enumeration in this package lives.
     """
-    try:
-        return {p.name: ('dir' if p.is_dir() else 'file')
-                for p in path.iterdir()}
-    except OSError:
-        return {}
+    return walk.entries(path)
 
 
 def case_variants(entries: dict[str, str], name: str) -> list[str]:
@@ -534,9 +529,8 @@ def milestone_dir(cfg: PmConfig, mid: str) -> Path | None:
     for base in (cfg.roadmap, cfg.roadmap / ARCHIVE_DIR_NAME):
         if not base.is_dir():
             continue
-        for d in sorted(base.glob(f'{mid}-*')):
-            if d.is_dir():
-                return d
+        for d in walk.matching(base, f'{mid}-*', Kind.DIR).kept:
+            return d
     return None
 
 
@@ -633,35 +627,56 @@ def orphan_dirs(cfg: PmConfig) -> list[tuple[Path, str]]:
     say what was skipped rather than quietly narrowing the scan.
     """
     out: list[tuple[Path, str]] = []
-    if not cfg.roadmap.is_dir():
-        return out
-    for d in sorted(cfg.roadmap.iterdir()):
-        if not d.is_dir() or d.name == ARCHIVE_DIR_NAME:
-            continue
-        if not (d / 'milestone.md').is_file():
+    candidates = _milestone_candidates(cfg.roadmap, exclude_archive=True)
+    _, orphan_milestones = candidates.partition(_has_milestone_file,
+                                                SkipReason.NO_GRAIN_FILE)
+    orphaned = set(orphan_milestones)
+    for d in candidates.kept:
+        if d in orphaned:
             out.append((d, 'milestone dir with no milestone.md'))
             continue
-        fdir = d / 'features'
-        if not fdir.is_dir():
-            continue
-        for f in sorted(fdir.iterdir()):
-            if f.is_dir() and not (f / 'feature.md').is_file():
-                out.append((f, 'feature dir with no feature.md'))
+        _, orphan_features = walk.children(d / 'features', Kind.DIR).partition(
+            _has_feature_file, SkipReason.NO_GRAIN_FILE)
+        out += [(f, 'feature dir with no feature.md') for f in orphan_features]
     return out
+
+
+def _has_milestone_file(d: Path) -> bool:
+    return (d / 'milestone.md').is_file()
+
+
+def _has_feature_file(d: Path) -> bool:
+    return (d / 'feature.md').is_file()
+
+
+def _milestone_candidates(base: Path, exclude_archive: bool) -> Walk:
+    """Directories under one roadmap base that a milestone COULD be.
+
+    The universe `milestone_dirs` keeps from and `orphan_dirs` reports on — one
+    walk, so the two can never disagree about which directories the tree holds.
+    """
+    found = walk.children(base, Kind.DIR)
+    if exclude_archive:
+        found = found.filter(lambda d: d.name != ARCHIVE_DIR_NAME,
+                             SkipReason.EXCLUDED_PATH)
+    return found
+
+
+def milestone_walk(cfg: PmConfig, include_archive: bool = False) -> Walk:
+    """Milestone dirs in the ACTIVE tree, with the scaffold-only dirs the walk
+    dropped recorded beside them (archived ones predate the schema)."""
+    found = _milestone_candidates(cfg.roadmap, exclude_archive=True).filter(
+        _has_milestone_file, SkipReason.NO_GRAIN_FILE)
+    if include_archive:
+        found = found.merge(
+            _milestone_candidates(cfg.roadmap / ARCHIVE_DIR_NAME, exclude_archive=False)
+            .filter(_has_milestone_file, SkipReason.NO_GRAIN_FILE))
+    return found
 
 
 def milestone_dirs(cfg: PmConfig, include_archive: bool = False) -> list[Path]:
     """Milestone dirs in the ACTIVE tree (archived ones predate the schema)."""
-    if not cfg.roadmap.is_dir():
-        return []
-    out = [d for d in sorted(cfg.roadmap.iterdir())
-           if d.is_dir() and d.name != ARCHIVE_DIR_NAME and (d / 'milestone.md').is_file()]
-    if include_archive:
-        arch = cfg.roadmap / ARCHIVE_DIR_NAME
-        if arch.is_dir():
-            out += [d for d in sorted(arch.iterdir())
-                    if d.is_dir() and (d / 'milestone.md').is_file()]
-    return out
+    return list(milestone_walk(cfg, include_archive).kept)
 
 
 def version_key(name: str) -> tuple:
@@ -734,21 +749,38 @@ def _is_grain_doc(path: Path) -> bool:
         return True
 
 
-def _slot_docs(gdir: Path) -> list[Path]:
-    """Every `.md` one slot directory holds, in reading order.
+def slot_walk(gdir: Path) -> Walk:
+    """THE walk of one slot directory (`bugs/`, `stories/`) — both halves.
 
-    RECURSIVE, and the extension compared case-insensitively. A `glob('*.md')`
+    The single definition every reader shares (D2/D4's story walk, D14's bug
+    lifetime, D17's prose cap, every census): a second walk would be a second
+    chance to disagree about which documents the tree even holds. It replaced
+    six hand-rolled functions — `_slot_docs`, `_all_slot_docs`, `hidden_docs`,
+    `grain_docs`, `note_docs` and their two tree-wide aggregators — which were
+    the same enumeration written five times so that each narrowing could be
+    remembered separately. One of them was forgotten, twice.
+
+    RECURSIVE, and the extension compared case-insensitively: a `glob('*.md')`
     saw neither `<slot>/<topic>/<doc>.md` nor `<DOC>.MD`, and neither `bugs/`
     nor `stories/` is a directory D13 descends into, so both were invisible to
     every rule at once — and the census printed the smaller number without
     saying it had looked less far.
 
-    DOTTED names are skipped, files and directories alike, exactly as
-    `structure_findings` skips them for D13: one walk cannot hold a
-    `stories/.hidden/d.md` to a rule the structure gate has already declared
-    out of scope.
+    Two NARROWINGS, and both disclose because `Walk.filter` gives them no other
+    option:
+
+      * DOTTED_NAME — dot-prefixed components, files and directories alike,
+        exactly as `structure_findings` skips them for D13. Out of scope for
+        every rule, but COUNTED: `0 bug(s)` must not quietly mean "one open bug
+        parked under `bugs/.hold/`", which prune would then delete where it
+        sits.
+      * NO_FRONTMATTER — a `.md` that is a note parked beside a grain rather
+        than a grain. "0 bugs" and "0 bugs and a README nobody counted" are
+        different facts about a directory.
     """
-    return [p for p in _all_slot_docs(gdir) if not _is_hidden(gdir, p)]
+    return (walk.descendants(gdir, Kind.FILE, suffix='.md')
+            .filter(lambda p: not _is_hidden(gdir, p), SkipReason.DOTTED_NAME)
+            .filter(_is_grain_doc, SkipReason.NO_FRONTMATTER))
 
 
 def _is_hidden(gdir: Path, p: Path) -> bool:
@@ -756,55 +788,14 @@ def _is_hidden(gdir: Path, p: Path) -> bool:
     return any(part.startswith('.') for part in p.relative_to(gdir).parts)
 
 
-def _all_slot_docs(gdir: Path) -> list[Path]:
-    """Every `.md` one slot directory holds, dotted names INCLUDED.
-
-    The universe the narrower walks partition. It exists so `hidden_docs` can
-    disclose what the dotted filter removed: a skip nobody counts is the same
-    silent narrowing the frontmatter filter already had to answer for.
-    """
-    if not gdir.is_dir():
-        return []
-    return sorted(p for p in gdir.rglob('*')
-                  if p.is_file() and p.suffix.lower() == '.md')
-
-
-def hidden_docs(gdir: Path) -> list[Path]:
-    """The `.md` files under one slot directory the DOTTED filter removed.
-
-    Out of scope for every rule, exactly as D13 treats a dotted name — but
-    COUNTED, because `0 bug(s)` must not quietly mean `one open bug parked
-    under bugs/.hold/`, which prune would then delete where it sits.
-    """
-    return [p for p in _all_slot_docs(gdir) if _is_hidden(gdir, p)]
-
-
 def grain_docs(gdir: Path) -> list[Path]:
-    """Every grain document under one slot directory, in reading order.
-
-    One definition, every reader (D2/D4's story walk, D14's bug lifetime, D17's
-    prose cap, every census): a second walk would be a second chance to
-    disagree about which documents the tree even holds.
-    """
-    return [p for p in _slot_docs(gdir) if _is_grain_doc(p)]
-
-
-def note_docs(gdir: Path) -> list[Path]:
-    """The `.md` files under one slot directory that `grain_docs` SKIPPED.
-
-    The other half of the same walk, and it exists so the census can say how
-    far it looked. A census that reports only what it kept asserts the tree is
-    what it scanned; naming the skips is what keeps "0 bugs" distinguishable
-    from "0 bugs and a README nobody counted".
-    """
-    return [p for p in _slot_docs(gdir) if not _is_grain_doc(p)]
+    """Every grain document under one slot directory, in reading order."""
+    return list(slot_walk(gdir).kept)
 
 
 def feature_files(mdir: Path) -> list[Path]:
-    fdir = mdir / 'features'
-    if not fdir.is_dir():
-        return []
-    return [d / 'feature.md' for d in sorted(fdir.iterdir()) if (d / 'feature.md').is_file()]
+    return [d / 'feature.md' for d in walk.children(mdir / 'features', Kind.DIR)
+            .filter(_has_feature_file, SkipReason.NO_GRAIN_FILE).kept]
 
 
 def story_files(ffile: Path) -> list[Path]:
@@ -812,35 +803,19 @@ def story_files(ffile: Path) -> list[Path]:
     return grain_docs(ffile.parent / 'stories')
 
 
-def notes_skipped(cfg: PmConfig) -> list[Path]:
-    """Every `.md` the grain walk skipped across the ACTIVE tree.
+def tree_walk(cfg: PmConfig) -> Walk:
+    """Every slot document in the ACTIVE tree, and everything the walk skipped.
 
-    A census must never assert the opposite of the filesystem. The grain walk
-    narrows `stories/` and `bugs/` to the documents that open frontmatter, and
-    a scan that narrows must say by how much — otherwise "0 bug(s)" reads as a
-    fact about the directory when it is a fact about the filter.
+    What the census renders. A census must never assert the opposite of the
+    filesystem, and the only way to a number here is `Walk.census`, which emits
+    the number and its narrowings as one string.
     """
-    out: list[Path] = []
+    found = Walk(())
     for mdir in milestone_dirs(cfg):
-        out += note_docs(mdir / 'bugs')
+        found = found.merge(slot_walk(mdir / 'bugs'))
         for ffile in feature_files(mdir):
-            out += note_docs(ffile.parent / 'stories')
-    return out
-
-
-def hidden_skipped(cfg: PmConfig) -> list[Path]:
-    """Every dot-prefixed `.md` the grain walk skipped across the ACTIVE tree.
-
-    The twin of `notes_skipped` for the other filter. A dot prefix is a
-    deliberate hide, so these are not findings — but an uncounted skip is how a
-    census comes to assert the opposite of the filesystem.
-    """
-    out: list[Path] = []
-    for mdir in milestone_dirs(cfg):
-        out += hidden_docs(mdir / 'bugs')
-        for ffile in feature_files(mdir):
-            out += hidden_docs(ffile.parent / 'stories')
-    return out
+            found = found.merge(slot_walk(ffile.parent / 'stories'))
+    return found
 
 
 # --- THE review-record definition --------------------------------------------
@@ -933,7 +908,7 @@ def review_record_for(cfg: PmConfig, fid: str) -> str | None:
         slug = fid.partition('/')[2]
         rdir = cfg.root / cfg.review_dir
         if slug and rdir.is_dir():
-            for cand in sorted(rdir.glob(f'{slug}*.md')):
+            for cand in walk.matching(rdir, f'{slug}*.md', Kind.FILE).kept:
                 if record_is_substantive(cfg, cand):
                     return cfg.rel(cand)
     return None
@@ -1415,18 +1390,7 @@ def log_files(cfg: PmConfig, schema: LogSchema) -> tuple[list[Path], list[Path]]
 
     Archived logs predate the schema and are skipped.
     """
-    if not cfg.roadmap.is_dir():
-        return [], []
-    logs: list[Path] = []
-    variants: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(cfg.roadmap):
-        dirnames[:] = [d for d in dirnames if d != ARCHIVE_DIR_NAME]
-        for name in filenames:
-            if name == schema.file_name:
-                logs.append(Path(dirpath) / name)
-            elif name.lower() == schema.file_name:
-                variants.append(Path(dirpath) / name)
-    return sorted(logs), sorted(variants)
+    return walk.named(cfg.roadmap, schema.file_name, prune=(ARCHIVE_DIR_NAME,))
 
 
 def _comment_scan(lines: list[str]) -> tuple[list[bool], list[str], int, int]:
