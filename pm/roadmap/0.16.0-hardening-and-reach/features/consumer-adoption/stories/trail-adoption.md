@@ -3,7 +3,7 @@ id: 0.16.0/consumer-adoption/trail-adoption
 feature: 0.16.0/consumer-adoption
 milestone: "0.16.0"
 name: make pm + shim, defaults-scan, Makefile claim fix, adopt install diffs
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

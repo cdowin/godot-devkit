@@ -3,7 +3,7 @@ id: 0.16.0/technical-review/full-review
 feature: 0.16.0/technical-review
 milestone: "0.16.0"
 name: File size, decomposition, comment archaeology, magic literals, readability
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

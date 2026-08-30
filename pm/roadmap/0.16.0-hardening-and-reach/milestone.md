@@ -30,7 +30,7 @@ labels: []
 2. `branch-discipline` · building · 0/1 stories
 3. `case-rename-retirement` · building · 0/1 stories
 4. `ci-corpus` · building · 0/1 stories
-5. `consumer-adoption` · planning · 0/2 stories
+5. `consumer-adoption` · building · 0/2 stories
 6. `gate-integrity` · building · 0/2 stories
 7. `hook-corpus-upstream` · building · 0/2 stories
 8. `hook-soundness` · building · 0/2 stories
@@ -39,7 +39,7 @@ labels: []
 11. `scene-verbs` · building · 0/4 stories
 12. `self-discipline` · building · 0/3 stories
 13. `subresource-model` · building · 0/1 stories
-14. `technical-review` · planning · 0/2 stories
+14. `technical-review` · building · 0/2 stories
 15. `uid-deepening` · building · 0/2 stories
 16. `write-fidelity` · building · 0/4 stories
 <!-- /pm:execution -->
