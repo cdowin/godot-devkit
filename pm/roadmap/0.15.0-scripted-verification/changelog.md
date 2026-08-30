@@ -77,3 +77,15 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C17 — 2026-08-30 — the review-slot refusal resolves symlinks
 **What:** pm feature done judges --review-record through symlinks, so a link named durable.md pointing at the transient review.md is refused and a dangling link does not raise.
 **Evidence:** 26577d0
+
+## C18 — 2026-08-30 — one walk
+**What:** Filesystem enumeration moves into core/walk.py, which returns what it KEPT and what it SKIPPED under a closed-enum reason; Walk has no length, so a census cannot reach a count without its disclosures.
+**Evidence:** 6ac90c3
+
+## C19 — 2026-08-30 — the two allowlists
+**What:** An AST test asserts glob/rglob/iterdir/os.walk live only in core/walk.py and write_text/open-for-write/rename/unlink/rmtree/mkdir only in core/apply.py, naming file:line otherwise.
+**Evidence:** tests/test_boundaries.py
+
+## C20 — 2026-08-30 — one apply
+**What:** Filesystem mutation moves into core/apply.py: a Plan is an explicit list of Steps, decide() names every obstruction from a closed enum before anything runs, and Applied says which landed.
+**Evidence:** 7134e72
