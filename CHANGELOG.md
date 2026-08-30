@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.15.0 — 2026-08-30
 
 - **BLOCKER: `pm feature done --cascade` was unreachable from the state the plain run leaves you in** — The verb short-circuited on an already-`done` feature BEFORE the cascade, so the two-step its own output prints as the remedy ("`--cascade` closes the ones at `review`") answered "already done (no-op)" at exit 0, moved no story and stopped even reporting the untouched ones. The feature flip is now the only idempotent part: the cascade, the `--review-record` stamp and the untouched-story report run whatever the feature's status is, and a late record on a closed feature has to RESOLVE like any other. (repo/pm/cli.py)
 - **eleven config surfaces stop being silently ignored** — `review_min_content_bytes`, the three grandfather ledgers, the six line caps and the whole `[agents]` section were all read from `devkit.toml` at v0.14.0 and by nothing at HEAD, yet `check pm` and `pm validate` both printed PASS at exit 0 over a file declaring every one of them. They are now named at exit 2 beside the six already in the ledger — on the GATES only, so the read verbs keep working through the pin bump. `core.config.section_declared` catches an empty `[agents]` too, which `config_section` cannot tell from an absent one. (repo/pm/model.py, core/config.py)
