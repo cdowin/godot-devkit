@@ -1448,6 +1448,28 @@ class BugStatus(unittest.TestCase):
                   'status': status})
         return p
 
+    def test_a_traversal_in_the_slug_half_never_writes_a_sibling_grain(self):
+        # v0.16.0 release-review blocker: `0.1/bugs/../features/alpha/feature`
+        # resolved by traversal and wrote a BUG-vocabulary status into the
+        # feature file — the cross-grain write the docstring above promises
+        # cannot happen. The slug half holds no path segments, ever.
+        with tree() as root:
+            self._bug(root, 'crash', 'open')
+            victim = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            for gid in ('0.1/bugs/../features/alpha/feature',
+                        '0.1/bugs/sub/../../features/alpha/feature',
+                        '0.1/bugs/'):
+                code, out = run_cli(root, 'bug', 'fixed', gid)
+                self.assertEqual(code, 2, (gid, out))
+                self.assertIn('no bug resolves', out)
+            self.assertEqual(model.field_of(victim, 'status'), 'building')
+            # `pm set` rides the same resolver — the same id must refuse.
+            code, out = run_cli(root, 'set',
+                                '0.1/bugs/../features/alpha/feature',
+                                'status', 'PWNED')
+            self.assertEqual(code, 2, out)
+            self.assertEqual(model.field_of(victim, 'status'), 'building')
+
     def test_an_id_lacking_the_bugs_segment_never_writes_a_different_grain(self):
         # `_grain_file` alone resolves a FEATURE id too when `/bugs/` is
         # absent — a bug verb reaching it unguarded would validate the

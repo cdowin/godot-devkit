@@ -112,6 +112,28 @@ class RetargetRewrites(unittest.TestCase):
             if 'SKIPPED' in line:
                 self.assertRegex(line, r'consumer\.gd:\d+')
 
+    def test_an_unreadable_file_is_skipped_not_a_traceback(self) -> None:
+        # v0.16.0 release review: only UnicodeDecodeError was caught, so a
+        # permission error mid-sweep stranded a partial rewrite behind a
+        # stack trace with no census. The contract is skip-and-continue.
+        if os.geteuid() == 0:
+            self.skipTest('root ignores permission bits')
+        with temp_repo('retarget_repo') as root:
+            locked = root / 'scenes/user.tscn'
+            locked.chmod(0o000)
+            try:
+                code, output = run_cli('refs', '--retarget', OLD, NEW)
+            finally:
+                locked.chmod(0o644)      # before the tempdir teardown
+            gd = (root / 'systems/consumer.gd').read_text(encoding='utf-8')
+        self.assertEqual(code, 1, output)                       # skips exit 1
+        self.assertIn(f'preload("{NEW}")', gd)                  # sweep went on
+        self.assertRegex(output, r'SKIPPED  scenes/user\.tscn  unreadable')
+        _, rewritten, skipped = census(output)
+        self.assertGreater(rewritten, 0)
+        # consumer.gd's three deliberate skip sites, plus the locked file.
+        self.assertEqual(skipped, 4)
+
     def test_a_bystander_file_is_byte_identical(self) -> None:
         with temp_repo('retarget_repo') as root:
             before = (root / 'scenes/bystander.tscn').read_bytes()

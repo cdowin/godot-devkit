@@ -793,6 +793,15 @@ def _grain_file(cfg: model.PmConfig, gid: str) -> Path:
     """Resolve any grain id — milestone, feature, story or bug — to its file."""
     if '/bugs/' in gid:
         mid, _, rest = gid.partition('/bugs/')
+        # The resolution twin of _check_slug's creation guard. bugs/ is
+        # walked recursively, so nested slugs are legal — but a `..` (or an
+        # empty) segment would resolve OUTSIDE bugs/ and hand the status
+        # write to a sibling grain, the cross-grain write the docstring
+        # above promises cannot happen.
+        parts = rest.replace('\\', '/').split('/')
+        if not rest or any(p in ('', '.', '..') for p in parts):
+            raise Usage(f'no bug resolves from id {gid!r} '
+                        f'(a bug slug holds no dot or empty segments)')
         mdir = model.milestone_dir(cfg, mid)
         bf = (mdir / 'bugs' / f'{rest}.md') if mdir else None
         if bf and bf.is_file():

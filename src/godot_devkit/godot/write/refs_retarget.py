@@ -152,6 +152,11 @@ def _retarget_file(path: Path, rel: str, old: str, new: str,
         # The SKIPPED variant: a sweep steps over the file and keeps going,
         # where a single-file verb refuses — the sentence itself is shared.
         return 0, 1, [f'  SKIPPED  {rel}  {utf8_refusal_reason(err)}']
+    except OSError as err:
+        # Same contract for an unreadable file (permissions, vanished mid-
+        # sweep): step over loudly. A traceback here would strand a partial
+        # multi-file rewrite with no census.
+        return 0, 1, [f'  SKIPPED  {rel}  unreadable ({err.strerror or err})']
     if old not in text:
         return 0, 0, []
     parts = LINE_ENDING.split(text)
