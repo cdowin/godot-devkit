@@ -40,6 +40,9 @@ USAGE = """usage: godot-devkit pm <command>
                                            it, no story file is touched)
   milestone <status> <milestone-id>       (done refuses unless all features done)
   status [<milestone>]
+  list [--status <s>[,<s>…]] [--owner <name>] [--milestone <id>]
+                                          (one tab-separated line per story:
+                                           id, status, owner, feature)
   get <grain-id> <key>                    (read one frontmatter field)
   set <grain-id> <key> <value>            (write one frontmatter field)
   templates [--force]                     (copy the templates into the project to edit)
@@ -410,6 +413,73 @@ def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
                 print(f'  -- phase {phase} ({n_done}/{len(members)} done)')
             for r in members:
                 print(r[3])
+    return 0
+
+
+def cmd_list(cfg: model.PmConfig, args: list[str]) -> int:
+    """One tab-separated line per story, filtered. A view over facts.
+
+    `pm status` answers "what is the whole tree doing" and prints 165 lines on
+    one consumer. The question a person actually arrives with is "what is open
+    right now", and there the real answer was two stories. This is that filter
+    and nothing more — no ranking, no scoring, no verb that picks THE next
+    thing, because a tool with an opinion about your priorities is the thing
+    this release removes.
+
+    Rows go to stdout so the output pipes into `cut`/`grep`/`wc` unchanged; the
+    census goes to stderr, so a run that matched nothing is still
+    distinguishable from a run that SCANNED nothing (a wrong `roadmap_dir`).
+    """
+    statuses: set[str] = set()
+    owner = ''
+    milestone = ''
+    i = 0
+    while i < len(args):
+        a = args[i]
+        for flag, dest in (('--status', 'status'), ('--owner', 'owner'),
+                           ('--milestone', 'milestone')):
+            if a == flag:
+                if i + 1 >= len(args):
+                    raise Usage(f'{flag} needs a value')
+                value, i = args[i + 1], i + 2
+                break
+            if a.startswith(f'{flag}='):
+                value, i = a.split('=', 1)[1], i + 1
+                break
+        else:
+            raise Usage(USAGE if not a.startswith('-')
+                        else f'unknown flag {a!r}')
+        if dest == 'status':
+            statuses |= {v for v in value.split(',') if v}
+        elif dest == 'owner':
+            owner = value
+        else:
+            milestone = value
+    unknown = sorted(statuses - set(cfg.story_states))
+    if unknown:
+        raise Usage(f'--status names {", ".join(unknown)}, which is not a story '
+                    f'status ({" ".join(cfg.story_states)})')
+
+    shown = 0
+    scanned = 0
+    for mdir in model.milestone_dirs(cfg):
+        mid = model.unquote(model.field_of(mdir / 'milestone.md', 'id'))
+        if milestone and milestone != mid:
+            continue
+        for ffile in model.feature_files(mdir):
+            view = model.read_feature(ffile)
+            for sfile in view.stories:
+                scanned += 1
+                status = model.field_of(sfile, 'status')
+                who = model.unquote(model.field_of(sfile, 'owner'))
+                if statuses and status not in statuses:
+                    continue
+                if owner and who != owner:
+                    continue
+                shown += 1
+                print(f'{model.unquote(model.field_of(sfile, "id"))}\t{status}'
+                      f'\t{who or "-"}\t{view.fid}')
+    print(f'[pm] {shown} of {scanned} story/ies', file=sys.stderr)
     return 0
 
 
@@ -969,7 +1039,7 @@ def main(argv: list[str]) -> int:
     cmd, rest = argv[0], argv[1:]
     table = {
         'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,
-        'status': cmd_status, 'new': cmd_new,
+        'status': cmd_status, 'list': cmd_list, 'new': cmd_new,
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
         'init': cmd_init, 'set': cmd_set, 'get': cmd_get,
         'templates': cmd_templates, 'sync': cmd_sync,

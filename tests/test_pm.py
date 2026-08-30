@@ -962,6 +962,95 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.2', 'Next')[0], 0)
 
 
+class ListFindsTheNail(unittest.TestCase):
+    """`pm list` — a filter over facts, and nothing else.
+
+    Measured on one consumer: `pm status` prints 165 lines, and the answer to
+    "what is open right now" was 2 stories. `pm list --status wip,review,blocked`
+    prints those 2.
+
+    There is deliberately no `pm next`. A verb that picks THE next thing is the
+    tool having an opinion about your priorities, which is what this release
+    removes everywhere else.
+    """
+
+    @staticmethod
+    def _rows(out: str) -> list[list[str]]:
+        return [line.split('\t') for line in out.strip().split('\n')
+                if '\t' in line]
+
+    def _tree(self):
+        return tree(story_statuses=('todo', 'wip', 'review', 'done'))
+
+    def test_every_story_one_tab_separated_row(self):
+        with self._tree() as root:
+            code, out = run_cli(root, 'list')
+            self.assertEqual(code, 0, out)
+            rows = self._rows(out)
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(rows[0][0], '0.1/alpha/s0')
+            self.assertEqual(rows[0][1], 'todo')
+            self.assertEqual(rows[0][3], '0.1/alpha')
+
+    def test_status_filter_narrows_to_what_is_open(self):
+        with self._tree() as root:
+            code, out = run_cli(root, 'list', '--status', 'wip,review')
+            self.assertEqual(code, 0, out)
+            self.assertEqual([r[1] for r in self._rows(out)], ['wip', 'review'])
+            self.assertIn('2 of 4 story/ies', out)
+
+    def test_owner_filter(self):
+        with self._tree() as root:
+            self.assertEqual(
+                run_cli(root, 'set', '0.1/alpha/s1', 'owner', 'ada')[0], 0)
+            code, out = run_cli(root, 'list', '--owner', 'ada')
+            self.assertEqual(code, 0, out)
+            rows = self._rows(out)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][2], 'ada')
+
+    def test_milestone_filter(self):
+        with self._tree() as root:
+            write(root / 'pm/roadmap/0.2-later/milestone.md',
+                  {'id': '"0.2"', 'name': 'Later', 'status': 'planning'})
+            write(root / 'pm/roadmap/0.2-later/features/beta/feature.md',
+                  {'id': '0.2/beta', 'milestone': '"0.2"', 'name': 'Beta',
+                   'status': 'planning'})
+            write(root / 'pm/roadmap/0.2-later/features/beta/stories/b0.md',
+                  {'id': '0.2/beta/b0', 'feature': '0.2/beta',
+                   'milestone': '"0.2"', 'name': 'B0', 'status': 'todo'})
+            code, out = run_cli(root, 'list', '--milestone', '0.2')
+            self.assertEqual(code, 0, out)
+            self.assertEqual([r[0] for r in self._rows(out)], ['0.2/beta/b0'])
+
+    def test_a_status_outside_the_vocabulary_is_a_usage_error(self):
+        with self._tree() as root:
+            code, out = run_cli(root, 'list', '--status', 'butterfly')
+            self.assertEqual(code, 2, out)
+            self.assertIn('is not a story status', out)
+
+    def test_matching_nothing_and_scanning_nothing_look_different(self):
+        # Rule 4, on a read verb: 0 rows out of 4 stories is an answer; 0 rows
+        # out of 0 is a wrong `roadmap_dir`, and the census says which.
+        with self._tree() as root:
+            _, out = run_cli(root, 'list', '--owner', 'nobody')
+            self.assertEqual(self._rows(out), [])
+            self.assertIn('0 of 4 story/ies', out)
+        with tree(story_statuses=()) as root:
+            _, out = run_cli(root, 'list')
+            self.assertIn('0 of 0 story/ies', out)
+
+    def test_pm_status_is_untouched(self):
+        # Contract stability: `pm list` is additive. `pm status` prints exactly
+        # what it printed before, and nothing here may quietly reshape it.
+        with self._tree() as root:
+            code, out = run_cli(root, 'status')
+            self.assertEqual(code, 0, out)
+            self.assertIn('milestone 0.1', out)
+            self.assertIn('stories 1/4 done', out)
+            self.assertNotIn('\t', out)
+
+
 class StatusReport(unittest.TestCase):
     def test_unphased_milestone_prints_no_bucket_header(self):
         with tree(story_statuses=('todo',)) as root:

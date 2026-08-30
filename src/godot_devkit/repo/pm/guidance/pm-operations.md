@@ -88,9 +88,12 @@ requires the two readings to agree.
 
 ## Reading the tools
 
-- **`pm status [<milestone>]`** — the single read for live status. It marks `<DRIFT>`
-  using the same predicates the gate fails on. Never hand-copy a tally out of it into
-  a doc; that is a second scoreboard and it will lie.
+- **`pm status [<milestone>]`** — the whole tree. It marks `<DRIFT>` using the same
+  predicates the gate reports on. Never hand-copy a tally out of it into a doc; that
+  is a second scoreboard and it will lie.
+- **`pm list [--status …] [--owner …] [--milestone …]`** — one tab-separated
+  `<story-id>  <status>  <owner>  <feature-id>` per story. It is the "what is open"
+  read; `pm status` is the "what is everything doing" read.
 - **`pm validate`** — ids match paths, parentage is consistent, refs resolve, the graph
   is acyclic. **UNVERIFIABLE** in its summary is not a failure: it
   counts refs into milestones no longer in the working tree, which is expected.

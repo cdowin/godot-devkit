@@ -36,6 +36,8 @@
 - **BREAKING: D13 is removed** — Its "extra slot" half failed your gate for keeping a file in your own milestone directory. The missing-grain-file half is already reported by `orphan_dirs` and V1.
 - **V5 is the dependency cycle, and nothing else** — Phase-monotone fired on `seam`, a bucket this tool invented and called neither blocking nor blocked. `phase:` groups the board; the graph orders the work.
 - **`pm new` mints no directory** — `features/ bugs/ design/ stories/` were scaffolded empty, and git stores no empty directory: 158 `design/` dirs in one consumer, 11 with content in them.
+- **`pm list` — the nail-finder** — One tab-separated row per story, filtered by `--status`/`--owner`/`--milestone`. `pm status` prints 165 lines on one consumer; the open work was 2 stories.
+- **no `pm next`, on purpose** — A verb that picks THE next thing is the tool having an opinion about your priorities. `pm list` filters; you decide. `pm status` is unchanged.
 - **empty repo to a closed milestone: 14 commands to 6** — Six of the fourteen existed only because an edge demanded them, and every one was reachable by hand anyway.
 - **`pm vocabulary` prints the closed SETS, not edges** — The states each grain may hold and the rule ids `[pm] checks` may name, machine-readably. It is how a project sees what a pin bump changed.
 - **a project's own template may open a grain at any state** — The guard forbidding it was the tool overruling a project about its own scaffold; D4 reads the state off the tree either way.

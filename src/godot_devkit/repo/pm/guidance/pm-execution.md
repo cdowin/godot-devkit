@@ -86,8 +86,11 @@ banner`. Link the hash and stop.
 
 ## Keeping the tree honest
 
-- `pm status [<milestone>]` — the single read for live status, grouped by `phase:`.
-  Never hand-copy a tally out of it.
+- `pm status [<milestone>]` — the whole tree, grouped by `phase:`. Never hand-copy a
+  tally out of it.
+- `pm list [--status …] [--owner …] [--milestone …]` — one tab-separated row per
+  story, filtered. `pm list --status wip,review,blocked` is "what is open right now"
+  where `pm status` is "what is everything doing".
 - `pm validate` — structural + referential integrity: ids match paths, parentage is
   consistent, `depends_on`/`consumed_by` resolve, the feature graph is acyclic. A ref
   into a milestone no longer in the tree is UNVERIFIABLE, not a failure.
