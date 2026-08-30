@@ -111,6 +111,19 @@ def test_gate_fails_when_the_program_is_not_on_path():
     assert 'not on PATH' in out
 
 
+def test_the_no_tasks_finding_is_stated_once():
+    """The f-string prepended a phrase `_no_tasks_message()` already opens
+    with, so the gate said `no [tasks] table in devkit.toml; no [tasks] table
+    in devkit.toml. Declare...`. A gate that says a finding twice reads as two
+    findings. Exit 1 stays: `tasks` is in EXPLICIT_CHECKS, so `check all` never
+    reaches it, and explicitly asking about something unconfigured is a real
+    finding."""
+    with repo('[other]\nx = 1\n'):
+        code, out = gate()
+    assert code == 1
+    assert out.count('no [tasks] table') == 1, out
+
+
 def test_gate_fails_on_no_tasks_table_rather_than_passing_over_nothing():
     """Rule 4. A gate with nothing to scan says so; it never prints PASS."""
     with repo('[checks]\nall = ["doc"]\n'):

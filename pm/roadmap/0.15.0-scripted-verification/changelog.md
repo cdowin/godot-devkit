@@ -37,3 +37,15 @@ use. It survives close: a milestone's notes matter most once it has shipped.
 ## C7 — 2026-08-29 — the release protocol points at the targets
 **What:** The release and consumer-smoke skills now start from `task verify` and `make smoke` instead of describing commands to retype, and name the collapse verb the close step needs.
 **Evidence:** .claude/skills/release/SKILL.md
+
+## C8 — 2026-08-30 — check tasks states its finding once
+**What:** The no-[tasks]-table failure printed the same sentence twice, which reads as two findings. Exit 1 is unchanged — asking to check something unconfigured is a real finding.
+**Evidence:** tests/test_tasks.py:114
+
+## C9 — 2026-08-30 — an install happens whole, or not at all
+**What:** A collision on the second file used to leave the first one installed while reporting nothing was written. Every destination is decided before the first write, and one refusal names them all.
+**Evidence:** tests/test_install.py:232
+
+## C10 — 2026-08-30 — the generated workflow can actually run
+**What:** install-ci renders the trigger and setup steps a repo declares in devkit.toml [ci] — so a verify role needing Godot gets it provisioned. A malformed [ci] is exit 2, not a broken workflow.
+**Evidence:** tests/test_install.py:295

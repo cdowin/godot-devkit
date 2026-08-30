@@ -203,8 +203,10 @@ def run() -> int:
         # Rule 4: a gate that scanned nothing says so rather than printing
         # PASS. No [tasks] table is not a repo with tidy roles.
         print()
-        print(f'[check:tasks] FAIL — no [tasks] table in devkit.toml; '
-              f'{_no_tasks_message()}')
+        # The message OPENS with the finding, so the phrase is not repeated
+        # here — a gate that says the same sentence twice reads as two
+        # findings, and the operator goes looking for the second one.
+        print(f'[check:tasks] FAIL — {_no_tasks_message()}')
         return 1
     verified = []
     for name in sorted(table):

@@ -317,7 +317,7 @@ verify = "make milestone"    # the full gate, and what CI runs
 | `task <role>` | Runs that role's declared command from the repo root, propagating its exit code. |
 | `task --list` | The declared roles and their commands; exit 1 if a required role is missing. |
 | `check tasks` | Asserts every declared role resolves to a real target (see the gate table above). |
-| `install-ci` | Writes `.github/workflows/verify.yml` — a workflow that runs `godot-devkit task verify` and nothing else. Identical in every repo, so CI cannot drift from the local gate: they are the same target, named once. The one substituted value is where the toolkit is resolved from, filled with the installing build's own version so the pin is correct by construction. `--force` overwrites a file this tool did not generate. |
+| `install-ci` | Writes `.github/workflows/verify.yml` — a workflow whose job runs `godot-devkit task verify` and nothing else, so CI cannot drift from the local gate: they are the same target, named once. The skeleton is devkit's; the trigger and the setup steps the gate needs before it can run (a Godot toolchain, in both game consumers) come from `[ci]` in your `devkit.toml` — a workflow that omitted them was byte-identical everywhere and unable to run anywhere. The toolkit source is filled with the installing build's own version, so the pin is correct by construction. A malformed `[ci]` is exit 2 and writes nothing. `--force` overwrites a file this tool did not generate. |
 | `install-agents` | Writes the review and build contract into `.claude/agents/` — construct adversarial input and RUN it, ship a test that failed against HEAD, print before AND after when probing a gate, never hand-roll verification. Written once here and installed, rather than hand-copied into every repo. It ships as AGENT DEFINITIONS deliberately: a rules file never reaches a subagent's spawn context, while its definition does. `--force` overwrites a file this tool did not generate. |
 
 Required roles are `quick` and `verify`; anything else in the table is yours and runs the
@@ -385,6 +385,28 @@ section overrides only what it names:
 # repo keeps its own target names.
 quick  = "make precommit"
 verify = "make milestone"
+
+[ci]
+# What `install-ci` cannot know about your repo. Everything here is optional.
+# on: which events trigger the workflow. One of push, pull_request,
+#     workflow_dispatch, merge_group — an event this skeleton cannot emit
+#     correctly is refused by name rather than half-written.
+# branches: the filter applied to push and pull_request. `["**"]` is every
+#     branch; the DEFAULT is the trunk only, because `verify` is a repo's
+#     heaviest target and firing it on every work-in-progress push burns CI.
+on = ["push", "pull_request", "workflow_dispatch"]
+branches = ["main"]
+
+# Steps that run after checkout + uv and before the gate. Both game consumers
+# need a Godot toolchain here; nothing generic can provision one for them.
+[[ci.setup]]
+name = "Setup Godot"
+uses = "chickensoft-games/setup-godot@v2"
+with = { version = "4.6.2", include-templates = false }
+
+[[ci.setup]]
+name = "Warm the import cache"
+run = "godot --path . --headless --editor --quit 2>&1 || true"
 
 [checks]
 # Which gates `check all` runs HERE. Default: uid, tres, props, doc, shell.
