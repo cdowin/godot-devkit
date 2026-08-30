@@ -868,18 +868,6 @@ class ConfigValidation(unittest.TestCase):
                 (root / 'devkit.toml').write_text(f'[pm]\n{bad}\n', encoding='utf-8')
                 self.assertEqual(run_gate(root)[0], 2)
 
-    def test_declaring_a_documented_default_behaves_as_the_absent_key(self):
-        # The contract the whole `[pm]` section is written to: a repo that
-        # writes the documented defaults down behaves identically to one with
-        # no devkit.toml. `decision_grandfather = []` was the single key that
-        # broke it — a LEDGER of exemptions, whose default IS empty, refused
-        # for "declaring nothing" when [] is exactly what it means.
-        with tree(story_statuses=('todo',)) as root:
-            bare = run_gate(root)
-            (root / 'devkit.toml').write_text(
-                '[pm]\ndecision_grandfather = []\n', encoding='utf-8')
-            self.assertEqual(run_gate(root), bare)
-
     def test_a_valid_subset_still_narrows_correctly(self):
         with tree(story_statuses=('todo',)) as root:
             self._drifted(root)

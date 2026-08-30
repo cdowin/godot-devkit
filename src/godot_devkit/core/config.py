@@ -35,15 +35,8 @@ def config_section(name: str) -> dict:
 
 
 def str_tuple(sect: dict, name: str, key: str,
-              fallback: tuple[str, ...],
-              allow_empty: bool = False) -> tuple[str, ...]:
-    """A list-of-strings setting. A bare string is REFUSED, never iterated.
-
-    `allow_empty` is for the keys whose default IS the empty list — a ledger of
-    exemptions, not a scope. There, `[]` states exactly what it looks like, and
-    refusing it would break the contract that a repo declaring the documented
-    defaults behaves identically to one with no devkit.toml at all.
-    """
+              fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """A list-of-strings setting. A bare string is REFUSED, never iterated."""
     value = sect.get(key)
     if value is None:
         return fallback
@@ -51,7 +44,7 @@ def str_tuple(sect: dict, name: str, key: str,
         raise ConfigError(
             f'[{name}] {key} must be a list of strings, got {value!r}'
             + (f' — write {key} = [{value!r}]' if isinstance(value, str) else ''))
-    if not value and not allow_empty:
+    if not value:
         # An empty list reads as "nothing", but downstream it usually means the
         # opposite: `git ls-files` with no pathspec is the ENTIRE repo. Refuse
         # rather than let a value mean the reverse of what it looks like.

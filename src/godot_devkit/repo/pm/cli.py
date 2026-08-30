@@ -680,7 +680,7 @@ def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
 
     # ONE plan: the destinations were decided above, and `core.apply` reports
     # exactly which of them landed. A loop that decided as it wrote is what
-    # made this verb's twin, `install-agents`, half-install twice.
+    # made this verb's twin half-install twice before it was one plan.
     writes = apply.Plan()
     for kind, target, body in actions:
         if kind != 'current':

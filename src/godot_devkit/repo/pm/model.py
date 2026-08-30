@@ -142,8 +142,8 @@ SLOT_TEMPLATE = {
 # file's own first line is the one delivery channel with a 100% hit rate for the
 # action its reader is about to take. Each line is an INSTRUCTION for that
 # action, never an explanation of what the file is, and deliberately NOT a
-# second copy of a schema a gate already owns: restating D12's four fields in
-# 178 files is a drift generator, so decisions.md points at the command instead.
+# second copy of a schema a gate already owns: restating a field list in 178
+# files is a drift generator, so decisions.md points at the command instead.
 SLOT_HEADER = {
     'decisions.md': 'Append with `godot-devkit pm decide <grain-id>` — never by '
                     'hand; the command stamps the date and the next ordinal.',
@@ -179,7 +179,7 @@ def git_rename(root: Path, old: Path, new: Path) -> tuple[bool, str]:
     says `DECISIONS.md`, and an explicit `git add` of the new name stages
     nothing. The migration goes green on the laptop, gets committed, and CI on
     Linux checks out the OLD name — D13 then reports every renamed grain
-    missing and D12 scans nothing. `git mv --force` is the one spelling that
+    missing. `git mv --force` is the one spelling that
     moves the index with the file.
     """
     try:
@@ -652,8 +652,8 @@ def _is_grain_doc(path: Path) -> bool:
     note and is out of scope; "this frontmatter is broken" is a grain and is a
     FINDING. Deciding scope with the strict parser answered the second with the
     first: a BOM before the `---`, a blank line before it, or a missing closing
-    fence dropped the document out of the census entirely — D4, D5, V1, D14 and
-    D17 all went blind at once, and D14's silence is a `prune` deleting an open
+    fence dropped the document out of the census entirely — D4, D5, V1 and D14
+    all went blind at once, and D14's silence is a `prune` deleting an open
     bug with the milestone it sits in. So detection is lenient
     (`_opens_frontmatter`) and parsing stays strict (`_fence_bounds`), and the
     damage is reported by the rules rather than resolved here.
@@ -1045,8 +1045,8 @@ def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
         mstat = field_of(mdir / 'milestone.md', 'status')
         mid = unquote(field_of(mdir / 'milestone.md', 'id')) or mdir.name
         # D14 is what stops `prune` deleting an open bug with its done
-        # milestone; a D14 that undercounts is not a weaker safety net, it is a
-        # false one — which is why the walk it shares with D17 is recursive.
+        # milestone; a D14 that undercounts is not a weaker safety net, it is
+        # a false one — which is why its walk is recursive.
         for bfile in bug_files(mdir):
             scanned += 1
             bstat = field_of(bfile, 'status')

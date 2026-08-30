@@ -41,10 +41,6 @@ from godot_devkit.core.project import load_config, repo_root  # noqa: E402
 pytestmark = pytest.mark.fuzz
 
 DEVKIT_TOML = """\
-[tasks]
-quick = "make precommit"
-verify = "make milestone"
-
 [pm]
 template_dir = "pm/templates"
 """

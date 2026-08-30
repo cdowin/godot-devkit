@@ -106,8 +106,8 @@ def test_a_durable_record_outside_the_tree_is_still_accepted():
 
 
 def test_a_dangling_symlink_is_judged_without_raising():
-    """D11 leaves a dangling link behind, so the resolver meets one. A path
-    that resolves nowhere is not the transient slot and is not a crash."""
+    """A `reviewed:` pointer can outlive what it points at. A path that
+    resolves nowhere is not a substantive record, and is not a crash."""
     with tree() as root:
         _feature_at_review(root)
         (root / FEATURE / 'gone.md').symlink_to('nowhere.md')

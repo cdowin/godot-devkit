@@ -153,8 +153,8 @@ def run() -> int:
             # bare `continue` here left the file counted in `scanned N
             # definition(s)` while nothing had been read from it — a definition
             # instructing the impossible passed the moment one latin-1 byte
-            # landed above it. D12 and D15 report an unopenable log for exactly
-            # this reason, and `check doc` reads with `errors='replace'`; this
+            # landed above it. `check pm` reports an unreadable grain for the
+            # same reason, and `check doc` reads with `errors='replace'`; this
             # was the one reader in the package that masked in silence.
             defect(f'{rel}: cannot be read ({err}) — a definition this gate '
                    f'cannot open is not a definition it has scanned; save it '
