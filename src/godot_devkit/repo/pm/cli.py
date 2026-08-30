@@ -271,9 +271,16 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
             if i + 1 >= len(args):
                 raise Usage('--review-record needs a path')
             rec, i = args[i + 1], i + 2
+            if not rec:
+                raise Usage('--review-record needs a path')
             continue
         if a.startswith('--review-record='):
+            # The `=` spelling with nothing after it stored '' and silently
+            # skipped the stamp — the flag was consumed and did nothing. Both
+            # spellings refuse an empty path the same way.
             rec, i = a.split('=', 1)[1], i + 1
+            if not rec:
+                raise Usage('--review-record needs a path')
             continue
         if a.startswith('-'):
             raise Usage(f'unknown flag {a!r}')
@@ -282,6 +289,12 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
         fid, i = a, i + 1
     if not fid:
         raise Usage(USAGE)
+    # `--cascade` writes `done` into STORY files, so that target state is
+    # validated against the story vocabulary before anything is touched — a
+    # custom `story_states` without `done` used to get it written anyway.
+    if cascade and 'done' not in cfg.story_states:
+        raise Usage(f"--cascade writes story status 'done', which is not a "
+                    f'story status ({" ".join(cfg.story_states)})')
     ff, cur = _feature_or_usage(cfg, fid)
     # NOT short-circuited on `cur == 'done'`. An early return there made the
     # two-step this verb's own output recommends — close, read "--cascade
@@ -337,15 +350,20 @@ def cmd_feature(cfg: model.PmConfig, args: list[str]) -> int:
     if not args:
         raise Usage(USAGE)
     sub, rest = args[0], args[1:]
+    # The TARGET state is validated against the closed vocabulary before ANY
+    # dispatch — `done` and `review` used to dispatch first, so a project whose
+    # custom `feature_states` excluded them had the sanctioned tool writing the
+    # exact out-of-vocabulary status D4 reports. (The CURRENT state is still
+    # never gated on — repair from any state stays.)
+    if sub not in cfg.feature_states:
+        raise Usage(f'{sub!r} is not a feature status '
+                    f'({" ".join(cfg.feature_states)})')
     # `done` is the only verb with behaviour of its own — the cascade.
     if sub == 'done':
         return cmd_feature_done(cfg, rest)
     if sub == 'review':
         return cmd_feature_review(cfg, rest)
-    if sub in cfg.feature_states:
-        return cmd_feature_simple(cfg, sub, rest)
-    raise Usage(f'{sub!r} is not a feature status '
-                f'({" ".join(cfg.feature_states)})')
+    return cmd_feature_simple(cfg, sub, rest)
 
 
 # --- milestone ----------------------------------------------------------------
@@ -382,9 +400,22 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
 # --- status -------------------------------------------------------------------
 def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
     only = args[0] if args else ''
-    for mdir in model.milestone_dirs(cfg):
+    # The same census discipline `pm list` already has: an empty print at
+    # exit 0 is what a wrong `roadmap_dir`, an emptied tree, and a typo'd
+    # milestone id all used to produce, and rule 4 says a scan that saw
+    # nothing must say so rather than pass in silence.
+    known = [(mdir, model.unquote(model.field_of(mdir / 'milestone.md', 'id')))
+             for mdir in model.milestone_dirs(cfg)]
+    if not known:
+        raise Usage(f'{cfg.roadmap_dir} holds no milestone at all — nothing to '
+                    f'report, so this is a scope problem (wrong [pm] '
+                    f'roadmap_dir, or an empty tree?), not a status')
+    if only and only not in {mid for _, mid in known}:
+        ids = sorted(mid for _, mid in known if mid)
+        raise Usage(f'{only!r} is not a milestone in {cfg.roadmap_dir} '
+                    f'({" ".join(ids)})')
+    for mdir, mid in known:
         mfile = mdir / 'milestone.md'
-        mid = model.field_of(mfile, 'id')
         if only and only != mid:
             continue
         print(f'milestone {mid:<10} [{model.field_of(mfile, "status")}]')
@@ -772,12 +803,19 @@ def cmd_sync(cfg: model.PmConfig, args: list[str]) -> int:
         if a != '--check':
             raise Usage(f'unknown flag {a!r}')
     from godot_devkit.repo.pm import execlist
-    results = execlist.sync(cfg, write=not check, existing_only=check)
+    # Zero grains refuses in BOTH modes. `--check` used to print
+    # `all 0 execution list(s) current` at exit 0 over an empty or
+    # mis-scoped tree — a gate that scanned nothing, passing.
+    if not execlist.targets(cfg):
+        raise Usage(f'no grains found under {cfg.roadmap_dir}/ '
+                    f'(wrong [pm] roadmap_dir, or an empty tree?)')
+    try:
+        results = execlist.sync(cfg, write=not check, existing_only=check)
+    except execlist.Refusal as err:
+        raise Refused(str(err)) from err
     changed = [p for p, c in results if c]
     for path in changed:
         _ok(f'{"stale" if check else "updated"} {cfg.rel(path)}')
-    if not results and not check:
-        raise Usage(f'no grains found under {cfg.roadmap_dir}/')
     if not changed:
         _ok(f'all {len(results)} execution list(s) current')
         return 0

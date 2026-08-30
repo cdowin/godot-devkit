@@ -36,8 +36,6 @@ from godot_devkit.repo.pm import model
 # the number sequences the build, it is not identity.
 _ORDINAL = re.compile(r'^\d\d-')
 
-VALIDATE_RULES = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
-
 _REF_KEYS = ('depends_on', 'consumed_by')
 
 
@@ -110,7 +108,11 @@ def _grain_exists(cfg: model.PmConfig, ref: str) -> bool | None:
 
 def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str], dict]:
     """Returns (findings, census). A finding names a path a human can open."""
-    on = enabled if enabled is not None else set(VALIDATE_RULES)
+    # `model.VALIDATE_CHECKS` is the ONE home of the rule-id roster. A local
+    # `VALIDATE_RULES` copy used to shadow it — a second name for the same
+    # fact, where a V7 added to one would silently split `pm validate` from
+    # `check pm`.
+    on = enabled if enabled is not None else set(model.VALIDATE_CHECKS)
     findings: list[str] = []
     census = {'grains': 0, 'refs': 0, 'unverifiable': 0}
 
@@ -213,11 +215,19 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
         # Without V6 it is exactly the hand-maintained second scoreboard the
         # doctrine forbids — it just happens to have been written by a tool once.
         from godot_devkit.repo.pm import execlist
-        for path, changed in execlist.sync(cfg, write=False, existing_only=True):
-            if changed:
-                findings.append(
-                    f'{cfg.rel(path)}: the execution list is stale — the tree has '
-                    f'moved since it was rendered; run `pm sync`')
+        try:
+            stale = execlist.sync(cfg, write=False, existing_only=True)
+        except execlist.Refusal as err:
+            # A grain the renderer refuses (non-UTF-8, broken markers) is a
+            # FINDING here, one per line — never a crash that aborts the run
+            # and takes every V1-V5 finding above down with it.
+            findings.extend(str(err).split('\n'))
+        else:
+            for path, changed in stale:
+                if changed:
+                    findings.append(
+                        f'{cfg.rel(path)}: the execution list is stale — the tree '
+                        f'has moved since it was rendered; run `pm sync`')
     return findings, census
 
 

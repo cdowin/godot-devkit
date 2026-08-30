@@ -3453,5 +3453,224 @@ class Decide(unittest.TestCase):
             self.assertIn('## D1 — ', self._log(root, 'features/alpha/decisions.md'))
 
 
+class ExeclistRefusals(unittest.TestCase):
+    """A grain the renderer cannot rewrite CORRECTLY is a refusal — the file
+    and the problem named, nothing written — never a traceback, and never a
+    file that quietly grows by one fresh block per run."""
+
+    MFILE = 'pm/roadmap/0.1-demo/milestone.md'
+    FFILE = 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+
+    def test_a_non_utf8_grain_refuses_instead_of_crashing(self):
+        # The audit's \xff-grain reproduction: UnicodeDecodeError traceback
+        # out of the inline read in execlist.sync, scan aborted mid-tree.
+        with tree() as root:
+            (root / self.FFILE).write_bytes(
+                b'---\nid: 0.1/alpha\nstatus: building\n---\n\xff\n')
+            code, out = run_cli(root, 'sync')
+            self.assertEqual(code, 1, out)
+            self.assertIn('REFUSED', out)
+            self.assertIn('feature.md', out)
+            self.assertIn('not UTF-8', out)
+            # `--check` reads the same bytes; it refuses the same way.
+            code, out = run_cli(root, 'sync', '--check')
+            self.assertEqual(code, 1, out)
+            self.assertIn('not UTF-8', out)
+
+    def test_v6_reports_a_non_utf8_grain_and_keeps_earlier_findings(self):
+        from godot_devkit.repo.pm import validate
+        with tree() as root:
+            run_cli(root, 'sync')
+            (root / self.FFILE).write_bytes(b'\xff\xfe broken')
+            findings, _ = validate.run(cfg_for(root))
+            self.assertTrue(any('not UTF-8' in f for f in findings), findings)
+            # V1's finding about the same grain survives — the crash used to
+            # abort run() and take every finding gathered before V6 with it.
+            self.assertTrue(any('missing id' in f for f in findings), findings)
+
+    def test_reversed_markers_refuse_instead_of_growing_the_file(self):
+        # The audit's growth reproduction: 25 -> 33 -> 41 lines over three
+        # `pm sync` runs, each exit 0 — the append branch fired every time.
+        from godot_devkit.repo.pm import execlist
+        with tree() as root:
+            run_cli(root, 'sync')
+            mfile = root / self.MFILE
+            text = mfile.read_text(encoding='utf-8')
+            mfile.write_text(text.replace(execlist.OPEN, '@@TMP@@')
+                             .replace(execlist.CLOSE, execlist.OPEN)
+                             .replace('@@TMP@@', execlist.CLOSE),
+                             encoding='utf-8')
+            before = mfile.read_bytes()
+            code, out = run_cli(root, 'sync')
+            self.assertEqual(code, 1, out)
+            self.assertIn('BEFORE', out)
+            self.assertIn(execlist.OPEN, out)
+            self.assertIn(execlist.CLOSE, out)
+            self.assertIn('milestone.md', out)
+            self.assertEqual(mfile.read_bytes(), before)
+            # Refusing twice is still refusing — and still not writing.
+            code, _ = run_cli(root, 'sync')
+            self.assertEqual(code, 1)
+            self.assertEqual(mfile.read_bytes(), before)
+
+    def test_a_lone_marker_refuses_too(self):
+        # Half a pair is not "no block" — it used to take the append branch.
+        from godot_devkit.repo.pm import execlist
+        with tree() as root:
+            run_cli(root, 'sync')
+            mfile = root / self.MFILE
+            mfile.write_text(mfile.read_text(encoding='utf-8')
+                             .replace(execlist.CLOSE, ''), encoding='utf-8')
+            before = mfile.read_bytes()
+            code, out = run_cli(root, 'sync')
+            self.assertEqual(code, 1, out)
+            self.assertIn('without', out)
+            self.assertIn('milestone.md', out)
+            self.assertEqual(mfile.read_bytes(), before)
+
+
+class StatusVerbHonoursACustomVocabulary(unittest.TestCase):
+    """`done` and `review` are dispatch verbs, but the TARGET state still has
+    to be in the project's own closed set. Pre-fix they dispatched before the
+    membership check, so with a custom vocabulary the sanctioned tool wrote
+    the exact out-of-vocabulary status D4 reports. The CURRENT state stays
+    ungated — repair-from-wombat is pinned elsewhere and unchanged."""
+
+    FFILE = 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+
+    def test_feature_done_refuses_when_the_vocabulary_excludes_done(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nfeature_states = ["todo", "building", "shipped"]\n',
+                encoding='utf-8')
+            ffile = root / self.FFILE
+            before = ffile.read_bytes()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+            self.assertEqual(code, 2, out)
+            self.assertIn('todo building shipped', out)
+            self.assertEqual(ffile.read_bytes(), before)
+
+    def test_feature_review_refuses_when_the_vocabulary_excludes_review(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nfeature_states = ["todo", "building", "shipped"]\n',
+                encoding='utf-8')
+            ffile = root / self.FFILE
+            before = ffile.read_bytes()
+            code, out = run_cli(root, 'feature', 'review', '0.1/alpha')
+            self.assertEqual(code, 2, out)
+            self.assertIn('todo building shipped', out)
+            self.assertEqual(ffile.read_bytes(), before)
+
+    def test_cascade_refuses_when_story_states_exclude_done(self):
+        with tree(story_statuses=('review',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nstory_states = ["todo", "wip", "review", "shipped"]\n',
+                encoding='utf-8')
+            sfile, ffile = root / STORY_REL, root / self.FFILE
+            s_before, f_before = sfile.read_bytes(), ffile.read_bytes()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha',
+                                '--cascade')
+            self.assertEqual(code, 2, out)
+            self.assertIn('todo wip review shipped', out)
+            # Nothing was touched — neither the story nor the feature.
+            self.assertEqual(sfile.read_bytes(), s_before)
+            self.assertEqual(ffile.read_bytes(), f_before)
+
+    def test_a_custom_vocabulary_that_keeps_done_still_closes(self):
+        with tree() as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nfeature_states = ["building", "done"]\n',
+                encoding='utf-8')
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(model.field_of(root / self.FFILE, 'status'),
+                             'done')
+
+    def test_review_record_equals_spelling_with_no_value_refuses(self):
+        # Pre-fix: `--review-record=` stored '' and silently skipped the
+        # stamp at exit 0 — flag consumed, nothing done. The space spelling's
+        # missing-arg case was already a Usage refusal; they now agree.
+        with tree() as root:
+            ffile = root / self.FFILE
+            before = ffile.read_bytes()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha',
+                                '--review-record=')
+            self.assertEqual(code, 2, out)
+            self.assertIn('needs a path', out)
+            self.assertEqual(ffile.read_bytes(), before)
+
+    def test_review_record_space_spelling_with_an_empty_value_refuses_too(self):
+        with tree() as root:
+            ffile = root / self.FFILE
+            before = ffile.read_bytes()
+            code, out = run_cli(root, 'feature', 'done', '0.1/alpha',
+                                '--review-record', '')
+            self.assertEqual(code, 2, out)
+            self.assertIn('needs a path', out)
+            self.assertEqual(ffile.read_bytes(), before)
+
+
+class ZeroCensusIsLoud(unittest.TestCase):
+    """An empty print at exit 0 over a tree that holds nothing is a scan of
+    zero files, passing — rule 4's read-side sin. `pm list` got the loud arm
+    first; `pm status` and `pm sync --check` mirror it."""
+
+    def _emptied(self, root: Path) -> None:
+        import shutil
+        shutil.rmtree(root / 'pm/roadmap/0.1-demo')
+
+    def test_status_over_an_empty_roadmap_refuses(self):
+        with tree() as root:
+            self._emptied(root)
+            code, out = run_cli(root, 'status')
+            self.assertEqual(code, 2, out)
+            self.assertIn('no milestone at all', out)
+
+    def test_status_naming_an_unknown_milestone_refuses_naming_the_set(self):
+        with tree() as root:
+            code, out = run_cli(root, 'status', '9.9')
+            self.assertEqual(code, 2, out)
+            self.assertIn("'9.9'", out)
+            self.assertIn('0.1', out)
+
+    def test_status_still_prints_a_real_tree(self):
+        with tree() as root:
+            code, out = run_cli(root, 'status', '0.1')
+            self.assertEqual(code, 0, out)
+            self.assertIn('milestone 0.1', out)
+
+    def test_sync_check_over_zero_grains_refuses(self):
+        # Pre-fix: `all 0 execution list(s) current`, exit 0 — only the write
+        # mode refused.
+        with tree() as root:
+            self._emptied(root)
+            code, out = run_cli(root, 'sync', '--check')
+            self.assertEqual(code, 2, out)
+            self.assertIn('no grains', out)
+            code, out = run_cli(root, 'sync')
+            self.assertEqual(code, 2, out)
+            self.assertIn('no grains', out)
+
+
+class OneHomeForEachFact(unittest.TestCase):
+    def test_the_VALIDATE_RULES_second_name_is_gone(self):
+        # `model.VALIDATE_CHECKS` is the one roster; a copy in validate.py
+        # meant a V7 added to one silently split `pm validate` from `check pm`.
+        from godot_devkit.repo.pm import validate
+        self.assertFalse(hasattr(validate, 'VALIDATE_RULES'))
+        self.assertEqual(model.VALIDATE_CHECKS,
+                         ('V1', 'V2', 'V3', 'V4', 'V5', 'V6'))
+
+    def test_the_dead_include_archive_parameter_is_gone(self):
+        # Zero callers ever passed True; the archive-merging branch was
+        # unreachable. A declaration whose last reader is gone dies with it.
+        import inspect
+        self.assertEqual(
+            list(inspect.signature(model.milestone_walk).parameters), ['cfg'])
+        self.assertEqual(
+            list(inspect.signature(model.milestone_dirs).parameters), ['cfg'])
+
+
 if __name__ == '__main__':
     unittest.main()

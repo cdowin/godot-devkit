@@ -612,21 +612,16 @@ def _milestone_candidates(base: Path, exclude_archive: bool) -> Walk:
     return found
 
 
-def milestone_walk(cfg: PmConfig, include_archive: bool = False) -> Walk:
+def milestone_walk(cfg: PmConfig) -> Walk:
     """Milestone dirs in the ACTIVE tree, with the scaffold-only dirs the walk
     dropped recorded beside them (archived ones predate the schema)."""
-    found = _milestone_candidates(cfg.roadmap, exclude_archive=True).filter(
+    return _milestone_candidates(cfg.roadmap, exclude_archive=True).filter(
         _has_milestone_file, SkipReason.NO_GRAIN_FILE)
-    if include_archive:
-        found = found.merge(
-            _milestone_candidates(cfg.roadmap / ARCHIVE_DIR_NAME, exclude_archive=False)
-            .filter(_has_milestone_file, SkipReason.NO_GRAIN_FILE))
-    return found
 
 
-def milestone_dirs(cfg: PmConfig, include_archive: bool = False) -> list[Path]:
+def milestone_dirs(cfg: PmConfig) -> list[Path]:
     """Milestone dirs in the ACTIVE tree (archived ones predate the schema)."""
-    return list(milestone_walk(cfg, include_archive).kept)
+    return list(milestone_walk(cfg).kept)
 
 
 BOM = '﻿'
