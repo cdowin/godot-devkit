@@ -33,6 +33,7 @@ import re
 from dataclasses import dataclass
 
 from godot_devkit.core.project import git_lines, repo_root
+from godot_devkit.core import apply
 from godot_devkit.core.config import config_section, str_tuple
 
 DEFAULT_EXCLUDE = ('addons/',)
@@ -126,7 +127,8 @@ def _apply(root, drifts: list[Drift]) -> list[Drift]:
             touched = True
             fixed.append(drift)
         if touched:
-            path.write_text(LINE_SEP.join(lines), encoding='utf-8')
+            apply.raise_on_error(
+                apply.write_translated(path, LINE_SEP.join(lines)))
     return fixed
 
 

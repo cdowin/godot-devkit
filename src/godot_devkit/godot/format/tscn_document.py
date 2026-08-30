@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from pathlib import Path
+from godot_devkit.core import apply
 
 from godot_devkit.godot.format.tscn import (
     NODE_KIND,
@@ -103,7 +104,7 @@ class TscnDocument:
         target = Path(path) if path is not None else self.path
         if target is None:
             raise TscnError('no path to save to')
-        target.write_text(self.text, encoding='utf-8')
+        apply.raise_on_error(apply.write_translated(target, self.text))
         return target
 
     def _reparse(self) -> None:

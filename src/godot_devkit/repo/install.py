@@ -35,12 +35,12 @@ command, not about the entry the refusal happened to land on.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from importlib import resources
 from pathlib import Path
 
 from godot_devkit import __version__
+from godot_devkit.core import apply
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.project import repo_root
 
@@ -276,6 +276,21 @@ def collision_refusal(collisions: list[str]) -> tuple[str, str]:
                   'the first colliding file.')
 
 
+# The wording this verb's refusals have always used, mapped from the closed
+# `Obstruction` vocabulary `core.apply` decides in. A dict, not a sentence
+# built at the call site: the check lives in one place and the phrasing lives
+# in one place, and neither has to know the other's business.
+_DEFECT_TEXT = {
+    apply.Obstruction.IS_A_DIRECTORY: 'is a directory',
+    apply.Obstruction.NOT_A_REGULAR_FILE: 'is not a regular file',
+    apply.Obstruction.NOT_WRITABLE: 'is not writable',
+}
+_PARENT_TEXT = {
+    apply.Obstruction.PARENT_IS_A_FILE: 'is not a directory',
+    apply.Obstruction.PARENT_NOT_WRITABLE: 'is not writable',
+}
+
+
 def destination_defect(target: Path) -> str:
     """'' when `target` can be written, else what stands in the way — decided
     WITHOUT writing a byte.
@@ -287,24 +302,31 @@ def destination_defect(target: Path) -> str:
     is not a refusal — it names no repair, and its "nothing was written" is a
     claim nobody made.
 
+    This function used to BE those checks. It is now a caller: `core.apply`
+    decides, in the same closed vocabulary every other writer in this package
+    is decided in, and this maps the reason to the sentence three install verbs
+    already print. A second copy of "can this be written" is a second chance to
+    answer it differently.
+
+    SYMLINKS ARE FOLLOWED here, said out loud rather than left to a default: an
+    install destination is an ordinary repo file, and a project that symlinks
+    `.claude/agents/` somewhere deliberate is exercising a choice this tool has
+    no business overriding. The scaffolder declares the opposite, because a
+    symlinked grain slot points OUT of the grain it was asked to fill.
+
     Not a substitute for handling the write's own OSError: a permission can
     change between this call and the write, and TOCTOU is exactly the case that
     must still not traceback. This is what turns the common cases into a
     sentence naming the path.
     """
-    if target.exists() and not target.is_file():
-        kind = 'a directory' if target.is_dir() else 'not a regular file'
-        return f'is {kind}'
-    if target.is_file() and not os.access(target, os.W_OK):
-        return 'is not writable'
-    parent = target.parent
-    while not parent.exists() and parent != parent.parent:
-        parent = parent.parent
-    if not parent.is_dir():
-        return f'cannot be created: {parent} is not a directory'
-    if not os.access(parent, os.W_OK):
-        return f'cannot be created: {parent} is not writable'
-    return ''
+    blocked = apply.Plan().overwrite(
+        target, '', symlink=apply.Symlink.FOLLOW).decide()
+    if not blocked:
+        return ''
+    first = blocked[0]
+    if first.reason in _DEFECT_TEXT:
+        return _DEFECT_TEXT[first.reason]
+    return f'cannot be created: {first.path} {_PARENT_TEXT[first.reason]}'
 
 
 def read_destination(target: Path) -> tuple[str | None, str]:
@@ -393,28 +415,37 @@ def main(command: str, argv: list[str]) -> int:
         print(_defect_refusal(command, defects, []), file=sys.stderr)
         return 1
 
-    wrote = 0
-    written: list[str] = []
+    # ONE plan, decided above and applied here. `install-agents` half-installed
+    # twice because the loop that wrote also decided: the third file's problem
+    # arrived with the first two already on disk. `core.apply` returns what
+    # LANDED, so the refusal below names it instead of guessing.
+    writes = apply.Plan()
+    for kind, target, rel, body in plan:
+        if kind != 'current':
+            writes.overwrite(target, body, newline=None, label=rel)
+    # Everything answerable was answered above, so a failure here means the
+    # filesystem changed under the plan. It is still a refusal that names what
+    # it did — never a traceback, and never a silent "nothing was written" over
+    # a directory that already has one.
+    result = writes.apply(decide=False)
+    written = [step.label for step in result.landed]
+    landed = set(written)
+    # Reported in PLAN order, and STOPPING where the plan stopped: a line
+    # printed past the failure would describe a file that was never reached.
     for kind, target, rel, body in plan:
         if kind == 'current':
             print(f'[install] {rel} already current')
-            continue
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(body, encoding='utf-8')
-        except OSError as err:
-            # Everything answerable was answered above, so reaching here means
-            # the filesystem changed under the plan. It is still a refusal that
-            # names what it did — never a traceback, and never a silent
-            # "nothing was written" over a directory that already has one.
-            print(_defect_refusal(command,
-                                  [f'{rel} could not be written '
-                                   f'({err.strerror or err})'], written),
-                  file=sys.stderr)
-            return 1
-        print(f'[install] wrote {rel}')
-        written.append(rel)
-        wrote += 1
+        elif rel in landed:
+            print(f'[install] wrote {rel}')
+        else:
+            break
+    if result.failed is not None:
+        print(_defect_refusal(command,
+                              [f'{result.failed.label} could not be written '
+                               f'({result.error})'], written),
+              file=sys.stderr)
+        return 1
+    wrote = len(written)
     if wrote and command == 'install-ci':
         print(f'[install] the workflow runs `godot-devkit task verify` and '
               f'nothing else. What that executes is devkit.toml [tasks] '

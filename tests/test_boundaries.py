@@ -12,10 +12,10 @@ shape somewhere new. Fixing grain detection literally created a new narrowing
 via dotted names, because the fix was a filter and nothing made filters
 disclose.
 
-`core/walk.py` makes the first shape impossible to express. THIS FILE makes it
-impossible to route around: the test is an exact module ALLOWLIST, not a
-pattern, and a new gate that enumerates directly breaks the build and is named
-by `file:line`. The second primitive lands next, with its own allowlist here.
+`core/walk.py` and `core/apply.py` make each shape impossible to express. THIS
+FILE makes them impossible to route around. Both tests are exact module
+ALLOWLISTS, not patterns: a new gate that enumerates directly, or a new verb
+that writes directly, breaks the build and is named by `file:line`.
 
 Deliberately AST, not grep: `subprocess.run(['git', 'mv', ...])` is not a
 `Path.rename`, a string `'rglob'` in a docstring is not a call, and a grep
@@ -39,6 +39,26 @@ WALK_MODULE = 'core/walk.py'
 # Attribute calls that ENUMERATE. `Path.walk` is 3.12+, banned here so the two
 # spellings of `os.walk` cannot split the ownership between interpreters.
 ENUMERATORS = ('glob', 'rglob', 'iterdir', 'walk', 'scandir', 'listdir')
+# --- primitive 2: one apply ---------------------------------------------------
+APPLY_MODULE = 'core/apply.py'
+# Path methods that mutate and CANNOT be anything else at the syntax level.
+# `.replace()` is absent on purpose: `str.replace` is the same syntax, and no
+# amount of staring at an AST distinguishes them by name. It is caught by ARITY
+# instead — see `_replace_is_a_path_replace`.
+PATH_MUTATORS = ('write_text', 'write_bytes', 'unlink', 'rmdir', 'mkdir',
+                 'rename', 'touch', 'symlink_to', 'hardlink_to', 'chmod')
+# Module-qualified mutators. The receiver is right there in the syntax, so
+# these need no disambiguation at all.
+MODULE_MUTATORS = {
+    'os': ('rename', 'replace', 'remove', 'unlink', 'rmdir', 'mkdir',
+           'makedirs', 'removedirs', 'symlink', 'link', 'truncate', 'chmod'),
+    'shutil': ('rmtree', 'copy', 'copy2', 'copyfile', 'copytree', 'move'),
+}
+# Modes that make `open()` a mutation. A read-mode `open()` is not a write and
+# stays anybody's to call.
+WRITE_MODES = ('w', 'a', 'x', '+')
+
+
 def _sources() -> list[tuple[str, Path]]:
     """(module-relative posix path, file) for every shipped module.
 
@@ -53,6 +73,27 @@ def _sources() -> list[tuple[str, Path]]:
 
 def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+
+
+def _is_write_open(node: ast.Call) -> bool:
+    """True when this `open(...)` call names a WRITE mode.
+
+    The mode is the second positional argument or the `mode=` keyword, and it
+    is a literal in every call in this package. A non-literal mode is treated as
+    a write: an unreadable mode is exactly the case a guard must not wave
+    through.
+    """
+    mode: ast.expr | None = None
+    if len(node.args) >= 2:
+        mode = node.args[1]
+    for kw in node.keywords:
+        if kw.arg == 'mode':
+            mode = kw.value
+    if mode is None:
+        return False  # read is the default
+    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+        return any(ch in mode.value for ch in WRITE_MODES)
+    return True
 
 
 def _calls(tree: ast.Module):
@@ -74,6 +115,39 @@ def _enumeration_sites(rel: str, tree: ast.Module) -> list[str]:
             out.append(f'{rel}:{node.lineno}: {func.attr}()')
         elif isinstance(func, ast.Name) and func.id in ('scandir', 'listdir'):
             out.append(f'{rel}:{node.lineno}: {func.id}()')
+    return out
+
+
+def _replace_is_a_path_replace(node: ast.Call) -> bool:
+    """True when this `.replace(...)` is `Path.replace`, decided by ARITY.
+
+    `str.replace` needs at least TWO arguments — `s.replace(old)` is a
+    TypeError, so it cannot appear in code that runs. `Path.replace(target)`
+    takes exactly one. That is a syntactic fact, not a guess about types, and it
+    is the only honest way to tell the two apart from an AST.
+    """
+    return len(node.args) == 1 and not node.keywords
+
+
+def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
+    out = []
+    for node in _calls(tree):
+        func = node.func
+        if isinstance(func, ast.Name):
+            if func.id == 'open' and _is_write_open(node):
+                out.append(f'{rel}:{node.lineno}: open(..., write mode)')
+            continue
+        if not isinstance(func, ast.Attribute):
+            continue
+        receiver = func.value.id if isinstance(func.value, ast.Name) else None
+        if receiver in MODULE_MUTATORS and func.attr in MODULE_MUTATORS[receiver]:
+            out.append(f'{rel}:{node.lineno}: {receiver}.{func.attr}()')
+        elif func.attr in PATH_MUTATORS:
+            out.append(f'{rel}:{node.lineno}: {func.attr}()')
+        elif func.attr == 'replace' and _replace_is_a_path_replace(node):
+            out.append(f'{rel}:{node.lineno}: replace() (one arg — Path.replace)')
+        elif func.attr == 'open' and _is_write_open(node):
+            out.append(f'{rel}:{node.lineno}: .open(..., write mode)')
     return out
 
 
@@ -99,6 +173,29 @@ class OneWalk(unittest.TestCase):
         stopped enumerating — then every offender would move somewhere else and
         the test would still pass."""
         sites = _enumeration_sites(WALK_MODULE, _tree(SRC / WALK_MODULE))
+        self.assertGreaterEqual(len(sites), 4, sites)
+
+
+class OneApply(unittest.TestCase):
+    """PRIMITIVE 2 — filesystem mutation lives in exactly one module."""
+
+    def test_only_the_apply_module_writes(self):
+        offenders: list[str] = []
+        for rel, path in _sources():
+            if rel == APPLY_MODULE:
+                continue
+            offenders.extend(_mutation_sites(rel, _tree(path)))
+        self.assertEqual(
+            [], offenders,
+            'filesystem mutation outside ' + APPLY_MODULE + '. A writer that '
+            'decides as it goes lands half a plan when step three refuses, '
+            'which is how the scaffolder, install-agents and `pm collapse` each '
+            'left a tree neither before nor after. Route it through '
+            '`core.apply`, which decides the whole plan and then applies it:\n  '
+            + '\n  '.join(offenders))
+
+    def test_the_apply_module_does_write(self):
+        sites = _mutation_sites(APPLY_MODULE, _tree(SRC / APPLY_MODULE))
         self.assertGreaterEqual(len(sites), 4, sites)
 
 

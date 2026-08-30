@@ -21,6 +21,7 @@ import os
 from importlib import resources
 from pathlib import Path
 
+from godot_devkit.core import apply
 from godot_devkit.repo.pm import model
 
 # The halfway name a case-only rename passes through on a case-INSENSITIVE
@@ -80,10 +81,14 @@ def render(text: str, values: dict[str, str]) -> str:
 
 
 def write(path: Path, text: str) -> None:
-    """Create a grain file, preserving the template's own line endings."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('w', encoding='utf-8', newline='') as fh:
-        fh.write(text)
+    """Create a grain file, preserving the template's own line endings.
+
+    Through `core.apply`, which owns every mutation in this package. The
+    refusals this module raises are named in slots and templates rather than
+    paths, so the plan is applied with `decide=False` and the domain wording
+    above stays exactly what a consumer's hook prints.
+    """
+    apply.raise_on_error(apply.write(path, text))
 
 
 class ScaffoldRefused(Exception):
@@ -136,13 +141,13 @@ def _rename_case(cfg: model.PmConfig, old: Path, new: Path) -> bool:
     # slot's rename behind it and is no longer the "nothing was written" it says.
     tmp = old.with_name(TEMP_RENAME_SUFFIX.format(name=old.name))
     try:
-        old.rename(tmp)
+        apply.raise_on_error(apply.move(old, tmp))
     except OSError as err:
         raise ScaffoldRefused(
             f'{cfg.rel(old)} could not be renamed to {new.name} ({err}); its '
             f'content is untouched, still at {cfg.rel(old)}') from err
     try:
-        tmp.rename(new)
+        apply.raise_on_error(apply.move(tmp, new))
     except OSError as err:
         raise ScaffoldRefused(
             f'{cfg.rel(old)} was renamed halfway to {new.name} and the second '
@@ -216,7 +221,7 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     # "drift found", so the stack trace lied in both directions. Nothing has
     # been written when this fails, so the refusal can say so and mean it.
     try:
-        gdir.mkdir(parents=True, exist_ok=True)
+        apply.raise_on_error(apply.make_dir(gdir))
     except OSError as err:
         raise ScaffoldRefused(
             f'{cfg.rel(gdir)}/ could not be created ({err}) — nothing was '
@@ -375,7 +380,7 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
         for slot in dir_slots:
             if slot in entries:
                 continue
-            (gdir / slot).mkdir(exist_ok=True)
+            apply.raise_on_error(apply.make_dir(gdir / slot))
             actions.append(('created', gdir / slot))
     except (OSError, UnicodeDecodeError) as err:
         did = '; '.join(f'{what} {cfg.rel(p)}' for what, p in actions)

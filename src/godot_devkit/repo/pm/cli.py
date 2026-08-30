@@ -15,7 +15,6 @@ Exit codes: 0 ok (incl. idempotent no-op) · 1 precondition/transition refused
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import textwrap
@@ -25,6 +24,7 @@ from pathlib import Path
 # `install` owns the refusal wording every install verb shares — this one
 # had its own copy and got the plural wrong.
 from godot_devkit.repo import install
+from godot_devkit.core import apply
 from godot_devkit.repo.pm import model, templates
 
 PROG = 'godot-devkit pm'
@@ -623,14 +623,14 @@ def cmd_init(cfg: model.PmConfig, args: list[str]) -> int:
     """Stand up a PM tree in a repo that has none, and say what is left to do."""
     if args:
         raise Usage(USAGE)
-    made = []
-    if not cfg.roadmap.is_dir():
-        cfg.roadmap.mkdir(parents=True)
-        made.append(f'{cfg.roadmap_dir}/')
+    plan = apply.Plan()
     index = cfg.roadmap / 'ROADMAP.md'
+    if not cfg.roadmap.is_dir():
+        plan.make_dir(cfg.roadmap, label=f'{cfg.roadmap_dir}/')
     if not index.is_file():
-        index.write_text(ROADMAP_SEED, encoding='utf-8')
-        made.append(cfg.rel(index))
+        plan.overwrite(index, ROADMAP_SEED, newline=None, label=cfg.rel(index))
+    apply.raise_on_error(plan.apply(decide=False))
+    made = [step.label for step in plan.steps]
     for m in made:
         _ok(f'created {m}')
     if not made:
@@ -742,27 +742,32 @@ def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
                       + '\nNothing was written. Fix the path(s) and re-run — '
                         'the command is idempotent.')
 
-    wrote = 0
-    written: list[str] = []
+    # ONE plan: the destinations were decided above, and `core.apply` reports
+    # exactly which of them landed. A loop that decided as it wrote is what
+    # made this verb's twin, `install-agents`, half-install twice.
+    writes = apply.Plan()
+    for kind, target, body in actions:
+        if kind != 'current':
+            writes.overwrite(target, body, newline=None, label=cfg.rel(target))
+    result = writes.apply(decide=False)
+    written = [step.label for step in result.landed]
+    landed = set(written)
     for kind, target, body in actions:
         if kind == 'current':
             _ok(f'{cfg.rel(target)} already current')
-            continue
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(body, encoding='utf-8')
-        except OSError as err:
-            raise Refused(
-                f'{cfg.rel(target)} could not be written '
-                f'({err.strerror or err}) — '
-                + ('nothing was written' if not written else
-                   'ALREADY WRITTEN before this was reached: '
-                   + ', '.join(written))
-                + '. Fix the path and re-run — the command is idempotent.'
-            ) from err
-        _ok(f'installed {cfg.rel(target)}')
-        written.append(cfg.rel(target))
-        wrote += 1
+        elif cfg.rel(target) in landed:
+            _ok(f'installed {cfg.rel(target)}')
+        else:
+            break
+    if result.failed is not None:
+        raise Refused(
+            f'{result.failed.label} could not be written '
+            f'({result.error}) — '
+            + ('nothing was written' if not written else
+               'ALREADY WRITTEN before this was reached: '
+               + ', '.join(written))
+            + '. Fix the path and re-run — the command is idempotent.')
+    wrote = len(written)
     if wrote:
         _ok(f'godot-devkit v{__version__} — these two carry only what the pm CLI '
             f'itself enforces and explains. Your project\'s SDLC (branching, '
@@ -1654,12 +1659,10 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     text += f'\n- **{stamp}** — pruned from commit `{head}`:\n'
     for _, label in targets:
         text += f'  - `{label}`\n'
-    index.parent.mkdir(parents=True, exist_ok=True)
     try:
-        # newline='' for the same reason model.py does it: never rewrite a
-        # file's line endings as a side effect of appending to it.
-        with index.open('w', encoding='utf-8', newline='') as fh:
-            fh.write(text)
+        # `core.apply` writes with newline='' for the same reason model.py does:
+        # never rewrite a file's line endings as a side effect of appending.
+        apply.raise_on_error(apply.write(index, text))
     except OSError as err:
         raise Usage(f'could not stamp the resurrect anchor into '
                     f'{cfg.rel(index)} ({err}) — nothing was deleted') from err
@@ -1667,7 +1670,7 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     for path, _ in targets:
         subprocess.run(['git', 'rm', '-r', '-q', '--ignore-unmatch', cfg.rel(path)],
                        cwd=cfg.root, capture_output=True, text=True, check=False)
-        shutil.rmtree(path, ignore_errors=True)
+        apply.remove_tree(path)
     _ok(f'pruned {len(targets)} dir(s); resurrect anchor {head} stamped in '
         f'{cfg.rel(index)}. Review + commit.')
     return 0

@@ -41,6 +41,7 @@ import re
 from pathlib import Path
 
 from godot_devkit.godot.index.gdscript import ScriptIndex
+from godot_devkit.core import apply
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import Section, node_own_path, parse, split_path
@@ -246,7 +247,7 @@ def main(argv: list[str]) -> int:
                 before.splitlines(keepends=True), after.splitlines(keepends=True),
                 fromfile=f'a/{path.name}', tofile=f'b/{path.name}', n=DIFF_CONTEXT)), end='')
         elif after != before:
-            path.write_text(after, encoding='utf-8')
+            apply.raise_on_error(apply.write_translated(path, after))
         # "changes", not "restored": with --elide-defaults a change can be a
         # deletion, and a count that lies about its own direction is worse than
         # no count.

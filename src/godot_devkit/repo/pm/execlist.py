@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from godot_devkit.core import apply
 from godot_devkit.repo.pm import model, validate
 
 OPEN = '<!-- pm:execution -->'
@@ -151,7 +152,6 @@ def sync(cfg: model.PmConfig, write: bool = True,
         after = _replace(before, block_for(cfg, path))
         changed = after != before
         if changed and write:
-            with path.open('w', encoding='utf-8', newline='') as fh:
-                fh.write(after)
+            apply.raise_on_error(apply.write(path, after))
         results.append((path, changed))
     return results

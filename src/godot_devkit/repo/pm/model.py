@@ -50,7 +50,7 @@ from datetime import date
 from pathlib import Path
 
 from godot_devkit.core.markdown import block_scan
-from godot_devkit.core import walk
+from godot_devkit.core import apply, walk
 from godot_devkit.core.walk import Kind, SkipReason, Walk
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, flag, number, str_tuple, text
@@ -429,8 +429,11 @@ def read_raw(path: Path) -> str:
 
 
 def write_raw(path: Path, text: str) -> None:
-    with path.open('w', encoding='utf-8', newline='') as fh:
-        fh.write(text)
+    """The grain-file write, through `core.apply` — the one module that
+    mutates. `newline=''` there is the same disabled translation this comment
+    describes; a mid-write failure comes back as the `OSError` every caller of
+    this function already handles."""
+    apply.raise_on_error(apply.write(path, text))
 
 
 def _eol(line: str) -> str:
