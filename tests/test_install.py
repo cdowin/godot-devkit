@@ -300,14 +300,13 @@ def test_the_installed_contracts_do_not_redden_a_consumers_gates():
         # the module pointing at a directory that no longer exists — and the
         # next test to import it inherits that. A gate run out-of-process cannot
         # contaminate the suite that runs it.
-        for gate in ('doc', 'agents'):
-            proc = subprocess.run(
-                [sys.executable, '-m', 'godot_devkit.cli', 'check', gate],
-                cwd=root, capture_output=True, text=True,
-                env={**os.environ, 'PYTHONPATH': str(REPO_ROOT / 'src')})
-            assert proc.returncode == 0, (
-                f'the installed contract fails `check {gate}` on install day:\n'
-                f'{proc.stdout}{proc.stderr}')
+        proc = subprocess.run(
+            [sys.executable, '-m', 'godot_devkit.cli', 'check', 'doc'],
+            cwd=root, capture_output=True, text=True,
+            env={**os.environ, 'PYTHONPATH': str(REPO_ROOT / 'src')})
+        assert proc.returncode == 0, (
+            'the installed contract fails `check doc` on install day:\n'
+            f'{proc.stdout}{proc.stderr}')
 
 
 # --- install-ci: one opinion, and the assumption said out loud ----------------

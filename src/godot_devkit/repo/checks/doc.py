@@ -5,7 +5,7 @@ Sibling of uid_scan.sh / capability_scan.sh: a fast, static gate over
 CLAUDE.md + .claude/rules/*.md + .claude/agents/*.md that catches the class
 of drift the doc-hygiene agent otherwise has to grep-verify by hand — a dead
 `res://` path, a `make <target>` that no longer exists, a markdown link to a
-moved file. NOT a substitute for doc-hygiene's judgment (duplication, scope
+moved file, a skill written as a flat `.md` that never loads. NOT a substitute for doc-hygiene's judgment (duplication, scope
 creep, "is this claim still true" symbol-identity checks) — just the
 objectively-checkable subset: does this path/link/make-target resolve.
 
@@ -40,6 +40,13 @@ DEFAULT_SCOPE = ('CLAUDE.md', '.claude/rules/*.md', '.claude/agents/*.md')
 SCOPE_GLOBS = str_tuple(_CFG, 'doc', 'scope', DEFAULT_SCOPE)
 MAKEFILE = REPO_ROOT / 'Makefile'
 ALLOW_MARKER = 'doc-scan:allow'
+# A skill is a DIRECTORY holding SKILL.md. A flat `.claude/skills/<name>.md`
+# does not load as a skill at all — its description never fires, so the file is
+# inert however good it is. A fact about where a file sits, checked by listing
+# one directory: `<name>/SKILL.md` legitimately sits beside references/,
+# scripts/ and assets/, so only a `.md` at depth 1 is the defect.
+SKILL_DIR = '.claude/skills'
+SKILL_FILENAME = 'SKILL.md'
 
 INLINE_CODE = re.compile(r'`([^`]+)`')
 MD_LINK_TEXT = re.compile(r'`[^`]+`\]\(')  # a backtick span used as [`text`](href) link text —
@@ -139,6 +146,17 @@ def check_backtick_paths(doc: Path, lines: list[tuple[int, str]]) -> list[str]:
     return findings
 
 
+def skill_entries() -> tuple[list[Path], list[Path]]:
+    """(everything listed under `.claude/skills/`, the flat `.md` files in it).
+
+    Both halves, because rule 4: "0 flat skills" out of an empty directory and
+    out of twelve correctly-shaped ones are different reports, and only one of
+    them is worth printing.
+    """
+    listed = list(walk.children(REPO_ROOT / SKILL_DIR).kept)
+    return listed, [p for p in listed if p.is_file() and p.suffix == '.md']
+
+
 def run() -> int:
     real_targets = real_make_targets()
     findings: list[str] = []
@@ -164,6 +182,13 @@ def run() -> int:
         findings.extend(check_make_targets(doc, lines, real_targets))
         findings.extend(check_backtick_paths(doc, lines))
 
+    listed, flat = skill_entries()
+    for skill in flat:
+        findings.append(
+            f'{skill.relative_to(REPO_ROOT)}  a skill must be '
+            f'<name>/{SKILL_FILENAME}; a flat .md does NOT load as a skill '
+            f'(its description never fires)')
+
     if findings or defects:
         counts = ', '.join(
             part for part in (
@@ -174,7 +199,7 @@ def run() -> int:
         # way it went — "1 malformed doc(s)" out of one doc and out of two
         # hundred are different reports, and only one of them printed.
         print(f'[check:doc] FAIL — {counts}, across {len(docs)} doc(s), '
-              f'{skipped} fenced line(s) skipped')
+              f'{skipped} fenced line(s) skipped, {len(listed)} {SKILL_DIR}/ entr(ies)')
         for finding in sorted(defects) + sorted(findings):
             print(f'  {finding}')
         print(f'\nA genuine exception (a deliberate retired-thing citation) gets a trailing '
@@ -191,7 +216,7 @@ def run() -> int:
     # SKIPPED is the other half of "what did this gate actually read", and a
     # PASS that never says it is a PASS over an unknown amount of unread text.
     print(f'[check:doc] PASS — {len(docs)} doc(s), {skipped} fenced line(s) '
-          f'skipped, 0 unresolved claims')
+          f'skipped, {len(listed)} {SKILL_DIR}/ entr(ies), 0 unresolved claims')
     return 0
 
 

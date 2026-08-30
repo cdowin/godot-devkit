@@ -911,8 +911,8 @@ class AStaleRuleIdStopsTheGATE_NotTheReadVerbs(unittest.TestCase):
     A version bump that retires a rule is exactly what leaves a stale id in a
     consumer's config, and one consumer names sixteen rules explicitly. Raised
     from `model.load()`, that typo killed `pm status`, `pm get`, `pm new`,
-    `pm validate`, `pm vocabulary --json`, `check pm` AND `check agents` at
-    exit 2 together — so the consumer could neither read its own tree nor ask
+    `pm validate`, `pm vocabulary --json` and `check pm` at exit 2 together —
+    so the consumer could neither read its own tree nor ask
     the tool what the new vocabulary is while deciding what to do about it.
 
     The strictness is right; the placement was not. The GATES refuse, because
@@ -937,24 +937,6 @@ class AStaleRuleIdStopsTheGATE_NotTheReadVerbs(unittest.TestCase):
             (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
             code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
             self.assertEqual(code, 0, out)
-
-    def test_check_agents_still_runs(self):
-        from godot_devkit.repo.checks import agents as agents_check
-        with tree(story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
-            d = root / '.claude' / 'agents'
-            d.mkdir(parents=True)
-            (d / 'a.md').write_text('Move it with `pm story wip <id>`.\n',
-                                    encoding='utf-8')
-            subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
-                           capture_output=True)
-            from godot_devkit.core.project import load_config, repo_root
-            repo_root.cache_clear()
-            load_config.cache_clear()
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                code = agents_check.run()
-            self.assertEqual(code, 0, buf.getvalue())
 
     def test_the_two_gates_refuse_loudly_and_name_the_id(self):
         with tree(story_statuses=('todo',)) as root:
@@ -1958,94 +1940,6 @@ class ExecutionList(unittest.TestCase):
             self.assertIn('keep me', mfile.read_text())
 
 
-class AgentDefinitions(unittest.TestCase):
-    """`check agents` — definitions that instruct what the tooling refuses."""
-
-    def _gate(self, root: Path):
-        from godot_devkit.repo.checks import agents
-        from godot_devkit.core.config import config_section
-        from godot_devkit.core.project import load_config, repo_root
-        repo_root.cache_clear()
-        load_config.cache_clear()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code = agents.run()
-        return code, buf.getvalue()
-
-    def _def(self, root: Path, rel: str, body: str) -> None:
-        p = root / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body, encoding='utf-8')
-
-    def test_a_legal_workflow_passes(self):
-        with tree() as root:
-            self._def(root, '.claude/agents/dev.md',
-                      'Claim with `pm story wip <id>`, then the reviewer runs\n'
-                      '`pm story review <id>`. A story goes wip -> review.\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 0, out)
-
-    def test_an_impossible_story_transition_is_caught(self):
-        # The real drift: a story reaching done outside the feature cascade.
-        with tree() as root:
-            self._def(root, '.claude/agents/po.md',
-                      'When the story is verified, flip `status: review -> done`.\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('review -> done', out)
-            self.assertIn('cascade', out)
-
-    def test_the_same_transition_is_legal_for_a_feature(self):
-        # review -> done IS the feature close edge. Grain context decides.
-        with tree() as root:
-            self._def(root, '.claude/agents/po.md',
-                      'Close the feature: it moves review -> done.\n')
-            self.assertEqual(self._gate(root)[0], 0)
-
-    def test_a_nonexistent_verb_is_caught(self):
-        with tree() as root:
-            self._def(root, '.claude/agents/dev.md', 'Run `pm story done <id>`.\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn("no 'done' verb", out)
-
-    def test_an_ambiguous_line_is_censused_not_guessed(self):
-        # Precision over reach: a false FAIL gets the gate switched off.
-        with tree() as root:
-            self._def(root, '.claude/agents/po.md',
-                      'The milestone is building; your stories go review -> done.\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertIn('UNVERIFIED', out)
-
-    def test_a_flat_skill_file_is_caught(self):
-        with tree() as root:
-            self._def(root, '.claude/skills/planning.md', '# Planning\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('does NOT load as a skill', out)
-
-    def test_a_correctly_shaped_skill_passes(self):
-        with tree() as root:
-            self._def(root, '.claude/skills/planning/SKILL.md', '# Planning\n')
-            self.assertEqual(self._gate(root)[0], 0)
-
-    def test_a_configured_forbidden_pattern_fires(self):
-        with tree() as root:
-            self._def(root, '.claude/agents/dev.md', 'Run godot --headless yourself.\n')
-            (root / 'devkit.toml').write_text(
-                '[agents]\nforbidden = ["godot --headless"]\n', encoding='utf-8')
-            code, out = self._gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('forbidden pattern', out)
-
-    def test_scanning_nothing_fails_rather_than_passing(self):
-        with tree() as root:
-            code, out = self._gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('scanned 0 definitions', out)
-
-
 class Vocabulary(unittest.TestCase):
     def test_json_states_the_story_terminal_machine_readably(self):
         # The whole point: a checker must never scrape help text.
@@ -2070,7 +1964,7 @@ class EveryConfigSection(unittest.TestCase):
     SECTIONS = (
         ('uid', 'exclude_prefixes'), ('tres', 'exclude_prefixes'),
         ('props', 'exclude_prefixes'), ('defaults', 'exclude_prefixes'),
-        ('shell', 'roots'), ('doc', 'scope'), ('agents', 'scope'),
+        ('shell', 'roots'), ('doc', 'scope'),
         ('pm', 'checks'),
     )
     BAD = ('"a-string"', '5', '[]', '{ k = 1 }')
@@ -2131,82 +2025,116 @@ class FamilySeparation(unittest.TestCase):
         self.assertEqual(offenders, [], 'core/ must know about neither family')
 
 
-class AgentGatePrecision(unittest.TestCase):
-    """A false FAIL gets a gate switched off; these are the four that shipped."""
+class SkillShape(unittest.TestCase):
+    """A flat `.claude/skills/<name>.md` does not load as a skill.
 
-    def _gate(self, root: Path):
-        from godot_devkit.repo.checks import agents
+    The one mechanically-decidable FACT the retired `check agents` held: where
+    the file sits decides whether its description ever fires, so an otherwise
+    perfect skill written flat is inert. It lives in `check doc` now, beside
+    the other "does this resolve" facts, and it INFERS nothing — it lists one
+    directory.
+
+    Its three neighbours in that gate did infer, and are gone: A1/A2 failed a
+    build because a markdown file DESCRIBED a workflow, guessed the subject of
+    a line by "exactly one grain word appears" (6 of 8 real mentions came back
+    UNVERIFIED), and suppressed an identical finding because the line happened
+    to contain the word "not".
+    """
+
+    def _doc(self, root: Path) -> tuple[int, str]:
+        import importlib
+        from godot_devkit.repo.checks import doc
         from godot_devkit.core.project import load_config, repo_root
         repo_root.cache_clear()
         load_config.cache_clear()
+        # `doc` binds its root and scope at IMPORT, where production resolves
+        # them once per process and the cwd never moves. Tests move it.
+        importlib.reload(doc)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = agents.run()
+            code = doc.run()
         return code, buf.getvalue()
 
-    def _write(self, root: Path, rel: str, body: str) -> None:
+    def _write(self, root: Path, rel: str, body: str = '# s\n') -> None:
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body, encoding='utf-8')
 
-    def test_a_supporting_file_in_a_real_skill_dir_is_not_a_flat_skill(self):
+    def test_a_flat_skill_file_is_a_finding(self):
         with tree() as root:
-            self._write(root, '.claude/skills/mine/SKILL.md', '# s\n')
-            self._write(root, '.claude/skills/mine/references/api.md', '# api\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 0, out)
-
-    def test_a_fenced_example_is_not_an_instruction(self):
-        with tree() as root:
-            self._write(root, '.claude/rules/r.md',
-                        '```\n[pm] REFUSED — story wip -> done\n```\n')
-            self.assertEqual(self._gate(root)[0], 0)
-
-    def test_a_definition_this_gate_cannot_decode_is_reported_not_skipped(self):
-        # The one reader in the package that masked in SILENCE: the file was
-        # dropped by a bare `continue` while the census still counted it as
-        # scanned, so one latin-1 byte turned a real INSTRUCTS finding into a
-        # PASS with the census unchanged.
-        with tree() as root:
-            p = root / '.claude/agents/bad.md'
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(b'caf\xe9\nFlip it with `pm story done <id>`.\n')
-            code, out = self._gate(root)
+            self._write(root, 'CLAUDE.md', '# c\n')
+            self._write(root, '.claude/skills/mine.md')
+            code, out = self._doc(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('MALFORMED', out)
-            self.assertIn('cannot be read', out)
-            # And the census stops asserting a scan that did not happen.
-            self.assertIn('0 definition(s)', out)
-            self.assertIn('1 of 1 UNREADABLE', out)
+            self.assertIn('.claude/skills/mine.md', out)
+            self.assertIn('does NOT load as a skill', out)
 
-    def test_prose_prohibiting_a_transition_is_not_instructing_it(self):
+    def test_a_correctly_shaped_skill_and_its_supporting_files_pass(self):
         with tree() as root:
-            self._write(root, '.claude/rules/r.md',
-                        'Never flip a story wip -> done; the CLI refuses it.\n')
-            self.assertEqual(self._gate(root)[0], 0)
-
-    def test_unbackticked_prose_is_not_an_invocation(self):
-        with tree() as root:
-            self._write(root, '.claude/agents/a.md',
-                        'The pm feature and pm milestone verbs both take an id.\n')
-            self.assertEqual(self._gate(root)[0], 0)
-
-    def test_a_chained_arrow_does_not_hide_its_middle_edge(self):
-        # findall is non-overlapping: `a -> b -> c` silently dropped (b, c).
-        with tree() as root:
-            self._write(root, '.claude/rules/r.md',
-                        'The milestone lifecycle is planning -> ready -> done.\n')
-            code, out = self._gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('ready -> done', out)
-
-    def test_an_unknown_state_is_censused_not_dropped(self):
-        with tree() as root:
-            self._write(root, '.claude/rules/r.md',
-                        'A story goes todo -> reviewd (a typo in this doc).\n')
-            code, out = self._gate(root)
+            self._write(root, 'CLAUDE.md', '# c\n')
+            self._write(root, '.claude/skills/mine/SKILL.md')
+            self._write(root, '.claude/skills/mine/references/api.md')
+            code, out = self._doc(root)
             self.assertEqual(code, 0, out)
-            self.assertIn('UNVERIFIED', out)
+
+    def test_the_census_says_what_it_listed(self):
+        # Rule 4: "no flat skills" out of an empty directory and out of twelve
+        # correctly-shaped ones are different reports.
+        with tree() as root:
+            self._write(root, 'CLAUDE.md', '# c\n')
+            self._write(root, '.claude/skills/one/SKILL.md')
+            self._write(root, '.claude/skills/two/SKILL.md')
+            code, out = self._doc(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('2 .claude/skills/ entr(ies)', out)
+
+
+class TheAgentsGateIsGone(unittest.TestCase):
+    """`check agents` gated ENGLISH PROSE, and it inferred. Both are removed.
+
+    A1 failed a build for a `pm <grain> <verb>` spelling inside a backtick
+    span; A2 for a `<state> -> <state>` a graph refused — in a file whose job
+    is to DESCRIBE the workflow. A4 was a project-supplied regex over prose.
+    None of them is a fact about the tree.
+    """
+
+    def test_it_is_not_a_gate_name(self):
+        with tree() as root:
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                from godot_devkit import cli as top
+                code = top.main(['check', 'agents'])
+            self.assertEqual(code, 2, buf.getvalue())
+            self.assertIn('unknown check', buf.getvalue())
+
+    def test_a_definition_describing_a_workflow_reddens_nothing(self):
+        # The exact text A2 failed on, and the near-identical line it let pass
+        # because the word "not" appeared in it.
+        with tree() as root:
+            d = root / '.claude' / 'rules'
+            d.mkdir(parents=True)
+            (d / 'r.md').write_text(
+                'The milestone lifecycle is planning -> ready -> done.\n'
+                'When the story is verified, flip `status: review -> done`.\n'
+                'A story does not go review -> done on its own.\n',
+                encoding='utf-8')
+            (root / 'CLAUDE.md').write_text('# c\n', encoding='utf-8')
+            import importlib
+            from godot_devkit.repo.checks import doc
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            importlib.reload(doc)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(doc.run(), 0, buf.getvalue())
+        # And there is no other gate left to redden it: the module that held
+        # A1/A2/A4 and the two inference helpers is gone, not narrowed.
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module('godot_devkit.repo.checks.agents')
 
 
 class BlockedIsNotATrap(unittest.TestCase):
@@ -2841,7 +2769,7 @@ class StoryResolution(unittest.TestCase):
 
 
 class MarkdownFences(unittest.TestCase):
-    """`check doc` / `check agents` — what a fence may and may not hide.
+    """`check doc` — what a fence may and may not hide.
 
     A fence masks because a quoted refusal message is an ILLUSTRATION, not an
     instruction. An UNTERMINATED one illustrates nothing and hides the rest of
@@ -2852,9 +2780,6 @@ class MarkdownFences(unittest.TestCase):
 
     DEAD = ('See [the missing spec](docs/specs/nope.md).\n'
             'Run `make no-such-target` to do it.\n')
-    INSTRUCTS = ('Flip it with `pm story done <id>`.\n'
-                 'A story goes review -> done once accepted.\n')
-
     def _doc(self, root: Path, body: str) -> tuple[int, str]:
         import importlib
         from godot_devkit.repo.checks import doc
@@ -2868,19 +2793,6 @@ class MarkdownFences(unittest.TestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code = doc.run()
-        return code, buf.getvalue()
-
-    def _agents(self, root: Path, body: str) -> tuple[int, str]:
-        from godot_devkit.repo.checks import agents
-        p = root / '.claude/agents/dev.md'
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body, encoding='utf-8')
-        from godot_devkit.core.project import load_config, repo_root
-        repo_root.cache_clear()
-        load_config.cache_clear()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code = agents.run()
         return code, buf.getvalue()
 
     def test_doc_still_fails_on_the_claims_without_any_fence(self):
@@ -2899,22 +2811,12 @@ class MarkdownFences(unittest.TestCase):
             self.assertIn('never terminated', out)
             self.assertIn('malformed doc(s)', out)
 
-    def test_an_unterminated_fence_cannot_hide_an_agent_instruction(self):
-        with tree() as root:
-            code, out = self._agents(root, '```\n' + self.INSTRUCTS)
-            self.assertEqual(code, 1, out)
-            self.assertIn('review -> done', out)
-            self.assertIn('MALFORMED', out)
-            self.assertIn('never terminated', out)
-
-    def test_a_terminated_fence_still_masks_both_gates(self):
-        # The fix is not "stop masking": a rule file quoting the CLI's own
-        # refusal is documenting it, and flagging that is how a gate gets
+    def test_a_terminated_fence_still_masks(self):
+        # The fix is not "stop masking": a doc quoting a command that no longer
+        # exists is illustrating it, and flagging that is how a gate gets
         # switched off.
         with tree() as root:
             code, out = self._doc(root, '```\n' + self.DEAD + '```\n')
-            self.assertEqual(code, 0, out)
-            code, out = self._agents(root, '```\n' + self.INSTRUCTS + '```\n')
             self.assertEqual(code, 0, out)
 
     def test_an_indented_fence_is_content_not_a_fence(self):
@@ -2937,13 +2839,10 @@ class MarkdownFences(unittest.TestCase):
             self.assertEqual(code, 1, out)
             self.assertIn('dead link target', out)
 
-    def test_both_censuses_say_how_much_they_skipped(self):
+    def test_the_census_says_how_much_it_skipped(self):
         # The census counts FILES, and files are not what a fence hides.
         with tree() as root:
             code, out = self._doc(root, '```\nhidden\n```\nfine.\n')
-            self.assertEqual(code, 0, out)
-            self.assertIn('3 fenced line(s) skipped', out)
-            code, out = self._agents(root, '```\nhidden\n```\nfine.\n')
             self.assertEqual(code, 0, out)
             self.assertIn('3 fenced line(s) skipped', out)
 
@@ -2982,8 +2881,7 @@ class MarkdownFences(unittest.TestCase):
             self.assertIn('4 fenced line(s) skipped', out)
 
     def test_the_doc_FAIL_line_says_what_it_scanned(self):
-        # `agents` carries its census into its FAIL line; `doc` printed the
-        # verdict alone. "1 malformed doc(s)" out of one doc and out of two
+        # The verdict used to print alone. "1 malformed doc(s)" out of one doc and out of two
         # hundred are different reports, and only one of them printed.
         with tree() as root:
             code, out = self._doc(root, '```\n' + self.DEAD)

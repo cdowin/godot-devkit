@@ -22,6 +22,8 @@
 - **D4 covers a bug's status** — D14's one fact about a FILE (a status outside `bug_states`) moves to the rule that already owns it, on by default. `bug_open_states` goes with its only reader.
 - **the census always counts bugs** — `N bug(s)` used to ride the opt-in D14, so a default run said nothing about a directory it had walked. (repo/checks/pm.py)
 - **a stale rule id stops the gate, not the CLI** — One retired name in `[pm] checks` used to kill `pm status`, `pm get`, `pm new` and `pm vocabulary --json` too. Now only `check pm` and `pm validate` refuse.
+- **BREAKING: `check agents` is removed** — A1/A2/A4 failed a build because a markdown file DESCRIBED a workflow, and they inferred: a line's subject was guessed from "one grain word appears".
+- **the flat-skill rule survives, in `check doc`** — `.claude/skills/<name>.md` instead of `<name>/SKILL.md` genuinely does not load. A fact about a file, on the gate that checks those.
 
 ## v0.14.0 — 2026-08-29
 

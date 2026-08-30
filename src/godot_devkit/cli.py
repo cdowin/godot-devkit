@@ -37,12 +37,10 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     godot-devkit pm feature done <feature-id> [--review-record <path>]
     godot-devkit pm milestone <ready|building|done> <milestone-id>
     godot-devkit pm status [<milestone>]
-    godot-devkit pm vocabulary --json   # the transition graph, for checkers
     godot-devkit pm validate            # ids/parentage/refs/graph integrity
     godot-devkit pm install-skills      # the shared rule + operations skill
     godot-devkit pm init                # stand up a tree in a repo with none
     godot-devkit pm new <milestone|feature|story|bug> ...
-    godot-devkit pm prune
     (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a
      hand-edit would leave, off the SAME predicates)
 
@@ -59,7 +57,7 @@ Installers (write the file once; after that it is the repo's):
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
-                      | repo-hygiene | pm | agents
+                      | repo-hygiene | pm
                                     # `uid --fix` applies the repair the gate
                                     # already computes: a stale Script ref uid
                                     # rewritten to the target's .uid sidecar
@@ -94,11 +92,11 @@ FIX_FLAG = '--fix'
 # `defaults` reports thousands of findings on a tree that has never been
 # canonicalized, so folding it in would redden every existing consumer on a
 # version bump — wire it explicitly, after the one-time cleanup pass;
-# `repo-hygiene` is close-time and hits the network; `pm` and `agents` would
-# fail a repo for not having a PM tree or agent definitions at all.
+# `repo-hygiene` is close-time and hits the network; `pm` would fail a repo for
+# not having a PM tree at all.
 KNOWN_CHECKS = {
     'uid': True, 'tres': True, 'props': True, 'doc': True, 'shell': True,
-    'defaults': False, 'repo-hygiene': False, 'pm': False, 'agents': False,
+    'defaults': False, 'repo-hygiene': False, 'pm': False,
 }
 
 
@@ -106,7 +104,7 @@ def all_roster() -> tuple[str, ...]:
     """Which gates `check all` runs HERE — `[checks] all`, else the defaults.
 
     Applicability is per-repo and the aggregate is where it shows. Five of the
-    nine gates read `.tscn`/`.tres`/shell, so a repo holding none of those
+    eight gates read `.tscn`/`.tres`/shell, so a repo holding none of those
     (this package itself; a PM-tree-only consumer) gets five 0-file censuses,
     and rule 4 correctly turns every one of them red. That is not drift and it
     is not a reason to weaken a gate — it is the roster being wrong for the
@@ -186,9 +184,6 @@ def _dispatch_check(name: str, fix: bool = False) -> int:
     if name == 'pm':
         from godot_devkit.repo.checks import pm
         return pm.run()
-    if name == 'agents':
-        from godot_devkit.repo.checks import agents
-        return agents.run()
     if name == 'all':
         worst = 0
         for check in all_roster():

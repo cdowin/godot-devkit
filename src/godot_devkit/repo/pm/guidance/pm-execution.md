@@ -41,10 +41,8 @@ it does NOT permit is a story reaching `done` any other way; see below.
 
 Worth knowing, so a refusal reads as a rule rather than a bug:
 
-- **A story reaches `done` only through the feature cascade.** A per-story `done`
-  flip is a review-skip hole; the graph has no such edge. If a definition or a habit
-  in your project describes one, `godot-devkit check agents` will find it — that drift
-  is why a story can sit at `wip` with finished work while its feature refuses to close.
+- **A story reaches `done` only through the feature cascade.** `pm feature done` moves
+  every story at `review` under the feature, and the feature, in one command.
 - **`pm feature review` refuses unless every story is at `review`.** A feature cannot
   be under review while its own work is unfinished.
 - **`pm feature done` refuses without a *substantive* review record** — a pointer that
@@ -89,8 +87,6 @@ banner`. Link the hash and stop.
   phase-monotone. A ref into a milestone no longer in the tree is UNVERIFIABLE,
   not a failure.
 - `check pm` — status drift, and the same integrity rules, as a gate.
-- `check agents` — your agent/rule/skill definitions, against this vocabulary. Prose
-  drifts from tooling silently; this is what makes it loud.
 - `pm vocabulary --json` — the graph itself, if you write your own checks.
 
 Run the gate in your per-change gate set. A PM tree is only worth what it can be

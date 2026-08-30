@@ -7,13 +7,13 @@
 # this file, and this file is the proof it can.
 
 [checks]
-# The roster `check all` runs HERE. Five of the nine gates read .tscn/.tres or
+# The roster `check all` runs HERE. Five of the eight gates read .tscn/.tres or
 # shell scripts, and this package holds neither outside its FIXTURES — so on the
 # default roster five gates report a 0-file census and rule 4 correctly reddens
 # every one. That is the roster being wrong for the repo, not a reason to soften
 # a gate: `check uid|tres|props|shell` still run here on demand and still say
-# exactly what they scanned. The repo-family three are the ones that apply.
-all = ["doc", "pm", "agents"]
+# exactly what they scanned. The repo-family two are the ones that apply.
+all = ["doc", "pm"]
 
 # The deliberately-drifted Godot corpus under tests/fixtures/ is the INPUT to
 # this package's tests, not content this repo maintains: a stale uid and a

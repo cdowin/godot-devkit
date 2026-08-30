@@ -1,7 +1,7 @@
 """walk.py — the ONE place this package enumerates a filesystem.
 
 A day of review found the same defect in six places: something left a census in
-silence. The fence masked a decision log; `check doc` and `check agents` masked
+silence. The fence masked a decision log; `check doc` masked
 a file's tail; D14 never descended into `bugs/<subdir>/`; damaged frontmatter
 dropped a grain; the dotted-name filter dropped another. Every fix was an
 INSTANCE — a filter taught to report itself — so the next feature reintroduced
