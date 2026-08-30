@@ -3,7 +3,7 @@ id: 0.16.0/hook-soundness/pathspec-from-file
 feature: 0.16.0/hook-soundness
 milestone: "0.16.0"
 name: cc-commit-pathspec recognizes --pathspec-from-file in both spellings
-status: todo
+status: review
 owner:
 estimate:
 depends_on: []

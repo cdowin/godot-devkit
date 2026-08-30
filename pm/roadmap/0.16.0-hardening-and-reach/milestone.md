@@ -29,15 +29,15 @@ labels: []
 1. `case-rename-retirement` · planning · 0/1 stories
 2. `ci-corpus` · planning · 0/1 stories
 3. `consumer-adoption` · planning · 0/2 stories
-4. `gate-integrity` · planning · 0/2 stories
+4. `gate-integrity` · building · 0/2 stories
 5. `hook-corpus-upstream` · planning · 0/2 stories
-6. `hook-soundness` · planning · 0/2 stories
-7. `pm-contract` · planning · 0/3 stories
+6. `hook-soundness` · building · 0/2 stories
+7. `pm-contract` · building · 0/3 stories
 8. `pm-verbs` · planning · 0/2 stories
 9. `scene-verbs` · planning · 0/4 stories
 10. `self-discipline` · planning · 0/3 stories
 11. `subresource-model` · planning · 0/1 stories
 12. `technical-review` · planning · 0/2 stories
 13. `uid-deepening` · planning · 0/2 stories
-14. `write-fidelity` · planning · 0/4 stories
+14. `write-fidelity` · building · 0/4 stories
 <!-- /pm:execution -->

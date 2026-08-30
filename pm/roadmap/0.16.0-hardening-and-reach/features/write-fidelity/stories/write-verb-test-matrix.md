@@ -3,7 +3,7 @@ id: 0.16.0/write-fidelity/write-verb-test-matrix
 feature: 0.16.0/write-fidelity
 milestone: "0.16.0"
 name: Idempotence for add/rm/reparent, rm refusal, strict-read refusals
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

@@ -3,7 +3,7 @@ id: 0.16.0/write-fidelity/layering-format-index
 feature: 0.16.0/write-fidelity
 milestone: "0.16.0"
 name: format/ stops importing index/: inject the uid resolver from write/
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

@@ -78,8 +78,13 @@ CMD="$(hook_json_field "$INPUT" tool_input.command)"
 
 # A heredoc BODY is data, not commands — an agent writing a doc or a script that
 # quotes `godot --headless` is not booting anything. Everything from the first
-# `<<` on is body (and a heredoc is not how anyone runs the engine).
-ANALYZE="${CMD%%<<*}"
+# `<<` on is body (and a heredoc is not how anyone runs the engine). A `<<<`
+# HERESTRING is not a heredoc: its payload is one inline word and the command
+# line CONTINUES after it, so truncating at it would hide a boot typed after
+# the herestring. Neutralize herestrings first; the placeholder glues onto the
+# data word so that word can never be misread as a fresh command word.
+ANALYZE="${CMD//<<</ __NBHSTR__}"
+ANALYZE="${ANALYZE%%<<*}"
 
 # Wrapper words that legitimately precede a real command word.
 is_wrapper() {
@@ -102,21 +107,29 @@ while IFS= read -r segment; do
 
 	idx=0
 	shifted=0
+	in_command=0
+	resolves_only=0
 	while [ "$idx" -lt "${#toks[@]}" ]; do
 		tok="${toks[$idx]}"
 		if is_wrapper "$tok"; then
+			if [ "$tok" = "command" ]; then in_command=1; fi
 			idx=$((idx + 1)); shifted=1; continue
 		fi
 		# Only AFTER a wrapper do flags / durations belong to it (`timeout 60`,
 		# `command -v`); in first position they mean this is not a command word.
 		if [ "$shifted" -eq 1 ]; then
 			case "$tok" in
+				-v|-V)
+					# `command -v godot` RESOLVES the binary and runs nothing.
+					if [ "$in_command" -eq 1 ]; then resolves_only=1; fi
+					idx=$((idx + 1)); continue ;;
 				-*|[0-9]*) idx=$((idx + 1)); continue ;;
 			esac
 		fi
 		break
 	done
 	[ "$idx" -lt "${#toks[@]}" ] || continue
+	[ "$resolves_only" -eq 0 ] || continue
 
 	# The command word itself: `godot`, `godot4`, `./godot`, or a full
 	# /Applications/Godot.app/Contents/MacOS/Godot path.
@@ -126,18 +139,31 @@ while IFS= read -r segment; do
 		*) continue ;;
 	esac
 
-	# `godot --version` / `--help` boot nothing and touch no user data.
-	case " $segment " in
-		*" --version"*|*" --help"*) continue ;;
-	esac
+	# The ONLY raw invocations that boot nothing are the pure version/help
+	# queries — and only when the WHOLE invocation is one. Everything else
+	# reaches real state: a boot flag (`--headless`, `-e`/`--editor`,
+	# `--import`, `-s`/`--script`, `--path`, …), a bare scene or project
+	# path positional (`godot main.tscn`, `godot .`), and bare `godot`
+	# itself (the project manager is a real boot against the real user://).
+	# Matching per-token also closes the smuggle: a `--help` buried in a
+	# boot's argument list no longer waves the boot through.
+	argi=$((idx + 1))
+	query_only=1
+	if [ "$argi" -ge "${#toks[@]}" ]; then
+		query_only=0   # bare `godot` — a boot, not a query
+	fi
+	while [ "$argi" -lt "${#toks[@]}" ]; do
+		case "${toks[$argi]}" in
+			--version|--help|-h) argi=$((argi + 1)) ;;
+			*) query_only=0; break ;;
+		esac
+	done
+	if [ "$query_only" -eq 1 ]; then
+		continue
+	fi
 
-	# Flags that open the PROJECT — the ones that reach user://.
-	case " $segment " in
-		*" --headless"*|*" --editor"*|*" --import"*|*" --script"*|*" -s "*|*" --path"*|*" --main-pack"*)
-			offender="$segment"
-			break
-			;;
-	esac
+	offender="$segment"
+	break
 done <<<"$(printf '%s' "$ANALYZE" | tr ';|&()`{}' '\n\n\n\n\n\n\n\n')"
 
 [ -n "$offender" ] || exit 0

@@ -3,7 +3,7 @@ id: 0.16.0/pm-contract/execlist-refusals
 feature: 0.16.0/pm-contract
 milestone: "0.16.0"
 name: Non-UTF-8 grain and reversed markers refuse instead of crash/grow
-status: todo
+status: wip
 owner:
 estimate:
 depends_on: []

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **`cc-commit-pathspec.sh` recognizes `--pathspec-from-file`** — both spellings were false-BLOCKED: the space form consumed the file argument without setting the verdict, the `=` form fell into the generic flag skip. A pathspec by file IS naming your paths; it now waves through, and the header's exemption roster says so. (repo/installables/cc-commit-pathspec.sh)
+- **`cc-godot-sandbox.sh` detects every boot shape, not a flag roster** — `godot -e`, `godot <scene>`, `godot .`, bare `godot` and `timeout 60 godot -e` all reached a real engine boot against the real `user://`; a `--help` substring anywhere waved a boot through; a `<<<` herestring truncated the scan ahead of a following boot. Detection is inverted to a query-only allowlist (a godot in command position is allowed iff every argument is `--version|--help|-h`), herestrings are neutralized before the heredoc strip, and `command -v godot` stays exempt. Proven by 36 installed-hook payload tests, 14 of which fail against the old bytes. (repo/installables/cc-godot-sandbox.sh, tests/test_hooks_payloads.py)
+
 ## v0.15.0 — 2026-08-30
 
 - **BLOCKER: `pm feature done --cascade` was unreachable from the state the plain run leaves you in** — The verb short-circuited on an already-`done` feature BEFORE the cascade, so the two-step its own output prints as the remedy ("`--cascade` closes the ones at `review`") answered "already done (no-op)" at exit 0, moved no story and stopped even reporting the untouched ones. The feature flip is now the only idempotent part: the cascade, the `--review-record` stamp and the untouched-story report run whatever the feature's status is, and a late record on a closed feature has to RESOLVE like any other. (repo/pm/cli.py)
