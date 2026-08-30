@@ -27,9 +27,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# `install` owns the refusal wording every install verb shares — this one
-# had its own copy and got the plural wrong.
-from godot_devkit.repo import install
 from godot_devkit.core import apply
 from godot_devkit.repo.pm import model, templates
 
@@ -287,6 +284,40 @@ def _resolve_record(cfg: model.PmConfig, rec: str) -> Path:
     return Path(rec) if rec.startswith('/') else cfg.root / rec
 
 
+def _take_flags(args: list[str], flags: tuple[str, ...],
+                noun: str = 'a value') -> tuple[list[tuple[str, str]],
+                                                list[str]]:
+    """Parse `--flag value` / `--flag=value` out of `args`, in order.
+
+    One home for the loop `feature done` and `list` each hand-rolled. Returns
+    (the (flag, value) pairs seen, everything else in its original order). A
+    flag with nothing after it refuses, naming what it needed; an EMPTY value
+    is the caller's question — the `=` spelling with nothing after it once
+    stored '' and silently skipped `--review-record`'s stamp, so that caller
+    refuses it where a filter flag folds it away.
+    """
+    pairs: list[tuple[str, str]] = []
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        for flag in flags:
+            if a == flag:
+                if i + 1 >= len(args):
+                    raise Usage(f'{flag} needs {noun}')
+                pairs.append((flag, args[i + 1]))
+                i += 2
+                break
+            if a.startswith(f'{flag}='):
+                pairs.append((flag, a.split('=', 1)[1]))
+                i += 1
+                break
+        else:
+            rest.append(a)
+            i += 1
+    return pairs, rest
+
+
 def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     """Close a feature. Touches the feature's own `status:` and nothing else.
 
@@ -305,35 +336,24 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     what the first run said it would. Run twice with the same flags and the
     second is a no-op, because there is nothing left at `review` to move.
     """
-    fid = ''
+    pairs, rest = _take_flags(args, ('--review-record',), noun='a path')
     rec = ''
+    for _, value in pairs:
+        # Both spellings refuse an empty path the same way (see _take_flags).
+        if not value:
+            raise Usage('--review-record needs a path')
+        rec = value
+    fid = ''
     cascade = False
-    i = 0
-    while i < len(args):
-        a = args[i]
+    for a in rest:
         if a == '--cascade':
-            cascade, i = True, i + 1
-            continue
-        if a == '--review-record':
-            if i + 1 >= len(args):
-                raise Usage('--review-record needs a path')
-            rec, i = args[i + 1], i + 2
-            if not rec:
-                raise Usage('--review-record needs a path')
-            continue
-        if a.startswith('--review-record='):
-            # The `=` spelling with nothing after it stored '' and silently
-            # skipped the stamp — the flag was consumed and did nothing. Both
-            # spellings refuse an empty path the same way.
-            rec, i = a.split('=', 1)[1], i + 1
-            if not rec:
-                raise Usage('--review-record needs a path')
-            continue
-        if a.startswith('-'):
+            cascade = True
+        elif a.startswith('-'):
             raise Usage(f'unknown flag {a!r}')
-        if fid:
+        elif fid:
             raise Usage(f'unexpected arg {a!r}')
-        fid, i = a, i + 1
+        else:
+            fid = a
     if not fid:
         raise Usage(USAGE)
     # `--cascade` writes `done` into STORY files, so that target state is
@@ -445,15 +465,14 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
 
 
 def _known_milestone_ids(cfg: model.PmConfig) -> list[str]:
-    return sorted(
-        model.unquote(model.field_of(mdir / 'milestone.md', 'id')) or mdir.name
-        for mdir in model.milestone_dirs(cfg))
+    return sorted(mid or mdir.name
+                  for mdir, mid in model.known_milestones(cfg))
 
 
 def cmd_retire(cfg: model.PmConfig, args: list[str]) -> int:
     """Retire a shipped milestone: remove its directory, record its row.
 
-    `pm init` seeds ROADMAP.md's table (`ROADMAP_SEED` above) and nothing
+    `pm init` seeds ROADMAP.md's table (`skills.ROADMAP_SEED`) and nothing
     used to fill it — a retirement was a hand-rolled `git rm -r` plus a
     hand-typed row, the two ever agreeing only by care. This is the one
     write that fills the table the tool itself mints.
@@ -490,13 +509,13 @@ def cmd_retire(cfg: model.PmConfig, args: list[str]) -> int:
         known = _known_milestone_ids(cfg)
         raise Usage(f'{mid!r} is not a milestone in {cfg.roadmap_dir} '
                     f'({" ".join(known) if known else "none scaffolded"})')
-    index = cfg.roadmap / 'ROADMAP.md'
+    index = cfg.roadmap / model.ROADMAP_DOC
     if not index.is_file():
         raise Refused(f'{cfg.rel(index)} does not exist — looked in '
                       f'{cfg.rel(cfg.roadmap)} (run `pm init` first; it seeds '
                       f'the table this command appends to)')
 
-    mfile = mdir / 'milestone.md'
+    mfile = mdir / model.MILESTONE_DOC
     notices: list[str] = []
     if not mfile.is_file():
         notices.append(f'{cfg.rel(mfile)} is missing')
@@ -562,7 +581,7 @@ def cmd_retire(cfg: model.PmConfig, args: list[str]) -> int:
 def _known_feature_ids(cfg: model.PmConfig) -> list[str]:
     out = []
     for mdir in model.milestone_dirs(cfg):
-        mid = model.unquote(model.field_of(mdir / 'milestone.md', 'id')) \
+        mid = model.unquote(model.field_of(mdir / model.MILESTONE_DOC, 'id')) \
             or mdir.name
         out.extend(f'{mid}/{ff.parent.name}' for ff in model.feature_files(mdir))
     return sorted(out)
@@ -649,8 +668,7 @@ def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
     # exit 0 is what a wrong `roadmap_dir`, an emptied tree, and a typo'd
     # milestone id all used to produce, and rule 4 says a scan that saw
     # nothing must say so rather than pass in silence.
-    known = [(mdir, model.unquote(model.field_of(mdir / 'milestone.md', 'id')))
-             for mdir in model.milestone_dirs(cfg)]
+    known = model.known_milestones(cfg)
     if not known:
         raise Usage(f'{cfg.roadmap_dir} holds no milestone at all — nothing to '
                     f'report, so this is a scope problem (wrong [pm] '
@@ -660,7 +678,7 @@ def cmd_status(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage(f'{only!r} is not a milestone in {cfg.roadmap_dir} '
                     f'({" ".join(ids)})')
     for mdir, mid in known:
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / model.MILESTONE_DOC
         if only and only != mid:
             continue
         print(f'milestone {mid:<10} [{model.field_of(mfile, "status")}]')
@@ -717,28 +735,17 @@ def cmd_list(cfg: model.PmConfig, args: list[str]) -> int:
     census goes to stderr, so a run that matched nothing is still
     distinguishable from a run that SCANNED nothing (a wrong `roadmap_dir`).
     """
+    pairs, rest = _take_flags(args, ('--status', '--owner', '--milestone'))
+    if rest:
+        raise Usage(USAGE if not rest[0].startswith('-')
+                    else f'unknown flag {rest[0]!r}')
     statuses: set[str] = set()
     owner = ''
     milestone = ''
-    i = 0
-    while i < len(args):
-        a = args[i]
-        for flag, dest in (('--status', 'status'), ('--owner', 'owner'),
-                           ('--milestone', 'milestone')):
-            if a == flag:
-                if i + 1 >= len(args):
-                    raise Usage(f'{flag} needs a value')
-                value, i = args[i + 1], i + 2
-                break
-            if a.startswith(f'{flag}='):
-                value, i = a.split('=', 1)[1], i + 1
-                break
-        else:
-            raise Usage(USAGE if not a.startswith('-')
-                        else f'unknown flag {a!r}')
-        if dest == 'status':
+    for flag, value in pairs:
+        if flag == '--status':
             statuses |= {v for v in value.split(',') if v}
-        elif dest == 'owner':
+        elif flag == '--owner':
             owner = value
         else:
             milestone = value
@@ -752,8 +759,7 @@ def cmd_list(cfg: model.PmConfig, args: list[str]) -> int:
     # what an emptied milestone and a wrong `roadmap_dir` also print. The ids
     # are right there in the tree, so the set gets named the way `--status`
     # already names its own.
-    known = [(mdir, model.unquote(model.field_of(mdir / 'milestone.md', 'id')))
-             for mdir in model.milestone_dirs(cfg)]
+    known = model.known_milestones(cfg)
     if milestone and milestone not in {mid for _, mid in known}:
         ids = sorted(mid for _, mid in known if mid)
         raise Usage(f'--milestone names {milestone!r}, which is not a milestone '
@@ -780,189 +786,6 @@ def cmd_list(cfg: model.PmConfig, args: list[str]) -> int:
                 print(f'{model.unquote(model.field_of(sfile, "id"))}\t{status}'
                       f'\t{who or "-"}\t{view.fid}')
     print(f'[pm] {shown} of {scanned} story/ies', file=sys.stderr)
-    return 0
-
-
-GUIDANCE_HEADER = 'GENERATED by godot-devkit'
-
-ROADMAP_SEED = """# Roadmap
-
-The permanent index: one row per shipped milestone, in ship order. Active detail lives
-in each milestone's own `milestone.md` — anything more than the table belongs deeper in
-the tree.
-
-| Version | Name | Delivered | What shipped |
-|---|---|---|---|
-"""
-
-
-def cmd_init(cfg: model.PmConfig, args: list[str]) -> int:
-    """Stand up a PM tree in a repo that has none, and say what is left to do."""
-    if args:
-        raise Usage(USAGE)
-    plan = apply.Plan()
-    index = cfg.roadmap / 'ROADMAP.md'
-    if not cfg.roadmap.is_dir():
-        plan.make_dir(cfg.roadmap, label=f'{cfg.roadmap_dir}/')
-    if not index.is_file():
-        plan.overwrite(index, ROADMAP_SEED, newline=None, label=cfg.rel(index))
-    apply.raise_on_error(plan.apply(decide=False))
-    made = [step.label for step in plan.steps]
-    for m in made:
-        _ok(f'created {m}')
-    if not made:
-        _ok(f'{cfg.roadmap_dir}/ already exists — leaving it alone')
-    cmd_install_skills(cfg, [])
-
-    # Everything below is the consumer's to wire; printing it beats a README
-    # they have to go find, and it is short enough to paste.
-    print()
-    print('Next, in your own repo:')
-    print()
-    print('  1. Wire the gate into your per-change gate set:')
-    print()
-    print('       pm-scan:')
-    print('       \t@godot-devkit check pm')
-    print()
-    print('  2. Declare any schema differences in devkit.toml (all optional):')
-    print()
-    print('       [pm]')
-    print('       review_dir = "docs/reviews"   # where review records live')
-    print('       # story_ordinal_prefix = true # if story FILES are NN-slug.md')
-    print('       # checks = [...]              # add D8/D9 for'
-          ' branch-per-milestone')
-    print()
-    print('  3. Scaffold your first milestone, then check it:')
-    print()
-    print('       godot-devkit pm new milestone 0.1 "First Milestone"')
-    print('       godot-devkit pm validate')
-    print()
-    print('  4. Keep your OWN vocabulary local — what a milestone means here, which')
-    print('     surfaces exist, who reviews what. The two installed files carry only')
-    print('     what the CLI enforces and explains.')
-    return 0
-
-
-def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
-    """Write the execution-loop guidance into the consuming repo.
-
-    Installed as a RULE, not a skill file, deliberately: `.claude/rules/*.md`
-    with a `paths:` header auto-load for any agent touching the matched files,
-    while a skill has to be invoked. The execution loop has to reach every
-    agent that edits the PM tree without being asked for.
-
-    Only the loop the CLI itself enforces ships here. Branching, versioning,
-    release ceremony, dispatch, review rosters — the project's own SDLC — stay
-    in the project's own rules, because they differ per repo and always will.
-    """
-    force = False
-    diff = False
-    for a in args:
-        if a == '--force':
-            force = True
-        elif a == '--diff':
-            diff = True
-        else:
-            raise Usage(f'unknown flag {a!r}')
-
-    from importlib import resources
-    from godot_devkit import __version__
-
-    # (source markdown, destination). Two delivery modes on purpose:
-    #   rule  — auto-loads for any agent touching the tree; the per-edit loop
-    #           has to arrive unasked or it does not arrive at all.
-    #   skill — invoked deliberately; the operations manual is what you reach
-    #           for when planning or restructuring, not on every edit.
-    plan = [
-        ('pm-execution.md', cfg.root / '.claude' / 'rules' / 'pm-execution.md'),
-        ('pm-operations.md',
-         cfg.root / '.claude' / 'skills' / 'pm-operations' / 'SKILL.md'),
-    ]
-    # Decided for BOTH entries before either is written. A refusal raised
-    # mid-loop installs the first file, refuses the second, and still says
-    # nothing was written — `nothing was written` has to be a claim about the
-    # whole command, the same rule `pm init` follows for renames.
-    # --diff reads and prints, off the SAME helper the install-* verbs use: a
-    # second unified-diff printer would be a second answer to one question.
-    if diff:
-        for name, target in plan:
-            body = (resources.files('godot_devkit.repo.pm.guidance')
-                    .joinpath(name).read_text(encoding='utf-8'))
-            install.print_diff(cfg.rel(target), target,
-                               body.replace('{version}', f'v{__version__}'))
-        return 0
-
-    actions: list[tuple[str, Path, str]] = []
-    collisions: list[str] = []
-    defects: list[str] = []
-    for name, target in plan:
-        body = (resources.files('godot_devkit.repo.pm.guidance')
-                .joinpath(name).read_text(encoding='utf-8'))
-        body = body.replace('{version}', f'v{__version__}')
-        # The same pre-decided discipline as the other two install verbs, from
-        # the same helpers: a destination that is a directory, unwritable, or
-        # undecodable is a refusal naming the path, never a traceback with one
-        # file already on disk behind it.
-        defect = install.destination_defect(target)
-        if defect:
-            defects.append(f'{cfg.rel(target)} {defect}')
-            continue
-        if target.is_file():
-            existing, unreadable = install.read_destination(target)
-            if unreadable:
-                defects.append(f'{cfg.rel(target)} {unreadable}')
-                continue
-            if existing == body:
-                actions.append(('current', target, body))
-                continue
-            # A file we did not generate — or one somebody edited — is theirs,
-            # not ours. Clobbering it silently is how a project loses a local
-            # decision it made on purpose.
-            if (existing is None
-                    or GUIDANCE_HEADER not in existing) and not force:
-                collisions.append(cfg.rel(target))
-                continue
-        actions.append(('write', target, body))
-    if collisions:
-        head, tail = install.collision_refusal(collisions)
-        raise Refused(f'{head}\n{tail}')
-    if defects:
-        raise Refused(f'{len(defects)} destination(s) cannot be written:\n'
-                      + '\n'.join(f'    {d}' for d in defects)
-                      + '\nNothing was written. Fix the path(s) and re-run — '
-                        'the command is idempotent.')
-
-    # ONE plan: the destinations were decided above, and `core.apply` reports
-    # exactly which of them landed. A loop that decided as it wrote is what
-    # made this verb's twin half-install twice before it was one plan.
-    writes = apply.Plan()
-    for kind, target, body in actions:
-        if kind != 'current':
-            writes.overwrite(target, body, newline=None, label=cfg.rel(target))
-    result = writes.apply(decide=False)
-    written = [step.label for step in result.landed]
-    landed = set(written)
-    for kind, target, body in actions:
-        if kind == 'current':
-            _ok(f'{cfg.rel(target)} already current')
-        elif cfg.rel(target) in landed:
-            _ok(f'installed {cfg.rel(target)}')
-        else:
-            break
-    if result.failed is not None:
-        raise Refused(
-            f'{result.failed.label} could not be written '
-            f'({result.error}) — '
-            + ('nothing was written' if not written else
-               'ALREADY WRITTEN before this was reached: '
-               + ', '.join(written))
-            + '. Fix the path and re-run — the command is idempotent.')
-    wrote = len(written)
-    if wrote:
-        _ok(f'godot-devkit v{__version__} — these two carry only what the pm CLI '
-            f'itself enforces and explains. Your project\'s SDLC (branching, '
-            f'versioning, release, dispatch, review rosters) stays in your own '
-            f'rules and agents.')
     return 0
 
 
@@ -1011,28 +834,6 @@ def cmd_set(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage(f'could not write {key}: in {cfg.rel(path)} '
                     f'(malformed frontmatter, or the file is not writable)')
     _ok(f'{gid}: {key} {before!r} -> {value!r}')
-    return 0
-
-
-def cmd_templates(cfg: model.PmConfig, args: list[str]) -> int:
-    """Copy the packaged templates into the project so they can be edited."""
-    force = '--force' in args
-    for a in args:
-        if a != '--force':
-            raise Usage(f'unknown flag {a!r}')
-    try:
-        written, variants = templates.install(cfg, force)
-    except templates.MissingTemplate as err:
-        raise Usage(str(err)) from err
-    for path in written:
-        _ok(f'installed {cfg.rel(path)}')
-    for other, slot in variants:
-        _ok(f'{cfg.template_dir}/{other} is a case variant of {slot} and was '
-            f'NOT written past — the loader reads EXACT names, so that file is '
-            f'never used; `git mv --force {cfg.template_dir}/{other} '
-            f'{cfg.template_dir}/{slot}`, then re-run')
-    if not written:
-        _ok(f'{cfg.template_dir}/ already populated (--force to overwrite)')
     return 0
 
 
@@ -1211,7 +1012,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             mdir = cfg.roadmap / f'{ver}-{_slugify(name)}'
             if _exists(mdir):
                 raise Refused(f'{cfg.rel(mdir)} already exists')
-        name = name or model.field_of(mdir / 'milestone.md', 'name')
+        name = name or model.field_of(mdir / model.MILESTONE_DOC, 'name')
         return _scaffold(cfg, 'milestone', mdir, {'id': ver, 'name': name})
     if grain == 'feature':
         if len(rest) < 2:
@@ -1222,10 +1023,10 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         if mdir is None:
             raise Usage(f'no milestone resolves from {mid!r}')
         fdir = mdir / 'features' / slug
-        if not _exists(fdir / 'feature.md') and not name:
+        if not _exists(fdir / model.FEATURE_DOC) and not name:
             raise Usage(f'feature {mid}/{slug!r} does not exist yet — a new one '
                         f'needs a name')
-        name = name or model.field_of(fdir / 'feature.md', 'name')
+        name = name or model.field_of(fdir / model.FEATURE_DOC, 'name')
         return _scaffold(cfg, 'feature', fdir,
                          {'id': f'{mid}/{slug}', 'milestone': mid, 'name': name})
     if grain == 'story':
@@ -1238,7 +1039,7 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             raise Usage(f'no feature resolves from id {fid!r}')
         # The milestone comes from the FEATURE's own frontmatter — single
         # source, never re-derived from the id string.
-        mid = model.field_of(fdir / 'feature.md', 'milestone')
+        mid = model.field_of(fdir / model.FEATURE_DOC, 'milestone')
         sf = fdir / 'stories' / f'{slug}.md'
         if _exists(sf):
             raise Refused(f'story {fid}/{slug!r} already exists')
@@ -1326,6 +1127,12 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage(f'unknown flag {gid!r}')
     if not title:
         raise Usage('decide needs a title — the heading is the entry')
+    if title.split()[0].startswith('--'):
+        # The one caller who leads the title with a flag is a caller speaking
+        # the retired four-field interface — writing their flag soup into a
+        # durable log at exit 0 would be a quiet lie.
+        raise Usage(f'{title.split()[0]!r} looks like a flag — decide takes '
+                    f'none: everything after the grain id is the heading')
     if '\n' in title or '\r' in title:
         raise Refused('a heading is one line — put the reasoning under it')
     log, text = _decision_log(cfg, gid)
@@ -1350,13 +1157,17 @@ def main(argv: list[str]) -> int:
         print(f'[pm] ERROR — {err}', file=sys.stderr)
         return 2
     cmd, rest = argv[0], argv[1:]
+    # Deferred: `skills` imports this module's shared vocabulary (Usage,
+    # Refused, _ok), so binding it at call time keeps the load order a
+    # non-question whichever module a caller imports first.
+    from godot_devkit.repo.pm import skills
     table = {
         'story': cmd_story, 'bug': cmd_bug, 'feature': cmd_feature,
         'milestone': cmd_milestone, 'retire': cmd_retire, 'move': cmd_move,
         'status': cmd_status, 'list': cmd_list, 'new': cmd_new,
-        'validate': cmd_validate, 'install-skills': cmd_install_skills,
-        'init': cmd_init, 'set': cmd_set, 'get': cmd_get,
-        'templates': cmd_templates, 'sync': cmd_sync,
+        'validate': cmd_validate, 'install-skills': skills.cmd_install_skills,
+        'init': skills.cmd_init, 'set': cmd_set, 'get': cmd_get,
+        'templates': skills.cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
     }
     fn = table.get(cmd)

@@ -8,7 +8,7 @@ against the JSON payload shape Claude Code actually delivers. Exit 0 is allow,
 exit 2 is a BLOCK.
 
 Every "pre-fix:" annotation below is a case that returned the WRONG verdict at
-d76eeea (the 2026-08-30 fresh-eyes audit reproductions), verified by firing the
+d76eeea, verified by firing the
 HEAD copies of the hooks against these exact payloads before the fix landed:
 
 cc-commit-pathspec.sh — `--pathspec-from-file` (both spellings) IS naming
@@ -120,6 +120,8 @@ def test_pathspec_a_pathless_commit_still_blocks(hooks_repo, command):
     # heredoc body is data: writing a doc that QUOTES a boot is not a boot
     "cat > notes.md <<'EOF'\ngodot --headless --path .\nEOF",
     'grep -c godot <<<"$notes"',           # herestring alone: no boot follows
+    'godot-devkit check all',              # this toolkit's own CLI — never a boot
+    '$GODOT --version',                    # variable resolved, still query-only
 ])
 def test_sandbox_allows_queries_wrappers_and_data(hooks_repo, command):
     assert fire(hooks_repo, SANDBOX, command) == 0
@@ -142,6 +144,13 @@ def test_sandbox_allows_queries_wrappers_and_data(hooks_repo, command):
     'grep godot <<<"$x"; godot --headless --path .',
     # pre-fix: a " --help" substring anywhere waved a real boot through
     'godot --headless --script tool.gd -- --help',
+    # pre-fix: a godot-NAMED variable in command position was allowed — the
+    # `$` failed the command-word match (the arbitrary-name case stays the
+    # hook's declared accepted gap)
+    'GODOT=/Apps/Godot; $GODOT --headless',
+    '"$GODOT" --headless --path .',
+    '"${GODOT}" -e',
+    '$GODOT --headless --path .',          # pre-fix: fast path missed ALL-CAPS
 ])
 def test_sandbox_blocks_every_raw_boot_shape(hooks_repo, command):
     assert fire(hooks_repo, SANDBOX, command) == 2

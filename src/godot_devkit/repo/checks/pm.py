@@ -107,11 +107,31 @@ def run() -> int:
         for path, why in bug_findings:
             report(f'{cfg.rel(path)}: {why}')
 
+    n_features, n_stories = _drift_walk(cfg, enabled, mdirs, report)
+
+    _flow_findings(cfg, enabled, report)
+
+    # --- V1-V6: structural + referential integrity ------------------------
+    v_on = enabled & set(model.VALIDATE_CHECKS)
+    v_census: dict = {}
+    if v_on:
+        from godot_devkit.repo.pm import validate as _validate
+        v_findings, v_census = _validate.run(cfg, v_on)
+        for msg in v_findings:
+            report(msg)
+
+    return _verdict(cfg, findings, len(mdirs), n_features, n_stories, n_bugs,
+                    v_on, v_census)
+
+
+def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
+                report) -> tuple[int, int]:
+    """D1-D6 over every grain. Returns the (feature, story) census."""
     n_features = 0
     n_stories = 0
 
     for mdir in mdirs:
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / model.MILESTONE_DOC
         mid = model.field_of(mfile, 'id')
         mstat = model.field_of(mfile, 'status')
 
@@ -167,7 +187,11 @@ def run() -> int:
             report(f'milestone {mid} is {mstat!r} but all {feat_total} features '
                    f'are done (should be done)  [{cfg.rel(mfile)}]')
 
-    # --- D8/D9/D10: the flow checks, only when opted into -------------------
+    return n_features, n_stories
+
+
+def _flow_findings(cfg: model.PmConfig, enabled: set[str], report) -> None:
+    """D8/D9/D10 — the branch-per-milestone / bump-at-start flow, opt-in."""
     building = model.building_milestones(cfg) if enabled & set(model.FLOW_CHECKS) else []
 
     if 'D8' in enabled and building:
@@ -203,18 +227,13 @@ def run() -> int:
                        f'the mainline itself — work must live off '
                        f'{mainline!r}, not on it (D10)  [{cfg.rel(mfile)}]')
 
-    # --- V1-V6: structural + referential integrity ------------------------
-    v_on = enabled & set(model.VALIDATE_CHECKS)
-    v_census = {}
-    if v_on:
-        from godot_devkit.repo.pm import validate as _validate
-        v_findings, v_census = _validate.run(cfg, v_on)
-        for msg in v_findings:
-            report(msg)
 
-
+def _verdict(cfg: model.PmConfig, findings: list[str], n_milestones: int,
+             n_features: int, n_stories: int, n_bugs: int,
+             v_on: set[str], v_census: dict) -> int:
+    """Render the census + verdict from what the phases reported."""
     print()
-    census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
+    census = (f'{n_milestones} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
     # A census must never assert the opposite of the filesystem. The grain walk
     # narrows `stories/` and `bugs/` to documents that OPEN frontmatter — a

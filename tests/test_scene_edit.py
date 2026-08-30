@@ -199,7 +199,7 @@ class RmSemantics(VerbCase):
     """`rm` on a path that resolves nothing REFUSES (exit 1): with no node
     there is no evidence a removal ever happened, so a typo'd path must not
     read as success. `--force` opts back into the exit-0 no-op for scripted
-    re-runs. (0.16.0 write-fidelity decision.)"""
+    re-runs."""
 
     def test_rm_refuses_a_path_that_resolves_nothing(self) -> None:
         before = self.text()
@@ -237,7 +237,7 @@ class LineEndingFidelity(VerbCase):
     """A write verb must never rewrite a byte it was not asked to touch — and
     a line ENDING is a byte. Verbs once normalized every ending in the file
     (universal-newline read + os.linesep write); these pin the whole-verb
-    path on real bytes. (0.16.0 newline-preservation.)"""
+    path on real bytes."""
 
     def test_set_on_a_crlf_file_changes_exactly_one_line_of_bytes(self) -> None:
         crlf = self.text().replace('\n', '\r\n').encode()
@@ -322,7 +322,7 @@ class DryRun(VerbCase):
 class SetResourceProps(VerbCase):
     """`set --resource` / `set --sub-resource <id>` — the whole data/**.tres
     plane, previously hand-edit-only. The id is exactly what `scene --props`
-    prints: read output is write input. (0.16.0 scene-verbs.)"""
+    prints: read output is write input."""
 
     def test_sub_resource_set_replaces_a_value_in_place(self) -> None:
         before = self.text()
@@ -406,8 +406,7 @@ class SetResourceProps(VerbCase):
 
 class AddInstance(unittest.TestCase):
     """`add --instance` — an instance node has NO type=; its ext_resource is
-    minted from the target's own uid, so the ref is born canonical.
-    (0.16.0 scene-verbs.)"""
+    minted from the target's own uid, so the ref is born canonical."""
 
     def run_verb(self, *argv: str) -> int:
         self.output = io.StringIO()
@@ -513,7 +512,7 @@ class AddInstance(unittest.TestCase):
 class ConnectDisconnect(VerbCase):
     """`connect` appends a `[connection]` in Godot's serialization position
     (after all nodes); `disconnect` removes exactly the matching one, refusing
-    ambiguity. (0.16.0 scene-verbs.)"""
+    ambiguity."""
 
     NEW_CONN = ('[connection signal="toggled" from="Nested/Deep" '
                 'to="TileRoomContract" method="_on_toggled"]')

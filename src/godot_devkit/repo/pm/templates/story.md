@@ -5,9 +5,7 @@ milestone: "{milestone}"
 name: {name}
 status: todo
 owner:
-estimate:
 depends_on: []
-labels: []
 ---
 
 # {name}

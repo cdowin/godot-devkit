@@ -115,10 +115,14 @@ RETARGET_FLAG = '--retarget'
 # version bump — wire it explicitly, after the one-time cleanup pass;
 # `repo-hygiene` is close-time and hits the network; `pm` would fail a repo for
 # not having a PM tree at all.
-KNOWN_CHECKS = {
+KNOWN_GATES = {
     'uid': True, 'tres': True, 'props': True, 'doc': True, 'shell': True,
     'defaults': False, 'repo-hygiene': False, 'pm': False,
 }
+
+# The gates that accept `--fix`. A second fixable gate is a row here, not a
+# new inline condition in `_run_check`.
+FIXABLE_CHECKS = frozenset({'uid'})
 
 
 def all_roster() -> tuple[str, ...]:
@@ -135,15 +139,15 @@ def all_roster() -> tuple[str, ...]:
     narrow the aggregate in silence, which is the cardinal sin with a config
     file in front of it.
     """
-    default = tuple(name for name, on in KNOWN_CHECKS.items() if on)
+    default = tuple(name for name, on in KNOWN_GATES.items() if on)
     roster = str_tuple(config_section('checks'), 'checks', 'all', default)
-    unknown = [c for c in roster if c not in KNOWN_CHECKS]
+    unknown = [c for c in roster if c not in KNOWN_GATES]
     if unknown:
         raise ConfigError(
             f'[checks] all names unknown gate(s) {", ".join(unknown)} — '
-            f'known gates are {" ".join(KNOWN_CHECKS)}')
+            f'known gates are {" ".join(KNOWN_GATES)}')
     # `all` naming itself would recurse forever; it is the one name that cannot
-    # appear, and KNOWN_CHECKS already excludes it.
+    # appear, and KNOWN_GATES already excludes it.
     return tuple(dict.fromkeys(roster))
 
 
@@ -164,10 +168,11 @@ def _usage() -> int:
 
 
 def _run_check(name: str, flags: list[str]) -> int:
-    # Only `uid` takes a flag today. An unknown one is a usage error, never a
-    # silently-ignored argument: a consumer that thinks it asked for a repair
-    # and got a read-only run has been lied to.
-    unknown = [f for f in flags if not (name == 'uid' and f == FIX_FLAG)]
+    # Only the FIXABLE_CHECKS take a flag today. An unknown one is a usage
+    # error, never a silently-ignored argument: a consumer that thinks it asked
+    # for a repair and got a read-only run has been lied to.
+    unknown = [f for f in flags
+               if not (name in FIXABLE_CHECKS and f == FIX_FLAG)]
     if unknown:
         print(f'godot-devkit: check {name}: unexpected argument(s) '
               f'{" ".join(unknown)}', file=sys.stderr)
@@ -214,7 +219,7 @@ def _dispatch_check(name: str, fix: bool = False) -> int:
     # `all` never repairs: an aggregate that writes is the last place a
     # consumer expects one, so `--fix` is asked for on the gate itself.
     print(f'godot-devkit: unknown check {name!r} '
-          f'(expected: {", ".join((*KNOWN_CHECKS, "all"))})',
+          f'(expected: {", ".join((*KNOWN_GATES, "all"))})',
           file=sys.stderr)
     return 2
 

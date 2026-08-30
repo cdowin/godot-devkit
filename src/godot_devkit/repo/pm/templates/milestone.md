@@ -2,13 +2,8 @@
 id: "{id}"
 name: {name}
 status: planning
-theme:
-target_date:
 depends_on: []
-risk: low
-track:
 branch:
-labels: []
 ---
 
 # {id} — {name}

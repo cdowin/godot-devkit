@@ -522,7 +522,7 @@ def test_this_repo_carries_what_install_ci_produces():
 
 
 def test_this_repo_carries_the_roles_it_runs_byte_current():
-    """PARTIAL-roster self-hosting, decided with the roster (0.16.0).
+    """PARTIAL-roster self-hosting, decided with the roster.
 
     This package runs its own SDLC with the verification pair; the
     game-shaped roles (developer with an engine-expertise brief, po writing

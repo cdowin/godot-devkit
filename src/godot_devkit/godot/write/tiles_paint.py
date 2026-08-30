@@ -47,8 +47,8 @@ from godot_devkit.godot.format.tscn import (
     find_tilemap_layer,
     node_own_path,
 )
-from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
-from godot_devkit.godot.write import render_diff
+from godot_devkit.godot.format.tscn_document import TscnDocument
+from godot_devkit.godot.write import load_scene_or_refuse, render_diff
 
 VERBS = ('paint', 'erase')
 PAINT, ERASE = VERBS
@@ -147,11 +147,8 @@ def main(argv: list[str]) -> int:
         print(f'godot-devkit tiles {args.verb}: no such file: {path}')
         return EXIT_USAGE
 
-    try:
-        before = read_scene_text(path)
-    except UnicodeDecodeError as err:
-        print(f'REFUSED  {path}: not valid UTF-8 ({err.reason} at byte {err.start}) '
-              f'— refusing to rewrite bytes this tool cannot read')
+    before = load_scene_or_refuse(path)
+    if before is None:
         return EXIT_REFUSED
     doc = TscnDocument(before, path)
     try:

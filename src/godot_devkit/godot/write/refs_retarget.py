@@ -41,6 +41,7 @@ from godot_devkit.core.project import repo_root
 from godot_devkit.core.walk import Kind, SkipReason
 from godot_devkit.godot.format.tscn import COMMENT_CHAR, EXT_RESOURCE_KIND, scan_line
 from godot_devkit.godot.format.tscn_document import LINE_ENDING, read_scene_text
+from godot_devkit.godot.write import utf8_refusal_reason
 from godot_devkit.godot.index.uid_index import RES_PREFIX
 from godot_devkit.godot.read.refs import exclude_prefixes
 
@@ -148,9 +149,9 @@ def _retarget_file(path: Path, rel: str, old: str, new: str,
     try:
         text = read_scene_text(path)
     except UnicodeDecodeError as err:
-        return 0, 1, [f'  SKIPPED  {rel}  not valid UTF-8 ({err.reason} at '
-                      f'byte {err.start}) — refusing to rewrite bytes this '
-                      f'tool cannot read']
+        # The SKIPPED variant: a sweep steps over the file and keeps going,
+        # where a single-file verb refuses — the sentence itself is shared.
+        return 0, 1, [f'  SKIPPED  {rel}  {utf8_refusal_reason(err)}']
     if old not in text:
         return 0, 0, []
     parts = LINE_ENDING.split(text)

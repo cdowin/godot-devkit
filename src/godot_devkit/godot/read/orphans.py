@@ -37,11 +37,12 @@ from pathlib import Path
 from godot_devkit.godot.format.tscn import parse, parse_text, basename
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
+from godot_devkit.godot import VENDORED_DEFAULT
 
 # --- Scope -------------------------------------------------------------------
 CONFIG_SECTION = 'orphans'
-# Excluded from the whole scan (corpus + candidates) — not ours.
-DEFAULT_VENDORED = ('addons/',)
+# Excluded from the whole scan (corpus + candidates) — not ours; the value
+# is the family-wide VENDORED_DEFAULT (godot/__init__.py).
 CANDIDATE_GLOBS = ('*.gd', '*.tscn', '*.tres')
 # tools/ scripts are one-shot `godot --script <path>` CLI entry points, run
 # directly rather than loaded through the game's preload graph — never a
@@ -79,7 +80,7 @@ def load_settings() -> Settings:
     sect = config_section(CONFIG_SECTION)
     return Settings(
         vendored=str_tuple(sect, CONFIG_SECTION, 'vendored_prefixes',
-                           DEFAULT_VENDORED),
+                           VENDORED_DEFAULT),
         entry_point_prefixes=str_tuple(sect, CONFIG_SECTION, 'entry_point_prefixes',
                                        DEFAULT_ENTRY_POINT_PREFIXES),
         auto_discovered=str_tuple(sect, CONFIG_SECTION, 'auto_discovered_prefixes',

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`pm decide` refuses a `--`-leading title word** — the retired four-field interface's flags were landing verbatim in the durable log at exit 0. (repo/pm/cli.py)
+- **pm templates stop minting machine-unread frontmatter** — `severity`, `labels`, `estimate`, `risk`, `size`, `theme`, `target_date`, `track` are gone from the stock grain templates (`pm set` inserts any of them back on demand); `bug.md` keeps `caught_in`/`fix_milestone` and its comment now describes `pm retire`, not the retired D14/prune. pm-operator.md's tooling contract matches the shipped verb roster — re-install with `--force`. (repo/pm/templates/, repo/installables/pm-operator.md)
+- **`cc-godot-sandbox.sh` blocks godot-named-variable boots** (`$GODOT --headless`, `"${GODOT}" -e`), carries a `project config` header, and states its accepted arbitrary-name fail-open gap. (repo/installables/cc-godot-sandbox.sh)
+- **post-review structure pass** — the two biggest check runners restructured along their phase/section seams with byte-identical output (differential-proven); the installer family extracted from pm/cli.py (1,374 → 1,090 lines); module-level `apply.move`/`remove_tree` deleted with their last readers; test_pm.py split by concern at identical collected-test count; UTF-8 refusals, doc-name and vendored-prefix literals each got one home. (src/, tests/)
+
 - **`scene set --resource` / `--sub-resource <id>`** — the set verb reaches the whole `data/**.tres` plane, previously hand-edit-only; the id is verbatim what `scene --props` prints (read output is write input). An unknown id refuses naming the known ones. (godot/write/scene_edit.py, godot/format/tscn_document.py)
 - **`scene add --instance res://x.tscn`** — instance nodes (`instance=ExtResource(...)`, no `type=`); the PackedScene ref is minted from the target's own uid and REFUSED when the target is missing or has no resolvable uid — never invented. (godot/write/scene_edit.py)
 - **`scene connect` / `scene disconnect`** — `[connection]` sections were parsed and rewritten on rename/reparent/rm but never authorable. Connect appends in Godot's serialization position; disconnect removes exactly the match, refusing ambiguity (`--flags` disambiguates); connect→disconnect round-trips byte-identically. (godot/write/scene_edit.py)

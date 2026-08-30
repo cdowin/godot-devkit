@@ -1,4 +1,4 @@
-"""support.py — shared test scaffolding.
+"""support — shared test scaffolding.
 
 The checks resolve their scope through `git ls-files` from the git toplevel of
 the cwd, so exercising one means standing up a throwaway git repo. `temp_repo`
@@ -17,7 +17,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-TESTS = Path(__file__).resolve().parent
+# This file is tests/support/__init__.py, so tests/ is two levels up.
+TESTS = Path(__file__).resolve().parent.parent
 FIXTURES = TESTS / 'fixtures'
 REPO_ROOT = TESTS.parent
 CONSUMER_REPOS = (Path.home() / 'workspace' / 'nullbound', Path.home() / 'workspace' / 'trail')

@@ -59,8 +59,8 @@ from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot.index.uid_codec import canonical
 from godot_devkit.godot.index.uid_index import (EXT_RESOURCE_PREFIX,
                                                 HEADER_PREFIXES, UID_ATTR)
+from godot_devkit.godot import VENDORED_DEFAULT
 
-DEFAULT_EXCLUDE = ('addons/',)
 # Attribute extraction is ORDER-INDEPENDENT — a reordered/hand-edited ref must
 # be censused, not silently skipped (false-PASS discipline). UID_ATTR and the
 # ext_resource line prefix come from `uid_index`, the module that owns where a
@@ -272,7 +272,7 @@ def _delete(root: Path, orphans: list[str]) -> tuple[list[str], list[str]]:
 def run(fix: bool = False) -> int:
     root = repo_root()
     exclude = str_tuple(config_section('uid'), 'uid', 'exclude_prefixes',
-                        DEFAULT_EXCLUDE)
+                        VENDORED_DEFAULT)
     drifts, misspellings, files, refs, uids = _scan(root, exclude)
     tracked = set(git_lines('ls-files'))
     new_gd = _new_gd(exclude)
@@ -283,48 +283,62 @@ def run(fix: bool = False) -> int:
                    if f.endswith(f'{GD_SUFFIX}{UID_SUFFIX}')
                    and not f.startswith(exclude))
 
+    # The CONFIGURED exclude, not VENDORED_DEFAULT. `[uid] exclude_prefixes` is
+    # one documented key and it scoped only half the gate: a tree excluded from
+    # CHECK 1 still had every .gd in it reported by CHECK 2, so the key a
+    # consumer set to scope this gate did not scope this gate.
+    untracked = _untracked_sidecars(tracked, exclude)
+
     rewrites: list[Rewrite] = [*(d for d in drifts if d.fixable),
                                *(m for m in misspellings if m.fixable)]
     repaired, refused = _apply(root, rewrites) if fix else ([], [])
     deleted, undeletable = _delete(root, orphans) if fix else ([], [])
     was_repaired = {id(entry) for entry in repaired}
+    drift_fixed = sum(1 for entry in repaired if isinstance(entry, Drift))
+    canon_fixed = len(repaired) - drift_fixed
 
-    print('[check:uid] CHECK 1 — .tres/.tscn Script ext_resource uid matches the script\'s .uid')
-    for drift in drifts:
-        print(drift.report(id(drift) in was_repaired))
-    for line in refused:
-        print(line)
+    # One structure per check: (header, finding lines, findings STILL
+    # standing). The report loop, the verdict sum and the FAIL count all read
+    # from it — a sixth check is a new tuple here, and a check whose findings
+    # never reach the verdict cannot be written (the hand-summed arithmetic
+    # this replaces was the one place that rule-4 lie was one forgotten term
+    # away).
+    sections: list[tuple[str, list[str], int]] = [
+        ('[check:uid] CHECK 1 — .tres/.tscn Script ext_resource uid matches '
+         'the script\'s .uid',
+         [drift.report(id(drift) in was_repaired) for drift in drifts]
+         + list(refused),
+         len(drifts) - drift_fixed),
+        (f'[check:uid] CHECK 2 — every tracked .gd has a tracked .gd.uid '
+         f'({", ".join(exclude)} exempt)',
+         [f'  UNTRACKED  {gd} has no tracked {gd}{UID_SUFFIX}'
+          for gd in untracked],
+         len(untracked)),
+        ('[check:uid] CHECK 3 — every new (untracked/staged) .gd has a .uid '
+         'sidecar on disk',
+         [f'  MISSING  {gd} is new and has no {gd}{UID_SUFFIX} — mint it '
+          f'(open the project in the editor once, or run the consumer\'s '
+          f'sandboxed `godot --headless --import`), then commit both together'
+          for gd in missing],
+         len(missing)),
+        ('[check:uid] CHECK 4 — every tracked .gd.uid still has its .gd',
+         [f'  FIXED  deleted {rel} — its script is gone' if rel in deleted
+          else f'  ORPHAN  {rel} is tracked but {rel[:-len(UID_SUFFIX)]} '
+               f'is gone — cruft; {FIX_FLAG} deletes it'
+          for rel in orphans] + list(undeletable),
+         len(orphans) - len(deleted)),
+        ('[check:uid] CHECK 5 — every .tres/.tscn header + non-Script '
+         'ext_resource uid is the canonical Godot spelling (Script refs are '
+         'CHECK 1\'s domain)',
+         [misspelt.report(id(misspelt) in was_repaired)
+          for misspelt in misspellings],
+         len(misspellings) - canon_fixed),
+    ]
 
-    print(f'[check:uid] CHECK 2 — every tracked .gd has a tracked .gd.uid '
-          f'({", ".join(exclude)} exempt)')
-    # The CONFIGURED exclude, not DEFAULT_EXCLUDE. `[uid] exclude_prefixes` is
-    # one documented key and it scoped only half the gate: a tree excluded from
-    # CHECK 1 still had every .gd in it reported by CHECK 2, so the key a
-    # consumer set to scope this gate did not scope this gate.
-    untracked = _untracked_sidecars(tracked, exclude)
-    for gd in untracked:
-        print(f'  UNTRACKED  {gd} has no tracked {gd}{UID_SUFFIX}')
-
-    print('[check:uid] CHECK 3 — every new (untracked/staged) .gd has a .uid '
-          'sidecar on disk')
-    for gd in missing:
-        print(f'  MISSING  {gd} is new and has no {gd}{UID_SUFFIX} — mint it '
-              f'(open the project in the editor once, or run the consumer\'s '
-              f'sandboxed `godot --headless --import`), then commit both together')
-
-    print('[check:uid] CHECK 4 — every tracked .gd.uid still has its .gd')
-    for rel in orphans:
-        print(f'  FIXED  deleted {rel} — its script is gone' if rel in deleted
-              else f'  ORPHAN  {rel} is tracked but {rel[:-len(UID_SUFFIX)]} '
-                   f'is gone — cruft; {FIX_FLAG} deletes it')
-    for line in undeletable:
-        print(line)
-
-    print('[check:uid] CHECK 5 — every .tres/.tscn header + non-Script '
-          'ext_resource uid is the canonical Godot spelling (Script refs are '
-          'CHECK 1\'s domain)')
-    for misspelt in misspellings:
-        print(misspelt.report(id(misspelt) in was_repaired))
+    for header, findings, _ in sections:
+        print(header)
+        for line in findings:
+            print(line)
 
     # The buckets the three new checks censused, so a scan of nothing is
     # visible (rule 4) and grep-shaped consumers can count what was covered.
@@ -332,14 +346,11 @@ def run(fix: bool = False) -> int:
           f'{sidecars} tracked .uid sidecar(s), '
           f'{uids} header/non-Script uid(s) canonicality-checked')
 
-    hard = (len(drifts) + len(misspellings) - len(repaired)
-            + len(untracked) + len(missing) + len(orphans) - len(deleted))
+    hard = sum(outstanding for _, _, outstanding in sections)
 
     if fix:
         # Say what was repaired even when nothing was: a `--fix` that silently
         # does nothing is indistinguishable from one that failed to write.
-        drift_fixed = sum(1 for entry in repaired if isinstance(entry, Drift))
-        canon_fixed = len(repaired) - drift_fixed
         if drift_fixed:
             print(f'[check:uid] FIX — repaired {drift_fixed} stale uid ref(s)')
         if canon_fixed:

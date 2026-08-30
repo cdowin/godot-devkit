@@ -58,8 +58,8 @@ from godot_devkit.godot.format.tscn import (
 from godot_devkit.godot.format.tscn import (
     script_path as _script_path,
 )
+from godot_devkit.godot import VENDORED_DEFAULT
 
-DEFAULT_EXCLUDE = ('addons/',)
 SCRIPT_PROP = 'script'
 NODE_PATHS_ATTR = re.compile(r'PackedStringArray\(([^)]*)\)')
 QUOTED = re.compile(r'"([^"]*)"')
@@ -295,7 +295,7 @@ def _check_section(section: Section, rel: str, ext: dict[str, dict], scripts: Sc
 def run() -> int:
     root = repo_root()
     config = config_section('props')
-    exclude = str_tuple(config, 'props', 'exclude_prefixes', DEFAULT_EXCLUDE)
+    exclude = str_tuple(config, 'props', 'exclude_prefixes', VENDORED_DEFAULT)
     extra = str_tuple_table(config, 'props', 'extra_properties', {})
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')

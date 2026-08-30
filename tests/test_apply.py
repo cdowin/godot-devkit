@@ -36,12 +36,12 @@ class DeleteTreeHonesty(TmpCase):
         (sub / 'grain.md').write_text('x', encoding='utf-8')
         sub.chmod(0o555)                             # rmtree cannot unlink inside
         self.addCleanup(sub.chmod, 0o755)
-        applied = apply.remove_tree(tree)
+        applied = apply.Plan().delete_tree(tree).apply(decide=False)
         self.assertIsNotNone(applied.failed, 'delete failed on disk but reported landed')
         self.assertTrue((sub / 'grain.md').exists())
 
     def test_a_tree_already_gone_is_the_desired_end_state(self) -> None:
-        applied = apply.remove_tree(self.tmp / 'never-existed')
+        applied = apply.Plan().delete_tree(self.tmp / 'never-existed').apply(decide=False)
         self.assertIsNone(applied.failed)
         self.assertEqual(len(applied.landed), 1)
 

@@ -91,6 +91,11 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 DECISION_FILE_NAME = 'decisions.md'
 REVIEW_FILE_NAME = 'review.md'
 HANDOFF_FILE_NAME = 'handoff.md'
+# The grain files themselves + the roadmap index — the id↔path convention is
+# this module's, so the names are spelled here once and composed everywhere.
+MILESTONE_DOC = 'milestone.md'
+FEATURE_DOC = 'feature.md'
+ROADMAP_DOC = 'ROADMAP.md'
 
 # PERMITTED, never required, MINTED ON FIRST WRITE. A shared doc scaffolded
 # empty is sprawl the tool made: across one consumer's tree `pm new`'s mandatory
@@ -103,17 +108,17 @@ HANDOFF_FILE_NAME = 'handoff.md'
 # fact about the grain rather than a finding. Never forbidden either — one
 # consumer holds 103 review.md, and reporting them would be reporting notes.
 # What a grain MUST carry: its own frontmatter file, and nothing else.
-MILESTONE_FILE_SLOTS = ('milestone.md',)
+MILESTONE_FILE_SLOTS = (MILESTONE_DOC,)
 MILESTONE_OPTIONAL_SLOTS = (HANDOFF_FILE_NAME, DECISION_FILE_NAME,
                             REVIEW_FILE_NAME)
-FEATURE_FILE_SLOTS = ('feature.md',)
+FEATURE_FILE_SLOTS = (FEATURE_DOC,)
 # No handoff.md: a feature is never picked up cold on its own.
 FEATURE_OPTIONAL_SLOTS = (DECISION_FILE_NAME, REVIEW_FILE_NAME)
 
 # slot -> the template that mints it. The grain file's own template is named for
 # the grain, the shared docs are named for the slot.
 SLOT_TEMPLATE = {
-    'milestone.md': 'milestone', 'feature.md': 'feature',
+    MILESTONE_DOC: 'milestone', FEATURE_DOC: 'feature',
     'handoff.md': 'handoff', 'decisions.md': 'decisions',
 }
 
@@ -481,7 +486,7 @@ def milestone_file(cfg: PmConfig, mid: str) -> Path | None:
     d = milestone_dir(cfg, mid)
     if d is None:
         return None
-    f = d / 'milestone.md'
+    f = d / MILESTONE_DOC
     return f if f.is_file() else None
 
 
@@ -500,7 +505,7 @@ def feature_file(cfg: PmConfig, fid: str) -> Path | None:
     d = feature_dir(cfg, fid)
     if d is None:
         return None
-    f = d / 'feature.md'
+    f = d / FEATURE_DOC
     return f if f.is_file() else None
 
 
@@ -585,11 +590,11 @@ def orphan_dirs(cfg: PmConfig) -> list[tuple[Path, str]]:
 
 
 def _has_milestone_file(d: Path) -> bool:
-    return (d / 'milestone.md').is_file()
+    return (d / MILESTONE_DOC).is_file()
 
 
 def _has_feature_file(d: Path) -> bool:
-    return (d / 'feature.md').is_file()
+    return (d / FEATURE_DOC).is_file()
 
 
 def _milestone_candidates(base: Path, exclude_archive: bool) -> Walk:
@@ -615,6 +620,17 @@ def milestone_walk(cfg: PmConfig) -> Walk:
 def milestone_dirs(cfg: PmConfig) -> list[Path]:
     """Milestone dirs in the ACTIVE tree (archived ones predate the schema)."""
     return list(milestone_walk(cfg).kept)
+
+
+def known_milestones(cfg: PmConfig) -> list[tuple[Path, str]]:
+    """Every milestone dir with its declared id (unquoted; '' when absent).
+
+    The one enumeration `pm status`, `pm list` and retire's id-refusal all
+    read — spelled once, so a scope refusal and a filter can never disagree
+    about which milestones exist.
+    """
+    return [(mdir, unquote(field_of(mdir / MILESTONE_DOC, 'id')))
+            for mdir in milestone_dirs(cfg)]
 
 
 BOM = '﻿'
@@ -718,7 +734,7 @@ def grain_docs(gdir: Path) -> list[Path]:
 
 
 def feature_files(mdir: Path) -> list[Path]:
-    return [d / 'feature.md' for d in walk.children(mdir / 'features', Kind.DIR)
+    return [d / FEATURE_DOC for d in walk.children(mdir / 'features', Kind.DIR)
             .filter(_has_feature_file, SkipReason.NO_GRAIN_FILE).kept]
 
 
@@ -787,7 +803,7 @@ def building_milestones(cfg: PmConfig) -> list[tuple[str, str, Path]]:
     """(id, branch, milestone.md) for every ACTIVE milestone at `building`."""
     out = []
     for mdir in milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / MILESTONE_DOC
         if field_of(mfile, 'status') != 'building':
             continue
         out.append((field_of(mfile, 'id'), field_of(mfile, 'branch'), mfile))

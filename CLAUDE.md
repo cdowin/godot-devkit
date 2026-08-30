@@ -40,10 +40,13 @@ A module that fits neither family is a signal worth raising, not a placement pro
 to solve quietly. Tool modules own their behavior and expose `main(argv)` or `run()`;
 `cli.py` only routes.
 
-- **New check** = module in the right family's `checks/` + branch in `_run_check` +
+- **New check** = module in the right family's `checks/` + branch in `_dispatch_check` +
   README table row + CHANGELOG line.
 - **New read verb** = module + `cli.py` route + README table row + CHANGELOG line.
-- **New WRITE verb** = all of the above, **plus** a round-trip fidelity case in the
+- **New WRITE verb**: the dominant case is a new **scene subverb** — a row in
+  `scene_edit.py`'s `VERBS` + `HANDLERS` tables plus `_build_parser`/`_check_usage`,
+  no new module and no `cli.py` edit. A new TOP-LEVEL verb is module + `cli.py`
+  route + README table row + CHANGELOG line. Either way, **plus** a round-trip fidelity case in the
   corpus, an explicit refusal path with a test proving it declines rather than
   mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`) —
   Godot addresses them that way; format-4 `unique_id` is not the addressing key.

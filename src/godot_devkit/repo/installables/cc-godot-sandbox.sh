@@ -1,23 +1,30 @@
 #!/usr/bin/env bash
 # cc-godot-sandbox.sh — Claude Code PreToolUse Bash hook: never a raw engine boot.
 #
-# A headless Godot boot runs the full autoload stack (GameManager save flush,
-# run-log appends) against whatever `user://` resolves to — and on this machine
-# that is Chris's LIVE game data. A week of scenario runs once littered ~40
-# synthetic save dirs into the real user://saves/ before anyone noticed; the
-# fix, and the only thing that prevents a recurrence, is the HOME override in
-# tools/dev/_common.sh (see its "--- user:// HOME sandbox ---" block). Every
-# `make` target routes through that. A hand-typed `godot --headless` does not.
-# So: hard BLOCK, with the wrapper that owns the job named in the message.
+# A headless Godot boot runs the project's full autoload stack (save flush,
+# run-log appends) against whatever `user://` resolves to — the developer's
+# LIVE game data. A week of scenario runs once littered ~40 synthetic save
+# dirs into the real user://saves/ before anyone noticed; the fix, and the
+# only thing that prevents a recurrence, is the HOME override in the project's
+# sandbox wrapper (SANDBOX_OWNER, project config below). Every scripted target
+# routes through that. A hand-typed `godot --headless` does not. So: hard
+# BLOCK, with the wrapper that owns the job named in the message.
 #
 # HOW THIS DOES NOT BRICK THE DEV LOOP. The wrappers themselves exec godot
-# constantly (parse.sh, unit.sh, scenario.sh, warnings.sh, cc-session-start.sh)
-# and MUST keep working. They do: a PreToolUse hook observes the command the
-# agent TYPED into the Bash tool, never the subprocesses that command goes on to
-# spawn. `make unit` reaches this hook as the four characters `make unit`. The
-# guard therefore matches only an invocation of godot in COMMAND POSITION within
-# the typed line — which is precisely "an agent typed it" and never "a wrapper
-# did its job".
+# constantly and MUST keep working. They do: a PreToolUse hook observes the
+# command the agent TYPED into the Bash tool, never the subprocesses that
+# command goes on to spawn. `make unit` reaches this hook as the four
+# characters `make unit`. The guard therefore matches only an invocation of
+# godot in COMMAND POSITION within the typed line — which is precisely "an
+# agent typed it" and never "a wrapper did its job".
+#
+# KNOWN, ACCEPTED GAP. The guard sees the typed line, never the shell's
+# expansion of it. A godot-NAMED variable in command position (`$GODOT`,
+# `"${GODOT}"`, `"$godot_bin"`) is resolved below by stripping quotes, `$`
+# and `{}` from the command word. An engine behind an ARBITRARY name
+# (`ENGINE=…; $ENGINE`), or an assignment made in an earlier Bash call, is
+# out of reach for a static hook without expansion — that residue is the
+# fail-open design working as declared, not an unstated hole.
 #
 # Protocol: Claude Code feeds the PreToolUse event as JSON on stdin (tool_name,
 # tool_input.command). Exit 0 = allow, exit 2 = BLOCK with stderr returned to
@@ -25,6 +32,19 @@
 # wedge the session.
 set -eu
 trap 'exit 0' ERR
+
+# --- project config (yours to edit after install — the file is your repo's) --
+# The file that owns the user:// HOME sandbox — named in the BLOCK message so
+# the agent is pointed at the door, not just turned away at the wall.
+SANDBOX_OWNER='tools/dev/_common.sh (its "--- user:// HOME sandbox ---" block)'
+# The wrapper roster the BLOCK message offers — your project's spellings.
+WRAPPER_ROSTER='    make parse | make lint | make check      # static gates
+    make unit SYS=<system>                   # unit tier (sliced)
+    make scenario NAME=<name>                # one integration scenario, cold
+    make integration ARGS="--system <x>"     # a scenario slice
+    make smoke                               # the boot smoke test
+    make help                                # every target, authoritative'
+# -----------------------------------------------------------------------------
 
 # hook_json_field <payload> <dotted.key>
 # Echo a STRING field out of a Claude Code hook event, or nothing.
@@ -65,9 +85,10 @@ if isinstance(node, str):
 INPUT="$(cat)"
 
 # Fast path: the overwhelming majority of Bash calls never mention the engine.
-# Pure shell, no fork, no JSON decode.
+# Pure shell, no fork, no JSON decode. `*GODOT*` is for the named-variable
+# spelling (`$GODOT --headless`) with no lowercase mention beside it.
 case "$INPUT" in
-	*godot*|*Godot*) ;;
+	*godot*|*Godot*|*GODOT*) ;;
 	*) exit 0 ;;
 esac
 
@@ -131,11 +152,17 @@ while IFS= read -r segment; do
 	[ "$idx" -lt "${#toks[@]}" ] || continue
 	[ "$resolves_only" -eq 0 ] || continue
 
-	# The command word itself: `godot`, `godot4`, `./godot`, or a full
-	# /Applications/Godot.app/Contents/MacOS/Godot path.
-	command_word="${toks[$idx]##*/}"
+	# The command word itself: `godot`, `godot4`, `./godot`, a full
+	# /Applications/Godot.app/Contents/MacOS/Godot path — or the engine behind
+	# a godot-NAMED variable (`$GODOT`, `"${GODOT}"`, `"$godot_bin"`): quotes,
+	# `$` and `{}` are stripped first, so those resolve to a godot* token (the
+	# arbitrary-name case is the accepted gap in the header). `godot-devkit`
+	# is this toolkit's own CLI in command position — never a boot.
+	command_word="${toks[$idx]//[\$\{\}\"\']/}"
+	command_word="${command_word##*/}"
 	case "$(printf '%s' "$command_word" | tr '[:upper:]' '[:lower:]')" in
-		godot|godot4|godot_v*) ;;
+		godot-devkit) continue ;;
+		godot*) ;;
 		*) continue ;;
 	esac
 
@@ -173,18 +200,13 @@ done <<<"$(printf '%s' "$ANALYZE" | tr ';|&()`{}' '\n\n\n\n\n\n\n\n')"
 	echo "  offending segment: ${offender# }"
 	echo ""
 	echo "  A raw boot runs the full autoload stack against the REAL user:// —"
-	echo "  Chris's live saves. Only the make / tools/dev wrappers redirect it, by"
-	echo "  overriding HOME (tools/dev/_common.sh, the user:// HOME sandbox block:"
+	echo "  the LIVE game data. Only the scripted wrappers redirect it, by"
+	echo "  overriding HOME ($SANDBOX_OWNER:"
 	echo "  a week of scenario runs once littered ~40 synthetic save dirs into the"
 	echo "  live user://saves/). There is no exception to this."
 	echo ""
 	echo "  Use the wrapper that owns the job:"
-	echo "    make parse | make lint | make check      # static gates"
-	echo "    make unit SYS=<system>                   # unit tier (sliced)"
-	echo "    make scenario NAME=<name>                # one integration scenario, cold"
-	echo "    make integration ARGS=\"--system <x>\"     # a scenario slice"
-	echo "    make smoke                               # the boot smoke test"
-	echo "    make help                                # every target, authoritative"
+	echo "$WRAPPER_ROSTER"
 	echo ""
 	echo "  (The wrappers call godot themselves and are unaffected — this guard"
 	echo "   only ever sees the command YOU type into the Bash tool.)"

@@ -337,14 +337,6 @@ def make_dir(path: Path) -> Applied:
     return Plan().make_dir(path).apply(decide=False)
 
 
-def move(src: Path, dest: Path) -> Applied:
-    return Plan().move(src, dest).apply(decide=False)
-
-
-def remove_tree(path: Path) -> Applied:
-    return Plan().delete_tree(path).apply(decide=False)
-
-
 def remove_file(path: Path) -> Applied:
     return Plan().delete_file(path).apply(decide=False)
 

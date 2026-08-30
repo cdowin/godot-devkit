@@ -43,9 +43,9 @@ from pathlib import Path
 from godot_devkit.core.project import repo_root
 from godot_devkit.godot.format.tscn import (EXT_RESOURCE_ONLY, Section,
                                             TscnError, join_path, split_path)
-from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
+from godot_devkit.godot.format.tscn_document import TscnDocument
 from godot_devkit.godot.index.uid_index import RES_PREFIX, UidIndex
-from godot_devkit.godot.write import render_diff
+from godot_devkit.godot.write import load_scene_or_refuse, render_diff
 
 VERBS = ('set', 'rename', 'add', 'rm', 'reparent', 'connect', 'disconnect')
 UNCHANGED = 'unchanged'
@@ -279,6 +279,9 @@ def _build_parser() -> argparse.ArgumentParser:
     subs = parser.add_subparsers(dest='verb', required=True)
 
     def add_verb(name: str, *fields: str) -> argparse.ArgumentParser:
+        # EVERY subverb goes through here, so `file` and `--dry-run` are
+        # attached in one place and a new subverb cannot forget either —
+        # `set`/`add` add their optional positionals/flags on the result.
         sub = subs.add_parser(name)
         sub.add_argument('file')
         for field in fields:
@@ -287,8 +290,7 @@ def _build_parser() -> argparse.ArgumentParser:
                          help='print the unified diff instead of writing')
         return sub
 
-    setter = subs.add_parser('set')
-    setter.add_argument('file')
+    setter = add_verb('set')
     setter.add_argument('node_path', nargs='?',
                         help='the node to set on (omit with --resource / '
                              '--sub-resource)')
@@ -299,13 +301,8 @@ def _build_parser() -> argparse.ArgumentParser:
     setter.add_argument('--sub-resource', dest='sub_resource', metavar='ID',
                         help='address a [sub_resource] by the id '
                              '`scene <file> --props` prints')
-    setter.add_argument('--dry-run', action='store_true',
-                        help='print the unified diff instead of writing')
     add_verb('rename', 'node_path', 'new_name')
-    adder = subs.add_parser('add')
-    adder.add_argument('file')
-    adder.add_argument('parent_path')
-    adder.add_argument('name')
+    adder = add_verb('add', 'parent_path', 'name')
     adder.add_argument('type', nargs='?',
                        help='the node type (omit with --instance)')
     adder.add_argument('--script',
@@ -314,8 +311,6 @@ def _build_parser() -> argparse.ArgumentParser:
     adder.add_argument('--instance', metavar='RES_PATH',
                        help='instance this res:// scene instead of typing the '
                             'node; the ref is minted from the scene\'s own uid')
-    adder.add_argument('--dry-run', action='store_true',
-                       help='print the unified diff instead of writing')
     add_verb('rm', 'node_path').add_argument(
         '--force', action='store_true',
         help='treat a node that does not exist as already removed (exit 0) '
@@ -355,11 +350,8 @@ def main(argv: list[str]) -> int:
         print(f'godot-devkit scene {args.verb}: no such file: {path}')
         return EXIT_USAGE
 
-    try:
-        before = read_scene_text(path)
-    except UnicodeDecodeError as err:
-        print(f'REFUSED  {path}: not valid UTF-8 ({err.reason} at byte {err.start}) '
-              f'— refusing to rewrite bytes this tool cannot read')
+    before = load_scene_or_refuse(path)
+    if before is None:
         return EXIT_REFUSED
     doc = TscnDocument(before, path, uid_resolver=uid_resolver(path))
     try:

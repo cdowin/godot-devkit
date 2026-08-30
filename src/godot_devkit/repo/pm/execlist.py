@@ -120,7 +120,7 @@ def feature_rows(cfg: model.PmConfig, ffile: Path) -> list[str]:
 
 
 def block_for(cfg: model.PmConfig, path: Path) -> str:
-    rows = (milestone_rows(cfg, path.parent) if path.name == 'milestone.md'
+    rows = (milestone_rows(cfg, path.parent) if path.name == model.MILESTONE_DOC
             else feature_rows(cfg, path))
     body = '\n'.join(rows) if rows else '_(nothing yet)_'
     return f'{OPEN}\n{NOTE}\n\n{body}\n{CLOSE}'
@@ -150,7 +150,7 @@ def _replace(text: str, block: str, rel: str) -> str:
 def targets(cfg: model.PmConfig) -> list[Path]:
     out = []
     for mdir in model.milestone_dirs(cfg):
-        out.append(mdir / 'milestone.md')
+        out.append(mdir / model.MILESTONE_DOC)
         out.extend(model.feature_files(mdir))
     return out
 

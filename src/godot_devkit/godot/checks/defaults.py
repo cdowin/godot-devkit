@@ -35,8 +35,8 @@ from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import parse
+from godot_devkit.godot import VENDORED_DEFAULT
 
-DEFAULT_EXCLUDE = ('addons/',)
 CONFIG_SECTION = 'defaults'
 EXIT_OK = 0
 EXIT_FINDINGS = 1
@@ -47,7 +47,7 @@ def run() -> int:
     root = repo_root()
     config = config_section(CONFIG_SECTION)
     exclude = str_tuple(config, CONFIG_SECTION, 'exclude_prefixes',
-                        DEFAULT_EXCLUDE)
+                        VENDORED_DEFAULT)
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])

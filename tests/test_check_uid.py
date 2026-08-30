@@ -425,7 +425,7 @@ class AggregateRoster(unittest.TestCase):
         with temp_repo('uid_repo', only=CLEAN):
             self.assertEqual(
                 cli.all_roster(),
-                tuple(n for n, on in cli.KNOWN_CHECKS.items() if on))
+                tuple(n for n, on in cli.KNOWN_GATES.items() if on))
 
     def test_every_known_gate_is_dispatchable(self) -> None:
         # The property the split list could not state: a name `[checks] all`
@@ -439,7 +439,7 @@ class AggregateRoster(unittest.TestCase):
         import subprocess
         from godot_devkit import cli
         with temp_repo('uid_repo', only=CLEAN) as root:
-            for name in cli.KNOWN_CHECKS:
+            for name in cli.KNOWN_GATES:
                 with self.subTest(name):
                     proc = subprocess.run(
                         [sys.executable, '-m', 'godot_devkit.cli', 'check', name],

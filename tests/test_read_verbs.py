@@ -26,6 +26,8 @@ from pathlib import Path
 
 from support import FIXTURES, REPO_ROOT, temp_repo
 
+from godot_devkit.godot import VENDORED_DEFAULT
+
 from godot_devkit.godot.read import autoloads, orphans, refs
 
 
@@ -217,7 +219,7 @@ class OrphansScope(unittest.TestCase):
         with temp_repo('read_repo') as root:
             _, stock, _ = run_main(orphans)
             _toml(root, '[orphans]\n'
-                        f'vendored_prefixes = [{_quoted(orphans.DEFAULT_VENDORED)}]\n'
+                        f'vendored_prefixes = [{_quoted(VENDORED_DEFAULT)}]\n'
                         f'entry_point_prefixes = [{_quoted(orphans.DEFAULT_ENTRY_POINT_PREFIXES)}]\n'
                         f'auto_discovered_prefixes = [{_quoted(orphans.DEFAULT_AUTO_DISCOVERED)}]\n'
                         f'convention_files = [{_quoted(orphans.DEFAULT_CONVENTION_FILES)}]\n')

@@ -39,19 +39,29 @@ milestone moves, triage, reports, roadmap maintenance.
 
 ## Tooling contract
 
-**Status transitions go through the pm CLI** (`story <wip|review|blocked>`,
-`feature <ready|building|review|done>`, `milestone <ready|building|done>`,
-`status`, `validate`, `decide`, `new`, `prune`) — it is the ONLY sanctioned
-way to flip a `status:` field; the pm drift gate catches a hand-edited one.
-Everything else stays direct filesystem work:
+**Status transitions go through the pm CLI** (`story <status>`, `bug <status>`,
+`feature <status>` / `feature done [--cascade]`, `milestone <status>`) — it is
+the ONLY sanctioned way to flip a `status:` field; the pm drift gate catches a
+hand-edited one. `pm --help` is the authoritative verb roster; the rest of it:
 
-- **Create**: `mkdir -p` the dir; Write the YAML+markdown file (an initial
-  `status:` at creation isn't a transition).
-- **Inspect**: `pm status` for a drift-aware tree report; Read/grep/find for
-  detail it doesn't surface.
-- **Modify (non-status fields)**: Edit the frontmatter or body.
-- **Move** (rare): `git mv` the dir; update `id:`/`milestone:`/`feature:` on
-  the file AND every `depends_on:`/`consumed_by:` that references it.
+- **Create**: `pm new milestone|feature|story|bug` — the sanctioned scaffolder.
+  It owns slug hygiene and the grain layout; never `mkdir` + Write a grain by
+  hand.
+- **Inspect**: `pm status` for a drift-aware tree report, `pm list` for
+  filterable per-story lines, `pm get <grain-id> <key>` for one field;
+  Read/grep/find only for detail those don't surface.
+- **Modify (non-status fields)**: `pm set <grain-id> <key> <value>` for a
+  frontmatter scalar; Edit the body prose directly.
+- **Move a story** (rare): `pm move <story-id> <feature-id>` — renames the
+  file and rewrites `id:`/`feature:`/`milestone:` whole-or-not-at-all; never
+  hand-roll it with `git mv`.
+- **Retire a milestone**: `pm retire <milestone-id>` — removes the directory
+  and appends its row to the roadmap index.
+- **Record a decision**: `pm decide <grain-id> <title...>` — appends the
+  dated, ordinal-stamped heading; the prose under it is yours.
+- **Derived files**: `pm sync` re-renders the execution lists; `pm validate`
+  checks structural + referential integrity; `pm vocabulary` prints the
+  closed state set.
 
 ## Modes
 
@@ -60,8 +70,8 @@ Parse the mode from the prompt. If ambiguous, ask one question and stop.
 1. **plan** (default) — from an idea/spec/request, produce a draft feature +
    scaffolded stories. Two stories minimum per feature (a one-story feature
    is usually mis-scoped); user-facing titles; acceptance criteria phrased as
-   user observation; labels from the tree's vocabulary; `depends_on` /
-   `consumed_by` where clear. Draft output unless `--commit`.
+   user observation; `depends_on` / `consumed_by` where clear. Draft output
+   unless `--commit`.
 2. **decompose** — from a story or feature, generate substep stories: each
    with acceptance criteria ("when X, Y happens"), likely file paths, and a
    pass/fail verification command.
@@ -85,7 +95,7 @@ Parse the mode from the prompt. If ambiguous, ask one question and stop.
 2. Every feature has a user-promise unless labeled internal.
 3. Every feature has 2+ stories or a note explaining why it's smaller.
 4. Every story has acceptance criteria phrased as user observation.
-5. Every issue has a milestone and at least one label.
+5. Every issue has a milestone.
 6. Titles at feature/story level are user-facing; implementation language
    only inside story bodies.
 7. Frontmatter matches the tree's schema.

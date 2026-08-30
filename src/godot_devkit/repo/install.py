@@ -70,7 +70,7 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         # The verification pair first — the contract predates the roster and
         # is the pair devkit itself self-hosts. Then the base roster: the
         # generalized consumer agents, each with model/effort frontmatter
-        # (the tiering table in docs/AGENT_WORKFLOW.md) and a project-config
+        # (the tiering table in SDLC.md) and a project-config
         # section the consumer edits after install, hook-corpus style.
         ('verification-reviewer.md', '.claude/agents/verification-reviewer.md'),
         ('verification-builder.md', '.claude/agents/verification-builder.md'),
@@ -137,7 +137,7 @@ _NEXT_STEP = {
                       'your spellings: the files are yours now. `model:` in '
                       'the frontmatter is doing proven work; `effort:` is '
                       'carried unverified. The SDLC these agents run is '
-                      'docs/AGENT_WORKFLOW.md in the godot-devkit repo.',
+                      'SDLC.md at the godot-devkit repo root.',
     'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
                   'target exists and is your full gate.',
 }

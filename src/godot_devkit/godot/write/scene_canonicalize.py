@@ -46,7 +46,7 @@ from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import Section, node_own_path, parse, split_path
 from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
 from godot_devkit.godot.index.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
-from godot_devkit.godot.write import render_diff
+from godot_devkit.godot.write import render_diff, utf8_refusal_reason
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
@@ -240,8 +240,7 @@ def main(argv: list[str]) -> int:
             before = read_scene_text(path)
             after, report = canonicalize(path, root, uids, bases, analyzer)
         except UnicodeDecodeError as err:
-            print(f'REFUSED  {path}: not valid UTF-8 ({err.reason} at byte '
-                  f'{err.start}) — refusing to rewrite bytes this tool cannot read')
+            print(f'REFUSED  {path}: {utf8_refusal_reason(err)}')
             refused += 1
             continue
         unresolved += sum(1 for line in report if 'UNRESOLVED' in line)

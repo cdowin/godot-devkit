@@ -106,6 +106,29 @@ def _grain_exists(cfg: model.PmConfig, ref: str) -> bool | None:
     return model.story_file(cfg, ref) is not None
 
 
+def _check_refs(cfg: model.PmConfig, path, key: str, on: set[str], bad,
+                census: dict) -> list[str]:
+    """The census / unverifiable / V4 block for one grain's ref key.
+
+    One home for the shape every grain kind runs (a V7 author touches this
+    block, not three pastes of it). Returns the refs that RESOLVED, so the
+    feature site can build its graph edges from them.
+    """
+    resolved: list[str] = []
+    for ref in _safe_refs(path, key, bad, cfg.rel(path)):
+        census['refs'] += 1
+        got = _grain_exists(cfg, ref)
+        if got is None:
+            census['unverifiable'] += 1
+        elif not got:
+            if 'V4' in on:
+                bad(f'{cfg.rel(path)}: {key} {ref!r} resolves to '
+                    f'nothing (its milestone IS in the tree)')
+        else:
+            resolved.append(ref)
+    return resolved
+
+
 def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str], dict]:
     """Returns (findings, census). A finding names a path a human can open."""
     # `model.VALIDATE_CHECKS` is the ONE home of the rule-id roster. A local
@@ -123,7 +146,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
     graph: dict[str, list[str]] = {}
 
     for mdir in model.milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
+        mfile = mdir / model.MILESTONE_DOC
         mid = model.field_of(mfile, 'id')
         census['grains'] += 1
         if 'V1' in on and (not mid or not model.field_of(mfile, 'status')):
@@ -176,37 +199,15 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                     if own and own != mid:
                         bad(f'{cfg.rel(sfile)}: milestone: {own!r} but it lives '
                             f'under milestone {mid!r}')
-                for ref in _safe_refs(sfile, 'depends_on', bad, cfg.rel(sfile)):
-                    census['refs'] += 1
-                    got = _grain_exists(cfg, ref)
-                    if got is None:
-                        census['unverifiable'] += 1
-                    elif not got and 'V4' in on:
-                        bad(f'{cfg.rel(sfile)}: depends_on {ref!r} resolves to '
-                            f'nothing (its milestone IS in the tree)')
+                _check_refs(cfg, sfile, 'depends_on', on, bad, census)
 
             for key in _REF_KEYS:
-                for ref in _safe_refs(ffile, key, bad, cfg.rel(ffile)):
-                    census['refs'] += 1
-                    got = _grain_exists(cfg, ref)
-                    if got is None:
-                        census['unverifiable'] += 1
-                        continue
-                    if not got:
-                        if 'V4' in on:
-                            bad(f'{cfg.rel(ffile)}: {key} {ref!r} resolves to '
-                                f'nothing (its milestone IS in the tree)')
-                    elif key == 'depends_on' and fid and ref.count('/') == 1:
-                        graph[fid].append(ref)
+                resolved = _check_refs(cfg, ffile, key, on, bad, census)
+                if key == 'depends_on' and fid:
+                    graph[fid].extend(ref for ref in resolved
+                                      if ref.count('/') == 1)
 
-        for ref in _safe_refs(mfile, 'depends_on', bad, cfg.rel(mfile)):
-            census['refs'] += 1
-            got = _grain_exists(cfg, ref)
-            if got is None:
-                census['unverifiable'] += 1
-            elif not got and 'V4' in on:
-                bad(f'{cfg.rel(mfile)}: depends_on {ref!r} resolves to nothing '
-                    f'(its milestone IS in the tree)')
+        _check_refs(cfg, mfile, 'depends_on', on, bad, census)
 
     if 'V5' in on:
         findings.extend(_graph_findings(graph))
