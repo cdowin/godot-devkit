@@ -229,6 +229,42 @@ class Transitions(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('features not done', out)
 
+    def test_milestone_done_records_no_date_of_its_own(self):
+        """Close flips the status and stops. Git already records the WHEN.
+
+        `actual_date:` was stamped here for one reader — the changelog render —
+        and outlived it. A stamp nothing reads is a field every consumer's tree
+        carries and no consumer can act on, so the close writes `status` and
+        nothing else.
+        """
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            mf = root / 'pm/roadmap/0.1-demo/milestone.md'
+            code, out = run_cli(root, 'milestone', 'done', '0.1')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(model.field_of(mf, 'status'), 'done')
+            # The whole file, not just the parsed field: a re-added EMPTY
+            # `actual_date:` parses as absent and would slip a reader-less
+            # field back into every consumer's tree in silence.
+            self.assertNotIn('actual_date', mf.read_text(encoding='utf-8'))
+            self.assertNotIn('actual_date', out)
+
+    def test_a_scaffolded_milestone_mints_no_actual_date(self):
+        """The template is the other half: nothing stamps it, nothing mints it.
+
+        Stopping the stamp while the template still minted the field would
+        leave every new milestone carrying an empty slot that is now, by
+        construction, never filled.
+        """
+        with tree() as root:
+            code, out = run_cli(root, 'new', 'milestone', '0.2', 'Second')
+            self.assertEqual(code, 0, out)
+            minted = next(
+                (root / 'pm/roadmap').glob('0.2*/milestone.md'), None)
+            self.assertIsNotNone(minted, sorted(
+                p.name for p in (root / 'pm/roadmap').iterdir()))
+            self.assertNotIn('actual_date',
+                             minted.read_text(encoding='utf-8'))
+
 
 class FeatureClose(unittest.TestCase):
     def test_cascade_closes_stories_and_feature(self):

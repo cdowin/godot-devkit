@@ -33,10 +33,9 @@ USAGE = """usage: godot-devkit pm <command>
   feature <ready|building> <feature-id>
   feature review <feature-id>
   feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
-  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done,
-                                                        and stamps actual_date: — the date it
-                                                        shipped; building also places branch:
-                                                        in the trunk when [pm]
+  milestone <ready|building|done> <milestone-id>       (done refuses unless all features done;
+                                                        building also places branch: in the
+                                                        trunk when [pm]
                                                         place_branch_on_building)
   status [<milestone>]
   get <grain-id> <key>                    (read one frontmatter field)
@@ -420,27 +419,6 @@ def _place_branch(cfg: model.PmConfig, mid: str, trunk: Path, branch: str) -> No
 
 
 # --- milestone ----------------------------------------------------------------
-def _stamp_actual_date(cfg: model.PmConfig, mf: Path, mid: str) -> None:
-    """Stamp `actual_date:` at close — the moment a milestone acquires one.
-
-    The template mints the field empty, and close is the one moment the tree
-    learns when a milestone shipped — a date reconstructed later is a guess.
-
-    Written only when EMPTY, so re-running `milestone done` repairs a missing
-    stamp — the same no-op-is-the-repair shape `place_branch_on_building` has —
-    without ever moving a date already recorded.
-    """
-    if model.field_of(mf, 'actual_date'):
-        return
-    when = datetime.now(timezone.utc).date().isoformat()
-    if not model.set_field(mf, 'actual_date', when):
-        raise Usage(f'could not write actual_date in {cfg.rel(mf)} '
-                    f'(malformed frontmatter, or the file is not writable). '
-                    f'The status stands at done — re-run this command to stamp '
-                    f'the date once the file is repaired')
-    _ok(f'milestone {mid}: actual_date {when}')
-
-
 def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     if len(args) != 2:
         raise Usage(USAGE)
@@ -464,8 +442,6 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
             target = _placement_target(cfg, mid, mf)
             if target is not None:
                 _place_branch(cfg, mid, *target)
-        if to == 'done':
-            _stamp_actual_date(cfg, mf, mid)
         return 0
     if not model.transition_legal(cfg.milestone_transitions, cur, to):
         raise Refused(f'illegal milestone transition {cur} -> {to} for {mid!r}')
@@ -483,8 +459,6 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     _ok(f'milestone {mid}: {cur} -> {to}')
     if target is not None:
         _place_branch(cfg, mid, *target)
-    if to == 'done':
-        _stamp_actual_date(cfg, mf, mid)
     return 0
 
 

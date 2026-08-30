@@ -11,6 +11,7 @@
 - **`pm new` stops minting empty files** — Scaffolding a `decisions.md` and `handoff.md` into every grain put 204 empty files and ~1,900 lines into one consumer's tree. A shared doc now appears on first WRITE. (b1c9629)
 - **BREAKING: `pm changelog`, `pm decisions`, `pm collapse`, `pm prose-ledger`, `pm claim`, `pm release`, `task`, `install-ci`, `install-agents` and `check tasks` are removed** — No consumer invoked any of them. `pm set <id> owner <x>` replaces claim/release; CI and agents run the project's own gate targets; `CHANGELOG.md` is hand-maintained. (4e034a4, 56ffaf4)
 - **BREAKING: D11, D12, D15, D16, D17 and D18 no longer exist** — `[pm] checks` naming any of them is exit 2. Neither consumer enabled one; every rule they do run (D1-D10, V1-V6) is byte-identical. `review.md` is a permitted file rather than a mandatory slot. (355b671)
+- **`actual_date:` is not minted and not stamped** — `pm milestone done` stopped writing it and the milestone template stopped minting the field when the changelog render that read it was removed. Git records when a milestone closed; existing values in a tree are left alone. (src/godot_devkit/repo/pm/templates/milestone.md)
 - **one gate roster** — `[checks] all` and the dispatch table were two lists holding one fact; a gate now carries its own default-in-`all` flag, and a test walks the roster to prove every name dispatches. (1c744f8)
 
 ## v0.14.0 — 2026-08-29

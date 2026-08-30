@@ -4,7 +4,6 @@ name: {name}
 status: planning
 theme:
 target_date:
-actual_date:
 depends_on: []
 risk: low
 track:
