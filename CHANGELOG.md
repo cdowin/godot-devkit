@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **the two handoff docs match the package** — README rewritten 655 -> 375 lines, opening with what the tool IS (informs / scaffolds / edits) and the pinned-tag sharing loop instead of a taxonomy. Dropped the false "precondition-checked CLI" and "a status you move through code" claims for closed states, open transitions; removed the `[agents]` config section and `check agents` from the roster, the duplicated northstar block, and the `python3 -m unittest` development stanza (the suite is `make test`). CLAUDE.md rule 2 loses its archaeology parenthetical. (README.md, CLAUDE.md)
 - **consumer smoke is a target** — `make smoke` runs every read verb against the live game checkouts, compares each printed census against an independent count, and fails if it leaves either checkout dirty. (tools/consumer_smoke.py)
 - **one walk** — Filesystem enumeration moves into core/walk.py, which returns what it KEPT and what it SKIPPED under a closed-enum reason; Walk has no length, so a census cannot reach a count without its disclosures. (6ac90c3)
 - **the two allowlists** — An AST test asserts glob/rglob/iterdir/os.walk live only in core/walk.py and write_text/open-for-write/rename/unlink/rmtree/mkdir only in core/apply.py, naming file:line otherwise. (tests/test_boundaries.py)
