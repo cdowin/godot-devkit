@@ -347,7 +347,7 @@ tool while a `sed` of the same line reached the state it refused.
 | `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain — its own frontmatter file (`milestone.md` / `feature.md`) and nothing else. **No directory is minted**: git stores no empty directory, so 158 scaffolded `design/` dirs across one consumer left 11 holding anything; `stories/` appears when the first story is written into it. **A shared doc is NOT minted either**: `decisions.md` appears when `pm decide` records the first one, `handoff.md` and `review.md` when somebody writes one. Scaffolding them empty put 204 files and ~1,900 lines into one consumer's tree — a quarter of its PM tree, minted by the verb that exists to stop sprawl. `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line on a doc that HAS one, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. Every failure out is a **refusal**, never a stack trace — including the grain directory or file the filesystem itself will not take (a name past NAME_MAX, an unwritable parent), which answers the same way on every supported Python |
 | `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex — the field's value replaced, every other byte and the file's line endings preserved |
 | `pm vocabulary [--json]` | The CLOSED sets, machine-readably: the states each grain kind may hold, and the rule ids `[pm] checks` may name. It prints no transitions — there are none. Its audience is the **pin bump**: the toolkit ships a shape, you bump the pin, and this is how you see what the closed set became without scraping a changelog. It keeps working when `[pm] checks` names a rule this release retired |
-| `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file; **V6** fails when a rendered block drifts from the tree |
+| `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file, and `--check` reports staleness without writing. **V6** gates the same thing, and is itself opt-in via `[pm] checks` — a generated view going stale while ordinary work moves the tree is not a defect in the tree |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
 | `pm decide <grain-id> <title…>` | Append one `## <id> — <ISO date> — <title>` heading to that milestone's or feature's `decisions.md`, **minting the log from its template if this is the first one**. It stamps the two things a hand-written entry gets wrong — the date, and the next ordinal in the log's own id prefix — and stops there; the reasoning under the heading is yours to write. No field schema: the four-field one this replaced produced zero conforming entries across a consumer's 158 decision logs, so what it gated was whether anyone used the verb |
 | `pm install-skills [--force] [--diff]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
@@ -412,11 +412,12 @@ review_dir  = "docs/reviews"    # where review records live
 review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
 story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
 checks = ["D1","D2","D3","D4","D5","D6",       # drift rules
-          "V1","V2","V3","V4","V5","V6"]        # integrity rules (see `pm validate`)
+          "V1","V2","V3","V4","V5"]            # integrity rules (see `pm validate`)
                                                 # ^ this IS the stock default: a repo
                                                 #   with no devkit.toml runs exactly
-                                                #   these, so a config "declaring the
-                                                #   defaults" must name V6 too
+                                                #   these. V6 is NOT among them — add
+                                                #   it here to gate the generated
+                                                #   execution lists
 # D8/D9 are the FLOW rules — opt in by naming them here:
 #   D8  project version == the `building` milestone's id (bump at START; the id
 #       IS the version, exact string equality)

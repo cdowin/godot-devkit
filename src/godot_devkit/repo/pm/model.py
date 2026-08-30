@@ -20,7 +20,7 @@ defaults.
     story_states          = [...]
     bug_states            = [...]  # D4: the bug vocabulary
     checks = ["D1","D2","D3","D4","D5","D6",        # which rules run — this
-              "V1","V2","V3","V4","V5","V6"]        #   IS the stock default
+              "V1","V2","V3","V4","V5"]             #   IS the stock default
 """
 from __future__ import annotations
 
@@ -54,10 +54,15 @@ DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
 # drifting, it is running a different (valid) flow, and a gate that fails it
 # would be lying. Opt in with `[pm] checks`.
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6',
-                  'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
+                  'V1', 'V2', 'V3', 'V4', 'V5')
 FLOW_CHECKS = ('D8', 'D9')
-# Structural/referential integrity. ON by default: a tree that does not satisfy
-# these is malformed, not merely running a different flow.
+# Structural/referential integrity — the validate family. V1-V5 are ON by
+# default: a tree that does not satisfy them is malformed, not merely running a
+# different flow. V6 is the exception and is OPT-IN: an execution list is a
+# GENERATED VIEW a project chooses to keep, and a view going stale while
+# ordinary work moves the tree is not a defect in the tree. `pm sync --check`
+# answers the same question on demand for anyone who wants it, and naming V6 in
+# `[pm] checks` puts it back on the gate.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
     DEFAULT_CHECKS + FLOW_CHECKS + VALIDATE_CHECKS))

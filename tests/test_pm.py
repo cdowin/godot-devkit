@@ -2033,7 +2033,7 @@ class ExecutionList(unittest.TestCase):
             self.assertEqual(self._validate(root)[0], [])
             self.assertEqual(run_cli(root, 'sync', '--check')[0], 0)
 
-    def test_v6_catches_a_stale_list(self):
+    def test_v6_catches_a_stale_list_when_asked_to(self):
         with tree(story_statuses=('todo',)) as root:
             run_cli(root, 'sync')
             run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
@@ -2041,6 +2041,31 @@ class ExecutionList(unittest.TestCase):
             self.assertEqual(run_cli(root, 'sync', '--check')[0], 1)
             run_cli(root, 'sync')
             self.assertEqual(run_cli(root, 'sync', '--check')[0], 0)
+
+    def test_v6_is_NOT_in_the_default_roster(self):
+        # Demoted, not deleted. A generated VIEW going stale while ordinary work
+        # moves the tree is not a defect in the tree, and reddening a commit
+        # gate over it makes the ordinary case the exceptional one.
+        with tree(story_statuses=('todo',)) as root:
+            run_cli(root, 'sync')
+            run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('stale', out)
+            # ...and `pm sync --check` still answers, for anyone who wants it.
+            self.assertEqual(run_cli(root, 'sync', '--check')[0], 1)
+        self.assertNotIn('V6', model.DEFAULT_CHECKS)
+        self.assertIn('V6', model.KNOWN_CHECKS)
+
+    def test_naming_V6_puts_it_back_on_the_gate(self):
+        with tree(story_statuses=('todo',)) as root:
+            run_cli(root, 'sync')
+            run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["V6"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('execution list is stale', out)
 
     def test_order_follows_dependencies_then_name(self):
         with tree() as root:

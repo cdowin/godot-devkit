@@ -46,6 +46,10 @@ checks = [
     "D9",
     "V1", "V2", "V3", "V4", "V5", "V6",
 ]
+# V6 is named on purpose, and it is the one rule here that is NOT stock. This
+# tree keeps generated execution lists and is small enough for `pm sync` to be
+# cheap, so the gate holds the view to the tree. A project whose lists go stale
+# on ordinary work should leave it off and reach for `pm sync --check`.
 # No grandfather ledger of any kind, in either direction. The tree was scaffolded
 # after the schemas existed, so every entry conforms and every document is inside
 # its cap. An empty debt ledger is the state the ratchets are aiming at.

@@ -13,7 +13,10 @@ undrifted and still depend on a feature that does not exist.
     V5  the feature dependency graph is ACYCLIC — a cycle means no build order
         exists at all
     V6  a generated execution-list block, WHERE ONE EXISTS, matches the tree it
-        was rendered from (the list is opt-in per file; absence is not staleness)
+        was rendered from (the list is opt-in per file; absence is not
+        staleness). OPT-IN via `[pm] checks`: a generated view going stale
+        while ordinary work moves the tree is not a defect in the tree, and
+        `pm sync --check` asks the same question on demand.
 
 **Pruned milestones are not errors.** Git history is the archive, so a ref like
 `0.19.4` naming a milestone no longer in the working tree is expected. V4
