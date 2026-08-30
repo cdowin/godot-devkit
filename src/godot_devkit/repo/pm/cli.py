@@ -32,11 +32,7 @@ USAGE = """usage: godot-devkit pm <command>
   story <wip|review|blocked> <story-id>   (review is the story terminal — no story done)
   feature <ready|building> <feature-id>
   feature review <feature-id>
-  feature done <feature-id> [--review-record <path>]   (cascade-closes review stories;
-                                                        REFUSES a record pointing at the
-                                                        transient review.md — D11 deletes
-                                                        that at close, so the durable record
-                                                        is the decision log it fed)
+  feature done <feature-id> [--review-record <path>]   (cascade-closes review stories)
   milestone <ready|building|done> <milestone-id>       (done refuses unless all features done,
                                                         and stamps actual_date: — the date it
                                                         shipped; building also places branch:
@@ -235,30 +231,6 @@ def _resolve_record(cfg: model.PmConfig, rec: str) -> Path:
     return Path(rec) if rec.startswith('/') else cfg.root / rec
 
 
-def _refuse_transient_record(cfg: model.PmConfig, fid: str, rec: str) -> None:
-    """Refuse a `reviewed:` pointer aimed at the TRANSIENT `review.md` slot.
-
-    The close protocol contradicted itself and the contradiction was only
-    resolvable by knowing a rule nobody had written down: stamp `reviewed:` at
-    `review.md`, obey D11 and delete it, and the feature is `done w/o review
-    record`. Enforced here rather than documented, because the whole point of
-    the CLI owning `status:` is that a human never has to hold the protocol in
-    their head to close something correctly.
-    """
-    if not model.is_transient_review_slot(cfg, _resolve_record(cfg, rec)):
-        return
-    durable = model.durable_record_for(cfg, fid)
-    where = cfg.rel(durable) if durable else 'the feature\'s decisions.md'
-    raise Refused(
-        f'feature {fid} -> done: review record {rec!r} is the TRANSIENT '
-        f'{model.REVIEW_FILE_NAME} slot, which D11 deletes at close — pointing '
-        f'`reviewed:` at it closes the feature and then strands it '
-        f'"done w/o review record". The durable record of a review is the '
-        f'decision log it fed: promote what the review settled with '
-        f'`{PROG} decide {fid} --chose … --over … --because … --evidence …`, '
-        f'then close with --review-record {where}. feature.md left untouched.')
-
-
 def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     fid = ''
     rec = ''
@@ -281,12 +253,6 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     if not fid:
         raise Usage(USAGE)
     ff, cur = _feature_or_usage(cfg, fid)
-    if rec:
-        # Before ANY write, and before the already-done shortcut: a late
-        # correction that re-points `reviewed:` at the transient slot is the
-        # same defect arriving by the other door.
-        _refuse_transient_record(cfg, fid, rec)
-
     # Idempotent no-op, but still allow a late --review-record correction on an
     # already-done feature without re-transitioning it.
     if cur == 'done':
@@ -307,13 +273,6 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     if pending:
         raise Refused(f'feature {fid} -> done: stories not at review: {" ".join(pending)}')
     to_close = [p for p, st in states if st == 'review']
-
-    # An EXISTING `reviewed:` aimed at the transient slot is refused too, and
-    # before the stories cascade: a hand-edited pointer reaches `done` by the
-    # same route as a flagged one, and would strand the feature identically.
-    standing = model.unquote(model.field_of(ff, 'reviewed'))
-    if not rec and standing and standing != 'null':
-        _refuse_transient_record(cfg, fid, standing)
 
     if rec:
         target = _resolve_record(cfg, rec)

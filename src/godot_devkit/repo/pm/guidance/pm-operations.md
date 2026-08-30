@@ -23,13 +23,11 @@ pm/roadmap/
     milestone.md                 id, name, status, + your project's own fields
     handoff.md                   cold-start only — never what `pm status` computes
     decisions.md                 DURABLE, append-only; survives close
-    review.md                    TRANSIENT — deleted at close
     bugs/<slug>.md               lives in the milestone that will FIX it
     design/                      design notes for this milestone
     features/<slug>/
       feature.md                 id: <milestone>/<slug>
       decisions.md               DURABLE
-      review.md                  TRANSIENT — deleted at close
       design/
       stories/<slug>.md          id: <milestone>/<feature-slug>/<story-slug>
 ```
@@ -41,11 +39,12 @@ how it grows a slot nothing knows about. `new milestone` and `new feature` are
 idempotent: re-run one on an existing grain and it fills the missing slots without
 touching an existing byte.
 
-**decisions.md is durable, review.md is transient.** Open a decision with
+**decisions.md is the durable record.** Open a decision with
 `pm decide <grain-id> <title>`: it appends one `## <id> — <date> — <title>` heading,
 stamping the two things a hand-written entry gets wrong, and the reasoning under it
-is yours to write. At close, promote anything durable out of `review.md` into
-`decisions.md` and delete `review.md`.
+is yours to write. A reviewer's working notes may sit beside it as `review.md` —
+permitted, never required, never written by a verb — and what a review SETTLED is
+promoted into `decisions.md`, which is where `reviewed:` should point.
 
 To change what a grain looks like here, set `[pm] template_dir`, run
 `pm templates` to copy the packaged templates out, and edit the markdown. A file

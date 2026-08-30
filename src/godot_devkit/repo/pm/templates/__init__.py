@@ -33,7 +33,7 @@ TEMP_RENAME_SUFFIX = '{name}.pm-case-rename'
 # minus the extension, so `decisions.md` is minted by `decisions.md` and there
 # is no mapping table to keep in sync.
 GRAINS = ('milestone', 'feature', 'story', 'bug')
-DOCS = ('handoff', 'decisions', 'review')
+DOCS = ('handoff', 'decisions')
 
 
 class MissingTemplate(Exception):
@@ -205,9 +205,6 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     cannot be hand-shaped, and a scaffolder that refuses on an existing grain
     would leave hand-shaping as the only path.
 
-    `review.md` is scaffolded only while the grain is OPEN: minting the
-    transient slot on a `done` grain would hand D11 a finding the scaffolder
-    itself created.
     """
     file_slots = (model.MILESTONE_FILE_SLOTS if kind == 'milestone'
                   else model.FEATURE_FILE_SLOTS)
@@ -228,8 +225,8 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
             f'written; shorten the id or name, or make {cfg.rel(gdir.parent)}/ '
             f'writable, and re-run') from err
 
-    # Resolve every case-variant FIRST, so the status read below and the writes
-    # after it both see the canonical names.
+    # Resolve every case-variant FIRST, so the writes after it see the
+    # canonical names.
     #
     # Every refusal for the WHOLE grain is raised before the first rename runs.
     # Deciding slot-by-slot inside the moving loop meant an earlier slot's
@@ -307,15 +304,9 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     # prepend is proved writable (a read-only legacy `handoff.md` used to escape
     # as `PermissionError` with the remaining slots never created).
     by_slot = {slot: variant for variant, slot in renames}
-    grain_slot = f'{kind}.md'
-    grain_now = by_slot.get(grain_slot, grain_slot)
-    status = (model.field_of(gdir / grain_now, 'status')
-              if entries.get(grain_now) == 'file' else '')
     bodies: dict[str, str] = {}
     for slot in file_slots:
         if entries.get(by_slot.get(slot, slot)) == 'file':
-            continue
-        if slot == model.REVIEW_FILE_NAME and status == 'done':
             continue
         name = model.SLOT_TEMPLATE[slot]
         try:

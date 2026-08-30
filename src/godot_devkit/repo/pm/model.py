@@ -77,10 +77,6 @@ DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review',
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7',
                   'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 FLOW_CHECKS = ('D8', 'D9', 'D10')
-# D11 is review RETENTION: the transient `review.md` slot must be gone once its
-# grain is done. Opt-in for the same reason D8-D10 are — a project that keeps
-# its review notes forever is running a different (valid) convention.
-RETENTION_CHECKS = ('D11',)
 # D13 is the canonical grain STRUCTURE, D14 the bug-lifetime rule. Opt-in
 # because a tree that predates the canonical slots is missing most of them, and
 # a rule that turns a consumer red on upgrade day is unshippable.
@@ -90,8 +86,7 @@ STRUCTURE_CHECKS = ('D13', 'D14')
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
-    DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS
-    + STRUCTURE_CHECKS + VALIDATE_CHECKS))
+    DEFAULT_CHECKS + FLOW_CHECKS + STRUCTURE_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -99,8 +94,6 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 # One shape, every grain, all lowercase. The split that makes it worth having:
 #
 #   decisions.md  DURABLE   — appended during the grain's life, survives close.
-#   review.md     TRANSIENT — simplifier and reviewer both append; DELETED at
-#                             close, with anything durable promoted first (D11).
 #
 # `handoff.md` and `bugs/` are milestone-only, ruled explicitly: a feature is
 # never picked up cold on its own, and a bug lives in the milestone that will
@@ -113,10 +106,16 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 DECISION_FILE_NAME = 'decisions.md'
 REVIEW_FILE_NAME = 'review.md'
 
-MILESTONE_FILE_SLOTS = ('milestone.md', 'handoff.md', 'decisions.md',
-                        'review.md')
+# PERMITTED, never required, and never minted. A reviewer's working notes are a
+# real file in a real tree — one consumer holds 103 of them — but no verb writes
+# one and no rule needs one, so requiring it would mint an empty file per grain
+# and forbidding it would report 103 findings about notes nobody asked for. The
+# durable record of a review is the decision log it fed, which D1 already reads.
+OPTIONAL_FILE_SLOTS = (REVIEW_FILE_NAME,)
+
+MILESTONE_FILE_SLOTS = ('milestone.md', 'handoff.md', 'decisions.md')
 MILESTONE_DIR_SLOTS = ('features', 'bugs', 'design')
-FEATURE_FILE_SLOTS = ('feature.md', 'decisions.md', 'review.md')
+FEATURE_FILE_SLOTS = ('feature.md', 'decisions.md')
 FEATURE_DIR_SLOTS = ('stories', 'design')
 
 # slot -> the template that mints it. The grain file's own template is named for
@@ -124,7 +123,6 @@ FEATURE_DIR_SLOTS = ('stories', 'design')
 SLOT_TEMPLATE = {
     'milestone.md': 'milestone', 'feature.md': 'feature',
     'handoff.md': 'handoff', 'decisions.md': 'decisions',
-    'review.md': 'review',
 }
 
 # The one-line instruction each shared doc opens with, and D13 asserts is still
@@ -137,8 +135,6 @@ SLOT_TEMPLATE = {
 SLOT_HEADER = {
     'decisions.md': 'Append with `godot-devkit pm decide <grain-id>` — never by '
                     'hand; the command stamps the date and the next ordinal.',
-    'review.md': 'Transient. Deleted at close — promote anything durable into '
-                 'decisions.md first.',
     'handoff.md': 'Cold-start only. Never restate what `pm status` computes.',
 }
 
@@ -746,49 +742,6 @@ def record_is_substantive(cfg: PmConfig, path: Path) -> bool:
     return len(''.join(body.split())) >= cfg.review_min_content_bytes
 
 
-def is_transient_review_slot(cfg: PmConfig, path: Path) -> bool:
-    """True when `path` is a grain's TRANSIENT `review.md`, not a durable record.
-
-    THE close protocol used to contradict itself here. `pm feature done
-    --review-record <path>` stamps `reviewed:` at whatever it is handed; D11
-    then requires a `done` grain to have NO `review.md`. Point the pointer at
-    the transient slot and both rules cannot hold: delete the file exactly as
-    D11 says and D1 reports the feature `done w/o review record`.
-
-    The resolution is that a review.md is scratch — reviewer and simplifier
-    append to it while the grain is open — and the DURABLE record of a review is
-    the decision log it fed. So the pointer must name the durable half, and this
-    predicate is how the close verb refuses the transient one instead of leaving
-    a human to know the rule.
-
-    Decidable without a guess: D13 permits `review.md` only as a grain slot, so
-    a file with that name anywhere inside the roadmap IS the transient slot. A
-    project storing durable records as `docs/reviews/<something>.md` is
-    untouched — that path is outside the tree and is not this slot.
-
-    Judged on the path AS WRITTEN and on what it RESOLVES to, and both halves
-    are load-bearing. A `durable.md -> review.md` symlink is the transient slot
-    under another name, and reading only the name lets it through. A `review.md`
-    symlink pointing at a durable record elsewhere is still the file D11 deletes
-    at close — deleting the link strands the pointer exactly the same way — so
-    the name in the tree is not forgiven by where it points either.
-    """
-    candidates = [path]
-    try:
-        candidates.append(path.resolve())
-    except OSError:
-        pass
-    for candidate in candidates:
-        if candidate.name.lower() != REVIEW_FILE_NAME:
-            continue
-        try:
-            candidate.resolve().relative_to(cfg.roadmap.resolve())
-        except (ValueError, OSError):
-            continue
-        return True
-    return False
-
-
 def durable_record_for(cfg: PmConfig, fid: str) -> Path | None:
     """Where a feature's review record BELONGS — its own `decisions.md`.
 
@@ -961,7 +914,7 @@ def read_feature(ffile: Path) -> FeatureView:
     view.done_n = sum(1 for s in view.stories if field_of(s, 'status') == 'done')
     return view
 
-# --- the grain walk (D11, D13, D14) -------------------------------------------
+# --- the grain walk (D13, D14) -------------------------------------------
 @dataclass(frozen=True)
 class GrainDir:
     """One milestone or feature directory, its grain file, and its status."""
@@ -997,24 +950,6 @@ def grain_dirs(cfg: PmConfig) -> list[GrainDir]:
     return out
 
 
-# --- retention (D11) ----------------------------------------------------------
-# `review.md` is CO-LOCATED, so retention has one question and no guess: is the
-# transient slot still there on a grain that closed? The rule this replaces
-# resolved a filename in a shared directory back to the grain it "named", and a
-# real corpus got that exactly backwards — 6 of 123 docs resolved, and those 6
-# were the durable ones `reviewed:` already pointed at. Anchoring the match
-# could only ever remove matches. A known path removes the question.
-def stale_review_files(cfg: PmConfig) -> list[tuple[GrainDir, Path]]:
-    """(grain, review.md) for every `done` grain that still has one."""
-    out = []
-    for grain in grain_dirs(cfg):
-        if grain.status != 'done':
-            continue
-        if dir_entries(grain.path).get(REVIEW_FILE_NAME) == 'file':
-            out.append((grain, grain.path / REVIEW_FILE_NAME))
-    return out
-
-
 # --- structure (D13) ----------------------------------------------------------
 def header_of(path: Path) -> str:
     """The file's first non-blank line, stripped — its canonical header slot."""
@@ -1035,17 +970,14 @@ def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
     LEDGER.md` all exist in a real tree because no slot was scaffolded AND
     nothing flagged the invention. A missing-only check leaves those forever.
 
-    `review.md` is required exactly while the grain is open and forbidden once
-    it is done — the two halves of one fact, with D11 owning the `done` half so
-    a closed grain is never told both to have it and to delete it.
+    `OPTIONAL_FILE_SLOTS` is permitted and never required — see its own note.
     """
     out: list[tuple[Path, str]] = []
     for grain in grain_dirs(cfg):
         entries = dir_entries(grain.path)
-        allowed = set(grain.file_slots) | set(grain.dir_slots)
+        allowed = (set(grain.file_slots) | set(grain.dir_slots)
+                   | set(OPTIONAL_FILE_SLOTS))
         for slot in grain.file_slots:
-            if slot == REVIEW_FILE_NAME and grain.status == 'done':
-                continue  # D11 owns the closed half
             if entries.get(slot) == 'file':
                 continue
             variants = case_variants(entries, slot)

@@ -459,7 +459,7 @@ class Scaffolding(unittest.TestCase):
             self.assertFalse((mdir / 'handoff.md').exists())
 
     # `nothing was written` is a claim about the WHOLE grain, and the slot order
-    # is milestone.md, handoff.md, decisions.md, review.md — so every refusal
+    # is milestone.md, handoff.md, decisions.md — so every refusal
     # that keys on decisions.md is reached with handoff.md's rename already
     # decided. Deciding inside the moving loop put that rename on disk and, via
     # `git mv --force`, in the INDEX, where it rides out on the next commit
@@ -555,13 +555,12 @@ class Scaffolding(unittest.TestCase):
                 self.assertIn('is not writable', out)
                 self.assertIn('nothing was written', out)
                 self.assertNotIn('Traceback', out)
-                self.assertFalse((mdir / 'review.md').exists())
                 self.assertEqual(model.read_raw(mdir / 'decisions.md'), LEGACY_LOG)
             finally:
                 (mdir / 'handoff.md').chmod(0o644)
             # And it goes through once the mode allows it.
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
-            self.assertTrue((mdir / 'review.md').is_file())
+            self.assertTrue((mdir / 'handoff.md').is_file())
 
     def test_new_refuses_an_unwritable_grain_DIRECTORY_before_a_rename(self):
         # A rename writes the DIRECTORY; the FILE's mode says nothing about it.
@@ -636,7 +635,7 @@ class Scaffolding(unittest.TestCase):
         # A latin-1 byte in a project's `template_dir` raised
         # `UnicodeDecodeError` from inside the slot loop, two files in. Every
         # template the grain needs is loaded and decoded before anything lands.
-        for slot in ('review.md', 'milestone.md'):
+        for slot in ('handoff.md', 'milestone.md'):
             with self.subTest(slot), tree(story_statuses=('todo',)) as root:
                 (root / 'devkit.toml').write_text(
                     '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
@@ -660,7 +659,7 @@ class Scaffolding(unittest.TestCase):
             real = templates.write
 
             def flaky(path: Path, text: str) -> None:
-                if path.name == model.REVIEW_FILE_NAME:
+                if path.name == model.DECISION_FILE_NAME:
                     raise OSError(28, 'No space left on device')
                 real(path, text)
 
@@ -686,7 +685,7 @@ class Scaffolding(unittest.TestCase):
             self.assertIn('is a SYMLINK', out)
             self.assertIn('nothing was written', out)
             self.assertEqual(model.read_raw(outside), 'OUTSIDE\n')
-            self.assertFalse((mdir / 'review.md').exists())
+            self.assertFalse((mdir / 'handoff.md').exists())
 
     def test_a_symlinked_slot_is_named_a_LINK_even_when_it_points_at_a_dir(self):
         # `dir_entries` classifies with `is_dir()`, which FOLLOWS the link, so a
@@ -710,14 +709,6 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             self.assertEqual((mdir / 'decisions.md').read_text(encoding='utf-8'),
                              before)
-
-    def test_new_does_not_mint_a_review_md_on_a_done_grain(self):
-        # Otherwise the scaffolder hands D11 a finding it created itself.
-        with tree(feature_status='done', story_statuses=('done',)) as root:
-            fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
-            self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'alpha')[0], 0)
-            self.assertFalse((fdir / 'review.md').exists())
-            self.assertTrue((fdir / 'decisions.md').is_file())
 
     def test_new_needs_a_name_only_when_the_grain_does_not_exist(self):
         with tree(story_statuses=('todo',)) as root:
@@ -2082,92 +2073,6 @@ class TemplateCannotMintPastTheGraph(unittest.TestCase):
 
 
 
-class Retention(unittest.TestCase):
-    """D11 — the transient `review.md` outliving the grain that owns it.
-
-    Co-located, so the rule asks one question at a known path and guesses at
-    nothing. What it replaces resolved a findings-doc FILENAME back to the grain
-    it "named", and on a real 123-doc corpus that resolved 6 — precisely the
-    durable ones `reviewed:` already pointed at. Anchoring the match could only
-    ever remove matches, which is why this is a rewrite and not a repair.
-    """
-
-    TOML = '[pm]\nchecks = ["D11"]\n'
-    FDIR = 'pm/roadmap/0.1-demo/features/alpha'
-    MDIR = 'pm/roadmap/0.1-demo'
-
-    @staticmethod
-    def _review(root: Path, rel: str) -> Path:
-        p = root / rel / model.REVIEW_FILE_NAME
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(f'{model.SLOT_HEADER["review.md"]}\n\n# review\n',
-                     encoding='utf-8')
-        return p
-
-    @staticmethod
-    def _close(root: Path, rel: str) -> None:
-        f = root / rel
-        f.write_text(f.read_text(encoding='utf-8').replace(
-            'status: building', 'status: done'), encoding='utf-8')
-
-    def test_a_review_outliving_its_done_feature_is_drift_and_not_before(self):
-        # The same file is legitimate WHILE the grain is open and dead weight
-        # the moment it closes. A rule that merely flagged its presence would be
-        # wrong for the whole first half of the grain's life.
-        with tree(feature_status='building', story_statuses=('review',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._review(root, self.FDIR)
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-            self._close(root, f'{self.FDIR}/feature.md')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn(f'{self.FDIR}/review.md is transient but feature '
-                          f'0.1/alpha is done', out)
-            self.assertIn('decisions.md', out)
-
-    def test_a_done_milestone_with_a_review_is_drift_too(self):
-        # Milestones get the rule as well. The old D11 had to skip them: it
-        # resolved through `reviewed:`, which exists only on feature.md, so a
-        # milestone-scoped doc had no green state and the finding ordered a
-        # repair the schema could not accept. A co-located slot has one.
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._review(root, self.MDIR)
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('milestone 0.1 is done', out)
-
-    def test_no_done_grain_is_named_rather_than_silently_passed(self):
-        # Not a FINDING — "nothing has closed yet" is this rule's own success
-        # state, unlike D12, whose missing log means it can never fire at all.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertIn('no `done` grain in the tree', out)
-
-    def test_the_census_carries_the_done_grain_count(self):
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertIn('2 done grain(s)', out)
-
-    def test_d11_is_silent_when_not_enabled(self):
-        with tree(feature_status='done', story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D4"]\n', encoding='utf-8')
-            self._review(root, self.FDIR)
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-            self.assertNotIn('is transient', out)
-            self.assertNotIn('done grain(s)', out)
-
-
 class Structure(unittest.TestCase):
     """D13 — the canonical slots. Missing is drift AND extra is drift.
 
@@ -2238,24 +2143,29 @@ class Structure(unittest.TestCase):
             self.assertIn('no longer opens with its instruction line', out)
             self.assertIn('godot-devkit pm decide', out)
 
-    def test_review_md_is_required_open_and_forbidden_done_with_no_overlap(self):
-        # The two halves of one fact. D13 owns the open half, D11 the closed
-        # one, and a `done` grain must never be told both to have the file and
-        # to delete it.
-        with tree(feature_status='building', story_statuses=('review',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D11","D13"]\n', encoding='utf-8')
-            self._scaffolded(root)
-            (root / self.FDIR / 'review.md').unlink()
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('is missing review.md', out)
-
-            f = root / self.FDIR / 'feature.md'
-            f.write_text(f.read_text(encoding='utf-8').replace(
-                'status: building', 'status: done'), encoding='utf-8')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
+    def test_review_md_is_permitted_at_every_status_and_never_required(self):
+        # PERMITTED, never required, never minted. One consumer holds 103 of
+        # them, so forbidding it would report 103 findings about notes nobody
+        # asked for; requiring it would mint an empty file per grain, which is
+        # the sprawl `pm new` was making. Both halves are asserted, and at both
+        # statuses, because "extra is drift" is the half that earns D13.
+        for status in ('building', 'done'):
+            with self.subTest(status), tree(
+                    feature_status=status,
+                    story_statuses=('done' if status == 'done' else 'review',)) as root:
+                (root / 'devkit.toml').write_text(
+                    '[pm]\nchecks = ["D13"]\n', encoding='utf-8')
+                self._scaffolded(root)
+                # Not minted by the scaffolder, and its absence is not a finding.
+                self.assertFalse((root / self.FDIR / 'review.md').exists())
+                code, out = run_gate(root)
+                self.assertEqual(code, 0, out)
+                # And present, it is not reported as a non-canonical file either.
+                (root / self.FDIR / 'review.md').write_text(
+                    '# notes\n', encoding='utf-8')
+                code, out = run_gate(root)
+                self.assertEqual(code, 0, out)
+                self.assertNotIn('review.md', out)
 
     def test_a_case_variant_is_both_missing_and_extra(self):
         # `DECISIONS.md` vs `decisions.md`. macOS resolves one to the other and

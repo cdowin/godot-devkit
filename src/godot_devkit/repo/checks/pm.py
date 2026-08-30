@@ -40,13 +40,6 @@ DRIFT RULES (each FAILs, naming the offending path):
       the roadmap root (lag-by-one keeps exactly the most recently closed),
       means a prune is due.
 
-  D11 review RETENTION — a `done` grain must not have a `review.md`. The slot
-      is the TRANSIENT half of the pair: simplifier and reviewer append to it
-      while the grain is open, and at close anything durable is promoted into
-      `decisions.md` and the file goes. Co-located at a known path, so there is
-      no filename to resolve, no exemption list and nothing to guess. OFF by
-      default (see RETENTION_CHECKS).
-
   D13 canonical grain STRUCTURE — every milestone and feature dir carries
       exactly its slots. MISSING is drift and EXTRA is drift, and each shared
       doc must still open with its one-line instruction header, so the
@@ -60,7 +53,7 @@ DRIFT RULES (each FAILs, naming the offending path):
       status outside `[pm] bug_states`, which D4 does not cover and which would
       otherwise read as "closed" and pass in silence.
 
-  D11/D13/D14 are OFF by default like D8-D10 — a tree predating the canonical
+  D13/D14 are OFF by default like D8-D10 — a tree predating the canonical
   slots is missing most of them, and a rule that turns a consumer red on
   upgrade day is unshippable. Scaffold first, then hold the line.
 
@@ -76,34 +69,6 @@ from __future__ import annotations
 import sys
 
 from godot_devkit.repo.pm import model
-
-
-def _retention(cfg, report) -> int:
-    """D11 — the transient `review.md` slot outliving the grain that owns it.
-
-    Returns the number of `done` grains scanned, so the census can carry it:
-    this rule's population is not "every grain", it is the closed ones, and a
-    run where nothing had closed must not read like a run where everything was
-    clean.
-
-    Co-located, so there is no resolution step and nothing to guess. The rule
-    this replaced matched a findings-doc FILENAME back to the grain it "named",
-    and against a real corpus that got the answer backwards: 6 of 123 docs
-    resolved, and those 6 were the durable ones `reviewed:` already pointed at.
-    A known path deletes the question rather than narrowing it.
-    """
-    stale = model.stale_review_files(cfg)
-    n_done = sum(1 for g in model.grain_dirs(cfg) if g.status == 'done')
-    if not n_done:
-        # Printed, NOT reported. "Nothing has closed yet" is this rule's own
-        # success state, not a rule that scanned nothing.
-        print(f'[check:pm] D11: no `done` grain in the tree — nothing to retire')
-        return 0
-    for grain, rfile in stale:
-        report(f'{cfg.rel(rfile)} is transient but {grain.kind} {grain.gid} is '
-               f'done — promote anything durable into '
-               f'{model.DECISION_FILE_NAME}, then delete it (D11)')
-    return n_done
 
 
 def _structure(cfg, report) -> int:
@@ -296,10 +261,6 @@ def run() -> int:
             report(f'{done_milestone_dirs} done milestone dirs at the roadmap '
                    f'root — lag-by-one allows 1; a prune is due')
 
-    n_done_grains = 0
-    if 'D11' in enabled:
-        n_done_grains = _retention(cfg, report)
-
     n_grain_dirs = _structure(cfg, report) if 'D13' in enabled else 0
     n_bugs = _bug_lifetime(cfg, report) if 'D14' in enabled else 0
 
@@ -319,8 +280,6 @@ def run() -> int:
     # anybody editing this file. That is the whole difference between fixing
     # the instance and fixing the shape.
     census += model.tree_walk(cfg).disclosures()
-    if 'D11' in enabled:
-        census += f', {n_done_grains} done grain(s)'
     if 'D13' in enabled:
         census += f', {n_grain_dirs} grain dir(s)'
     if 'D14' in enabled:
