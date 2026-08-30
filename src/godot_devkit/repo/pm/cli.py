@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,14 +68,6 @@ USAGE = """usage: godot-devkit pm <command>
                                           (append a release note to that milestone)
   changelog --render [--milestone <id>]   (the union of every milestone's changelog,
                                            newest release first, to stdout)
-  prose-ledger                            (regenerate `[pm] prose_grandfather`, D17's debt
-                                           ledger, to stdout — REFUSES to raise a ceiling)
-  collapse <milestone-id> [--keep <ids>] [--note <sentence>]
-                                          (D18's close step: rewrite a `done` milestone's
-                                           raw decision trail to one generated pointer,
-                                           keeping the entries named by --keep. The one
-                                           sanctioned edit of an append-only log, and it
-                                           refuses to emit a file D18 would still fail)
   prune                                   (delete cooled archives; stamp the prune log)"""
 
 
@@ -1197,14 +1188,7 @@ def _append_to_log(cfg: model.PmConfig, log: Path, schema: model.LogSchema,
     except (OSError, UnicodeDecodeError) as err:
         raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
     entries = model.log_entries_in(text)
-    # What a COLLAPSE retired is spent, not free. Allocating from the entries
-    # still present re-mints an id the log's own pointer says is gone, and the
-    # gate cannot see the collision because a pointer is prose.
-    spent, pointer_defects = model.spent_entry_ids(text)
-    if pointer_defects:
-        raise Refused(f'{cfg.rel(log)} left untouched — '
-                      + '; '.join(pointer_defects))
-    eid = model.next_entry_id(entries, schema, spent)
+    eid = model.next_entry_id(entries, schema)
     when = datetime.now(timezone.utc).date().isoformat()
     # The title defaults to the entry's headline field, which is right most of
     # the time and wrong LOUDLY the rest: one too long to be a title is refused
@@ -1414,195 +1398,6 @@ def cmd_changelog(cfg: model.PmConfig, args: list[str]) -> int:
                           values, title, '--what', 'What')
 
 
-# --- collapse (D18) -----------------------------------------------------------
-# THE missing verb. D18 requires a `done` milestone to collapse its raw decision
-# trail to pointers — but decisions.md is append-only and written ONLY by
-# `pm decide`, so the collapse could be performed exactly one way: by hand, in a
-# file whose own first line says never by hand. One rule demanding an edit
-# another rule forbids is not a policy, it is a gap, and it was closed by a
-# human deleting 66 lines and hoping the result still conformed.
-#
-# The verb makes the collapse the same kind of act as every other status move:
-# preconditions first, all-or-nothing, idempotent, and its OUTPUT is gate-clean
-# by construction — it refuses rather than emit a file D18 would still fail.
-COLLAPSE_FLAGS = {'--keep': 'keep', '--note': 'note'}
-
-
-def _collapsed_block(collapsed: list[model.LogEntry], when: str,
-                     note: str) -> list[str]:
-    """The pointer that replaces a run of entries. Generated, never typed.
-
-    Names WHAT was collapsed (every id, so nothing goes missing without saying
-    so) and WHERE it went: git history holds the full text, and the design
-    detail that produced each choice lives at the feature grain. That is what
-    D18 means by "close evidence is pointers, a line and a link".
-
-    The id list is also the ALLOCATOR's input, under `SPENT_IDS_LABEL`: a
-    collapsed entry is gone from the file and its id is still spent, so this
-    sentence is the only surviving record of it. Everything before the label is
-    prose for a human and is never parsed — a pointer explaining "D16's
-    separation from D15" is talking about rules, not about retired entries.
-    """
-    ids = ', '.join(entry.eid for entry in collapsed)
-    body = (f'{model.COLLAPSE_MARKER}, {when}. {len(collapsed)} decision(s) '
-            f'collapsed to this pointer; the full text is in git history '
-            f'(`git log -p` on this file), and the design detail behind each '
-            f'lives at the feature grain. {model.SPENT_IDS_LABEL} {ids}.')
-    # Wrapped, because the line count IS the budget D18 measures and an
-    # unwrapped paragraph spends it on one line nobody can read in a diff.
-    out = textwrap.wrap(body, width=79)
-    if note:
-        out += [''] + textwrap.wrap(note, width=79)
-    return out
-
-
-def _refuse_unless_git_holds(cfg: model.PmConfig, path: Path) -> None:
-    """Refuse to destroy `path`'s prose unless git already holds a copy of it.
-
-    `pm collapse` deletes the text of every entry it retires and writes a
-    pointer saying "the full text is in git history (`git log -p` on this
-    file)". On an uncommitted log that sentence is FALSE and the prose is gone
-    for good — a destructive command lying about recoverability, which is the
-    anti-pattern `pm prune`'s dirty check is named for. This is the same guard,
-    on the other destructive verb this package ships.
-
-    FILE-SCOPED, deliberately, where prune's is whole-tree. Prune deletes many
-    paths at once and must be its own commit, so anything dirty anywhere is a
-    reason to stop. A collapse rewrites exactly one file, and the close protocol
-    that runs it has other files legitimately dirty at that moment (milestone.md
-    just flipped to done, changelog.md just gained a release entry). A
-    whole-tree check would refuse the protocol's normal state, and a gate that
-    fires on normal operation is a gate people learn to route around — so it
-    checks the one file whose text it is about to delete, and no other.
-
-    TRACKED as well as clean: an untracked or ignored log has no history at all,
-    and `git status` says nothing about a file git was told to ignore.
-    """
-    rel = cfg.rel(path)
-    fix = (f'Commit it first (`git add {rel} && git commit`), then re-run — '
-           f'the collapse is a rewrite whose only backup is that commit. '
-           f'{rel} left untouched.')
-    tracked = _git(['ls-files', '--error-unmatch', '--', str(path)], cfg.root)
-    if tracked.returncode != 0:
-        said = (tracked.stderr or tracked.stdout).strip().splitlines()
-        raise Refused(
-            f'{rel} is not tracked by git ({said[-1] if said else "git said no"})'
-            f' — the pointer this writes says the full text is in git history, '
-            f'and for an untracked log that is false: the collapsed prose would '
-            f'be gone for good. {fix}')
-    status = _git(['status', '--porcelain', '--', str(path)], cfg.root)
-    if status.returncode != 0:
-        raise Refused(
-            f'cannot read git status for {rel} '
-            f'({status.stderr.strip() or "git failed"}) — a collapse whose '
-            f'recoverability cannot be checked is a destructive command lying '
-            f'about it. {fix}')
-    if status.stdout.strip():
-        raise Refused(
-            f'{rel} has uncommitted changes ({status.stdout.strip().splitlines()[0]}) '
-            f'— the collapse deletes the prose of the entries it retires and '
-            f'writes a pointer claiming the full text is in git history. For '
-            f'anything not yet committed that claim is false and the text is '
-            f'unrecoverable. {fix}')
-
-
-def cmd_collapse(cfg: model.PmConfig, args: list[str]) -> int:
-    mid, values, _ = _parse_flags(args, COLLAPSE_FLAGS)
-    if not mid:
-        raise Usage(USAGE)
-    if '/' in mid:
-        raise Refused(
-            f'{mid!r} names a feature, story or bug — D18 collapses a '
-            f'MILESTONE log. A feature\'s decisions.md is capped by D17 and '
-            f'stays whole: it is where the collapsed detail is pointing.')
-    mdir = model.milestone_dir(cfg, mid)
-    if mdir is None:
-        raise Usage(f'no milestone resolves from id {mid!r}')
-    mfile = mdir / 'milestone.md'
-    status = model.field_of(mfile, 'status')
-    if status != 'done':
-        raise Refused(
-            f'milestone {mid} is {status!r} — the collapse is a CLOSE step, '
-            f'and an open milestone\'s trail is still being appended to. Close '
-            f'it first (`{PROG} milestone done {mid}`).')
-    log = mdir / model.DECISION_FILE_NAME
-    if not log.is_file():
-        raise Refused(f'{cfg.rel(mdir)}/ has no {model.DECISION_FILE_NAME} — '
-                      f'nothing to collapse')
-    try:
-        text = model.read_raw(log)
-    except (OSError, UnicodeDecodeError) as err:
-        raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
-    defect = model.log_fence_defect(text, 'D18')
-    if defect:
-        raise Refused(f'{cfg.rel(log)}: {defect}')
-
-    entries = model.log_entries_in(text)
-    if not entries:
-        raise Refused(f'{cfg.rel(log)} holds no entries — a milestone that '
-                      f'recorded no decision has no trail to collapse')
-    keep = [k.strip() for k in values.get('keep', '').split(',') if k.strip()]
-    known = {entry.eid for entry in entries}
-    unknown = [k for k in keep if k not in known]
-    if unknown:
-        raise Refused(
-            f'--keep names {", ".join(unknown)}, which {cfg.rel(log)} does not '
-            f'hold (it has: {" ".join(entry.eid for entry in entries)})')
-    collapsed = [entry for entry in entries if entry.eid not in keep]
-    if not collapsed:
-        if model.COLLAPSE_MARKER in text:
-            _ok(f'milestone {mid}: {cfg.rel(log)} already collapsed (no-op)')
-            return 0
-        raise Refused(
-            f'--keep names every entry in {cfg.rel(log)} — a collapse that '
-            f'collapses nothing is a no-op with a rewrite behind it')
-
-    lines = text.split('\n')
-    # The preamble is everything before the FIRST entry heading — the mandated
-    # header, the title, the slot's own explanation. It is not trail and it is
-    # not this verb's to touch.
-    first = min(entry.line for entry in entries)
-    head = lines[:first - 1]
-    while head and not head[-1].strip():
-        head.pop()
-    kept_blocks: list[list[str]] = []
-    bounds = [entry.line for entry in entries] + [len(lines) + 1]
-    for n, entry in enumerate(entries):
-        if entry.eid not in keep:
-            continue
-        block = lines[entry.line - 1:bounds[n + 1] - 1]
-        while block and not block[-1].strip():
-            block.pop()
-        kept_blocks.append(block)
-
-    when = datetime.now(timezone.utc).date().isoformat()
-    body = list(head) + ['']
-    body += _collapsed_block(collapsed, when, values.get('note', '').strip())
-    for block in kept_blocks:
-        body += [''] + block
-    out = '\n'.join(body) + '\n'
-
-    # Gate-clean by construction, exactly as `prose-ledger` refuses to raise a
-    # ceiling: a verb that emitted a file its own rule still fails would leave
-    # the human back where they started, hand-editing an append-only log.
-    produced = len(out.rstrip('\n').split('\n'))
-    if produced > cfg.closed_log_lines_max:
-        raise Refused(
-            f'the collapse would leave {cfg.rel(log)} at {produced} lines, '
-            f'still over D18\'s {cfg.closed_log_lines_max}-line close budget — '
-            f'keep fewer entries (--keep currently holds '
-            f'{len(keep)}), or shorten --note. {cfg.rel(log)} left untouched.')
-    # Last precondition before the only write: everything above can refuse on
-    # the log's contents alone, and this one asks git whether the prose about
-    # to be deleted survives anywhere.
-    _refuse_unless_git_holds(cfg, log)
-    model.write_raw(log, out)
-    _ok(f'milestone {mid}: {cfg.rel(log)} collapsed — '
-        f'{len(collapsed)} entry/ies to a pointer, {len(keep)} kept, '
-        f'{len(text.rstrip(chr(10)).split(chr(10)))} -> {produced} lines')
-    return 0
-
-
 # --- prune --------------------------------------------------------------------
 def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     if args:
@@ -1676,54 +1471,6 @@ def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
-def cmd_prose_ledger(cfg: model.PmConfig, args: list[str]) -> int:
-    """Regenerate D17's debt ledger to STDOUT, refusing to raise any ceiling.
-
-    A RENDER, not a file this tool owns — the ledger lives in the consumer's
-    `devkit.toml`, so the block goes to stdout to be pasted or redirected and
-    every count goes to stderr, where redirecting the block cannot swallow it.
-
-    The refusal is the feature: an EXISTING ceiling never rises. A regeneration
-    that raised one would make the whole ratchet decorative — every over-cap
-    document would be re-recorded at its new size and the gate would never fail
-    again. The only way past a growth is a genuine trim.
-
-    A document that has newly crossed its cap is a different case and IS
-    absorbed, because a ledger that could not gain a line could not be
-    regenerated on a growing tree at all. Every one of them is NAMED on stderr
-    with a count: a debt ledger that grows in silence has stopped being a
-    ratchet, and naming them is what makes the `devkit.toml` diff a decision
-    somebody makes rather than a paste nobody reads.
-    """
-    if args:
-        raise Usage('prose-ledger takes no arguments')
-    docs = model.prose_docs(cfg)
-    if not docs:
-        raise Usage(f'no grain documents found under {cfg.roadmap_dir}/ '
-                    f'(wrong [pm] roadmap_dir, or an empty tree?)')
-    body, refused, absorbed = model.regenerate_prose_ledger(cfg, docs)
-    if refused:
-        raise Refused(
-            'the ledger is a DEBT ledger and a recorded ceiling never rises — '
-            + '; '.join(refused)
-            + '. Trim the document(s) back under the recorded ceiling, or make '
-              'the case for the growth and lower something else. Raising a '
-              'ceiling is the one thing this will not do (nothing was written)')
-    print('prose_grandfather = [')
-    for entry in body:
-        print(f'    "{entry}",')
-    print(']')
-    print(f'[pm] {len(body)} document(s) over cap, from '
-          f'{len(cfg.prose_grandfather)} ledgered; paste this into [pm] in '
-          f'devkit.toml', file=sys.stderr)
-    if absorbed:
-        print(f'[pm] {len(absorbed)} document(s) NEWLY ABSORBED into the '
-              f'ledger — new debt, not a trim:', file=sys.stderr)
-        for entry in absorbed:
-            print(f'[pm]   + {entry}', file=sys.stderr)
-    return 0
-
-
 # --- dispatch -----------------------------------------------------------------
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help', 'help'):
@@ -1743,7 +1490,6 @@ def main(argv: list[str]) -> int:
         'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
         'decisions': cmd_decisions, 'changelog': cmd_changelog,
-        'prose-ledger': cmd_prose_ledger, 'collapse': cmd_collapse,
     }
     fn = table.get(cmd)
     if fn is None:

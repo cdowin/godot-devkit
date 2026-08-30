@@ -33,13 +33,6 @@ the milestone machine has no `review` state (nothing transitions into one).
     decision_grandfather = []      # D12: logs whose legacy entries predate the
                                    # schema — "<path>" or "<path>:<N entries>"
     changelog_grandfather = []     # D15: the same ledger for changelog.md
-    story_lines_max      = 120     # D17: the per-grain prose caps
-    feature_lines_max    = 200
-    bug_lines_max        = 125
-    decisions_lines_max  = 150
-    changelog_lines_max  = 150
-    closed_log_lines_max = 60      # D18: a `done` milestone's decision trail
-    prose_grandfather    = []      # D17/D18: "<path>:<N lines>", debt only
 """
 from __future__ import annotations
 
@@ -108,17 +101,12 @@ STRUCTURE_CHECKS = ('D13', 'D14')
 # can ship with a perfectly conforming empty log.
 SCHEMA_CHECKS = ('D12', 'D15')
 RELEASE_CHECKS = ('D16',)
-# D17 is the prose RATCHET and D18 the closed-milestone decision trail. Opt-in
-# like the rest: the caps default to one consumer's measured p90, and another
-# tree's distribution is its own — a cap that fits one repo misfires on the
-# next, so a consumer sets its numbers and then turns the rules on.
-PROSE_CHECKS = ('D17', 'D18')
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
     DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + SCHEMA_CHECKS
-    + STRUCTURE_CHECKS + RELEASE_CHECKS + PROSE_CHECKS + VALIDATE_CHECKS))
+    + STRUCTURE_CHECKS + RELEASE_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
@@ -179,13 +167,6 @@ SLOT_HEADER = {
                  'decisions.md first.',
     'handoff.md': 'Cold-start only. Never restate what `pm status` computes.',
 }
-
-# The same lines as a SET, for the one reader that does not know which slot it
-# is holding: D17 excludes the mandated header from every prose budget, and it
-# has to do that for EVERY slot header rather than the one it was written
-# against. Derived from SLOT_HEADER, never retyped — a second copy of these
-# strings is a second thing to keep in step with D13.
-SLOT_HEADERS = frozenset(SLOT_HEADER.values())
 
 
 def dir_entries(path: Path) -> dict[str, str]:
@@ -257,19 +238,6 @@ class PmConfig:
     # is exit 2. (repo-relative log path, entries exempted or None for all).
     decision_grandfather: tuple[tuple[str, int | None], ...] = ()
     changelog_grandfather: tuple[tuple[str, int | None], ...] = ()
-    # D17/D18 only: the prose caps, and the debt ledger that lets a tree over
-    # them ship. Every cap is CONFIG rather than a constant — the defaults are
-    # one consumer's measured p90, not a law (see PROSE_CAPS).
-    story_lines_max: int = 120
-    feature_lines_max: int = 200
-    bug_lines_max: int = 125
-    decisions_lines_max: int = 150
-    changelog_lines_max: int = 150
-    closed_log_lines_max: int = 60
-    # (repo-relative doc path, its recorded line CEILING). Never None: a
-    # whole-file exemption would be a permanent uncapped pass, which is the one
-    # thing a ratchet cannot have.
-    prose_grandfather: tuple[tuple[str, int], ...] = ()
     # D8 only: where the shipped version lives, and the line that carries it.
     template_dir: str = ''
     version_file: str = 'project.godot'
@@ -344,17 +312,6 @@ def load() -> PmConfig:
             'the markdown (a template can change a grain\'s whole shape, not '
             'just its frontmatter defaults)')
 
-    def cap(key: str, fallback: int) -> int:
-        got = number(sect, 'pm', key, fallback)
-        if got < 1:
-            # A cap of 0 fails every document including an empty one, so the
-            # gate would be unsatisfiable rather than strict. Refuse the value
-            # instead of shipping a rule nothing can pass.
-            raise ConfigError(
-                f'[pm] {key} is {got} — a line cap under 1 fails every '
-                f'document, including an empty one')
-        return got
-
     return PmConfig(
         root=repo_root(),
         roadmap_dir=text(sect, 'pm', 'roadmap_dir', 'pm/roadmap'),
@@ -382,15 +339,6 @@ def load() -> PmConfig:
         changelog_grandfather=parse_grandfather(
             str_tuple(sect, 'pm', 'changelog_grandfather', (), allow_empty=True),
             CHANGELOG_SCHEMA.ledger_key, CHANGELOG_SCHEMA.file_name),
-        story_lines_max=cap('story_lines_max', 120),
-        feature_lines_max=cap('feature_lines_max', 200),
-        bug_lines_max=cap('bug_lines_max', 125),
-        decisions_lines_max=cap('decisions_lines_max', 150),
-        changelog_lines_max=cap('changelog_lines_max', 150),
-        closed_log_lines_max=cap('closed_log_lines_max', 60),
-        prose_grandfather=parse_grandfather(
-            str_tuple(sect, 'pm', 'prose_grandfather', (), allow_empty=True),
-            'prose_grandfather', '.md', cap_required=True),
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
@@ -756,7 +704,7 @@ def slot_walk(gdir: Path) -> Walk:
     """THE walk of one slot directory (`bugs/`, `stories/`) — both halves.
 
     The single definition every reader shares (D2/D4's story walk, D14's bug
-    lifetime, D17's prose cap, every census): a second walk would be a second
+    lifetime, every census): a second walk would be a second
     chance to disagree about which documents the tree even holds. It replaced
     six hand-rolled functions — `_slot_docs`, `_all_slot_docs`, `hidden_docs`,
     `grain_docs`, `note_docs` and their two tree-wide aggregators — which were
@@ -1602,90 +1550,7 @@ def entry_violations_in(entries: list[LogEntry],
 # --- writing an entry (`pm decide`, `pm changelog`) ----------------------------
 _ENTRY_ORDINAL = re.compile(r'^([A-Za-z]{1,4})(\d+)$')
 
-# The sentence `pm collapse` writes in place of the entries it retires. It lives
-# HERE and not in the verb that writes it, because the allocator has to read it:
-# a collapsed entry is gone from the file, and an allocator that sees only what
-# is still present will hand its id out a second time.
-COLLAPSE_MARKER = 'Collapsed at close'
-# The pointer's machine-read slot. Everything before it is prose for a human;
-# this is the one place the allocator looks, so a rule id quoted in the
-# explanation ("D16's separation from D15") can never be mistaken for a
-# retired entry.
-SPENT_IDS_LABEL = 'Ids spent, never minted again:'
-
-
-def collapse_pointers(text: str) -> list[tuple[int, str]]:
-    """[(1-based line, the pointer's whole paragraph)] for each collapse pointer.
-
-    A PARAGRAPH, not a line: the pointer is wrapped to fit a diff, so its id
-    list routinely spans two of them. The paragraph ends at the first blank
-    line, which is what keeps a `--note` (written after a blank line) out of the
-    id list — a note quoting `D4` must not make D4 look retired.
-    """
-    lines = _split(text)
-    live, body, _, _ = _comment_scan(lines)
-    out: list[tuple[int, str]] = []
-    for i, raw in enumerate(body):
-        if not live[i] or COLLAPSE_MARKER not in raw:
-            continue
-        block = [raw.rstrip('\r')]
-        for j in range(i + 1, len(lines)):
-            if not live[j] or not body[j].strip():
-                break
-            block.append(body[j].rstrip('\r'))
-        out.append((i + 1, '\n'.join(block)))
-    return out
-
-
-def spent_entry_ids(text: str) -> tuple[set[str], list[str]]:
-    """(the ids this log's collapse pointers record as retired, what is wrong).
-
-    The ids are the RECORD of entries the file no longer holds. Without them an
-    allocator counting only present entries re-mints `D3` three lines under a
-    pointer saying D3 was collapsed — one file, two different D3s, and no gate
-    can see it, because a pointer is prose.
-
-    Read from a LABELLED slot and never from the paragraph's prose. The first
-    cut of this scanned the whole pointer for id-shaped tokens and immediately
-    read `D16's separation from D15` — two RULE names in a hand-written pointer
-    — as two retired entries, which is a false claim in a gate. An id list a
-    machine reads has to be somewhere a machine can point at.
-
-    A pointer with no such slot is REPORTED, never read as "nothing was
-    retired": that is the hand-edited case, and guessing there is exactly the
-    silent re-mint this exists to stop.
-    """
-    ids: set[str] = set()
-    defects: list[str] = []
-    for line, block in collapse_pointers(text):
-        # Whitespace-normalised, because the pointer is wrapped to fit a diff
-        # and the label itself can land across two lines.
-        flat = ' '.join(block.split())
-        _, sep, tail = flat.partition(SPENT_IDS_LABEL)
-        if not sep:
-            defects.append(
-                f'line {line} carries a `{COLLAPSE_MARKER}` pointer with no '
-                f'`{SPENT_IDS_LABEL}` list, so nothing can tell which ids it '
-                f'retired — an append would risk re-minting one. Add the list '
-                f'the way `pm collapse` writes it: `{SPENT_IDS_LABEL} D1, D3, '
-                f'D4.`')
-            continue
-        for token in tail.strip().rstrip('.').replace(',', ' ').split():
-            if _ENTRY_ORDINAL.match(token):
-                ids.add(token)
-            else:
-                # Loud: a token that is not an id in the one place ids are read
-                # means the list has been edited into prose, and quietly
-                # dropping it would shrink the spent set without saying so.
-                defects.append(
-                    f'line {line}: `{SPENT_IDS_LABEL}` lists {token!r}, which '
-                    f'is not an entry id — that slot holds ids and nothing '
-                    f'else, so the retired set cannot be trusted')
-    return ids, defects
-
-
-def next_entry_id(entries: list[LogEntry], schema: LogSchema,
-                  spent: set[str] | tuple[str, ...] = ()) -> str:
+def next_entry_id(entries: list[LogEntry], schema: LogSchema) -> str:
     """The next id for this log — the two things authors get wrong, allocated.
 
     The PREFIX comes from the log's own last id-shaped entry, so a tree that
@@ -1693,25 +1558,15 @@ def next_entry_id(entries: list[LogEntry], schema: LogSchema,
     all dates) starts at the schema's own prefix: `D1` for decisions, `C1` for
     a changelog.
 
-    `spent` is what a COLLAPSE retired. An id is never re-minted within one
-    file, whether or not its entry is still in it — a fully collapsed log whose
-    pointer records D1-D5 allocates D6, not D1. Reuse across FILES stays by
-    design: 0.14.0's D7 and 0.15.0's D7 are different decisions in different
-    logs, and numbering every milestone from a global counter would say they
-    were related.
+    Reuse across FILES is by design: 0.14.0's D7 and 0.15.0's D7 are different
+    decisions in different logs, and numbering every milestone from a global
+    counter would say they were related.
     """
     numbered = [m for m in (_ENTRY_ORDINAL.match(e.eid) for e in entries) if m]
-    retired = [m for m in (_ENTRY_ORDINAL.match(s) for s in sorted(spent)) if m]
-    if numbered:
-        prefix = numbered[-1].group(1)
-    elif retired:
-        # Nothing is left in the file, so the pointer is the only surviving
-        # record of how this log numbers itself. Falling back to the schema
-        # prefix here would restart at D1 — on top of every id it just retired.
-        prefix = retired[-1].group(1)
-    else:
+    if not numbered:
         return f'{schema.prefix}1'
-    highest = max((int(m.group(2)) for m in numbered + retired
+    prefix = numbered[-1].group(1)
+    highest = max((int(m.group(2)) for m in numbered
                    if m.group(1) == prefix), default=0)
     return f'{prefix}{highest + 1}'
 
@@ -1751,9 +1606,8 @@ def append_entry(text: str, eid: str, when: str, title: str,
                   in entry_violations_in(entries, schema) if n == last]
 
 
-def parse_grandfather(specs: tuple[str, ...], key_name: str, suffix: str,
-                      cap_required: bool = False
-                      ) -> tuple[tuple[str, int | None], ...]:
+def parse_grandfather(specs: tuple[str, ...], key_name: str,
+                      suffix: str) -> tuple[tuple[str, int | None], ...]:
     """`"<path>"` (the whole file) or `"<path>:<N>"` (its first N / its first N
     lines, depending on which ledger is reading).
 
@@ -1762,15 +1616,10 @@ def parse_grandfather(specs: tuple[str, ...], key_name: str, suffix: str,
     growing badly without anyone rewriting old text. A malformed spec is a
     CONFIG error (exit 2), never a finding.
 
-    ONE implementation over all three ledgers. `decision_grandfather`,
-    `changelog_grandfather` and `prose_grandfather` differ in which file name a
-    key must end with and in whether the number is optional — data, passed in.
-    Three copies of this would be three chances to accept a spec the others
-    reject, and the ledger form is the thing a consumer hand-writes.
-
-    `cap_required` is the RATCHET's half: D17's ledger records a line ceiling,
-    and an entry without one would be a permanent uncapped pass — exactly what
-    a ratchet cannot have.
+    ONE implementation over both ledgers. `decision_grandfather` and
+    `changelog_grandfather` differ in which file name a key must end with —
+    data, passed in. Two copies of this would be two chances to accept a spec
+    the other rejects, and the ledger form is the thing a consumer hand-writes.
     """
     out: list[tuple[str, int | None]] = []
     seen: set[str] = set()
@@ -1796,11 +1645,6 @@ def parse_grandfather(specs: tuple[str, ...], key_name: str, suffix: str,
             raise ConfigError(
                 f'[pm] {key_name} {spec!r} does not name a '
                 f'{suffix} — the ledger names files, not directories')
-        if cap is None and cap_required:
-            raise ConfigError(
-                f'[pm] {key_name} {spec!r} records no line ceiling — write '
-                f'"<path>:<N lines>"; an entry with no ceiling never fails, '
-                f'and a ratchet with a permanent pass in it is decorative')
         if key in seen:
             raise ConfigError(
                 f'[pm] {key_name} names {key} twice — one entry per file')
@@ -1812,9 +1656,9 @@ def parse_grandfather(specs: tuple[str, ...], key_name: str, suffix: str,
 def relkey(cfg: PmConfig, path: Path) -> str:
     """The repo-relative, forward-slashed key a ledger spec is matched on.
 
-    One spelling for all three ledgers, so a path a consumer writes into
+    One spelling for both ledgers, so a path a consumer writes into
     `decision_grandfather` is keyed exactly as one written into
-    `prose_grandfather`.
+    `changelog_grandfather`.
     """
     return cfg.rel(path).replace('\\', '/')
 
@@ -1912,279 +1756,3 @@ def milestones_without_notes(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int
     return out, scanned
 
 
-# --- the prose ratchet (D17, D18) ---------------------------------------------
-# WHY THIS EXISTS: everything written into a PM tree is grep-reachable, so every
-# line of PM prose is a line some future agent may pull into its context and
-# reason from. The scaffolding should not be twice the size of the thing it
-# scaffolds. The close-evidence budget is already stated in prose — "≤5 lines"
-# for a story close, "a line and a link" for a milestone — and nothing enforced
-# any of it; one consumer measured 48,704 lines across 235 stories, 136
-# feature.md, 89 bugs and 57 decisions.md, with individual files at 774 and 567.
-#
-# HONEST SCOPE: this counts lines. It cannot tell 200 earned lines of authored
-# tables from 200 lines of restated commit messages — that judgement stays with
-# the PO and the reviewer. What it can do is stop the corpus growing while
-# nobody is looking, which is what happened.
-#
-# A RATCHET, not a big bang. Every already-over-cap document is recorded in
-# `[pm] prose_grandfather` at its CURRENT size, and the gate fails only when a
-# ledgered document GROWS past its recorded ceiling (GREW) or a new one crosses
-# its cap (OVERCAP). The ledger is a DEBT ledger: its length is the metric, and
-# `pm prose-ledger` REFUSES TO RAISE AN EXISTING CEILING. Without that refusal
-# the gate is decorative — every growth would be absorbed by a regeneration.
-#
-# WHAT IS ENFORCED, EXACTLY: no recorded ceiling ever rises, and a document
-# back inside its cap is dropped rather than re-recorded. A document that has
-# newly crossed its cap DOES come out as a new ledger line — a regeneration
-# that could not record new debt could not be run on a growing tree at all. It
-# is not silent: `pm prose-ledger` names every newly absorbed document on
-# stderr with a count, and the line itself is a `devkit.toml` diff a human has
-# to paste. "The ledger may only ever shrink" would be a stronger claim than
-# the code makes, and a gate whose docstring overstates it is a gate people
-# stop reading.
-#
-# THREE THINGS THAT ARE NOT OBVIOUS AND ARE LOAD-BEARING:
-#
-#  1. A MILESTONE'S OWN `decisions.md` IS NOT CAPPED WHILE ITS MILESTONE IS
-#     OPEN. It is the append-only autonomous-mode trail by design, and it is
-#     routinely the largest file in the tree. Capping it fights the process.
-#     What IS a finding is a CLOSED milestone still carrying its raw log — that
-#     is D18, and its threshold is derived from the close rule ("close evidence
-#     is pointers, a line and a link") rather than from any distribution: about
-#     twenty pointer lines plus headers, an order of magnitude above "a line and
-#     a link" and an order of magnitude below what a live trail reaches.
-#
-#  2. THE TOOL-MANDATED INSTRUCTION HEADER IS EXCLUDED FROM EVERY LINE COUNT.
-#     D13 asserts that header is present, so it is a constant an author cannot
-#     trim — counting it against a prose budget makes the budget uncompliable
-#     and silently shrinks every cap. `doc_lines` drops it for EVERY slot
-#     header (SLOT_HEADERS), not just the decisions one.
-#
-#  3. THE CAPS ARE CONFIG, NOT CONSTANTS. The defaults below are ONE consumer's
-#     measured p90 — the median document is untouched and only the outliers must
-#     shrink. Another tree's distribution is its own, and hardcoding one repo's
-#     numbers into a shared toolkit is a gate that fits that repo and misfires
-#     on the next. Every cap is a `[pm]` key.
-#
-# This is a SHAPE gate, not a style gate: a story that genuinely needs 200 lines
-# is usually two stories.
-def doc_lines(path: Path) -> int:
-    """Line count for a PM document, EXCLUDING the mandated instruction header.
-
-    D13 asserts each shared doc opens with its SLOT_HEADER line, so that line —
-    and the blank line separating it from the body — is a constant an author
-    cannot trim. Counting it against a prose budget makes the budget
-    uncompliable and silently shrinks every cap by two.
-
-    A file's final newline TERMINATES its last line rather than starting an
-    empty one, which is `wc -l`'s reading; a final line with no newline is still
-    counted, which is not. The difference shows up only on a file that does not
-    end in a newline, and there the honest answer is the larger one.
-    """
-    try:
-        lines = _split(read_raw(path))
-    except (OSError, UnicodeDecodeError):
-        return 0
-    if lines and lines[-1] == '':
-        lines.pop()
-    total = len(lines)
-    head = next((n for n, line in enumerate(lines) if line.strip()), None)
-    if head is None or lines[head].strip() not in SLOT_HEADERS:
-        return total
-    total -= 1
-    if head + 1 < len(lines) and not lines[head + 1].strip():
-        total -= 1
-    return total
-
-
-@dataclass(frozen=True)
-class ProseDoc:
-    """One measured grain document: what it is, what it may be, what it is."""
-    kind: str    # story | feature | bug | decisions | changelog | closed-log
-    rule: str    # the rule that reports it over cap — D17, or D18 for a closed log
-    cap: int
-    path: Path
-    key: str     # repo-relative, forward-slashed — the ledger's spelling
-    lines: int
-
-
-def prose_docs(cfg: PmConfig) -> list[ProseDoc]:
-    """Every capped grain document in the ACTIVE tree, in reading order.
-
-    IN SCOPE: a story, a feature.md, a bug, a feature's decisions.md, a
-    milestone's changelog.md — and, for D18 only, a DONE milestone's
-    decisions.md.
-
-    OUT OF SCOPE, deliberately: an OPEN milestone's decisions.md (the
-    append-only trail, see note 1 above), milestone.md, handoff.md, review.md
-    and anything under `design/`. Those are not prose budgets — a milestone.md
-    is frontmatter and a scope statement, a review.md is transient and D11
-    deletes it at close, and `design/` is where a feature.md over its cap is
-    told to put the design it is carrying. Capping the destination too would
-    leave the author nowhere to go.
-
-    The walk reuses the discovery every other rule uses — `milestone_dirs`,
-    `feature_files`, `story_files`, `bug_files`, `dir_entries` — so D17 and D13
-    can never disagree about which documents the tree holds.
-    """
-    out: list[ProseDoc] = []
-
-    def add(kind: str, rule: str, cap: int, path: Path) -> None:
-        out.append(ProseDoc(kind=kind, rule=rule, cap=cap, path=path,
-                            key=relkey(cfg, path), lines=doc_lines(path)))
-
-    for mdir in milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
-        entries = dir_entries(mdir)
-        for ffile in feature_files(mdir):
-            add('feature', 'D17', cfg.feature_lines_max, ffile)
-            for sfile in story_files(ffile):
-                add('story', 'D17', cfg.story_lines_max, sfile)
-            if dir_entries(ffile.parent).get(DECISION_FILE_NAME) == 'file':
-                add('decisions', 'D17', cfg.decisions_lines_max,
-                    ffile.parent / DECISION_FILE_NAME)
-        for bfile in bug_files(mdir):
-            add('bug', 'D17', cfg.bug_lines_max, bfile)
-        # The changelog accumulates by design exactly as a decision log does,
-        # and stopping it growing without bound is the whole reason it is a
-        # written-by-the-tool slot rather than a free-text file.
-        if entries.get(CHANGELOG_FILE_NAME) == 'file':
-            add('changelog', 'D17', cfg.changelog_lines_max,
-                mdir / CHANGELOG_FILE_NAME)
-        # D18. The OPEN half of this file is out of scope on purpose — see
-        # note 1. Only a milestone that has already closed is measured.
-        if (entries.get(DECISION_FILE_NAME) == 'file'
-                and field_of(mfile, 'status') == 'done'):
-            add('closed-log', 'D18', cfg.closed_log_lines_max,
-                mdir / DECISION_FILE_NAME)
-    return out
-
-
-# The ledger's own hygiene is reported under whichever prose rule is enabled:
-# one `[pm]` key serves both rules, so its integrity is one fact, not two.
-LEDGER_FINDING = 'LEDGER'
-
-# What an over-cap document of THIS kind is usually carrying. A finding that
-# tells a decisions.md "a story over its cap is usually two stories" is naming
-# the wrong grain and the reader has to translate it; the whole value of the
-# sentence is that it says where the lines went.
-OVERCAP_ADVICE = {
-    'story': 'a story over its cap is usually two stories',
-    'feature': 'a feature.md over its cap is carrying design that belongs in '
-               'a design/ note',
-    'bug': 'a bug over its cap is carrying a repro transcript — link it '
-           'rather than paste it',
-    'decisions': 'a decisions.md over its cap is carrying narrative in its '
-                 'entries — a decision is four fields',
-    'changelog': 'a changelog.md over its cap is carrying a devlog — an entry '
-                 'is what shipped and the reference proving it',
-}
-
-
-def prose_findings(cfg: PmConfig,
-                   docs: list[ProseDoc]) -> list[tuple[str, str]]:
-    """[(rule, message)] — the ratchet's findings and the ledger's own hygiene.
-
-    Measurement is INDEPENDENT of which rules are enabled, and only the
-    reporting is filtered. Otherwise a ledger entry for a story would "suppress
-    nothing" whenever D17 happened to be off, and the shrink-only rule would
-    delete the debt record of a document nobody had looked at.
-
-    Three classes, and the shrink-only ledger rules `decision_grandfather`
-    already has:
-      GREW       — ledgered and larger than its recorded ceiling.
-      OVERCAP    — over its grain's cap and not on the ledger.
-      CLOSED-LOG — a `done` milestone still carrying its raw decision trail.
-    """
-    ledger = dict(cfg.prose_grandfather)
-    out: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for doc in docs:
-        ceiling = ledger.get(doc.key)
-        if ceiling is None:
-            if doc.lines <= doc.cap:
-                continue
-            if doc.kind == 'closed-log':
-                out.append((doc.rule, (
-                    f'CLOSED-LOG  {doc.key} — {doc.lines} lines of raw '
-                    f'decision trail on a `done` milestone (cap '
-                    f'{doc.cap}); close evidence is pointers, a line and a '
-                    f'link, and the detail lives at the feature grain')))
-            else:
-                out.append((doc.rule, (
-                    f'OVERCAP     {doc.key} — {doc.lines} lines, over the '
-                    f'{doc.kind} cap of {doc.cap} and not on the ledger; '
-                    + OVERCAP_ADVICE[doc.kind])))
-            continue
-        seen.add(doc.key)
-        if doc.lines > ceiling:
-            out.append((doc.rule, (
-                f'GREW        {doc.key} — {doc.lines} lines, past its '
-                f'prose_grandfather ceiling of {ceiling}; the ledger only '
-                f'shrinks, so trim it rather than regenerate')))
-            continue
-        # Shrink-only, both directions, exactly as the log ledgers are: an
-        # entry that suppresses nothing has done its job and must go, and a
-        # ceiling reaching past the end of the file is a claim the file no
-        # longer supports.
-        #
-        # ONE FACT, ONE FINDING. A document back inside its cap is ALSO smaller
-        # than its ceiling, so reporting both told the reader to lower a
-        # ceiling on a line they were being told to delete. The drop subsumes
-        # the lower, so the drop is the only finding.
-        if doc.lines <= doc.cap:
-            out.append((LEDGER_FINDING, (
-                f'{doc.key} is in prose_grandfather but {doc.lines} lines is '
-                f'inside the {doc.kind} cap of {doc.cap} — drop it from the '
-                f'ledger')))
-        elif ceiling > doc.lines:
-            out.append((LEDGER_FINDING, (
-                f'{doc.key} is ledgered at {ceiling} lines but the document '
-                f'has {doc.lines} — lower the ceiling')))
-    for key in ledger:
-        if key not in seen:
-            out.append((LEDGER_FINDING, (
-                f'{key} is in prose_grandfather but no such grain document '
-                f'exists — drop it from the ledger')))
-    return out
-
-
-def regenerate_prose_ledger(
-        cfg: PmConfig,
-        docs: list[ProseDoc]) -> tuple[list[str], list[str], list[str]]:
-    """(the `"<path>:<lines>"` entries, the growths REFUSED, the ABSORPTIONS).
-
-    The refusal is the load-bearing half. A regeneration that raised an
-    existing ceiling would make the ratchet decorative: every over-cap document
-    would simply be re-recorded at its new size and the gate would never fail.
-    So a document larger than its recorded ceiling is refused, and the only way
-    past it is a genuine trim.
-
-    What this does NOT refuse is a document that has newly crossed its cap and
-    is on no ledger line yet — it comes out as a new entry, because a
-    regeneration that could not record new debt could never be run on a growing
-    tree at all. That absorption is not silent and it is not this function's to
-    approve: the new keys come back NAMED, the verb prints them, and the entry
-    itself is a visible diff in `devkit.toml` that a human has to paste. The
-    ratchet is "no ceiling ever rises", not "the ledger never gains a line".
-
-    What comes out is gate-clean by construction — a document back inside its
-    cap is DROPPED rather than re-recorded, which is the same shrink the
-    "suppresses nothing" finding asks for by hand.
-    """
-    ledger = dict(cfg.prose_grandfather)
-    body: list[str] = []
-    refused: list[str] = []
-    absorbed: list[str] = []
-    for doc in docs:
-        ceiling = ledger.get(doc.key)
-        if ceiling is not None and doc.lines > ceiling:
-            refused.append(f'{doc.key} is {doc.lines} lines, past its ledger '
-                           f'ceiling of {ceiling}')
-            continue
-        if doc.lines > doc.cap:
-            body.append(f'{doc.key}:{doc.lines}')
-            if ceiling is None:
-                absorbed.append(f'{doc.key}:{doc.lines} ({doc.kind} cap '
-                                f'{doc.cap})')
-    return body, refused, absorbed

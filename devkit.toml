@@ -52,7 +52,7 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 checks = [
     "D1", "D2", "D3", "D4", "D5", "D6", "D7",
     "D9", "D10",
-    "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18",
+    "D11", "D12", "D13", "D14", "D15", "D16",
     "V1", "V2", "V3", "V4", "V5", "V6",
 ]
 # No grandfather ledger of any kind, in either direction. The tree was scaffolded

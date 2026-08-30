@@ -293,7 +293,7 @@ Anything unresolvable is reported and left alone.
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
-| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V6) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires a `done` grain's transient `review.md`, D12 holds every `decisions.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`), D13 holds every grain dir to the canonical slots (missing is drift **and** extra is drift, headers included), D14 reports an open bug parked under a `done` milestone, D15 holds every `changelog.md` entry to the two-field release-note schema (`What`/`Evidence`), D16 fails a `done` milestone whose changelog is empty, D17 caps the PROSE of every grain document as a ratchet (a story, a `feature.md`, a bug, a feature's `decisions.md`, a milestone's `changelog.md`), and D18 fails a `done` milestone still carrying its raw decision trail — all opt-in via `[pm] checks`, with D12's, D15's and D17's legacy text migrating through the `decision_grandfather` / `changelog_grandfather` / `prose_grandfather` ledgers the gate prints the size of. |
+| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V6) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires a `done` grain's transient `review.md`, D12 holds every `decisions.md` entry to the four-field decision schema (`Chose`/`Over`/`Because`/`Evidence`), D13 holds every grain dir to the canonical slots (missing is drift **and** extra is drift, headers included), D14 reports an open bug parked under a `done` milestone, D15 holds every `changelog.md` entry to the two-field release-note schema (`What`/`Evidence`), D16 fails a `done` milestone whose changelog is empty — all opt-in via `[pm] checks`, with D12's and D15's legacy text migrating through the `decision_grandfather` / `changelog_grandfather` ledgers the gate prints the size of. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
 | `check tasks` | A `[tasks]` role pointing at a target that no longer exists. Every declared role must resolve to a real, invocable command, and the required roles (`quick`, `verify`) must be declared at all. A `make` role is verified all the way to the target (`make -n`, which resolves the target name against your Makefile and holds back the recipe — including a recursive `$(MAKE)`, which inherits `-n`). It is not a sandbox: parsing a Makefile runs its parse-time `$(shell …)`, and a `+`-prefixed recipe line runs under `-n` too, so a repo that uses either has that much of it executed by this gate. Anything that is not make is verified only as far as its program being on PATH, and the census says which each got. Off by default in `check all` — a repo that has not declared `[tasks]` has no stale roles to find. |
 | `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the eight gates read `.tscn`/`.tres` or shell scripts, so a repo holding none of them gets five 0-file censuses and rule 4 correctly reddens each one. That is the roster being wrong for the repo, not a reason to soften a gate — name the gates that apply and run the rest on demand. An unknown gate name is exit 2, never a quietly narrowed run. |
@@ -345,13 +345,11 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm decisions <grain-id>` | Print that grain's decision entries, parsed and deterministic — the READ half of the contract `decide` writes. A milestone prints its own log **and its features'**. The document goes to stdout and the count to stderr. Exists so answering "what did we decide in milestone xyz" is never a `find` piped to a `grep`: that is a second parser with none of the fence and comment handling, and it disagrees with the gate on exactly the logs where it matters |
 | `pm changelog <milestone-id> --what … --evidence … [--title …]` | Append a D15-conforming release note to that milestone's `changelog.md`. Two fields and no more — **what was built that a player cares about**, and the reference proving it shipped; the reasoning is a *decision* and belongs in `decisions.md`. A **milestone** log: a feature contributes through the entry's `Evidence:` pointer, and naming one is refused. Same machinery as `decide` — the tool stamps the ISO date and the next ordinal in the log's own prefix, and re-parses the composed entry through D15's own predicates, so a refusal leaves the log byte-identical |
 | `pm changelog --render [--milestone <id>]` | The union of every milestone's `changelog.md` to **stdout**, newest release first — a render the consumer redirects, so every count and skip goes to stderr instead. Milestones are ordered by **declared version, compared component-wise**, never by directory-name string sort (`0.9` sorts *before* `0.10` lexically and *after* it numerically); entries come out in the order their append-only log holds them. Same tree, same bytes, every run |
-| `pm prose-ledger` | Regenerate D17's debt ledger — `prose_grandfather = [...]` to **stdout**, ready to paste into `devkit.toml`, with the count on stderr. It **REFUSES to raise an existing ceiling**: a document larger than the one recorded for it is reported and nothing is printed, so the only way past a growth is a genuine trim. Without that refusal the ratchet would be decorative. A document that has NEWLY crossed its cap is absorbed as a new entry — a ledger that could gain no line could not be regenerated on a growing tree — and never silently: each one is named on stderr with a count, and the entry is a `devkit.toml` diff a human has to paste. A document back inside its cap is dropped rather than re-recorded, so what comes out is gate-clean by construction |
 | `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex. `status` is refused — it has a transition graph behind it |
 | `pm claim <grain-id> <owner>` · `pm release <grain-id>` | Sugar over `owner:` — the field that was hand-edited everywhere `status:` was not |
 | `pm vocabulary [--json]` | The states, transitions and verbs, machine-readably. Exists so an external checker never has to scrape help text — a tool that states its own rules in a parseable form is the only way a scanner stays honest when the rules change |
 | `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file; **V6** fails when a rendered block drifts from the tree |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
-| `pm collapse <milestone-id> [--keep <ids>] [--note <sentence>]` | D18's close step, as a verb. Rewrites a `done` milestone's raw decision trail into one **generated** pointer naming every collapsed entry, keeping the entries `--keep` names verbatim. The one sanctioned edit of an append-only log — without it D18 demanded a collapse only a hand edit could perform, in a file whose first line says never by hand. Refuses an open milestone, an unknown `--keep` id, **a log with uncommitted changes** (the pointer says the full text is in `git log -p` on that file, and on an uncommitted log that is false and the prose is gone for good — so commit the trail first, file-scoped: an unrelated dirty file does not block it), and — the load-bearing one — **a result its own rule would still fail**, so the output is D18-clean by construction. The pointer's `Ids spent, never minted again:` list is read back by `pm decide`, so a collapsed id is never re-minted into the same log. Idempotent: re-running with the same `--keep` is a no-op |
 | `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
 | `pm install-skills [--force]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
 | `pm init` | Stand up a tree in a repo that has none — `pm/roadmap/` + a seeded `ROADMAP.md`, the two guidance files, and the remaining wiring printed as a checklist |
@@ -499,22 +497,6 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 #       one entry D15 does not report. D15 asks whether what is written
 #       conforms — and a conforming EMPTY log satisfies it forever; D16 is what
 #       stops a release shipping with nothing a player can read.
-#   D17 the PROSE RATCHET. Everything written into a PM tree is grep-reachable,
-#       so every line of prose is context some future agent pays for — the
-#       scaffolding should not be twice the size of the thing it scaffolds. A
-#       story, a feature.md, a bug, a feature's decisions.md and a milestone's
-#       changelog.md each get a line cap, with two finding classes: OVERCAP
-#       (over cap, not on the ledger) and GREW (on the ledger, larger than its
-#       recorded ceiling). The mandated instruction header D13 asserts is
-#       EXCLUDED from every count — it is a constant an author cannot trim, so
-#       counting it would make the budget uncompliable. A shape gate, not a
-#       style gate: a story that genuinely needs 200 lines is usually two.
-#       NOT capped: an OPEN milestone's own decisions.md, which is the
-#       append-only autonomous-mode trail by design.
-#   D18 a `done` milestone still carrying its RAW decision trail. Milestone
-#       close evidence is pointers — "a line and a link" — so a done milestone
-#       with a 1,600-line trail was not closed, it was abandoned. Its threshold
-#       comes from that rule, not from any distribution.
 bug_states      = ["open", "fixed", "closed"]   # D14: the bug vocabulary
 bug_open_states = ["open"]                      # D14: which of those are OPEN
 decision_grandfather = [                        # D12: logs that predate the schema
@@ -529,31 +511,6 @@ changelog_grandfather = [                       # D15: the same ledger, same sha
 # capped form is the point — legacy entries stay, new ones still have to conform.
 # D16 reads the changelog ledger too, so an entry D15 has been told to accept is
 # never one D16 rejects.
-# D17's caps. CONFIG, not constants. The defaults sit at roughly the p90 of ONE
-# consumer's measured distribution (story median 74 / p90 119, feature.md 81 /
-# 203, bug 73 / 124, feature decisions.md 98 / 273), so the median document is
-# untouched and only the outliers must shrink. They are that consumer's
-# distribution, NOT a law — another tree's is its own, and a cap that fits one
-# repo misfires on the next. `decisions_lines_max` is deliberately tight
-# relative to its p90 and `changelog_lines_max` takes the same number: both
-# logs accumulate by design, and both are written by `pm decide`/`pm changelog`
-# as declarations rather than narrative. `closed_log_lines_max` is not a
-# distribution number at all — it is the close-evidence budget, about twenty
-# pointer lines plus headers. A cap under 1 is a config error, not a finding.
-story_lines_max      = 120                      # D17
-feature_lines_max    = 200                      # D17
-bug_lines_max        = 125                      # D17
-decisions_lines_max  = 150                      # D17: a FEATURE's decisions.md
-changelog_lines_max  = 150                      # D17
-closed_log_lines_max = 60                       # D18: a `done` milestone's trail
-prose_grandfather = [                           # D17/D18: documents already over
-    "pm/roadmap/0.9-old/features/a/feature.md:274",   # cap, at their CURRENT size
-]                                               # The ceiling is REQUIRED — an
-# entry without one would be a permanent uncapped pass, which a ratchet cannot
-# have. Same shrink-only rules as the log ledgers: an entry that suppresses
-# nothing, a ceiling reaching past the end of its file, and a line naming no
-# document each FAIL. `pm prose-ledger` regenerates it and REFUSES to raise a
-# ceiling, so the only way to regenerate is after a genuine trim.
 version_file = "project.godot"                  # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
 trunk_branches = ["staging", "main"]            # D10: `branch: staging` = no integration branch

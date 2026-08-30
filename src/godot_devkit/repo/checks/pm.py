@@ -73,34 +73,7 @@ DRIFT RULES (each FAILs, naming the offending path):
       written conforms; a conforming EMPTY log satisfies it forever, and this
       is what stops a release shipping with nothing a player can read.
 
-  D17 grain PROSE CAPS, as a RATCHET. Everything written into a PM tree is
-      grep-reachable, so every line of prose is context some future agent pays
-      for — the scaffolding should not be twice the size of the thing it
-      scaffolds. A story, a feature.md, a bug, a feature's decisions.md and a
-      milestone's changelog.md each have a line cap, and two finding classes:
-      OVERCAP (over cap, not on the ledger) and GREW (on the ledger, larger
-      than its recorded ceiling). `[pm] prose_grandfather` is a DEBT ledger —
-      its length is the metric, and `pm prose-ledger` REFUSES TO RAISE AN
-      EXISTING CEILING. Without that refusal the gate is decorative. Newly
-      over-cap documents ARE absorbed on a regeneration (a ledger that could
-      gain no line could not be regenerated on a growing tree), but never
-      silently: the verb names each one on stderr with a count, and the entry
-      is a `devkit.toml` diff a human pastes.
-      The caps are CONFIG (`[pm] *_lines_max`); the defaults are one consumer's
-      measured p90, not a law. The mandated instruction header D13 asserts is
-      excluded from every count — it is a constant an author cannot trim, so
-      counting it would make the budget uncompliable.
-
-      NOT capped: an OPEN milestone's own decisions.md. It is the append-only
-      autonomous-mode trail by design, and capping it fights the process.
-
-  D18 CLOSED-LOG — a `done` milestone still carrying its raw decision trail.
-      Milestone close evidence is pointers, "a line and a link", so a done
-      milestone with a 1,600-line trail was not closed, it was abandoned. Its
-      threshold is derived from that rule rather than from the distribution.
-      Shares D17's ledger: one `[pm]` key, so its integrity is one fact.
-
-  D11/D13/D14/D15/D16/D17/D18 are OFF by default like D8-D12 — a tree predating the
+  D11/D13/D14/D15/D16 are OFF by default like D8-D12 — a tree predating the
   canonical slots is missing most of them, and a rule that turns a consumer red
   on upgrade day is unshippable. Scaffold first, then hold the line.
 
@@ -267,24 +240,6 @@ def _log_schema(cfg, report, schema) -> tuple[int, int]:
         entries = model.log_entries_in(text)
         n_entries += len(entries)
         n_suppressed = 0
-        # A COLLAPSED entry is gone from the file and its id is still spent.
-        # Reported here because the pointer recording it is prose: a log can
-        # hold `## D3` three lines under a pointer saying D3 was collapsed, and
-        # every other check in this gate reads that as one entry and one
-        # paragraph. Two different D3s in one file is not a schema violation of
-        # either of them, which is exactly why nothing saw it.
-        spent, pointer_defects = model.spent_entry_ids(text)
-        for defect in pointer_defects:
-            report(f'{key}: {defect} ({rule})')
-        for ordinal, entry in enumerate(entries):
-            if entry.eid not in spent:
-                continue
-            if cap is None or ordinal < cap:
-                n_suppressed += 1
-                continue
-            report(f'{key}: {entry.eid} is minted twice — the log\'s own '
-                   f'collapse pointer records it as retired, so this file '
-                   f'holds two different {entry.eid}s ({rule})')
         for ordinal, eid, why in model.entry_violations_in(entries, schema):
             if cap is None or ordinal < cap:
                 n_suppressed += 1
@@ -310,59 +265,6 @@ def _log_schema(cfg, report, schema) -> tuple[int, int]:
     print(f'[check:pm] {rule}: {len(logs)} {name}(s), {n_entries} entry/ies '
           f'held to the schema')
     return len(logs), n_entries
-
-
-def _prose(cfg, report, enabled) -> tuple[int, int, int]:
-    """D17 / D18 — the prose ratchet. Returns (docs, corpus lines, closed logs).
-
-    ONE implementation over both rules, for the reason `_log_schema` is one
-    over D12 and D15: they share the grain walk, the line measurement, the
-    ledger and the shrink-only rules, and differ only in which document each
-    reports. Two implementations would be two chances to disagree about what a
-    grain document even is.
-
-    MEASUREMENT IS NOT GATED BY `enabled`; only reporting is. A ledger entry
-    for a story suppresses a story finding whether or not D17 is switched on,
-    and computing it otherwise would tell a D18-only consumer to delete the
-    debt record of every document nobody had looked at.
-    """
-    docs = model.prose_docs(cfg)
-    ledger_rule = 'D17' if 'D17' in enabled else 'D18'
-    print(f'[check:pm] {ledger_rule} ledger: {len(cfg.prose_grandfather)} '
-          f'document(s) carrying prose debt — no recorded ceiling ever rises')
-    for rule, msg in model.prose_findings(cfg, docs):
-        if rule == model.LEDGER_FINDING:
-            # One `[pm]` key serves both rules, so its hygiene is reported
-            # under whichever of them is on rather than going unchecked when
-            # the consumer enabled only the other.
-            report(f'{msg} ({ledger_rule})')
-        elif rule in enabled:
-            report(f'{msg} ({rule})')
-
-    capped = [d for d in docs if d.rule == 'D17']
-    closed = [d for d in docs if d.rule == 'D18']
-    if 'D17' in enabled:
-        # Rule 4: a rule that scanned nothing must say so rather than print
-        # PASS. An empty capped population means a misconfigured tree, never a
-        # clean one.
-        if not capped:
-            report('D17 is enabled but no story, feature.md, bug, feature '
-                   f'decisions.md or changelog.md exists under '
-                   f'{cfg.roadmap_dir}/ — the rule scanned nothing')
-        print(f'[check:pm] D17: {len(capped)} grain document(s), '
-              f'{sum(d.lines for d in capped)} line(s) of capped prose — this '
-              f'number should only shrink')
-    if 'D18' in enabled:
-        if closed:
-            print(f'[check:pm] D18: {len(closed)} closed milestone log(s) held '
-                  f'to the close-evidence budget '
-                  f'({cfg.closed_log_lines_max} lines)')
-        else:
-            # This rule's own success state, like D11's and D16's: a tree where
-            # nothing has closed is not a tree with an abandoned decision log.
-            print('[check:pm] D18: no `done` milestone with a decisions.md — '
-                  'no raw trail to collapse')
-    return len(capped), sum(d.lines for d in capped), len(closed)
 
 
 def _release_notes(cfg, report) -> int:
@@ -554,10 +456,6 @@ def run() -> int:
     n_bugs = _bug_lifetime(cfg, report) if 'D14' in enabled else 0
     n_shipped = _release_notes(cfg, report) if 'D16' in enabled else 0
 
-    n_prose = n_prose_lines = n_closed_logs = 0
-    if enabled & set(model.PROSE_CHECKS):
-        n_prose, n_prose_lines, n_closed_logs = _prose(cfg, report, enabled)
-
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
               f'{n_stories} story/ies')
@@ -586,11 +484,6 @@ def run() -> int:
         census += f', {n_bugs} bug(s)'
     if 'D16' in enabled:
         census += f', {n_shipped} shipped milestone(s)'
-    if 'D17' in enabled:
-        census += (f', {n_prose} capped document(s), {n_prose_lines} line(s) '
-                   f'of prose')
-    if 'D18' in enabled:
-        census += f', {n_closed_logs} closed milestone log(s)'
     if v_census:
         census += f', {v_census["refs"]} ref(s)'
         if v_census['unverifiable']:
