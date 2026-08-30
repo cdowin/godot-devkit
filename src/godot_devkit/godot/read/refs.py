@@ -23,7 +23,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from godot_devkit.godot.format.tscn import parse, _basename
+from godot_devkit.godot.format.tscn import parse, basename
 from godot_devkit.core.project import repo_root
 from godot_devkit.core import walk
 from godot_devkit.core.walk import Kind, SkipReason
@@ -132,7 +132,7 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
                 hits['call_emit'].append(Hit('call_emit', rel, lineno, text))
             for match in PRELOAD_LOAD.finditer(stripped):
                 target = match.group(1)
-                if needle in _basename(target).lower() or symbol == target:
+                if needle in basename(target).lower() or symbol == target:
                     hits['preload_load'].append(Hit('preload_load', rel, lineno, text))
     return hits
 
@@ -149,7 +149,7 @@ def scan_scene_refs(root: Path, symbol: str, files: list[Path]) -> list[Hit]:
             if section.kind == 'ext_resource':
                 target = section.attrs.get('path') or ''
                 uid = section.attrs.get('uid') or ''
-                if needle in _basename(target).lower() or symbol == uid:
+                if needle in basename(target).lower() or symbol == uid:
                     kind = section.attrs.get('type', '?')
                     hits.append(Hit('scene_ref', _relpath(root, path), 0,
                                     f'ext_resource[{section.attrs.get("id", "?")}] {kind}  {target or uid}'))

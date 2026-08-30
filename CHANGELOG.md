@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **the hard rules are gates on this repo now** — three new boundary tests: config imports live on a closed allowlist and no collection may be built directly from a config lookup (the v0.9.0 bare-string bug class, now unwritable); zero dead imports across src/ (found and removed the last two); the layer directions (format→index→read/write→checks, repo↛godot, core↛both) are asserted with per-layer census floors. Each proven to fire on injected probes. (tests/test_boundaries.py)
+- **one home per helper** — the thrice-declared diff renderer, the twice-declared value formatters and section constants, and nine cross-module underscore imports are collapsed to single public homes, proven byte-identical against the old bytes on real CLI runs. (godot/)
+- **doc hygiene** — README pins bumped to v0.15.0 and both pin sites named in the release skill; `check doc`'s docstring stops describing its pre-extraction life; `uv.lock` ignored; the Makefile's no-venv comment scoped to the gates. (README.md, .claude/skills/release/, repo/checks/doc.py)
+
 - **the uppercase-migration machinery is retired** — both consumers completed the lowercase grain migration, so the temp-suffix rename pre-pass, `_rename_case` and `git_rename` are deleted (−210 source lines, −208 test lines). A legacy uppercase slot is now a whole-grain refusal naming the variant and the exact `git mv` to run — never a silent rename, twin, or truncation. (repo/pm/templates/, repo/pm/model.py)
 
 - **write verbs preserve the file's own line endings, byte-for-byte** — load/save normalized every line to the platform ending (universal-newline read + `os.linesep` write), a whole-file rewrite the `--dry-run` diff and the "(N line(s))" count never showed. Lines now carry their endings through the store: an untouched line keeps its exact bytes, an in-place rewrite keeps the replaced lines' endings, an inserted line takes the file's dominant ending. Proven on 1,406 real consumer `.tscn`/`.tres`: `load().text` byte-identical to disk on every one. (godot/format/tscn_document.py, godot/write/)

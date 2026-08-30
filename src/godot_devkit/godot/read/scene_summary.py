@@ -21,7 +21,7 @@ from godot_devkit.godot.format.tscn import (
     RESOURCE_REF,
     TILE_MAP_DATA_PROP,
     Section,
-    _basename,
+    basename,
     node_own_path,
     parse,
     resolve_ref,
@@ -39,18 +39,34 @@ KEY_PROPS = frozenset((
 ))
 
 
-def format_prop(key: str, value: str, ext: dict[str, dict]) -> str:
-    """Render one `key = value` for display: decode tile data, summarize packed
-    arrays, resolve resource refs, elide long scalars; pass short scalars through."""
+def format_value(key: str, value: str, ext: dict[str, dict]) -> str:
+    """Render one scalar prop value for display: decode tile data, resolve
+    resource refs, elide long/packed values; pass short scalars through."""
     if key == TILE_MAP_DATA_PROP:
-        return f'{key}: {decode_tilemap_bounds(value)}'
+        return decode_tilemap_bounds(value)
     if PACKED_ARRAY.match(value):
-        return f'{key}: <{value.split("(", 1)[0]}, elided>'
+        return f'<{value.split("(", 1)[0]}, elided>'
     if RESOURCE_REF.match(value):
-        return f'{key}={resolve_ref(value, ext)}'
+        return resolve_ref(value, ext)
     if len(value) > PROP_ELIDE_LEN:
-        return f'{key}: <{len(value)} chars elided>'
-    return f'{key}={value}'
+        return f'<{len(value)} chars elided>'
+    return value
+
+
+def format_prop(key: str, value: str, ext: dict[str, dict]) -> str:
+    """`format_value`, with its key: `key=value` for a scalar or a resolved
+    ref, `key: <summary>` when the value was decoded, summarized or elided."""
+    rendered = format_value(key, value, ext)
+    if RESOURCE_REF.match(value) or rendered == value:
+        return f'{key}={rendered}'
+    return f'{key}: {rendered}'
+
+
+def describe_node(node: Section, ext: dict[str, dict]) -> str:
+    kind = node.attrs.get('type')
+    if kind is None and 'instance' in node.attrs:
+        kind = 'instance ' + resolve_ref(node.attrs['instance'], ext).lstrip(REF_ARROW)
+    return f'{node.attrs.get("name", "?")} [{kind or "?"}]'
 
 
 def print_tree(nodes: list[Section], ext: dict[str, dict], show_all: bool,
@@ -65,12 +81,9 @@ def print_tree(nodes: list[Section], ext: dict[str, dict], show_all: bool,
             children[parent].append(node)
 
     def describe(node: Section) -> str:
-        kind = node.attrs.get('type')
-        if kind is None and 'instance' in node.attrs:
-            kind = 'instance ' + resolve_ref(node.attrs['instance'], ext).lstrip(REF_ARROW)
         shown = node.props if show_all else [p for p in node.props if p[0] in KEY_PROPS]
         suffix = ('  ' + '  '.join(format_prop(k, v, ext) for k, v in shown)) if shown else ''
-        return f'{node.attrs.get("name", "?")} [{kind or "?"}]{suffix}'
+        return f'{describe_node(node, ext)}{suffix}'
 
     def walk(node: Section, depth: int) -> None:
         if show_paths:
@@ -103,7 +116,7 @@ def print_summary(sections: list[Section], path: str, show_all: bool,
 
     print(f'\n## ext_resources ({len(ext)})')
     for res in ext.values():
-        name = _basename(res.get('path') or res.get('uid', '?'))
+        name = basename(res.get('path') or res.get('uid', '?'))
         print(f'  [{res["id"]}] {res.get("type", "?")}  {name}')
 
     if subs:

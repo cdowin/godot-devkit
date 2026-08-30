@@ -38,7 +38,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from godot_devkit.godot.format.tscn import parse_text, _strip_quotes
+from godot_devkit.godot.format.tscn import parse_text, strip_quotes
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import (
     ConfigError,
@@ -118,7 +118,7 @@ def list_autoloads(root: Path) -> list[tuple[str, str]]:
         if section.kind != 'autoload':
             continue
         for name, value in section.props:
-            res_path = _strip_quotes(value).lstrip('*')
+            res_path = strip_quotes(value).lstrip('*')
             entries.append((name, res_path.removeprefix('res://')))
     return entries
 

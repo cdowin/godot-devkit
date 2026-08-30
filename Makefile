@@ -21,9 +21,10 @@ TEST_DEPS ?= --with pytest
 PYTEST    ?= $(UV) run --python $(PY_FLOOR) $(TEST_DEPS) python -m pytest
 PYTEST_Q  ?= -q
 
-# The gates run the WORKING TREE, never an installed build: a gate that checks
-# the last release tells you nothing about the change in front of you. No wheel
-# build, no venv, no network — the package imports from src/ with the stdlib.
+# The GATES run the WORKING TREE, never an installed build: a gate that checks
+# the last release tells you nothing about the change in front of you. For the
+# gates alone: no wheel build, no venv, no network — the package imports from
+# src/ with the stdlib. (The test targets above DO use uv, for pytest.)
 PY        ?= python3
 DEVKIT    ?= PYTHONPATH=$(CURDIR)/src $(PY) -m godot_devkit.cli
 

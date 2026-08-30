@@ -36,7 +36,6 @@ resolved is REPORTED and left alone — a wrong uid is worse than a missing one.
 from __future__ import annotations
 
 import argparse
-import difflib
 import re
 from pathlib import Path
 
@@ -47,6 +46,7 @@ from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import Section, node_own_path, parse, split_path
 from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
 from godot_devkit.godot.index.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
+from godot_devkit.godot.write import render_diff
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
@@ -56,7 +56,6 @@ EDITABLE_KIND = 'editable'
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
-DIFF_CONTEXT = 1
 
 
 class BaseScenes:
@@ -250,9 +249,7 @@ def main(argv: list[str]) -> int:
             print(f'canonicalize  {path}  already canonical')
             continue
         if args.dry_run:
-            print(''.join(difflib.unified_diff(
-                before.splitlines(keepends=True), after.splitlines(keepends=True),
-                fromfile=f'a/{path.name}', tofile=f'b/{path.name}', n=DIFF_CONTEXT)), end='')
+            print(render_diff(before, after, path.name), end='')
         elif after != before:
             # Raw write: `after` carries the file's own line endings (the
             # document preserves them), and translating here would normalize

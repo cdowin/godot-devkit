@@ -30,20 +30,19 @@ success), and `rm --force` restores the exit-0 no-op for scripted re-runs.
 from __future__ import annotations
 
 import argparse
-import difflib
 from pathlib import Path
 
 from godot_devkit.core.project import repo_root
 from godot_devkit.godot.format.tscn import TscnError, join_path, split_path
 from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
 from godot_devkit.godot.index.uid_index import UidIndex
+from godot_devkit.godot.write import render_diff
 
 VERBS = ('set', 'rename', 'add', 'rm', 'reparent')
 UNCHANGED = 'unchanged'
 EXIT_OK = 0
 EXIT_REFUSED = 1
 EXIT_USAGE = 2
-DIFF_CONTEXT = 1
 PROJECT_FILE = 'project.godot'
 
 
@@ -61,12 +60,6 @@ def uid_resolver(scene_path: Path):
                      if (p / PROJECT_FILE).is_file()), None)
         return UidIndex(root or repo_root()).of(res_path)
     return resolve
-
-
-def _diff(before: str, after: str, name: str) -> str:
-    return ''.join(difflib.unified_diff(
-        before.splitlines(keepends=True), after.splitlines(keepends=True),
-        fromfile=f'a/{name}', tofile=f'b/{name}', n=DIFF_CONTEXT))
 
 
 def _child_path(doc: TscnDocument, parent_path: str, name: str) -> str:
@@ -197,10 +190,10 @@ def main(argv: list[str]) -> int:
         print(f'{args.verb}  {path}  {UNCHANGED}')
         return EXIT_OK
     if args.dry_run:
-        print(_diff(before, after, path.name), end='')
+        print(render_diff(before, after, path.name), end='')
     else:
         doc.save()
-    changed = sum(1 for line in _diff(before, after, path.name).splitlines()
+    changed = sum(1 for line in render_diff(before, after, path.name).splitlines()
                   if line[:1] in '+-' and not line.startswith(('+++', '---')))
     print(f'{args.verb}  {path}  {outcome}  ({changed} line(s)'
           f'{", dry run" if args.dry_run else ""})')

@@ -34,7 +34,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from godot_devkit.godot.format.tscn import parse, parse_text, _basename
+from godot_devkit.godot.format.tscn import parse, parse_text, basename
 from godot_devkit.core.project import repo_root
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 
@@ -151,7 +151,7 @@ def build_static_refs(root: Path, all_tracked: list[str],
     for rel in iter_repo_files(all_tracked, '.gd', settings):
         text = (root / rel).read_text(encoding='utf-8', errors='replace')
         for match in PRELOAD_LOAD.finditer(text):
-            refs.add(_basename(match.group(1)))
+            refs.add(basename(match.group(1)))
     for suffix in ('.tscn', '.tres'):
         for rel in iter_repo_files(all_tracked, suffix, settings):
             try:
@@ -162,7 +162,7 @@ def build_static_refs(root: Path, all_tracked: list[str],
                 if section.kind == 'ext_resource':
                     target = section.attrs.get('path')
                     if target:
-                        refs.add(_basename(target))
+                        refs.add(basename(target))
     return refs
 
 
@@ -270,7 +270,7 @@ def find_orphans(root: Path, settings: Settings,
                 continue
             candidates.append(rel)
 
-    unreferenced = [rel for rel in candidates if _basename(rel) not in static_refs]
+    unreferenced = [rel for rel in candidates if basename(rel) not in static_refs]
 
     # A candidate with a class_name is used if its class is mentioned in ANY
     # OTHER file — extends/typed-ref/instantiation (.gd) or an inline

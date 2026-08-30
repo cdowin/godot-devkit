@@ -35,13 +35,14 @@ from dataclasses import dataclass
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core import apply
 from godot_devkit.core.config import config_section, str_tuple
+from godot_devkit.godot.index.uid_index import EXT_RESOURCE_PREFIX, UID_ATTR
 
 DEFAULT_EXCLUDE = ('addons/',)
 # Attribute extraction is ORDER-INDEPENDENT — a reordered/hand-edited ref must
-# be censused, not silently skipped (false-PASS discipline).
-UID_ATTR = re.compile(r'\buid="(uid://[0-9a-z]+)"')
+# be censused, not silently skipped (false-PASS discipline). UID_ATTR and the
+# ext_resource line prefix come from `uid_index`, the module that owns where a
+# uid lives — PATH_ATTR stays local because this check wants `.gd` targets only.
 PATH_ATTR = re.compile(r'\bpath="res://([^"]+\.gd)"')
-EXT_RESOURCE_PREFIX = '[ext_resource '
 SCRIPT_TYPE = 'type="Script"'
 UID_SUFFIX = '.uid'
 GD_SUFFIX = '.gd'

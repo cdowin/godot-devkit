@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+# uv-run residue: the package is stdlib-only, so a lockfile pins nothing it ships.
+uv.lock

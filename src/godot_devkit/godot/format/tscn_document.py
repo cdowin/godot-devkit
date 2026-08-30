@@ -38,8 +38,11 @@ from typing import Callable
 from godot_devkit.core import apply
 
 from godot_devkit.godot.format.tscn import (
+    COMMENT_CHAR,
+    EXT_RESOURCE_KIND,
     NODE_KIND,
     NODE_PATH_LITERAL,
+    PARENT_SEG,
     PATH_SEP,
     PROP_ASSIGN,
     ROOT_PATH,
@@ -47,21 +50,18 @@ from godot_devkit.godot.format.tscn import (
     Prop,
     Section,
     TscnError,
-    _parse_lines,
     join_path,
     node_own_path,
+    parse_lines,
     resolve_node_path,
     split_path,
 )
 
 CONNECTION_KIND = 'connection'
 EDITABLE_KIND = 'editable'
-EXT_RESOURCE_KIND = 'ext_resource'
 SUB_RESOURCE_KIND = 'sub_resource'
 RESOURCE_KIND = 'resource'
 SCENE_KINDS = ('gd_scene', 'gd_resource')
-COMMENT_CHAR = ';'
-PARENT_SEG = '..'
 
 # Header attributes whose value is a scene-relative NODE PATH (so a rename or a
 # reparent has to rewrite them). `node_paths=` is deliberately absent: it lists
@@ -170,7 +170,7 @@ class TscnDocument:
                  uid_resolver: Callable[[str], str | None] | None = None) -> None:
         self.path = path
         self.lines = _Lines(text)
-        self.sections = _parse_lines(self.lines)
+        self.sections = parse_lines(self.lines)
         self.notes: list[str] = []
         self.uid_resolver = uid_resolver
 
@@ -194,7 +194,7 @@ class TscnDocument:
         return target
 
     def _reparse(self) -> None:
-        self.sections = _parse_lines(self.lines)
+        self.sections = parse_lines(self.lines)
 
     # --- lookups ------------------------------------------------------------
     @property

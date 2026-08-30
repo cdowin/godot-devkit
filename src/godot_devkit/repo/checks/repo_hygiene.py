@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 
-from godot_devkit.core.project import git_lines, load_config, repo_root
+from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core.config import config_section, pattern, text
 
 

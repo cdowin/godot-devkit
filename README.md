@@ -24,7 +24,7 @@ Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 Consumed at a **pinned tag** so every machine and CI runs identical gate code:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.14.0" godot-devkit --version   # godot-devkit 0.14.0
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.15.0" godot-devkit --version   # godot-devkit 0.15.0
 ```
 
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
@@ -306,7 +306,7 @@ skipped.
 Pin the tag once; every target routes through it, so a bump is a one-line diff:
 
 ```make
-DEVKIT_VERSION := v0.14.0
+DEVKIT_VERSION := v0.15.0
 DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
 
 check:         ; @$(DEVKIT) check all           # per-change gate — offline, no Godot boot

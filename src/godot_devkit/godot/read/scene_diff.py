@@ -20,21 +20,17 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from godot_devkit.godot.format.tilemap import decode_tilemap_bounds
 from godot_devkit.godot.format.tscn import (
-    PACKED_ARRAY,
     REF_ARROW,
-    RESOURCE_REF,
     Section,
-    _basename,
+    basename,
     node_own_path,
     parse,
     parse_text,
-    resolve_ref,
 )
+from godot_devkit.godot.read.scene_summary import describe_node, format_value
 
 # --- Presentation knobs -----------------------------------------------------
-PROP_ELIDE_LEN = 70          # a scalar prop longer than this is summarized, not shown
 ADD_MARK = '+'
 REMOVE_MARK = '-'
 CHANGE_MARK = '~'
@@ -54,7 +50,7 @@ class SceneModel:
 def build_model(sections: list[Section]) -> SceneModel:
     ext = {s.attrs['id']: s.attrs for s in sections if s.kind == 'ext_resource'}
     ext_by_key = {
-        (a.get('type', '?'), _basename(a.get('path') or a.get('uid', '?'))): a
+        (a.get('type', '?'), basename(a.get('path') or a.get('uid', '?'))): a
         for a in ext.values()
     }
     subs_by_key = {
@@ -67,20 +63,6 @@ def build_model(sections: list[Section]) -> SceneModel:
     # change on `.` rather than a whole-tree remove+add.
     nodes_by_path = {node_own_path(n): n for n in nodes}
     return SceneModel(ext_by_key, subs_by_key, nodes_by_path, ext)
-
-
-def format_value(key: str, value: str, ext: dict[str, dict]) -> str:
-    """Render one scalar prop value for a diff line: decode tile data, resolve
-    resource refs, elide long/packed values; pass short scalars through."""
-    if key == 'tile_map_data':
-        return decode_tilemap_bounds(value)
-    if PACKED_ARRAY.match(value):
-        return f'<{value.split("(", 1)[0]}, elided>'
-    if RESOURCE_REF.match(value):
-        return resolve_ref(value, ext)
-    if len(value) > PROP_ELIDE_LEN:
-        return f'<{len(value)} chars elided>'
-    return value
 
 
 def diff_props(old: Section, new: Section, old_ext: dict, new_ext: dict) -> list[str]:
@@ -98,13 +80,6 @@ def diff_props(old: Section, new: Section, old_ext: dict, new_ext: dict) -> list
             if before != after:
                 lines.append(f'    {CHANGE_MARK} {key}: {before} {REF_ARROW} {after}')
     return lines
-
-
-def describe_node(node: Section, ext: dict[str, dict]) -> str:
-    kind = node.attrs.get('type')
-    if kind is None and 'instance' in node.attrs:
-        kind = 'instance ' + resolve_ref(node.attrs['instance'], ext).lstrip(REF_ARROW)
-    return f'{node.attrs.get("name", "?")} [{kind or "?"}]'
 
 
 def diff_nodes(old: SceneModel, new: SceneModel) -> list[str]:
