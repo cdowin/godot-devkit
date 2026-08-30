@@ -48,13 +48,15 @@ DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
 # typo'd status is a finding rather than a silent "closed" (rule 4).
 DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
 
-# D8/D9 encode the branch-per-milestone / bump-at-start flow. They are OFF by
-# default: a project that ships from the trunk and bumps at close is not
+# D8/D9/D10 encode the branch-per-milestone / bump-at-start flow. They are OFF
+# by default: a project that ships from the trunk and bumps at close is not
 # drifting, it is running a different (valid) flow, and a gate that fails it
-# would be lying. Opt in with `[pm] checks`.
+# would be lying. Opt in with `[pm] checks`. D10 is stricter than D9 — a repo
+# may run D9 alone (branch declared, wherever it points) or add D10 to also
+# refuse the trunk itself.
 DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6',
                   'V1', 'V2', 'V3', 'V4', 'V5')
-FLOW_CHECKS = ('D8', 'D9')
+FLOW_CHECKS = ('D8', 'D9', 'D10')
 # Structural/referential integrity — the validate family. V1-V5 are ON by
 # default: a tree that does not satisfy them is malformed, not merely running a
 # different flow. V6 is the exception and is OPT-IN: an execution list is a
@@ -234,7 +236,9 @@ RETIRED_KEYS = {
     'place_branch_on_building':
         '`pm milestone building` no longer runs `git checkout` in your trunk '
         'worktree — a PM tracker does not move your VCS checkout',
-    'trunk_branches': 'read only by the retired D10 and the branch placement',
+    'trunk_branches': 'read only by the retired branch-placement flow — the '
+                      'id D10 was later reused for a different rule (branch '
+                      'discipline: a building milestone off the mainline)',
     'bug_open_states': 'read only by the retired D14; `bug_states` still gates '
                        'a bug\'s status through D4',
     'milestone_transitions': 'there is no transition graph — `milestone_states` '
@@ -778,7 +782,7 @@ def review_record_for(cfg: PmConfig, fid: str) -> str | None:
     return None
 
 
-# --- flow helpers (D8/D9) -----------------------------------------------------
+# --- flow helpers (D8/D9/D10) --------------------------------------------------
 def building_milestones(cfg: PmConfig) -> list[tuple[str, str, Path]]:
     """(id, branch, milestone.md) for every ACTIVE milestone at `building`."""
     out = []
@@ -788,6 +792,25 @@ def building_milestones(cfg: PmConfig) -> list[tuple[str, str, Path]]:
             continue
         out.append((field_of(mfile, 'id'), field_of(mfile, 'branch'), mfile))
     return out
+
+
+def mainline_branch() -> str:
+    """D10's trunk name — `[repo_hygiene] mainline`, `origin/`-stripped.
+
+    Read from `[repo_hygiene]`, not `[pm]`: the mainline name is a repo-hygiene
+    fact one section already owns (`check repo-hygiene` CHECK 4 reads the same
+    key), and D10 is the one PM rule that needs it — duplicating the key under
+    `[pm]` would be a second name for the same fact. `check repo-hygiene`
+    compares against real `git` refs so it keeps the `origin/` remote prefix;
+    D10 compares against a milestone's authored `branch:` string, which is
+    never remote-qualified, so the stock `origin/main` reads as the local
+    branch name `main`.
+    """
+    sect = config_section('repo_hygiene')
+    value = text(sect, 'repo_hygiene', 'mainline', 'origin/main')
+    if value.startswith('origin/'):
+        value = value[len('origin/'):]
+    return value
 
 
 def shipped_version(cfg: PmConfig) -> str | None:

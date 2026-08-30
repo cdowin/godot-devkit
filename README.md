@@ -290,8 +290,10 @@ story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
 checks = ["D1","D2","D3","D4","D5","D6",   # drift rules       — the stock default.
           "V1","V2","V3","V4","V5"]        # integrity rules    V6 and the FLOW rules
                                            # D8 (version == the building milestone's
-                                           # id) and D9 (a building milestone declares
-                                           # `branch:`) are opt-in — name them here.
+                                           # id), D9 (a building milestone declares
+                                           # `branch:`) and D10 (that branch: is not
+                                           # empty or the [repo_hygiene] mainline)
+                                           # are opt-in — name them here.
 bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file    = "project.godot"               # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it

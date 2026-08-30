@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **new opt-in `check pm` rule D10** — a `building` milestone whose `branch:` is empty or equals `[repo_hygiene] mainline` (`origin/`-stripped) is drift. Pairs with D9: run D9 alone for "a building milestone declares its branch," add D10 for the stricter guarantee that it is never the trunk itself. Devkit enables it on its own tree; the flow it encodes is `SDLC.md` §1. (repo/checks/pm.py, repo/pm/model.py)
+
 - **`pm bug <status> <id>`** — moves a bug's status through the vocabulary and resolver that already existed for it: the one grain a typo'd status could previously reach only by hand edit or untyped `pm set`. (repo/pm/cli.py)
 - **`pm retire <milestone-id>`** — fills the ROADMAP.md table `pm init` already seeds: one whole-or-nothing write removing the milestone directory and appending its row, reporting (never refusing on) an undone status or live children; `--dry-run` decides and prints without writing. The `NoDeleter` guard survives narrowed to `cmd_retire`'s body — a named single target is not `prune`'s automatic sweep. (repo/pm/cli.py)
 - **`pm move <story-id> <feature-id>`** — re-parents a story whole: renames the file and rewrites `id`/`feature`/`milestone` together through the new `model.set_fields`, or touches nothing. (repo/pm/cli.py, repo/pm/model.py)

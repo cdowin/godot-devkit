@@ -32,12 +32,18 @@ DRIFT RULES (each FAILs, naming the offending path):
   D9  a `building` milestone declares the `branch:` its work lives on. A fresh
       checkout of the trunk sees the PM records but not the code; without the
       stamp the only recourse is guessing at `git branch -a`.
-  D8/D9 encode the branch-per-milestone / bump-at-start flow and are OFF by
-  default; a project shipping from the trunk and bumping at close is running a
-  different valid flow, not drifting. Opt in via `[pm] checks`.
+  D10 a `building` milestone's `branch:` is empty, or equals the configured
+      mainline (`[repo_hygiene] mainline`, `origin/`-stripped — stock
+      `origin/main` reads as `main`). D9 only requires SOME stamp; D10 also
+      refuses the trunk itself, so a repo may run D9 alone (branch declared,
+      wherever it points) or add D10 for the stricter guarantee. A repo may
+      also rely on D9 without D10.
+  D8/D9/D10 encode the branch-per-milestone / bump-at-start flow and are OFF
+  by default; a project shipping from the trunk and bumping at close is
+  running a different valid flow, not drifting. Opt in via `[pm] checks`.
 
 Which rules run is `[pm] checks` in devkit.toml (default: D1-D6 + V1-V5).
-V6 is known but OPT-IN, as are the two flow rules named just above.
+V6 is known but OPT-IN, as are the three flow rules named just above.
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
 MUST pass on the legitimate mid-build state: a building milestone with mixed
@@ -161,7 +167,7 @@ def run() -> int:
             report(f'milestone {mid} is {mstat!r} but all {feat_total} features '
                    f'are done (should be done)  [{cfg.rel(mfile)}]')
 
-    # --- D8/D9: the flow checks, only when opted into ---------------------
+    # --- D8/D9/D10: the flow checks, only when opted into -------------------
     building = model.building_milestones(cfg) if enabled & set(model.FLOW_CHECKS) else []
 
     if 'D8' in enabled and building:
@@ -181,10 +187,21 @@ def run() -> int:
                    f'building milestone {ids[0]!r} — bump at milestone START, '
                    f'and the id IS the version (D8)')
 
+    mainline = model.mainline_branch() if 'D10' in enabled and building else ''
+
     for mid, branch, mfile in building:
         if 'D9' in enabled and not branch:
             report(f'building milestone {mid} declares no branch: — a fresh '
                    f'checkout cannot find where its work lives  [{cfg.rel(mfile)}]')
+        if 'D10' in enabled:
+            if not branch:
+                report(f'building milestone {mid} declares no branch: — D10 '
+                       f'needs a branch off the mainline ({mainline!r}) to '
+                       f'declare  [{cfg.rel(mfile)}]')
+            elif branch == mainline:
+                report(f'building milestone {mid} declares branch: {branch!r}, '
+                       f'the mainline itself — work must live off '
+                       f'{mainline!r}, not on it (D10)  [{cfg.rel(mfile)}]')
 
     # --- V1-V6: structural + referential integrity ------------------------
     v_on = enabled & set(model.VALIDATE_CHECKS)

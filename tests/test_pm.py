@@ -1103,6 +1103,93 @@ class FlowChecks(unittest.TestCase):
             self.assertIn('declares no branch:', out)
 
 
+class MainlineGuard(unittest.TestCase):
+    """D10 — a `building` milestone must not be empty or on the mainline.
+
+    Opt-in, like D8/D9 (decision D3, 0.16.0): a repo may run D9 alone (some
+    branch declared, wherever it points) or add D10 for the stricter
+    guarantee that it is not the trunk itself.
+    """
+
+    def _building(self, root: Path, branch: str = '', version: str = '0.1'):
+        model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md', 'status', 'building')
+        if branch:
+            model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md', 'branch', branch)
+        if version:
+            (root / 'project.godot').write_text(
+                f'[application]\nconfig/version="{version}"\n', encoding='utf-8')
+
+    def test_off_by_default(self):
+        # Same shape as D8/D9's off-by-default case, but proved on the exact
+        # input D10 exists to catch: a building milestone stamped onto the
+        # mainline itself. Silent unless named.
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='main')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_fires_on_a_building_milestone_stamped_onto_the_mainline(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='main')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('the mainline itself', out)
+
+    def test_fires_on_an_empty_branch_even_without_d9_named(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root)  # no branch: at all
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('needs a branch off the mainline', out)
+
+    def test_a_real_milestone_branch_passes(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='milestone/0.1-demo')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_mainline_strips_a_leading_origin_prefix(self):
+        # `[repo_hygiene] mainline` is a git ref and keeps `origin/`; D10
+        # compares against an authored `branch:` string, which never carries
+        # a remote qualifier, so the stock `origin/main` must read as `main`
+        # — proved here with a NON-stock value so the assertion cannot pass
+        # by accident on the untouched default.
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='trunk')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n'
+                '[repo_hygiene]\nmainline = "origin/trunk"\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn("'trunk'", out)
+
+    def test_d9_alone_does_not_refuse_the_mainline(self):
+        # The opt-in split, from the other side: D9 only requires SOME stamp.
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='main')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D9"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_d10_is_a_known_rule_not_a_config_error(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._building(root, branch='milestone/0.1-demo')
+            (root / 'devkit.toml').write_text(
+                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('unknown rule', out)
+        self.assertIn('D10', model.KNOWN_CHECKS)
+        self.assertIn('D10', model.FLOW_CHECKS)
+
+
 class ThePMTrackerNeverMovesYourCheckout(unittest.TestCase):
     """`pm milestone building` ran `git checkout` in the trunk worktree.
 
@@ -1172,12 +1259,15 @@ class ThePMTrackerNeverMovesYourCheckout(unittest.TestCase):
             self.assertEqual(code, 0, out)
 
     def test_the_rule_is_gone_and_the_gate_says_so(self):
+        # The id D10 itself was later reused (decision D3, 0.16.0) for an
+        # unrelated rule (branch-discipline) — an id nothing has ever shipped
+        # proves the roster still refuses an unknown id the same way it always
+        # did, without asserting something false about D10.
         with tree(story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D10"]\n', encoding='utf-8')
+                '[pm]\nchecks = ["D97"]\n', encoding='utf-8')
             code, out = run_gate(root)
             self.assertEqual(code, 2, out)
-        self.assertNotIn('D10', model.KNOWN_CHECKS)
         self.assertFalse(hasattr(model.PmConfig, 'place_branch_on_building'))
         self.assertFalse(hasattr(model.PmConfig, 'trunk_branches'))
 
@@ -2269,6 +2359,7 @@ class Vocabulary(unittest.TestCase):
             for grain in ('milestone', 'feature', 'story', 'bug'):
                 self.assertIn(grain, out)
             self.assertIn('D9', out)
+            self.assertIn('D10', out)
             self.assertNotIn('->', out)
 
 
