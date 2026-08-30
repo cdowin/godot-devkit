@@ -43,6 +43,7 @@ class Act(Enum):
     OVERWRITE = 'overwrite'
     RENAME = 'rename'
     DELETE_TREE = 'delete directory tree'
+    DELETE_FILE = 'delete file'
 
 
 class Obstruction(Enum):
@@ -167,6 +168,9 @@ class Plan:
     def delete_tree(self, dest: Path, *, label: str = '') -> 'Plan':
         return self.add(Step(Act.DELETE_TREE, dest, label=label))
 
+    def delete_file(self, dest: Path, *, label: str = '') -> 'Plan':
+        return self.add(Step(Act.DELETE_FILE, dest, label=label))
+
     # --- phase one ------------------------------------------------------------
     def decide(self) -> list[Blocked]:
         """Every step that cannot run, with the reason it cannot.
@@ -220,6 +224,13 @@ class Plan:
         elif step.act is Act.DELETE_TREE:
             if dest.exists() and not dest.is_dir():
                 out.append(Blocked(step, dest, Obstruction.NOT_A_DIRECTORY))
+        elif step.act is Act.DELETE_FILE:
+            if dest.exists() and not dest.is_file():
+                out.append(Blocked(step, dest, Obstruction.NOT_A_REGULAR_FILE))
+            elif dest.is_file() and not os.access(dest.parent, os.W_OK):
+                # An unlink writes the DIRECTORY, like a rename does.
+                out.append(Blocked(step, dest.parent,
+                                   Obstruction.PARENT_NOT_WRITABLE))
         return out
 
     def _parent_obstructions(self, step: Step, dest: Path,
@@ -300,6 +311,10 @@ def _run(step: Step) -> None:
         # reported `landed` over a delete that did not happen.
         if step.dest.exists() or step.dest.is_symlink():
             shutil.rmtree(step.dest)
+    elif step.act is Act.DELETE_FILE:
+        # Already-gone is the desired end state (idempotent), same as
+        # DELETE_TREE; a directory here raises and surfaces as `failed`.
+        step.dest.unlink(missing_ok=True)
 
 
 # --- the one-step conveniences ------------------------------------------------
@@ -328,6 +343,10 @@ def move(src: Path, dest: Path) -> Applied:
 
 def remove_tree(path: Path) -> Applied:
     return Plan().delete_tree(path).apply(decide=False)
+
+
+def remove_file(path: Path) -> Applied:
+    return Plan().delete_file(path).apply(decide=False)
 
 
 def raise_on_error(applied: Applied) -> None:

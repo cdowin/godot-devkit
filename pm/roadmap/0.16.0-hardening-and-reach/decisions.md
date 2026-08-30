@@ -40,3 +40,14 @@ to main + tag. New feature `branch-discipline` encodes it: opt-in rule D10 (a `b
 milestone's `branch:` must not be the `[repo_hygiene] mainline`), devkit turns it on for itself,
 and CLAUDE.md/devkit.toml stop describing the old flow. Rejected: leaving devkit on-main as a
 single-maintainer carve-out — the carve-out is exactly how the divergence went unnoticed.
+
+## D4 — 2026-08-30 — Script refs and sidecar contents are exempt from uid canonicality
+
+CHECK 5 judges headers and non-Script `ext_resource` uids only. For the Script plane the `.gd.uid`
+sidecar is the canonical home and CHECK 1 pins ref == sidecar; flagging one side's spelling would
+set the two checks at war over the same byte. This matches the folded `resource_uid_scan.sh` scope
+(Script + addons exempt). Consequence accepted: ~33 nullbound Script-plane non-canonical uids stay
+ungated until the editor next rewrites them, at which point CHECK 1 keeps ref and sidecar moving
+together. Rejected: canonicalizing sidecar + every ref in one fix (a multi-file cascade the gate
+cannot prove safe from parse alone). Flagged for Chris's end-of-run review: would have asked?
+BORDERLINE — the exemption leaves a known churn class ungated on one plane.

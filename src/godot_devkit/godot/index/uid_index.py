@@ -28,6 +28,7 @@ UID_SIDECAR_SUFFIX = '.uid'
 IMPORT_SUFFIX = '.import'
 HEADER_SCAN_BYTES = 4096          # the uid is always in the first header line
 EXT_RESOURCE_PREFIX = '[ext_resource '
+HEADER_PREFIXES = ('[gd_scene ', '[gd_resource ')
 
 
 class UidIndex:

@@ -59,9 +59,11 @@ Installers (write the file once; after that it is the repo's):
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
                       | repo-hygiene | pm
-                                    # `uid --fix` applies the repair the gate
-                                    # already computes: a stale Script ref uid
-                                    # rewritten to the target's .uid sidecar
+                                    # `uid --fix` applies the repairs the gate
+                                    # already computes: stale Script ref uids
+                                    # rewritten to the sidecar's, non-canonical
+                                    # spellings canonicalized (same id), and
+                                    # orphan .gd.uid sidecars deleted
     godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell).
                                     # `defaults` and `repo-hygiene` stay explicit:
                                     # the first is red until a tree is canonicalized

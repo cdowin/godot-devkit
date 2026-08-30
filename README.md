@@ -89,7 +89,7 @@ That churn — files you did not edit turning up in every commit — has three c
 
 | Step | Command | Expect |
 |---|---|---|
-| 1 | `check uid` | Red if `.uid` sidecars are untracked. Commit them; the policy is the gate. Stale refs clear with `check uid --fix`. |
+| 1 | `check uid` | Red if `.uid` sidecars are untracked, missing on a new `.gd`, or orphaned — or a uid spelling is non-canonical. Commit sidecars with their scripts; stale refs, spellings and orphans clear with `check uid --fix`. |
 | 2 | [uid-in-refs migration](#appendix-migrating-to-canonical-uid-in-refs) → `check tres` | Red until migrated once. |
 | 3 | `check props` | Findings are real renamed-export bugs. Fix before wiring. |
 | 4 | `scene canonicalize --elide-defaults` → `check defaults` | Red on any tree never canonicalized. Clean once, then gate. |
@@ -180,7 +180,7 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 
 | Gate | Guards against |
 |---|---|
-| `check uid` | `.uid` sidecar drift: every tracked `.gd` has a tracked `.gd.uid`, and every Script `ext_resource` uid matches the target's. **`--fix`** rewrites each stale ref byte-surgically; a drift with no should-be value stays a finding, because minting one is invention. `--fix` on another gate, or on `check all`, is a usage error |
+| `check uid` | `.uid` drift, five checks: every Script `ext_resource` uid matches the target's `.gd.uid`; every tracked `.gd` has a tracked `.gd.uid`; every NEW (untracked/staged) `.gd` has a sidecar on disk — the finding names the mint remedy, since only an editor import can create one; every tracked `.gd.uid` still has its `.gd`; every header + non-Script `ext_resource` uid is the canonical `ResourceUID` spelling, judged by a ported engine codec with no engine boot. **`--fix`** rewrites stale refs and non-canonical spellings byte-surgically (same id, no ref break) and deletes orphan sidecars; a drift with no should-be value stays a finding, because minting one is invention. `--fix` on another gate, or on `check all`, is a usage error |
 | `check tres` | Path-only `ext_resource` refs, which Godot 4.4+ silently upgrades on any editor/import pass |
 | `check props` | Assignments to properties that **do not exist** — a renamed `@export` whose old assignment Godot drops in silence. Scene nodes, sub_resources and `.tres`, against the `@export` chain and the engine's ClassDB |
 | `check defaults` | `.tres` assignments repeating the script's declared `@export` default. Judges the elision dimension only |

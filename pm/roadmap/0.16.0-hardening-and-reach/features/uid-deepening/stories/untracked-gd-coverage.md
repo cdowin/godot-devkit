@@ -3,7 +3,7 @@ id: 0.16.0/uid-deepening/untracked-gd-coverage
 feature: 0.16.0/uid-deepening
 milestone: "0.16.0"
 name: check uid censuses staged and untracked .gd files
-status: wip
+status: review
 owner:
 estimate:
 depends_on: []

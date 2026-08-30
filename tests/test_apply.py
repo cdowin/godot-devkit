@@ -84,3 +84,34 @@ class CaseOnlyRenamePredicate(TmpCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DeleteFileContract(TmpCase):
+    """DELETE_FILE joined apply for the uid ORPHAN fix — same honesty terms."""
+
+    def test_a_file_already_gone_is_the_desired_end_state(self) -> None:
+        applied = apply.remove_file(self.tmp / 'gone.gd.uid')
+        self.assertEqual(applied.failed, None)
+        self.assertEqual(len(applied.landed), 1)
+
+    def test_a_directory_is_a_decided_obstruction_not_a_surprise(self) -> None:
+        target = self.tmp / 'not_a_file'
+        target.mkdir()
+        blocked = apply.Plan().delete_file(target).decide()
+        self.assertEqual([b.reason for b in blocked],
+                         [apply.Obstruction.NOT_A_REGULAR_FILE])
+        self.assertTrue(target.is_dir(), 'decide() must not touch disk')
+
+    def test_an_unwritable_parent_is_decided_before_any_byte(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest('root ignores permission bits')
+        parent = self.tmp / 'ro'
+        parent.mkdir()
+        victim = parent / 'orphan.gd.uid'
+        victim.write_text('uid://abc\n', encoding='utf-8')
+        parent.chmod(0o555)
+        self.addCleanup(parent.chmod, 0o755)
+        blocked = apply.Plan().delete_file(victim).decide()
+        self.assertEqual([b.reason for b in blocked],
+                         [apply.Obstruction.PARENT_NOT_WRITABLE])
+        self.assertTrue(victim.is_file(), 'decide() must not touch disk')

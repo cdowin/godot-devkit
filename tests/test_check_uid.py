@@ -22,9 +22,19 @@ BASE = ['project.godot', 'systems/rule.gd', 'systems/rule.gd.uid']
 CLEAN = [*BASE, 'scenes/clean.tscn']
 DRIFTED = [*CLEAN, 'scenes/drifted.tscn', 'data/drifted.tres']
 GHOST = [*CLEAN, 'systems/ghost.gd', 'scenes/ghost_ref.tscn']
+ORPHANED = [*CLEAN, 'systems/orphan.gd.uid']
+NONCANON = [*CLEAN, 'data/noncanon.tres']
+UNDECODABLE = [*CLEAN, 'data/invalid_uid.tres']
+LEGACY = [*CLEAN, 'systems/legacy.gd', 'systems/legacy.gd.uid',
+          'scenes/legacy_ref.tscn']
 STALE_SCENE_UID = 'uid://dstaleuid000'
 STALE_RES_UID = 'uid://dstaleuid001'
 ACTUAL_UID = 'uid://drulescript'
+# Real-world non-canonical spellings and their engine-canonical twins.
+NONCANON_HEADER = 'uid://wkcycles00001'
+CANON_HEADER = 'uid://c8bmebsj60m77'
+NONCANON_REF = 'uid://zopk21mtzaqz'
+CANON_REF = 'uid://0opk21mt0aq0'
 
 
 def _fix() -> tuple[int, str]:
@@ -161,6 +171,193 @@ class Repairs(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertIn('nothing to repair', out)
         self.assertIn('has NO .uid file', out)
+
+
+class NewScripts(unittest.TestCase):
+    """CHECK 3 — the tracked census misses the moment of risk: a NEW .gd
+    (untracked, or staged in a tree with no commit yet) with no sidecar on
+    disk sails through a tracked-only gate and fails the next cold import."""
+
+    def test_an_untracked_gd_without_a_sidecar_is_a_finding_naming_the_remedy(
+            self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'systems/fresh.gd').write_text('extends Node\n',
+                                                   encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn('MISSING  systems/fresh.gd is new and has no '
+                      'systems/fresh.gd.uid', out)
+        # The remedy is named IN the finding — minting is an editor-import
+        # concern this package never performs itself.
+        self.assertIn('godot --headless --import', out)
+        self.assertIn('open the project in the editor once', out)
+
+    def test_an_untracked_gd_with_an_on_disk_sidecar_passes(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'systems/fresh.gd').write_text('extends Node\n',
+                                                   encoding='utf-8')
+            (root / 'systems/fresh.gd.uid').write_text('uid://dfreshuid000\n',
+                                                       encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+
+    def test_a_gd_inside_an_untracked_directory_is_still_censused(self) -> None:
+        """Plain porcelain collapses a new directory to one `?? dir/` line;
+        without -uall the riskiest file shape is invisible."""
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'systems/newborn').mkdir()
+            (root / 'systems/newborn/fresh.gd').write_text(
+                'extends Node\n', encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn('MISSING  systems/newborn/fresh.gd', out)
+
+    def test_a_gitignored_gd_is_not_censused(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / '.gitignore').write_text('generated/\n', encoding='utf-8')
+            (root / 'generated').mkdir()
+            (root / 'generated/gen.gd').write_text('extends Node\n',
+                                                   encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('gen.gd', out)
+
+    def test_the_configured_exclude_scopes_check_3(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'addons').mkdir()
+            (root / 'addons/vendored.gd').write_text('extends Node\n',
+                                                     encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('vendored.gd', out)
+
+    def test_a_staged_new_gd_without_a_sidecar_is_censused_too(self) -> None:
+        # In these fixture repos everything is staged-new (git add -A, no
+        # commit): ghost.gd is exactly the staged shape, and it reports.
+        with temp_repo('uid_repo', only=GHOST):
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn('MISSING  systems/ghost.gd', out)
+
+    def test_the_census_line_discloses_the_new_buckets(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'systems/fresh.gd').write_text('extends Node\n',
+                                                   encoding='utf-8')
+            _, out = run_check(uid)
+        # rule.gd is staged-new (no commit in a fixture repo) + fresh.gd
+        # untracked = 2; one tracked sidecar; clean.tscn's header is the one
+        # canonicality-checked uid (its Script ref is CHECK 1's domain).
+        self.assertIn('[check:uid] census — 2 new (untracked/staged) .gd, '
+                      '1 tracked .uid sidecar(s), '
+                      '1 header/non-Script uid(s) canonicality-checked', out)
+
+
+class OrphanSidecars(unittest.TestCase):
+    """CHECK 4 — a tracked .gd.uid whose script is gone is cruft, and the ONE
+    repair that is a deletion rather than a rewrite."""
+
+    def test_a_tracked_sidecar_whose_script_is_gone_is_a_finding(self) -> None:
+        with temp_repo('uid_repo', only=ORPHANED):
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn('ORPHAN  systems/orphan.gd.uid is tracked but '
+                      'systems/orphan.gd is gone', out)
+        self.assertIn('--fix deletes it', out)
+
+    def test_a_sidecar_whose_script_exists_only_on_disk_is_not_cruft(self) -> None:
+        """An untracked .gd next to its tracked sidecar is a script being
+        born, not a script that died — deleting the sidecar would break the
+        commit in progress."""
+        with temp_repo('uid_repo', only=ORPHANED) as root:
+            (root / 'systems/orphan.gd').write_text('extends Node\n',
+                                                    encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('ORPHAN', out)
+
+    def test_fix_deletes_the_orphan_and_only_the_orphan(self) -> None:
+        with temp_repo('uid_repo', only=ORPHANED) as root:
+            before = _snapshot(root)
+            code, out = _fix()
+            after = _snapshot(root)
+        self.assertEqual(code, 0, out)
+        self.assertIn('FIXED  deleted systems/orphan.gd.uid', out)
+        self.assertIn('[check:uid] FIX — deleted 1 orphan .uid sidecar(s)', out)
+        del before['systems/orphan.gd.uid']
+        self.assertEqual(after, before)
+
+    def test_a_rerun_after_the_deletion_reports_clean(self) -> None:
+        with temp_repo('uid_repo', only=ORPHANED):
+            _fix()
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+
+    def test_the_configured_exclude_scopes_check_4(self) -> None:
+        with temp_repo('uid_repo', only=ORPHANED) as root:
+            (root / 'devkit.toml').write_text(
+                '[uid]\nexclude_prefixes = ["addons/", "systems/orphan"]\n',
+                encoding='utf-8')
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('ORPHAN', out)
+
+
+class Canonicality(unittest.TestCase):
+    """CHECK 5 — a header / non-Script uid whose TEXT is not the engine's
+    spelling is churn: Godot rewrites it on the next editor save. The verdict
+    comes from the ported codec, never from the engine (rule 2)."""
+
+    def test_non_canonical_spellings_are_findings_naming_the_canonical_form(
+            self) -> None:
+        with temp_repo('uid_repo', only=NONCANON):
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'NON-CANONICAL  data/noncanon.tres : {NONCANON_HEADER} '
+                      f'-> should be {CANON_HEADER}', out)
+        self.assertIn(f'NON-CANONICAL  data/noncanon.tres : {NONCANON_REF} '
+                      f'-> should be {CANON_REF}', out)
+        self.assertIn('re-run with --fix', out)
+
+    def test_an_undecodable_uid_is_reported_and_never_repaired(self) -> None:
+        with temp_repo('uid_repo', only=UNDECODABLE) as root:
+            code, out = run_check(uid)
+            self.assertEqual(code, 1, out)
+            self.assertIn('INVALID  data/invalid_uid.tres : uid://not_valid! '
+                          'does not decode', out)
+            self.assertNotIn('re-run with --fix', out)
+            before = (root / 'data/invalid_uid.tres').read_text(encoding='utf-8')
+            fix_code, fix_out = _fix()
+            after = (root / 'data/invalid_uid.tres').read_text(encoding='utf-8')
+        self.assertEqual(fix_code, 1, fix_out)
+        self.assertEqual(after, before)
+        self.assertIn('nothing to repair', fix_out)
+
+    def test_a_script_ref_matching_its_sidecar_is_exempt(self) -> None:
+        """The Script ref and its .gd.uid both carry the same non-canonical
+        text: CHECK 1 pins ref to sidecar and owns that plane, so CHECK 5
+        stays out — flagging one side would set the two gates at war."""
+        with temp_repo('uid_repo', only=LEGACY):
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('NON-CANONICAL', out)
+
+    def test_fix_canonicalizes_byte_surgically_and_converges(self) -> None:
+        with temp_repo('uid_repo', only=NONCANON) as root:
+            path = root / 'data/noncanon.tres'
+            before = path.read_text(encoding='utf-8').splitlines()
+            code, out = _fix()
+            after = path.read_text(encoding='utf-8').splitlines()
+            rerun_code, rerun_out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertIn('[check:uid] FIX — canonicalized 2 uid spelling(s)', out)
+        changed = [(a, b) for a, b in zip(before, after) if a != b]
+        self.assertEqual(len(changed), 2)
+        self.assertEqual(len(before), len(after))
+        self.assertEqual(changed[0][0].replace(NONCANON_HEADER, CANON_HEADER),
+                         changed[0][1])
+        self.assertEqual(changed[1][0].replace(NONCANON_REF, CANON_REF),
+                         changed[1][1])
+        self.assertEqual(rerun_code, 0, rerun_out)
 
 
 class CliRouting(unittest.TestCase):
