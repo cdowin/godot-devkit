@@ -222,6 +222,12 @@ survivable — a false FAIL gets the gate switched off, and then nothing is chec
 **Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `devkit.toml`
 mistake is always `2`, never `1`, so CI can never read a typo as drift.
 
+**A stale rule id stops the GATE, not the read verbs.** `[pm] checks` naming a rule this
+package no longer ships — which is what a pin bump retiring one produces — is exit 2 from
+`check pm` and `pm validate`, and from nothing else. `pm status`, `pm get`, `pm new` and
+`pm vocabulary --json` keep working, so you can read your own tree and ask the
+tool what the new vocabulary is while deciding what to change.
+
 ## Command reference
 
 ### Scene-file introspection

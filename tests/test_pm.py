@@ -905,6 +905,67 @@ class ConfigValidation(unittest.TestCase):
             self.assertEqual(code, 0, out)   # D4 is off, so the bogus status is quiet
 
 
+class AStaleRuleIdStopsTheGATE_NotTheReadVerbs(unittest.TestCase):
+    """One retired id in `[pm] checks` must not take the whole CLI down.
+
+    A version bump that retires a rule is exactly what leaves a stale id in a
+    consumer's config, and one consumer names sixteen rules explicitly. Raised
+    from `model.load()`, that typo killed `pm status`, `pm get`, `pm new`,
+    `pm validate`, `pm vocabulary --json`, `check pm` AND `check agents` at
+    exit 2 together — so the consumer could neither read its own tree nor ask
+    the tool what the new vocabulary is while deciding what to do about it.
+
+    The strictness is right; the placement was not. The GATES refuse, because
+    a narrowed roster is a lie told by a gate. Everything that only READS is
+    still readable.
+    """
+
+    STALE = '[pm]\nchecks = ["D1","D2","D3","D4","D5","D6","D99"]\n'
+
+    def test_the_read_verbs_still_run(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
+            for argv in (('status',), ('vocabulary', '--json'),
+                         ('get', '0.1/alpha', 'status')):
+                with self.subTest(argv=argv):
+                    code, out = run_cli(root, *argv)
+                    self.assertEqual(code, 0, out)
+            self.assertIn('milestone 0.1', run_cli(root, 'status')[1])
+
+    def test_a_write_verb_still_runs(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
+            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+            self.assertEqual(code, 0, out)
+
+    def test_check_agents_still_runs(self):
+        from godot_devkit.repo.checks import agents as agents_check
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
+            d = root / '.claude' / 'agents'
+            d.mkdir(parents=True)
+            (d / 'a.md').write_text('Move it with `pm story wip <id>`.\n',
+                                    encoding='utf-8')
+            subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                           capture_output=True)
+            from godot_devkit.core.project import load_config, repo_root
+            repo_root.cache_clear()
+            load_config.cache_clear()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = agents_check.run()
+            self.assertEqual(code, 0, buf.getvalue())
+
+    def test_the_two_gates_refuse_loudly_and_name_the_id(self):
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.STALE, encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 2, out)
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 2, out)
+            self.assertIn('D99', out)
+
+
 class FlowChecks(unittest.TestCase):
     """D8-D10 — branch-per-milestone + bump-at-start. Off unless opted into."""
 

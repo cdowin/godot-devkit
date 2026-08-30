@@ -21,6 +21,7 @@
 - **BREAKING: `pm prune` is removed, with D7 and D14** — On the default roster an open bug under a `done` milestone was PASS, and prune then deleted it. Nothing here deletes a grain. (repo/pm/cli.py)
 - **D4 covers a bug's status** — D14's one fact about a FILE (a status outside `bug_states`) moves to the rule that already owns it, on by default. `bug_open_states` goes with its only reader.
 - **the census always counts bugs** — `N bug(s)` used to ride the opt-in D14, so a default run said nothing about a directory it had walked. (repo/checks/pm.py)
+- **a stale rule id stops the gate, not the CLI** — One retired name in `[pm] checks` used to kill `pm status`, `pm get`, `pm new` and `pm vocabulary --json` too. Now only `check pm` and `pm validate` refuse.
 
 ## v0.14.0 — 2026-08-29
 

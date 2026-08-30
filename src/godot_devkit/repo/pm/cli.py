@@ -851,6 +851,11 @@ def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
     """Structural + referential integrity. The same predicates `check pm` runs."""
     if args:
         raise Usage(USAGE)
+    # Same placement as the gate's: `pm validate` is the other reader a stale
+    # rule id would silently narrow, and the only two that must refuse it.
+    stale = model.unknown_checks(cfg)
+    if stale:
+        raise Usage(stale)
     from godot_devkit.repo.pm import validate as _validate
     findings, census = _validate.run(cfg, set(cfg.checks) & set(model.VALIDATE_CHECKS))
     for msg in findings:

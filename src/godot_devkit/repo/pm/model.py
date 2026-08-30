@@ -244,13 +244,6 @@ def load() -> PmConfig:
         return out
 
     checks = tup('checks', DEFAULT_CHECKS)
-    unknown = [c for c in checks if c not in KNOWN_CHECKS]
-    if unknown:
-        # An unknown name is indistinguishable from a disabled rule at runtime,
-        # so a typo would quietly narrow the gate. Name it instead.
-        raise ConfigError(
-            f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
-            f'known rules are {" ".join(KNOWN_CHECKS)}')
 
     # Compile here, not at use: an invalid regex or a missing capture group is
     # a CONFIG error (exit 2), never a finding (exit 1). Deferring it meant CI
@@ -296,6 +289,27 @@ def load() -> PmConfig:
         version_pattern=version_pattern,
         trunk_branches=tup('trunk_branches', ('staging', 'main')),
     )
+
+
+def unknown_checks(cfg: PmConfig) -> str:
+    """The refusal for a `[pm] checks` naming a rule this package does not ship,
+    or `''` when every name is known.
+
+    An unknown name is indistinguishable from a disabled rule at runtime, so a
+    typo would quietly narrow the gate — which is why this is strict. But it is
+    NOT raised from `load()`, and that placement is the whole point: `load()` is
+    on the path of every `pm` verb, so one stale id — exactly what a version
+    bump retiring a rule produces — used to kill `pm status`, `pm get`, `pm new`
+    and `pm vocabulary --json` at exit 2. The consumer could then neither read
+    its own tree nor ask the tool what the new vocabulary is while deciding what
+    to do about it. The GATES enforce it, because they are what a narrowed
+    roster would lie to.
+    """
+    unknown = [c for c in cfg.checks if c not in KNOWN_CHECKS]
+    if not unknown:
+        return ''
+    return (f'[pm] checks names unknown rule(s) {", ".join(unknown)} — '
+            f'known rules are {" ".join(KNOWN_CHECKS)}')
 
 
 def transition_legal(graph: tuple[str, ...], src: str, dst: str) -> bool:

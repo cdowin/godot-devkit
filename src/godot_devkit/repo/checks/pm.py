@@ -88,6 +88,13 @@ def run() -> int:
         # it as "drift found" (the contract project.py states).
         print(f'[check:pm] ERROR — {err}', file=sys.stderr)
         return 2
+    # The roster is validated HERE rather than in `model.load()`: a stale rule
+    # id must not take `pm status` down with the gate. This is the reader a
+    # narrowed roster would lie to, so this is where it has to be loud.
+    stale = model.unknown_checks(cfg)
+    if stale:
+        print(f'[check:pm] ERROR — {stale}', file=sys.stderr)
+        return 2
     findings: list[str] = []
 
     def report(msg: str) -> None:
