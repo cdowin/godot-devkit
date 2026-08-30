@@ -3,7 +3,7 @@ id: 0.16.0/consumer-adoption/nullbound-adoption
 feature: 0.16.0/consumer-adoption
 milestone: "0.16.0"
 name: Adopt install diffs, wire surgery verbs, delete superseded local checks
-status: wip
+status: done
 owner:
 estimate:
 depends_on: []

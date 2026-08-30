@@ -62,3 +62,12 @@ ROADMAP.md row append before either write, with `--dry-run`. The guard survives 
 primitive anywhere outside `cmd_retire`'s body still fails the test. Rejected: keeping the blanket
 ban (leaves the documented prune flow a hand-rolled `git rm -r` forever). Would have asked? NO —
 Chris commissioned `pm retire` by name in the audit decisions.
+
+## D6 — 2026-08-30 — Wave-2 adoption rides the next milestone - the tag must exist first
+
+consumer-adoption closed on wave 1 (trail's pm wiring + the 9 uid fixes; nullbound's surgery
+targets). Wave 2 — pin bumps to v0.16.0, `install-*` adoption in both repos, deleting the
+superseded `cc-uid-sidecar.sh`/`resource_uid_scan.sh`, retarget/connect targets, and enabling D10
+in both consumers (Chris: "enable in both") — needs the tag to exist, so it becomes the opening
+feature of the next milestone rather than holding this one open. Rejected: keeping 0.16.0
+`building` until adoption (a released milestone held open by work the release itself unblocks).

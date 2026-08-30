@@ -1,7 +1,7 @@
 ---
 id: "0.16.0"
 name: hardening-and-reach
-status: building
+status: done
 theme:
 target_date:
 depends_on: []
@@ -30,7 +30,7 @@ labels: []
 2. `branch-discipline` · done · 1/1 stories
 3. `case-rename-retirement` · done · 1/1 stories
 4. `ci-corpus` · done · 1/1 stories
-5. `consumer-adoption` · building · 0/2 stories
+5. `consumer-adoption` · done · 2/2 stories
 6. `gate-integrity` · done · 2/2 stories
 7. `hook-corpus-upstream` · done · 2/2 stories
 8. `hook-soundness` · done · 2/2 stories

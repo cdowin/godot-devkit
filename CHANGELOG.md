@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.16.0 — 2026-08-30
+
 - **`pm decide` refuses a `--`-leading title word** — the retired four-field interface's flags were landing verbatim in the durable log at exit 0. (repo/pm/cli.py)
 - **pm templates stop minting machine-unread frontmatter** — `severity`, `labels`, `estimate`, `risk`, `size`, `theme`, `target_date`, `track` are gone from the stock grain templates (`pm set` inserts any of them back on demand); `bug.md` keeps `caught_in`/`fix_milestone` and its comment now describes `pm retire`, not the retired D14/prune. pm-operator.md's tooling contract matches the shipped verb roster — re-install with `--force`. (repo/pm/templates/, repo/installables/pm-operator.md)
 - **`cc-godot-sandbox.sh` blocks godot-named-variable boots** (`$GODOT --headless`, `"${GODOT}" -e`), carries a `project config` header, and states its accepted arbitrary-name fail-open gap. (repo/installables/cc-godot-sandbox.sh)
