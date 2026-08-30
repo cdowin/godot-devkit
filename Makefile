@@ -11,16 +11,13 @@
 
 .DEFAULT_GOAL := help
 
-# The package is stdlib-only. The TEST run needs two things it does not ship:
-# pytest, and PyYAML — `install-ci` generates a GitHub workflow, and the only
-# honest way to assert a generator emits parseable YAML is to parse it. Without
-# it that test skips, and a skipped test reports nothing while looking green.
-# 3.11 is the declared floor and where the fast loop runs; the matrix is every
-# interpreter the package claims.
+# The package is stdlib-only. The TEST run needs one thing it does not ship:
+# pytest. 3.11 is the declared floor and where the fast loop runs; the matrix
+# is every interpreter the package claims.
 PY_FLOOR  ?= 3.11
 PY_MATRIX ?= 3.11 3.12 3.13 3.14
 UV        ?= uv
-TEST_DEPS ?= --with pytest --with pyyaml
+TEST_DEPS ?= --with pytest
 PYTEST    ?= $(UV) run --python $(PY_FLOOR) $(TEST_DEPS) python -m pytest
 PYTEST_Q  ?= -q
 

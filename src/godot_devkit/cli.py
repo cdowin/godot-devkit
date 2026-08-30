@@ -46,13 +46,6 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a
      hand-edit would leave, off the SAME predicates)
 
-Installers (write once, then the file is the repo's):
-    godot-devkit install-ci         # the workflow that runs the repo's gate
-    godot-devkit install-agents     # the review + build contract, as agent
-                                    # definitions (a rules file never reaches
-                                    # a subagent's spawn context; a definition
-                                    # does)
-
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
                       | repo-hygiene | pm | agents
@@ -114,17 +107,6 @@ def all_roster() -> tuple[str, ...]:
     # `all` naming itself would recurse forever; it is the one name that cannot
     # appear, and KNOWN_CHECKS already excludes it.
     return tuple(dict.fromkeys(roster))
-
-
-def install_commands() -> tuple[str, ...]:
-    """The `install-*` verbs, from the installer's own plan table.
-
-    Asked rather than restated: a second list here would be a second name for
-    the same fact, and the failure mode is a verb documented in one place and
-    dispatched in neither.
-    """
-    from godot_devkit.repo.install import PLANS
-    return tuple(PLANS)
 
 
 def _usage() -> int:
@@ -232,9 +214,6 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'pm':
         from godot_devkit.repo.pm import cli as pm_cli
         return pm_cli.main(rest)
-    if cmd in install_commands():
-        from godot_devkit.repo import install
-        return install.main(cmd, rest)
     if cmd == 'check':
         if not rest:
             return _usage()

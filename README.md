@@ -303,28 +303,6 @@ Optional, at the consuming repo root. Every tool works with stock defaults; a
 section overrides only what it names:
 
 ```toml
-[ci]
-# What `install-ci` cannot know about your repo. Everything here is optional.
-# on: which events trigger the workflow. One of push, pull_request,
-#     workflow_dispatch, merge_group — an event this skeleton cannot emit
-#     correctly is refused by name rather than half-written.
-# branches: the filter applied to push and pull_request. `["**"]` is every
-#     branch; the DEFAULT is the trunk only, because `verify` is a repo's
-#     heaviest target and firing it on every work-in-progress push burns CI.
-on = ["push", "pull_request", "workflow_dispatch"]
-branches = ["main"]
-
-# Steps that run after checkout + uv and before the gate. Both game consumers
-# need a Godot toolchain here; nothing generic can provision one for them.
-[[ci.setup]]
-name = "Setup Godot"
-uses = "chickensoft-games/setup-godot@v2"
-with = { version = "4.6.2", include-templates = false }
-
-[[ci.setup]]
-name = "Warm the import cache"
-run = "godot --path . --headless --editor --quit 2>&1 || true"
-
 [checks]
 # Which gates `check all` runs HERE. Default: uid, tres, props, doc, shell.
 # A repo with no Godot tree (a PM-tree-only consumer, this package itself) names

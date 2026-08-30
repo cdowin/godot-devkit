@@ -39,5 +39,4 @@ packages = ["src/godot_devkit"]
 # The guidance markdown is read at runtime via importlib.resources — it must be
 # in the wheel, not just the sdist.
 artifacts = ["src/godot_devkit/repo/pm/guidance/*.md",
-             "src/godot_devkit/repo/pm/templates/*.md",
-             "src/godot_devkit/repo/installables/*"]
+             "src/godot_devkit/repo/pm/templates/*.md"]
