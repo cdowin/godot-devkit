@@ -197,19 +197,32 @@ def _fill_header(path: Path, slot: str, actions: list[tuple[str, Path]]) -> None
 
 def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
              values: dict[str, str]) -> list[tuple[str, Path]]:
-    """Fill every canonical slot of one grain dir. IDEMPOTENT, and never
-    clobbers: an existing slot is left byte-identical, and a slot present under
-    another CASE is renamed rather than written past.
+    """Fill one grain dir's REQUIRED slots. IDEMPOTENT, and never clobbers: an
+    existing slot is left byte-identical, and a slot present under another CASE
+    is renamed rather than written past.
 
     This is how a consumer migrates. A tree with 22 milestones and 136 features
     cannot be hand-shaped, and a scaffolder that refuses on an existing grain
     would leave hand-shaping as the only path.
 
+    WHAT IT DOES NOT DO IS MINT A SHARED DOC. `handoff.md`, `decisions.md` and
+    `review.md` are optional and appear on first write — a decisions.md the
+    moment `pm decide` records one, the other two when a human writes one.
+    Scaffolding them empty put 204 files and ~1,900 lines into one consumer's
+    tree, a quarter of it, minted by the verb that exists to stop sprawl.
+
+    They stay MANAGED, which is the other half: an existing `DECISIONS.md` is
+    still renamed to the canonical case and an existing doc that lost its
+    instruction header still gets it back. Migration is what this verb is for;
+    creation-from-nothing is what it stops doing.
     """
     file_slots = (model.MILESTONE_FILE_SLOTS if kind == 'milestone'
                   else model.FEATURE_FILE_SLOTS)
     dir_slots = (model.MILESTONE_DIR_SLOTS if kind == 'milestone'
                  else model.FEATURE_DIR_SLOTS)
+    # Renamed and header-repaired when PRESENT, never created when absent.
+    managed = file_slots + (model.MILESTONE_OPTIONAL_SLOTS if kind == 'milestone'
+                            else model.FEATURE_OPTIONAL_SLOTS)
     actions: list[tuple[str, Path]] = []
     # The grain DIRECTORY is the first byte this verb writes, and it was the
     # last unguarded one: a name the filesystem will not take (`OSError: File
@@ -238,7 +251,7 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     # stop.
     entries = model.dir_entries(gdir)
     renames: list[tuple[str, str]] = []
-    for slot in file_slots:
+    for slot in managed:
         variants = model.case_variants(entries, slot)
         # A DIRECTORY or a SYMLINK is refused under EVERY spelling, not only the
         # canonical one. `case_variants` reads names, not kinds, so a variant
@@ -317,7 +330,7 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
                 f'written' + (f'; fix it under {cfg.template_dir}/, or delete '
                               f'it there to fall back to the packaged one'
                               if cfg.template_dir else '')) from err
-    for slot in file_slots:
+    for slot in managed:
         now = gdir / by_slot.get(slot, slot)
         if slot in bodies or entries.get(now.name) != 'file':
             continue
@@ -362,7 +375,7 @@ def scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
     # us). It becomes a REFUSAL naming what already landed, so exit 1 always
     # reads as a finding a consumer's hook can print, never as a stack trace.
     try:
-        for slot in file_slots:
+        for slot in managed:
             if slot in bodies:
                 write(gdir / slot, bodies[slot])
                 actions.append(('created', gdir / slot))

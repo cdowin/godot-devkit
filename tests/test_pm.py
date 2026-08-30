@@ -635,19 +635,34 @@ class Scaffolding(unittest.TestCase):
         # A latin-1 byte in a project's `template_dir` raised
         # `UnicodeDecodeError` from inside the slot loop, two files in. Every
         # template the grain needs is loaded and decoded before anything lands.
-        for slot in ('handoff.md', 'milestone.md'):
-            with self.subTest(slot), tree(story_statuses=('todo',)) as root:
-                (root / 'devkit.toml').write_text(
-                    '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
-                self.assertEqual(run_cli(root, 'templates')[0], 0)
-                (root / 'pm/templates' / slot).write_bytes(b'caf\xe9\n')
-                (root / 'pm/roadmap/0.1-demo/milestone.md').unlink()
-                code, out = run_cli(root, 'new', 'milestone', '0.1')
-                self.assertEqual(code, 1, out)
-                self.assertIn('template cannot be read', out)
-                self.assertIn('nothing was written', out)
-                self.assertNotIn('Traceback', out)
-                self.assertFalse((root / 'pm/roadmap/0.1-demo/handoff.md').exists())
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            self.assertEqual(run_cli(root, 'templates')[0], 0)
+            (root / 'pm/templates/milestone.md').write_bytes(b'caf\xe9\n')
+            (root / 'pm/roadmap/0.1-demo/milestone.md').unlink()
+            code, out = run_cli(root, 'new', 'milestone', '0.1')
+            self.assertEqual(code, 1, out)
+            self.assertIn('template cannot be read', out)
+            self.assertIn('nothing was written', out)
+            self.assertNotIn('Traceback', out)
+            self.assertFalse((root / 'pm/roadmap/0.1-demo/milestone.md').exists())
+
+    def test_decide_refuses_an_undecodable_decisions_template(self):
+        # `pm decide` mints the log on first write, so the decode that used to
+        # happen inside `pm new` now happens here — and it refuses the same
+        # way, with the grain byte-identical.
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
+            self.assertEqual(run_cli(root, 'templates')[0], 0)
+            (root / 'pm/templates/decisions.md').write_bytes(b'caf\xe9\n')
+            code, out = run_cli(root, 'decide', '0.1', 'a choice')
+            self.assertEqual(code, 2, out)
+            self.assertIn('template cannot be read', out)
+            self.assertNotIn('Traceback', out)
+            self.assertFalse(
+                (root / 'pm/roadmap/0.1-demo/decisions.md').exists())
 
     def test_new_reports_a_write_that_no_listing_could_have_predicted(self):
         # Not everything is pre-inspectable — a mode changed under us, a disk
@@ -655,22 +670,25 @@ class Scaffolding(unittest.TestCase):
         # can print, so the escaping exception becomes a refusal that names
         # exactly which slots did land rather than a stack trace over them.
         with tree(story_statuses=('todo',)) as root:
-            gdir = root / 'pm/roadmap/0.1-demo'
+            gdir = root / 'pm/roadmap/0.2-second'
             real = templates.write
 
             def flaky(path: Path, text: str) -> None:
-                if path.name == model.DECISION_FILE_NAME:
+                if path.name == 'milestone.md':
                     raise OSError(28, 'No space left on device')
                 real(path, text)
 
             with unittest.mock.patch.object(templates, 'write', flaky):
-                code, out = run_cli(root, 'new', 'milestone', '0.1')
+                code, out = run_cli(root, 'new', 'milestone', '0.2', 'Second')
             self.assertEqual(code, 1, out)
             self.assertNotIn('Traceback', out)
             self.assertIn('No space left on device', out)
             self.assertIn('PART-FILLED', out)
-            self.assertIn('created pm/roadmap/0.1-demo/handoff.md', out)
-            self.assertFalse((gdir / model.REVIEW_FILE_NAME).exists())
+            # The grain file is the FIRST write, so the honest report is that
+            # nothing had landed — the claim has to track the truth in both
+            # directions, not only when something did.
+            self.assertIn('nothing had been written yet', out)
+            self.assertFalse((gdir / 'features').exists())
 
     def test_new_refuses_a_slot_that_is_a_symlink_out_of_the_grain(self):
         # `_fill_header` followed it and rewrote a file the verb was never
@@ -705,6 +723,8 @@ class Scaffolding(unittest.TestCase):
         with tree(story_statuses=('todo',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            model.write_raw(mdir / 'decisions.md',
+                            f'{model.SLOT_HEADER["decisions.md"]}\n\n# log\n')
             before = (mdir / 'decisions.md').read_text(encoding='utf-8')
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             self.assertEqual((mdir / 'decisions.md').read_text(encoding='utf-8'),
@@ -716,12 +736,35 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(code, 2, out)
             self.assertIn('needs a name', out)
 
-    def test_every_shared_doc_ships_its_instruction_header(self):
+    def test_new_mints_no_shared_doc_and_repairs_the_header_of_one_present(self):
+        # BOTH halves. `pm new` stopped CREATING a shared doc — that scaffolded
+        # 204 empty files into one consumer's tree — and still MANAGES one that
+        # exists, which is what a migration needs.
         with tree(story_statuses=('todo',)) as root:
-            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             mdir = root / 'pm/roadmap/0.1-demo'
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            for slot in model.MILESTONE_OPTIONAL_SLOTS:
+                self.assertFalse((mdir / slot).exists(), slot)
             for slot, want in model.SLOT_HEADER.items():
+                (mdir / slot).write_text('# headerless\n', encoding='utf-8')
+                self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
                 self.assertEqual(model.header_of(mdir / slot), want, slot)
+                self.assertIn('# headerless',
+                              (mdir / slot).read_text(encoding='utf-8'))
+
+    def test_new_renames_a_case_variant_of_a_shared_doc_without_minting_one(self):
+        # The migration this verb exists for: `DECISIONS.md` -> `decisions.md`
+        # with the bytes intact. Optional does not mean invisible.
+        with tree(story_statuses=('todo',)) as root:
+            mdir = root / 'pm/roadmap/0.1-demo'
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            legacy = f'{model.SLOT_HEADER["decisions.md"]}\n\n# legacy\n'
+            model.write_raw(mdir / 'DECISIONS.md', legacy)
+            self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
+            entries = model.dir_entries(mdir)
+            self.assertEqual(entries.get('decisions.md'), 'file')
+            self.assertNotIn('DECISIONS.md', entries)
+            self.assertEqual(model.read_raw(mdir / 'decisions.md'), legacy)
 
     def test_a_name_the_filesystem_refuses_is_a_refusal_not_a_traceback(self):
         # The grain DIRECTORY was the last unguarded write: `gdir.mkdir` on a
@@ -1614,7 +1657,7 @@ class Templates(unittest.TestCase):
             self.assertEqual(model.field_of(ff, 'milestone'), '0.1')
             self.assertEqual(run_cli(root, 'validate')[0], 0)
 
-    def test_a_new_milestone_gets_handoff_and_decisions(self):
+    def test_a_new_milestone_gets_its_grain_file_under_the_exact_name(self):
         # EXACT names, from a listing: `is_file()` here passed on macOS against
         # the OLD uppercase spellings long after the rename landed, and would
         # have failed in CI on Linux. The slot names are the assertion.
@@ -1624,7 +1667,7 @@ class Templates(unittest.TestCase):
             entries = model.dir_entries(mdir)
             for f in model.MILESTONE_FILE_SLOTS:
                 self.assertEqual(entries.get(f), 'file', f)
-            self.assertIn('0.2 Second', (mdir / 'handoff.md').read_text())
+            self.assertIn('# 0.2 — Second', (mdir / 'milestone.md').read_text())
 
     def test_templates_command_refuses_to_write_past_a_case_variant(self):
         # `is_file()` on macOS answers `decisions.md` with a leftover
@@ -1646,11 +1689,12 @@ class Templates(unittest.TestCase):
             self.assertEqual(model.read_raw(tdir / 'DECISIONS.md'), mine)
             self.assertNotIn('decisions.md', model.dir_entries(tdir))
 
-            # Renamed, it is the template `new` renders from — the whole point.
-            # Through a temp name: a direct rename is a no-op on macOS.
+            # Renamed, it is the template the log is MINTED from — the whole
+            # point. Through a temp name: a direct rename is a no-op on macOS.
             (tdir / 'DECISIONS.md').rename(tdir / 'x.tmp')
             (tdir / 'x.tmp').rename(tdir / 'decisions.md')
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.3', 'Third')[0], 0)
+            self.assertEqual(run_cli(root, 'decide', '0.3', 'a choice')[0], 0)
             self.assertIn('MINE', model.read_raw(
                 root / 'pm/roadmap/0.3-third/decisions.md'))
 
@@ -1706,12 +1750,16 @@ class FieldMutation(unittest.TestCase):
             sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
             self.assertEqual(model.field_of(sf, 'status'), 'todo')
 
-    def test_claim_and_release_move_owner(self):
+    def test_set_moves_owner_in_both_directions(self):
+        # `claim`/`release` were fourteen lines calling this with the key
+        # hardcoded. One verb, and `owner` is not special among fields.
         with tree(story_statuses=('todo',)) as root:
             sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
-            run_cli(root, 'claim', '0.1/alpha/s0', 'dev-1')
+            self.assertEqual(
+                run_cli(root, 'set', '0.1/alpha/s0', 'owner', 'dev-1')[0], 0)
             self.assertEqual(model.field_of(sf, 'owner'), 'dev-1')
-            run_cli(root, 'release', '0.1/alpha/s0')
+            self.assertEqual(
+                run_cli(root, 'set', '0.1/alpha/s0', 'owner', '')[0], 0)
             self.assertEqual(model.field_of(sf, 'owner'), '')
 
     def test_every_grain_kind_resolves(self):
@@ -2098,14 +2146,53 @@ class Structure(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertIn('2 grain dir(s)', out)
 
-    def test_a_missing_slot_is_drift(self):
+    def test_a_grain_dir_with_no_grain_file_is_still_reported(self):
+        # The only REQUIRED slot is the grain's own frontmatter file, and a dir
+        # without one is invisible to `feature_files` — so the missing half of
+        # D13 cannot reach it. The always-on orphan scan does, and that is what
+        # keeps this from being a narrowing: the case-variant test below covers
+        # D13's own missing branch, and this covers the outright-absent case.
         with tree(feature_status='building', story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
             self._scaffolded(root)
-            (root / self.MDIR / 'handoff.md').unlink()
+            (root / self.FDIR / 'feature.md').unlink()
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('is missing handoff.md', out)
+            self.assertIn('feature dir with no feature.md', out)
+
+    def test_an_absent_shared_doc_is_not_drift(self):
+        # A shared doc is minted on FIRST WRITE, so its absence means nothing
+        # was recorded — a fact about the grain, not a finding. Requiring it is
+        # what put 204 empty files into one consumer's tree.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            for slot in model.MILESTONE_OPTIONAL_SLOTS:
+                self.assertFalse((root / self.MDIR / slot).exists(), slot)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_a_shared_doc_that_EXISTS_still_has_to_carry_its_header(self):
+        # Optional does not mean unmanaged: the instruction line is the whole
+        # reason the file has a convention, and it is the one channel that
+        # reaches a dispatched agent.
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            (root / self.MDIR / 'handoff.md').write_text(
+                '# a hand-made handoff\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('no longer opens with its instruction line', out)
+
+    def test_handoff_md_is_milestone_only_and_extra_on_a_feature(self):
+        with tree(feature_status='building', story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._scaffolded(root)
+            (root / self.FDIR / 'handoff.md').write_text('x\n', encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn('carries handoff.md', out)
 
     def test_an_extra_slot_is_drift(self):
         # The half that matters. Each of these is a real invention from a real
@@ -2174,17 +2261,17 @@ class Structure(unittest.TestCase):
         with tree(feature_status='building', story_statuses=('todo',)) as root:
             (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
             self._scaffolded(root)
-            src = root / self.FDIR / 'decisions.md'
+            src = root / self.FDIR / 'feature.md'
             body = src.read_text(encoding='utf-8')
-            src.rename(src.with_name('decisions.tmp'))
-            (src.parent / 'decisions.tmp').rename(src.with_name('DECISIONS.md'))
+            src.rename(src.with_name('feature.tmp'))
+            (src.parent / 'feature.tmp').rename(src.with_name('FEATURE.MD'))
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('is missing decisions.md', out)
-            self.assertIn('DECISIONS.md is the same slot in another case', out)
-            self.assertIn('carries DECISIONS.md', out)
+            self.assertIn('is missing feature.md', out)
+            self.assertIn('FEATURE.MD is the same slot in another case', out)
+            self.assertIn('carries FEATURE.MD', out)
             self.assertEqual(
-                (root / self.FDIR / 'DECISIONS.md').read_text(encoding='utf-8'),
+                (root / self.FDIR / 'FEATURE.MD').read_text(encoding='utf-8'),
                 body)
 
     def test_d13_is_silent_when_not_enabled(self):
@@ -2871,6 +2958,34 @@ class Decide(unittest.TestCase):
         return (root / self.MDIR / (rel or 'decisions.md')).read_text(
             encoding='utf-8')
 
+    def test_the_log_is_minted_on_the_FIRST_decision_and_not_before(self):
+        # The whole cut. `pm new` scaffolded an empty decisions.md into every
+        # grain — 204 files, ~1,900 lines, a quarter of one consumer's PM tree,
+        # minted by the verb that exists to stop sprawl. It appears when there
+        # is something in it.
+        with tree() as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            self.assertFalse(log.exists())
+            code, out = run_cli(root, 'decide', '0.1', 'the first choice')
+            self.assertEqual(code, 0, out)
+            self.assertTrue(log.is_file())
+            body = log.read_text(encoding='utf-8')
+            # Minted from the template, header and all — a bare heading with no
+            # instruction line is what D13 reports.
+            self.assertTrue(body.startswith(model.SLOT_HEADER['decisions.md']))
+            self.assertIn('## D1 — ', body)
+
+    def test_a_refused_decision_mints_nothing(self):
+        # Refuses WHOLE: the mint and the append are one write, so a refusal
+        # cannot leave an empty log behind — which would be the sprawl again,
+        # arriving by the error path.
+        with tree() as root:
+            self._scaffolded(root)
+            code, out = run_cli(root, 'decide', '0.1')
+            self.assertEqual(code, 2, out)
+            self.assertFalse((root / self.MDIR / 'decisions.md').exists())
+
     def test_it_stamps_todays_date_and_the_first_ordinal(self):
         with tree() as root:
             self._scaffolded(root)
@@ -2898,9 +3013,8 @@ class Decide(unittest.TestCase):
         with tree() as root:
             self._scaffolded(root)
             log = root / self.MDIR / 'decisions.md'
-            log.write_text(log.read_text(encoding='utf-8')
-                           + '\n## M27 — 2026-01-01 — an older choice\n',
-                           encoding='utf-8')
+            model.write_raw(log, f'{model.SLOT_HEADER["decisions.md"]}\n\n'
+                                 f'## M27 — 2026-01-01 — an older choice\n')
             self.assertEqual(run_cli(root, 'decide', '0.1', 'the next one')[0], 0)
             self.assertIn('## M28 — ', self._log(root))
 
@@ -2910,18 +3024,18 @@ class Decide(unittest.TestCase):
         with tree() as root:
             self._scaffolded(root)
             log = root / self.MDIR / 'decisions.md'
-            hand = ('\n## D9 — 2026-01-01 — a hand-written entry\n'
+            hand = ('## D9 — 2026-01-01 — a hand-written entry\n'
                     'Free prose, no fields, several\nlines of it.\n')
-            log.write_text(log.read_text(encoding='utf-8') + hand,
-                           encoding='utf-8')
+            model.write_raw(log, f'{model.SLOT_HEADER["decisions.md"]}\n\n{hand}')
             self.assertEqual(run_cli(root, 'decide', '0.1', 'the next one')[0], 0)
             body = self._log(root)
             self.assertIn(hand.strip(), body)
             self.assertIn('## D10 — ', body)
 
-    def test_a_missing_title_is_a_usage_error_and_writes_nothing(self):
+    def test_a_missing_title_is_a_usage_error_and_leaves_the_log_alone(self):
         with tree() as root:
             self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'decide', '0.1', 'a choice')[0], 0)
             before = self._log(root)
             code, out = run_cli(root, 'decide', '0.1')
             self.assertEqual(code, 2, out)

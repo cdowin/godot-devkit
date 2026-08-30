@@ -41,21 +41,21 @@ USAGE = """usage: godot-devkit pm <command>
   status [<milestone>]
   get <grain-id> <key>                    (read one frontmatter field)
   set <grain-id> <key> <value>            (write one — never `status`)
-  claim <grain-id> <owner>                (sugar for set … owner)
-  release <grain-id>                      (clear owner)
   templates [--force]                     (copy the templates into the project to edit)
   sync [--check]                          (re-render the execution lists)
   vocabulary [--json]                     (the transition graph, for checkers)
   validate                                (structural + referential integrity)
   install-skills [--force]                (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
-  new milestone <ver> [<name...>]         (scaffold every canonical slot; idempotent —
-                                           re-run on an existing grain to fill gaps)
+  new milestone <ver> [<name...>]         (scaffold the grain file + dir slots; a
+                                           shared doc is minted on first WRITE, not
+                                           here. Idempotent — re-run to fill gaps)
   new feature <milestone> <slug> [<name...>]
   new story <feature-id> <slug> <name...>
   new bug <milestone> <slug>
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
-                                           heading; the prose under it is yours)
+                                           heading, minting decisions.md if this is
+                                           the first; the prose under it is yours)
   prune                                   (delete cooled archives; stamp the prune log)"""
 
 
@@ -770,19 +770,6 @@ def cmd_set(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
-def cmd_claim(cfg: model.PmConfig, args: list[str]) -> int:
-    """Set `owner:` — the field that was hand-edited everywhere `status:` was not."""
-    if len(args) != 2:
-        raise Usage(USAGE)
-    return cmd_set(cfg, [args[0], 'owner', args[1]])
-
-
-def cmd_release(cfg: model.PmConfig, args: list[str]) -> int:
-    if len(args) != 1:
-        raise Usage(USAGE)
-    return cmd_set(cfg, [args[0], 'owner', ''])
-
-
 def cmd_templates(cfg: model.PmConfig, args: list[str]) -> int:
     """Copy the packaged templates into the project so they can be edited."""
     force = '--force' in args
@@ -1043,8 +1030,17 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
 
 
 # --- decide -------------------------------------------------------------------
-def _decision_log(cfg: model.PmConfig, gid: str) -> Path:
-    """The decisions.md of the milestone or feature `gid` names."""
+def _decision_log(cfg: model.PmConfig, gid: str) -> tuple[Path, str]:
+    """(the decisions.md of the grain `gid` names, its text — MINTED if absent).
+
+    The log is minted on FIRST WRITE, from the same template `pm templates`
+    copies out, rather than at scaffold time. An empty decisions.md in every
+    grain is sprawl the tool made: 204 such files, ~1,900 lines, a quarter of
+    one consumer's PM tree, minted by the verb that exists to stop sprawl.
+
+    Nothing is written here — the body comes back and the caller writes once,
+    so a refusal further down still leaves the grain byte-identical.
+    """
     depth = gid.count('/')
     gdir = (model.milestone_dir(cfg, gid) if depth == 0 else
             model.feature_dir(cfg, gid) if depth == 1 else None)
@@ -1053,14 +1049,20 @@ def _decision_log(cfg: model.PmConfig, gid: str) -> Path:
                       f'log; name the feature or milestone that owns the choice')
     if gdir is None:
         raise Usage(f'no milestone or feature resolves from id {gid!r}')
-    entries = model.dir_entries(gdir)
-    if entries.get(model.DECISION_FILE_NAME) != 'file':
-        kind = 'milestone' if depth == 0 else 'feature'
-        raise Refused(
-            f'{cfg.rel(gdir)}/ has no {model.DECISION_FILE_NAME} — run '
-            f'`{PROG} new {kind} {gid.replace("/", " ")}` to fill the '
-            f'canonical slots (it is idempotent), then re-run')
-    return gdir / model.DECISION_FILE_NAME
+    log = gdir / model.DECISION_FILE_NAME
+    if model.dir_entries(gdir).get(model.DECISION_FILE_NAME) == 'file':
+        try:
+            return log, model.read_raw(log)
+        except (OSError, UnicodeDecodeError) as err:
+            raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
+    try:
+        return log, templates.render(
+            templates.load(cfg, model.SLOT_TEMPLATE[model.DECISION_FILE_NAME]),
+            {'id': gid, 'name': model.field_of(
+                gdir / f'{"milestone" if depth == 0 else "feature"}.md', 'name')})
+    except (OSError, UnicodeDecodeError, templates.MissingTemplate) as err:
+        raise Usage(f'the decisions template cannot be read ({err}) — '
+                    f'{cfg.rel(log)} was not created') from err
 
 
 def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
@@ -1085,11 +1087,7 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage('decide needs a title — the heading is the entry')
     if '\n' in title or '\r' in title:
         raise Refused('a heading is one line — put the reasoning under it')
-    log = _decision_log(cfg, gid)
-    try:
-        text = model.read_raw(log)
-    except (OSError, UnicodeDecodeError) as err:
-        raise Usage(f'cannot read {cfg.rel(log)} ({err})') from err
+    log, text = _decision_log(cfg, gid)
     eid = model.next_entry_id(text)
     when = datetime.now(timezone.utc).date().isoformat()
     try:
@@ -1188,8 +1186,8 @@ def main(argv: list[str]) -> int:
         'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,
         'status': cmd_status, 'new': cmd_new, 'prune': cmd_prune,
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
-        'init': cmd_init, 'set': cmd_set, 'get': cmd_get, 'claim': cmd_claim,
-        'release': cmd_release, 'templates': cmd_templates, 'sync': cmd_sync,
+        'init': cmd_init, 'set': cmd_set, 'get': cmd_get,
+        'templates': cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
     }
     fn = table.get(cmd)

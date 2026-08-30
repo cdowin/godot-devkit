@@ -99,24 +99,36 @@ ARCHIVE_DIR_NAME = 'zz_archive'
 # never picked up cold on its own, and a bug lives in the milestone that will
 # FIX it.
 #
+# Every shared doc is OPTIONAL and minted on first write — see
+# OPTIONAL_FILE_SLOTS. Only the grain's own frontmatter file is required.
+#
 # DIRECTORY slots are allowed but never REQUIRED, and the reason is git: an
 # empty directory does not survive a clone, so requiring `design/` would mean
 # 178 placeholder files or a rule that fails the moment somebody checks the
 # tree out fresh. Files carry the requirement; directories carry permission.
 DECISION_FILE_NAME = 'decisions.md'
 REVIEW_FILE_NAME = 'review.md'
+HANDOFF_FILE_NAME = 'handoff.md'
 
-# PERMITTED, never required, and never minted. A reviewer's working notes are a
-# real file in a real tree — one consumer holds 103 of them — but no verb writes
-# one and no rule needs one, so requiring it would mint an empty file per grain
-# and forbidding it would report 103 findings about notes nobody asked for. The
-# durable record of a review is the decision log it fed, which D1 already reads.
-OPTIONAL_FILE_SLOTS = (REVIEW_FILE_NAME,)
-
-MILESTONE_FILE_SLOTS = ('milestone.md', 'handoff.md', 'decisions.md')
+# PERMITTED, never required, MINTED ON FIRST WRITE. A shared doc scaffolded
+# empty is sprawl the tool made: across one consumer's tree `pm new`'s mandatory
+# slots minted 204 empty files, ~1,900 lines, a quarter of the PM tree — so the
+# verb that exists to stop sprawl was the largest single producer of it.
+#
+# `decisions.md` is minted by `pm decide` when the first decision is recorded;
+# `handoff.md` and `review.md` are hand-written and appear when somebody writes
+# one. Never required: an absent one means nothing was recorded, which is a
+# fact about the grain rather than a finding. Never forbidden either — one
+# consumer holds 103 review.md, and reporting them would be reporting notes.
+# What a grain MUST carry: its own frontmatter file, and nothing else.
+MILESTONE_FILE_SLOTS = ('milestone.md',)
 MILESTONE_DIR_SLOTS = ('features', 'bugs', 'design')
-FEATURE_FILE_SLOTS = ('feature.md', 'decisions.md')
+MILESTONE_OPTIONAL_SLOTS = (HANDOFF_FILE_NAME, DECISION_FILE_NAME,
+                            REVIEW_FILE_NAME)
+FEATURE_FILE_SLOTS = ('feature.md',)
 FEATURE_DIR_SLOTS = ('stories', 'design')
+# No handoff.md: a feature is never picked up cold on its own.
+FEATURE_OPTIONAL_SLOTS = (DECISION_FILE_NAME, REVIEW_FILE_NAME)
 
 # slot -> the template that mints it. The grain file's own template is named for
 # the grain, the shared docs are named for the slot.
@@ -934,6 +946,11 @@ class GrainDir:
         return (MILESTONE_DIR_SLOTS if self.kind == 'milestone'
                 else FEATURE_DIR_SLOTS)
 
+    @property
+    def optional_slots(self) -> tuple[str, ...]:
+        return (MILESTONE_OPTIONAL_SLOTS if self.kind == 'milestone'
+                else FEATURE_OPTIONAL_SLOTS)
+
 
 def grain_dirs(cfg: PmConfig) -> list[GrainDir]:
     """Every milestone and feature dir in the ACTIVE tree, in reading order."""
@@ -970,13 +987,16 @@ def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
     LEDGER.md` all exist in a real tree because no slot was scaffolded AND
     nothing flagged the invention. A missing-only check leaves those forever.
 
-    `OPTIONAL_FILE_SLOTS` is permitted and never required — see its own note.
+    The shared docs are OPTIONAL and minted on first write — permitted, never
+    required, see MILESTONE_OPTIONAL_SLOTS. Their instruction header is still
+    asserted once one EXISTS: the breadcrumb is the reason the file has a
+    convention at all, and a hand-made one that lost it is drift.
     """
     out: list[tuple[Path, str]] = []
     for grain in grain_dirs(cfg):
         entries = dir_entries(grain.path)
         allowed = (set(grain.file_slots) | set(grain.dir_slots)
-                   | set(OPTIONAL_FILE_SLOTS))
+                   | set(grain.optional_slots))
         for slot in grain.file_slots:
             if entries.get(slot) == 'file':
                 continue
@@ -993,7 +1013,7 @@ def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
                         f'{"/" if kind == "dir" else ""}, which is not a '
                         f'canonical slot ({" ".join(sorted(allowed))})'))
         for slot, want in SLOT_HEADER.items():
-            if slot not in grain.file_slots or entries.get(slot) != 'file':
+            if slot not in grain.optional_slots or entries.get(slot) != 'file':
                 continue
             got = header_of(grain.path / slot)
             if got != want:

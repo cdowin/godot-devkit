@@ -23,6 +23,7 @@ pm/roadmap/
     milestone.md                 id, name, status, + your project's own fields
     handoff.md                   cold-start only — never what `pm status` computes
     decisions.md                 DURABLE, append-only; survives close
+                                 (both optional — they appear on first write)
     bugs/<slug>.md               lives in the milestone that will FIX it
     design/                      design notes for this milestone
     features/<slug>/
@@ -37,7 +38,9 @@ grain from a template and starts it at its initial status. A hand-made file is h
 tree grows a field the resolvers do not read, and a hand-made sibling directory is
 how it grows a slot nothing knows about. `new milestone` and `new feature` are
 idempotent: re-run one on an existing grain and it fills the missing slots without
-touching an existing byte.
+touching an existing byte. It does NOT mint a shared doc — `decisions.md` appears
+when `pm decide` records the first one, `handoff.md` and `review.md` when somebody
+writes one. An empty one in every grain is sprawl the tool made.
 
 **decisions.md is the durable record.** Open a decision with
 `pm decide <grain-id> <title>`: it appends one `## <id> — <date> — <title>` heading,
