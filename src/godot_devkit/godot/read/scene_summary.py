@@ -3,8 +3,11 @@
 
 Turns a scene (often 100k+ tokens of packed tile bytes) into a few-hundred-token
 structured summary: ext/sub resources, the node tree with scalar @export props,
-and a decoded bounds line per TileMapLayer. Big PackedXxxArray values are
-summarized, never dumped. Pure parse — never writes, never boots Godot.
+and a decoded bounds line per TileMapLayer. `--props` additionally renders the
+PROPERTY VALUES of every `[resource]`/`[sub_resource]` body (default: key names
+only), with each printed sub_resource id verbatim — the address the scene write
+verbs take. Big PackedXxxArray values are summarized, never dumped. Pure parse —
+never writes, never boots Godot.
 
     make scene FILE=scenes/map/map.tscn
     python3 tools/dev/introspect/scene_summary.py <path> [--props]
@@ -12,6 +15,7 @@ summarized, never dumped. Pure parse — never writes, never boots Godot.
 from __future__ import annotations
 
 import argparse
+import re
 from collections import defaultdict
 
 from godot_devkit.godot.format.tilemap import decode_tilemap_bounds
@@ -26,6 +30,11 @@ from godot_devkit.godot.format.tscn import (
     parse,
     resolve_ref,
 )
+
+# An array literal whose members are ALL Ext/SubResource refs — with or
+# without a typed `Array[T](...)` wrapper. Rendered as a ref list rather than
+# elided: the member ids are the addresses the scene write verbs take.
+REF_ARRAY = re.compile(r'^(?:Array\[[\w. ]+\]\()?\[(?P<body>.+)\]\)?$')
 
 # --- Presentation knobs -----------------------------------------------------
 PROP_ELIDE_LEN = 70          # a scalar prop longer than this is summarized, not shown
@@ -60,6 +69,33 @@ def format_prop(key: str, value: str, ext: dict[str, dict]) -> str:
     if RESOURCE_REF.match(value) or rendered == value:
         return f'{key}={rendered}'
     return f'{key}: {rendered}'
+
+
+def format_resource_prop(key: str, value: str, ext: dict[str, dict]) -> str:
+    """`format_prop`, plus one case node props rarely hit: an array whose
+    members are all resource refs renders as `key: [→a, →b]` instead of
+    eliding — inside a `[resource]`/`[sub_resource]` body those ids ARE the
+    structure (and the write-verb addresses), not bulk."""
+    match = REF_ARRAY.match(value)
+    if match:
+        members = [m.strip() for m in match.group('body').split(',')]
+        if all(RESOURCE_REF.fullmatch(m) for m in members):
+            refs = ', '.join(resolve_ref(m, ext) for m in members)
+            return f'{key}: [{refs}]'
+    return format_prop(key, value, ext)
+
+
+def key_preview(section: Section) -> str:
+    """The first few property NAMES — the default (no `--props`) view of a
+    `[resource]`/`[sub_resource]` body."""
+    return ', '.join(k for k, _ in section.props[:SUBRES_KEY_PREVIEW])
+
+
+def print_resource_props(section: Section, ext: dict[str, dict]) -> None:
+    """Every property of a resource-bodied section, one value per indented
+    line — the `--props` view. Additive: the preview line above it stays."""
+    for key, value in section.props:
+        print(f'{INDENT * 2}{format_resource_prop(key, value, ext)}')
 
 
 def describe_node(node: Section, ext: dict[str, dict]) -> str:
@@ -107,6 +143,7 @@ def print_summary(sections: list[Section], path: str, show_all: bool,
     scene = next((s for s in sections if s.kind in ('gd_scene', 'gd_resource')), None)
     ext = {s.attrs['id']: s.attrs for s in sections if s.kind == 'ext_resource'}
     subs = [s for s in sections if s.kind == 'sub_resource']
+    resources = [s for s in sections if s.kind == 'resource']
     nodes = [s for s in sections if s.kind == 'node']
 
     print(f'# {path}')
@@ -122,8 +159,22 @@ def print_summary(sections: list[Section], path: str, show_all: bool,
     if subs:
         print(f'\n## sub_resources ({len(subs)})')
         for sub in subs:
-            keys = ', '.join(k for k, _ in sub.props[:SUBRES_KEY_PREVIEW])
-            print(f'  [{sub.attrs.get("id", "?")}] {sub.attrs.get("type", "?")}  {keys}')
+            # The [id] is verbatim from the file — the exact address
+            # `scene set --sub-resource <id>` takes. Read output is write input.
+            print(f'  [{sub.attrs.get("id", "?")}] {sub.attrs.get("type", "?")}'
+                  f'  {key_preview(sub)}')
+            if show_all:
+                print_resource_props(sub, ext)
+
+    if resources:  # the [resource] body of a .tres; its type lives on the header
+        rtype = '?'
+        if scene is not None:
+            rtype = scene.attrs.get('script_class') or scene.attrs.get('type', '?')
+        print(f'\n## resource ({rtype})')
+        for res in resources:
+            print(f'{INDENT}{key_preview(res)}')
+            if show_all:
+                print_resource_props(res, ext)
 
     if nodes:
         print(f'\n## node tree ({len(nodes)})')
@@ -135,7 +186,9 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('file', help='path to a .tscn or .tres')
     parser.add_argument('--props', action='store_true',
-                        help='show ALL scalar props per node (default: a curated subset)')
+                        help='show ALL scalar props per node, and property '
+                             'VALUES per [resource]/[sub_resource] body '
+                             '(default: a curated subset / key names)')
     parser.add_argument('--paths', action='store_true',
                         help='print each node\'s full path — the address the '
                              'scene write verbs take')

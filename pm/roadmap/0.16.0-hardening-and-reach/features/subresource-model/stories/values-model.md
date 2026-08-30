@@ -3,7 +3,7 @@ id: 0.16.0/subresource-model/values-model
 feature: 0.16.0/subresource-model
 milestone: "0.16.0"
 name: scene exposes sub_resource/resource property VALUES structurally
-status: wip
+status: review
 owner:
 estimate:
 depends_on: []

@@ -10,7 +10,8 @@ takes what it wants — which is how a lesson learned in one game reaches the ot
 Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 
 - **Read a scene without loading it.** `scene` answers structure in a few hundred tokens where the
-  file costs 100k+. → [Quickstart](#quickstart-five-minutes)
+  file costs 100k+; `--props` adds every `[resource]`/`[sub_resource]` property value, packed data
+  elided, each id verbatim — the address the write verbs take. → [Quickstart](#quickstart-five-minutes)
 - **Edit a scene without reformatting it.** Path-addressed write verbs that change the lines you
   named and refuse rather than mangle. → [Scene surgery](#scene-surgery-write-verbs)
 - **Gate the silent-failure classes.** Renamed exports, uid drift, path-only refs — the things Godot

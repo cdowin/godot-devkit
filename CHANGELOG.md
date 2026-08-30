@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`scene --props` renders `[resource]` and `[sub_resource]` property VALUES** — previously key names only. Packed/bulky data elides as node props already do, resource-ref arrays stay whole as `[→id, …]` (inside a resource body the ids ARE the structure), and every sub_resource id prints verbatim — the address `scene set --resource/--sub-resource` takes. Default output unchanged except a new `## resource` block on `.tres` files; existing lines byte-stable, proven differentially across the 65-file corpus. Trail's `content_schema_lint.py` SEAM parser can retire against this. (godot/read/scene_summary.py)
+
 - **a committed 65-file scrubbed corpus proves round-trip fidelity in CI** — 36 nullbound + 29 trail `.tscn`/`.tres`, prose deterministically anonymized with structure byte-preserved, covering 24 distinct awkward constructs (tile_map_data, editable paths, packed arrays, inline comments, escaped quotes, …). The corpus round-trip runs unconditionally — CI no longer proves only the hand-built fixture — with a census floor and construct-coverage guard so it cannot rot. (tests/fixtures/corpus/, tests/test_tscn_roundtrip.py)
 
 - **the hard rules are gates on this repo now** — three new boundary tests: config imports live on a closed allowlist and no collection may be built directly from a config lookup (the v0.9.0 bare-string bug class, now unwritable); zero dead imports across src/ (found and removed the last two); the layer directions (format→index→read/write→checks, repo↛godot, core↛both) are asserted with per-layer census floors. Each proven to fire on injected probes. (tests/test_boundaries.py)
