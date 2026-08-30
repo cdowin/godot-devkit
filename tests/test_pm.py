@@ -366,14 +366,6 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('should be done', out)
 
-    def test_d7_archive_dir_means_a_prune_is_due(self):
-        with tree(story_statuses=('todo',)) as root:
-            (root / 'pm' / 'roadmap' / 'zz_archive' / 'x').mkdir(parents=True)
-            code, out = run_gate(root)
-            self.assertEqual(code, 1)
-            self.assertIn('a prune is due', out)
-
-
     def test_a_disabled_rule_does_not_fire(self):
         # `[pm] checks` is the knob. This fixture trips D2 AND D5, so turning
         # D2 off must silence D2's message specifically while D5 still fires —
@@ -384,7 +376,7 @@ class DriftGate(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('all stories done, feature still building', out)
             (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D1","D3","D4","D5","D6","D7"]\n', encoding='utf-8')
+                '[pm]\nchecks = ["D1","D3","D4","D5","D6"]\n', encoding='utf-8')
             code, out = run_gate(root)
             self.assertEqual(code, 1)
             self.assertNotIn('all stories done', out)
@@ -1191,56 +1183,75 @@ class StructuralIntegrity(unittest.TestCase):
             self.assertIn('SKIPPED', out)
 
 
-class Prune(unittest.TestCase):
+class NoDeleter(unittest.TestCase):
+    """The tracker REPORTS; no verb of it deletes a grain.
+
+    Reproduced on the default roster before `prune` was removed: an OPEN bug
+    filed under a `done` milestone, `check pm` PASS, `pm prune`, and the bug
+    file was gone. The rule that was supposed to make that impossible (an open
+    bug under a done milestone) was opt-in and neither consumer enabled it, so
+    nothing at all stood between the two commands.
+
+    If archive sprawl needs an answer it is a READ verb. This is the test that
+    says the answer is never a deleter.
+    """
+
     def _commit(self, root: Path) -> None:
         for args in (['add', '-A'], ['-c', 'user.email=t@t', '-c', 'user.name=t',
                                      'commit', '-qm', 'x']):
             subprocess.run(['git', *args], cwd=root, check=True,
                            capture_output=True)
 
-    def test_the_resurrect_anchor_is_written_even_with_no_roadmap_index(self):
+    def _two_closed_milestones_and_an_open_bug(self, root: Path) -> Path:
+        write(root / 'pm/roadmap/0.2-later/milestone.md',
+              {'id': '"0.2"', 'name': 'Later', 'status': 'done'})
+        bug = root / 'pm/roadmap/0.1-demo/bugs/seed-is-zero.md'
+        write(bug, {'id': '0.1/bugs/seed-is-zero', 'milestone': '"0.1"',
+                    'status': 'open'})
+        return bug
+
+    def test_the_open_bug_under_the_cooled_milestone_survives(self):
         with tree(milestone_status='done', feature_status='done',
                   story_statuses=('done',)) as root:
-            other = root / 'pm/roadmap/0.2-later'
-            write(other / 'milestone.md',
-                  {'id': '"0.2"', 'name': 'Later', 'status': 'done'})
+            bug = self._two_closed_milestones_and_an_open_bug(root)
             self._commit(root)
-            self.assertFalse((root / 'pm/roadmap/ROADMAP.md').exists())
             code, out = run_cli(root, 'prune')
-            self.assertEqual(code, 0, out)
-            index = root / 'pm/roadmap/ROADMAP.md'
-            # The anchor is the only way back to what prune deleted; claiming to
-            # have stamped it without doing so is the failure this pins.
-            self.assertTrue(index.is_file())
-            self.assertIn('Prune log', index.read_text())
+            self.assertEqual(code, 2, out)
+            self.assertIn('unknown command', out)
+            self.assertTrue(bug.is_file(), 'the bug file was deleted')
+            self.assertTrue((root / 'pm/roadmap/0.1-demo/milestone.md').is_file())
 
-    def test_lag_by_one_keeps_the_version_newest_not_the_lexically_last(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'repo'
-            for v in ('0.9', '0.10', '0.11'):
-                write(root / f'pm/roadmap/{v}-m/milestone.md',
-                      {'id': f'"{v}"', 'name': v, 'status': 'done'})
-            subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
-            previous = Path.cwd()
-            os.chdir(root)
-            try:
-                self._commit(root)
-                code, out = run_cli(root, 'prune')
-            finally:
-                os.chdir(previous)
-            self.assertEqual(code, 0, out)
-            survivors = sorted(p.name for p in (root / 'pm/roadmap').iterdir()
-                               if p.is_dir())
-            self.assertEqual(survivors, ['0.11-m'])
-
-    def test_prune_refuses_a_dirty_tree(self):
+    def test_two_closed_milestones_are_a_fact_not_a_gate_failure(self):
+        # The other half: the gate used to REDDEN until the destructive verb
+        # was run, so a green build depended on a deletion whose scope the
+        # person running it did not choose.
         with tree(milestone_status='done', feature_status='done',
                   story_statuses=('done',)) as root:
-            self._commit(root)
-            (root / 'dirty.txt').write_text('x', encoding='utf-8')
-            code, out = run_cli(root, 'prune')
-            self.assertEqual(code, 1)
-            self.assertIn('dirty', out)
+            self._two_closed_milestones_and_an_open_bug(root)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_an_archive_directory_is_not_a_gate_failure_either(self):
+        with tree(milestone_status='building') as root:
+            (root / 'pm/roadmap/zz_archive').mkdir(parents=True)
+            (root / 'pm/roadmap/zz_archive/note.md').write_text('x\n',
+                                                               encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+
+    def test_the_pm_cli_carries_no_recursive_delete(self):
+        # The shape, not the instance: any future verb reaching for one of
+        # these is the same data-loss path wearing a different name.
+        source = Path(cli.__file__).read_text(encoding='utf-8')
+        for spelling in ('remove_tree', 'rmtree', "'rm'", 'unlink'):
+            self.assertNotIn(spelling, source,
+                             f'{spelling} is back in the pm CLI')
+
+    def test_the_retired_rules_are_not_silently_accepted_names(self):
+        # A retired id must not linger in KNOWN_CHECKS: a name that parses but
+        # runs nothing is a gate a consumer believes is on.
+        for retired in ('D7', 'D14'):
+            self.assertNotIn(retired, model.KNOWN_CHECKS)
 
 
 class IdsAreLiterals(unittest.TestCase):
@@ -2322,15 +2333,15 @@ class Structure(unittest.TestCase):
             self.assertNotIn('D13', out)
 
 
-class BugLifetime(unittest.TestCase):
-    """D14 — a bug lives in the milestone that will FIX it.
+class BugStatusVocabulary(unittest.TestCase):
+    """D4 — a bug's status, held to the vocabulary like every other grain's.
 
-    Not cosmetic: `prune`'s lag-by-one deletes a done milestone's directory the
-    moment the next one closes, so an open bug parked in a closed milestone is
-    already scheduled for deletion. One consumer holds 28 of them.
+    Where a bug LIVES is not this tool's business: it is filed where it was
+    caught, nothing moves it, and nothing deletes it. What is a fact about the
+    file is whether its status is a word the schema has — and it matters more
+    for a bug than anywhere else, because every reader asking "is this still
+    open" tests for a NAME, so a typo reads as closed and passes in silence.
     """
-
-    TOML = '[pm]\nchecks = ["D14"]\n'
 
     @staticmethod
     def _bug(root: Path, slug: str, status: str, **extra) -> Path:
@@ -2341,133 +2352,76 @@ class BugLifetime(unittest.TestCase):
         write(p, front)
         return p
 
-    def test_an_open_bug_under_a_done_milestone_is_drift(self):
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._bug(root, 'seed-is-zero', 'open', fix_milestone='"0.2"')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn("is 'open' under the done milestone 0.1", out)
-            # The repair names where it goes, from the bug's own decision.
-            self.assertIn('move it to 0.2/bugs/', out)
-
-    def test_an_untriaged_open_bug_is_told_to_decide_first(self):
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._bug(root, 'seed-is-zero', 'open')
-            code, out = run_gate(root)
-            self.assertEqual(code, 1, out)
-            self.assertIn('set fix_milestone:', out)
-
-    def test_a_closed_bug_under_a_done_milestone_is_fine(self):
-        # Where a FIXED bug lives is history, and history is exactly what the
-        # done milestone's directory is for.
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._bug(root, 'seed-is-zero', 'fixed')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-    def test_an_open_bug_under_a_live_milestone_is_fine(self):
-        with tree(milestone_status='building', feature_status='building',
-                  story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            self._bug(root, 'seed-is-zero', 'open')
-            code, out = run_gate(root)
-            self.assertEqual(code, 0, out)
-
-    def test_a_status_outside_the_vocabulary_is_a_finding_not_a_silent_close(self):
-        # D4 does not cover bugs, so a typo'd status would otherwise read as
-        # "not open" and be passed in silence — rule 4's cardinal sin.
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+    def test_a_status_outside_the_vocabulary_is_a_finding(self):
+        # On the DEFAULT roster — no devkit.toml, no opt-in.
+        with tree(milestone_status='building') as root:
             self._bug(root, 'seed-is-zero', 'opne')
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
             self.assertIn("bug status 'opne' is not in", out)
 
-    def test_bug_open_states_must_be_in_bug_states(self):
-        with tree(story_statuses=('todo',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D14"]\nbug_open_states = ["triage"]\n',
-                encoding='utf-8')
-            from godot_devkit.core.project import load_config, repo_root
-            repo_root.cache_clear()
-            load_config.cache_clear()
-            with self.assertRaises(model.ConfigError):
-                model.load()
-
-    def test_no_bug_file_is_named_rather_than_silently_passed(self):
+    def test_an_open_bug_under_a_done_milestone_is_not_a_finding(self):
         with tree(milestone_status='done', feature_status='done',
                   story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+            self._bug(root, 'seed-is-zero', 'open')
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
-            self.assertIn('no bug files under', out)
+
+    def test_every_vocabulary_status_passes(self):
+        with tree(milestone_status='building') as root:
+            for i, status in enumerate(model.DEFAULT_BUG_STATES):
+                self._bug(root, f'b{i}', status)
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('3 bug(s)', out)
 
     def test_a_bug_in_a_bugs_SUBDIR_is_not_invisible(self):
         # `bugs/` is a permitted slot and D13 never descends into it, so a
         # `glob('*.md')` made a nested bug invisible to every rule at once —
         # and the census printed the smaller number without saying it had
-        # looked less far. D14 is what stops `prune` deleting an open bug with
-        # its done milestone; one that undercounts is a FALSE safety net.
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            nested = root / 'pm/roadmap/0.1-demo/bugs/spatial'
-            write(nested / 'seed-is-zero.md',
+        # looked less far.
+        with tree(milestone_status='building') as root:
+            write(root / 'pm/roadmap/0.1-demo/bugs/spatial/seed-is-zero.md',
                   {'id': '0.1/bugs/seed-is-zero', 'milestone': '"0.1"',
-                   'status': 'open', 'caught_in': '"0.1"'})
+                   'status': 'opne'})
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
             self.assertIn('bugs/spatial/seed-is-zero.md', out)
             self.assertIn('1 bug(s)', out)
 
     def test_an_uppercase_MD_extension_is_not_invisible(self):
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
+        with tree(milestone_status='building') as root:
             write(root / 'pm/roadmap/0.1-demo/bugs/SEED-IS-ZERO.MD',
                   {'id': '0.1/bugs/seed-is-zero', 'milestone': '"0.1"',
-                   'status': 'open', 'caught_in': '"0.1"'})
+                   'status': 'opne'})
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
             self.assertIn('SEED-IS-ZERO.MD', out)
 
     def test_the_census_counts_every_bug_file_it_opened(self):
         with tree(milestone_status='building') as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
             self._bug(root, 'flat', 'fixed')
             write(root / 'pm/roadmap/0.1-demo/bugs/deep/nested.md',
                   {'id': '0.1/bugs/nested', 'milestone': '"0.1"',
-                   'status': 'fixed', 'caught_in': '"0.1"'})
+                   'status': 'fixed'})
             write(root / 'pm/roadmap/0.1-demo/bugs/UPPER.MD',
                   {'id': '0.1/bugs/upper', 'milestone': '"0.1"',
-                   'status': 'fixed', 'caught_in': '"0.1"'})
+                   'status': 'fixed'})
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
             self.assertIn('3 bug(s)', out)
 
-    def test_d14_is_silent_when_not_enabled(self):
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(
-                '[pm]\nchecks = ["D4"]\n', encoding='utf-8')
-            self._bug(root, 'seed-is-zero', 'open')
+    def test_the_census_says_zero_when_a_tree_files_no_bugs(self):
+        # Rule 4: "0 bug(s)" is a fact this scan states, never an omission.
+        with tree(milestone_status='building') as root:
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
-            self.assertNotIn('D14', out)
+            self.assertIn('0 bug(s)', out)
 
     def test_a_non_grain_md_parked_under_bugs_is_not_a_bug(self):
         # A grain IS its frontmatter, so a README explaining how bugs are filed
         # — or a design note beside them — is not a bug with an empty status.
-        # There was no way to park either under `bugs/` without a finding.
         with tree(milestone_status='building') as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
             bdir = root / 'pm/roadmap/0.1-demo/bugs'
             (bdir / 'design').mkdir(parents=True, exist_ok=True)
             (bdir / 'README.md').write_text('# how bugs are filed here\n',
@@ -2477,22 +2431,20 @@ class BugLifetime(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
             self.assertNotIn('README.md', out)
-            self.assertIn('no bug files under', out)
+            self.assertIn('0 bug(s)', out)
 
-    def test_that_rule_does_not_reopen_the_subdir_hole_it_sits_next_to(self):
+    def test_that_narrowing_does_not_reopen_the_subdir_hole_beside_it(self):
         # The control: a REAL bug carries frontmatter wherever it is parked and
         # whatever its extension, so narrowing the walk to grain documents must
         # not undo the recursion that made nested bugs visible at all.
-        with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('done',)) as root:
-            (root / 'devkit.toml').write_text(self.TOML, encoding='utf-8')
-            (root / 'pm/roadmap/0.1-demo/bugs/README.md').parent.mkdir(
-                parents=True, exist_ok=True)
-            (root / 'pm/roadmap/0.1-demo/bugs/README.md').write_text(
-                '# how bugs are filed here\n', encoding='utf-8')
-            write(root / 'pm/roadmap/0.1-demo/bugs/spatial/SEED.MD',
+        with tree(milestone_status='building') as root:
+            bdir = root / 'pm/roadmap/0.1-demo/bugs'
+            bdir.mkdir(parents=True, exist_ok=True)
+            (bdir / 'README.md').write_text('# how bugs are filed here\n',
+                                            encoding='utf-8')
+            write(bdir / 'spatial/SEED.MD',
                   {'id': '0.1/bugs/seed', 'milestone': '"0.1"',
-                   'status': 'open', 'caught_in': '"0.1"'})
+                   'status': 'opne'})
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
             self.assertIn('bugs/spatial/SEED.MD', out)
@@ -2502,7 +2454,7 @@ class BugLifetime(unittest.TestCase):
 class StoryWalk(unittest.TestCase):
     """`stories/` is the same never-descended slot shape `bugs/` was.
 
-    D14's fix made the bug walk recursive and case-insensitive on extension and
+    The bug walk was made recursive and case-insensitive on extension and
     `stories/` never got it, so a story parked one directory down was invisible
     to every rule at once — and worse than invisible: D4 could not see its
     status, and D2 read "all stories done" off the ones it could see and filed
@@ -2566,16 +2518,15 @@ class DamagedFrontmatter(unittest.TestCase):
     facts, and the grain walk answered the second with the first: scope was
     decided by the STRICT parser, so a BOM before the fence, a blank line above
     it or a missing closing fence dropped the document out of every rule at
-    once — D4, D5, V1, D14 and D17 went blind together and the gate printed
-    PASS. The D14 half is data loss: `prune`'s lag-by-one deletes a done
-    milestone's directory, and the open bug inside it went unreported because
-    the census said there was no bug there at all.
+    once — D4, D5 and V1 went blind together and the gate printed PASS. The bug
+    half is the loudest: the census said there was no bug in the directory at
+    all, so a damaged bug was a bug nobody could be told to fix.
 
     Detection is lenient, parsing is strict. That split is the whole rule, and
     the controls below are the other half of it: a genuine note must stay out.
     """
 
-    BUG_TOML = '[pm]\nchecks = ["D4","D14","V1"]\n'
+    BUG_TOML = '[pm]\nchecks = ["D4","V1"]\n'
 
     @staticmethod
     def _bug(root: Path, slug: str, status: str) -> Path:
@@ -2609,11 +2560,10 @@ class DamagedFrontmatter(unittest.TestCase):
                     self.assertIn('1 bug(s)', out)
                     self.assertNotIn('no bug files under', out)
 
-    def test_d14_still_has_a_bug_to_place_when_that_bug_is_damaged(self):
-        # The data-loss case, exactly. An OPEN bug under a DONE milestone whose
-        # frontmatter carries a BOM used to make D14 announce "no bug files
-        # under pm/roadmap/ — nothing to place" while the file sat there
-        # waiting for `prune` to delete it with the milestone.
+    def test_a_damaged_bug_is_still_counted_under_a_closed_milestone(self):
+        # A BOM before the fence used to drop the file out of the walk
+        # entirely, so the census reported a directory with no bugs in it while
+        # the file sat there unreadable and unreported.
         for form in DAMAGE_FORMS:
             with self.subTest(form=form):
                 with tree(milestone_status='done', feature_status='done',
@@ -2670,7 +2620,8 @@ class DamagedFrontmatter(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 0, out)
             self.assertNotIn('README.md', out)
-            self.assertIn('no bug files under', out)
+            self.assertIn('0 bug(s)', out)
+            self.assertIn('1 note(s) skipped', out)
 
     def test_a_readme_with_no_frontmatter_under_stories_is_still_silent(self):
         with tree(feature_status='building', story_statuses=('todo',)) as root:
@@ -2714,8 +2665,8 @@ class DamagedFrontmatter(unittest.TestCase):
 
     def test_the_census_says_how_many_documents_the_dotted_filter_hid(self):
         # The twin of the note disclosure, and the reason it matters: an open
-        # bug parked under `bugs/.hold/` is out of scope for every rule, so
-        # D14 cannot report it and `prune` deletes the milestone it sits in.
+        # bug parked under `bugs/.hold/` is out of scope for every rule, so no
+        # rule can report its status.
         # A dot prefix is a deliberate hide; an UNCOUNTED one is a census
         # asserting the opposite of the filesystem.
         with tree(feature_status='building', story_statuses=('todo',)) as root:

@@ -18,6 +18,9 @@
 - **BREAKING: D11, D12, D15, D16, D17 and D18 no longer exist** — `[pm] checks` naming any of them is exit 2. Neither consumer enabled one; every rule they do run (D1-D10, V1-V6) is byte-identical. `review.md` is a permitted file rather than a mandatory slot. (355b671)
 - **`actual_date:` is not minted and not stamped** — `pm milestone done` stopped writing it and the milestone template stopped minting the field when the changelog render that read it was removed. Git records when a milestone closed; existing values in a tree are left alone. (src/godot_devkit/repo/pm/templates/milestone.md)
 - **one gate roster** — `[checks] all` and the dispatch table were two lists holding one fact; a gate now carries its own default-in-`all` flag, and a test walks the roster to prove every name dispatches. (1c744f8)
+- **BREAKING: `pm prune` is removed, with D7 and D14** — On the default roster an open bug under a `done` milestone was PASS, and prune then deleted it. Nothing here deletes a grain. (repo/pm/cli.py)
+- **D4 covers a bug's status** — D14's one fact about a FILE (a status outside `bug_states`) moves to the rule that already owns it, on by default. `bug_open_states` goes with its only reader.
+- **the census always counts bugs** — `N bug(s)` used to ride the opt-in D14, so a default run said nothing about a directory it had walked. (repo/checks/pm.py)
 
 ## v0.14.0 — 2026-08-29
 

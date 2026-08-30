@@ -12,7 +12,10 @@ DRIFT RULES (each FAILs, naming the offending path):
   D2  a feature still planning/ready/building while ALL its stories are `done`
       (a forgotten advance).
   D3  a `done` milestone with a non-`done` feature child.
-  D4  a status outside the schema's vocabulary (milestone/feature/story).
+  D4  a status outside the schema's vocabulary — milestone, feature, story
+      AND bug. It matters most for a bug: every reader that asks "is this one
+      still open" tests for a NAME, so a typo reads as closed and passes in
+      silence.
   D5  a `done` story under a non-`done` feature. The story terminal is
       `review`; `done` comes only from the feature cascade, so this is a
       hand-edit or a half-applied cascade. (A done story under a DONE feature
@@ -35,11 +38,6 @@ DRIFT RULES (each FAILs, naming the offending path):
   default; a project shipping from the trunk and bumping at close is running a
   different valid flow, not drifting. Opt in via `[pm] checks`.
 
-  D7  archive presence — git history IS the archive. A `zz_archive/` dir under
-      the roadmap or the review dir, or MORE than one `done` milestone dir at
-      the roadmap root (lag-by-one keeps exactly the most recently closed),
-      means a prune is due.
-
   D13 canonical grain STRUCTURE — every milestone and feature dir carries
       exactly its slots. MISSING is drift and EXTRA is drift, and each shared
       doc must still open with its one-line instruction header, so the
@@ -47,17 +45,11 @@ DRIFT RULES (each FAILs, naming the offending path):
       slots are permitted, never required: git does not store an empty
       directory. `pm new milestone|feature <id>` is idempotent and fills gaps.
 
-  D14 bug LIFETIME — a bug lives in the milestone that will FIX it, so an OPEN
-      bug under a `done` milestone is drift: nothing schedules the fix, and
-      `prune`'s lag-by-one deletes the file where it sits. Also reports a bug
-      status outside `[pm] bug_states`, which D4 does not cover and which would
-      otherwise read as "closed" and pass in silence.
+  D13 is OFF by default like D8-D10 — a tree predating the canonical slots is
+  missing most of them, and a rule that turns a consumer red on upgrade day is
+  unshippable. Scaffold first, then hold the line.
 
-  D13/D14 are OFF by default like D8-D10 — a tree predating the canonical
-  slots is missing most of them, and a rule that turns a consumer red on
-  upgrade day is unshippable. Scaffold first, then hold the line.
-
-Which rules run is `[pm] checks` in devkit.toml (default: D1-D7 + V1-V6).
+Which rules run is `[pm] checks` in devkit.toml (default: D1-D6 + V1-V6).
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
 MUST pass on the legitimate mid-build state: a building milestone with mixed
@@ -86,29 +78,6 @@ def _structure(cfg, report) -> int:
     print(f'[check:pm] D13: {len(grains)} grain dir(s) held to the canonical '
           f'slots; `pm new milestone|feature <id>` fills a gap')
     return len(grains)
-
-
-def _bug_lifetime(cfg, report) -> int:
-    """D14 — an open bug under a `done` milestone. Returns the bugs scanned.
-
-    Not cosmetic: `prune`'s lag-by-one deletes a done milestone's directory the
-    moment the next one closes, so an open bug parked in a closed milestone is
-    scheduled for deletion. Moving it to the milestone that will FIX it is what
-    makes prune safe by construction.
-    """
-    findings, scanned = model.open_bugs_under_done(cfg)
-    if not scanned:
-        # This rule's own success state, like D11's: a tree with no bugs filed
-        # is not a tree whose bug lifetime is broken. A bug whose frontmatter
-        # is DAMAGED is still a bug and still counts here — answering "this
-        # grain is broken" with "there is no such grain" is how an open bug
-        # sat under a done milestone with prune scheduled to delete it.
-        print(f'[check:pm] D14: no bug files under {cfg.roadmap_dir}/ — '
-              f'nothing to place')
-        return 0
-    for path, why in findings:
-        report(f'{cfg.rel(path)} {why} (D14)')
-    return scanned
 
 
 def run() -> int:
@@ -144,16 +113,21 @@ def run() -> int:
         report(f'{cfg.rel(path)}/ is a {why} — every grain under it was SKIPPED '
                f'by this scan')
 
+    # Always walked, so the census can state how many bug files this scan
+    # opened whatever the roster says; only REPORTED under D4, which owns
+    # "a status outside the vocabulary" for every grain.
+    bug_findings, n_bugs = model.bug_status_findings(cfg)
+    if 'D4' in enabled:
+        for path, why in bug_findings:
+            report(f'{cfg.rel(path)}: {why}')
+
     n_features = 0
     n_stories = 0
-    done_milestone_dirs = 0
 
     for mdir in mdirs:
         mfile = mdir / 'milestone.md'
         mid = model.field_of(mfile, 'id')
         mstat = model.field_of(mfile, 'status')
-        if mstat == 'done':
-            done_milestone_dirs += 1
 
         if 'D4' in enabled and mstat not in cfg.milestone_states:
             report(f'milestone {mid}: status {mstat!r} not in '
@@ -251,18 +225,7 @@ def run() -> int:
         for msg in v_findings:
             report(msg)
 
-    if 'D7' in enabled:
-        for archive in (cfg.roadmap / model.ARCHIVE_DIR_NAME,
-                        cfg.root / cfg.review_dir / model.ARCHIVE_DIR_NAME):
-            if archive.is_dir():
-                report(f'{cfg.rel(archive)}/ exists — a prune is due '
-                       f'(git history is the archive)')
-        if done_milestone_dirs > 1:
-            report(f'{done_milestone_dirs} done milestone dirs at the roadmap '
-                   f'root — lag-by-one allows 1; a prune is due')
-
     n_grain_dirs = _structure(cfg, report) if 'D13' in enabled else 0
-    n_bugs = _bug_lifetime(cfg, report) if 'D14' in enabled else 0
 
     print()
     census = (f'{len(mdirs)} milestone(s), {n_features} feature(s), '
@@ -280,10 +243,9 @@ def run() -> int:
     # anybody editing this file. That is the whole difference between fixing
     # the instance and fixing the shape.
     census += model.tree_walk(cfg).disclosures()
+    census += f', {n_bugs} bug(s)'
     if 'D13' in enabled:
         census += f', {n_grain_dirs} grain dir(s)'
-    if 'D14' in enabled:
-        census += f', {n_bugs} bug(s)'
     if v_census:
         census += f', {v_census["refs"]} ref(s)'
         if v_census['unverifiable']:

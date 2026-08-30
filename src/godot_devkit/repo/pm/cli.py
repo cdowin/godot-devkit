@@ -1,4 +1,4 @@
-"""cli.py — the precondition-checked PM-tree status CLI.
+"""cli.py — the PM-tree status CLI.
 
 The ONLY sanctioned way to transition a story/feature/milestone status. A
 free-text edit of a `status:` line is the drift vector this exists to close:
@@ -54,8 +54,7 @@ USAGE = """usage: godot-devkit pm <command>
   new bug <milestone> <slug>
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
-                                           the first; the prose under it is yours)
-  prune                                   (delete cooled archives; stamp the prune log)"""
+                                           the first; the prose under it is yours)"""
 
 
 
@@ -520,12 +519,6 @@ the tree.
 
 | Version | Name | Delivered | What shipped |
 |---|---|---|---|
-
-## Prune log
-
-The working tree keeps only active milestones — git history is the archive. Each entry
-records the last commit that still CONTAINS the pruned paths: browse with
-`git ls-tree -r <hash> <path>` and resurrect any file with `git show <hash>:<old-path>`.
 """
 
 
@@ -1085,79 +1078,6 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
-# --- prune --------------------------------------------------------------------
-def cmd_prune(cfg: model.PmConfig, args: list[str]) -> int:
-    if args:
-        raise Usage(USAGE)
-    try:
-        dirty = subprocess.run(['git', 'status', '--porcelain'], cwd=cfg.root,
-                               capture_output=True, text=True, check=True).stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError) as err:
-        raise Usage('git not available') from err
-    if dirty:
-        raise Refused('working tree dirty — commit or stash first '
-                      '(the prune must be its own commit)')
-    try:
-        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=cfg.root,
-                              capture_output=True, text=True,
-                              check=True).stdout.strip()
-    except subprocess.CalledProcessError as err:
-        raise Usage('cannot resolve HEAD — a repo with no commits has no '
-                    'resurrect anchor to record, so there is nothing safe to '
-                    'prune against') from err
-
-    targets: list[tuple[Path, str]] = []
-    for archive in (cfg.roadmap / model.ARCHIVE_DIR_NAME,
-                    cfg.root / cfg.review_dir / model.ARCHIVE_DIR_NAME):
-        if archive.is_dir():
-            targets.append((archive, f'{cfg.rel(archive)}/ (all)'))
-    done_dirs = sorted(
-        (d for d in model.milestone_dirs(cfg)
-         if model.field_of(d / 'milestone.md', 'status') == 'done'),
-        key=lambda d: model.version_key(d.name))
-    if len(done_dirs) > 1:
-        keep = done_dirs[-1]
-        for d in done_dirs:
-            if d != keep:
-                targets.append((d, f'{cfg.rel(d)}/ (done, cooled)'))
-        _ok(f'keeping newest done milestone (lag-by-one): {cfg.rel(keep)}')
-    if not targets:
-        _ok('prune: nothing to prune')
-        return 0
-
-    # The anchor is the ONLY way back to what this deletes, so it is written
-    # BEFORE the delete and the index is CREATED if absent. Skipping the stamp
-    # because the file happened not to exist — while still printing "resurrect
-    # anchor ... stamped" — is a destructive command lying about recoverability.
-    index = cfg.roadmap / 'ROADMAP.md'
-    text = index.read_text(encoding='utf-8') if index.is_file() else '# Roadmap\n'
-    if '## Prune log' not in text:
-        text += (
-            '\n## Prune log\n\nThe working tree keeps only active milestones — git '
-            'history is the archive. Each entry\nrecords the last commit that still '
-            'CONTAINS the pruned paths: browse with\n`git ls-tree -r <hash> <path>` and '
-            'resurrect any file with `git show <hash>:<old-path>`.\n')
-    stamp = datetime.now(timezone.utc).date().isoformat()
-    text += f'\n- **{stamp}** — pruned from commit `{head}`:\n'
-    for _, label in targets:
-        text += f'  - `{label}`\n'
-    try:
-        # `core.apply` writes with newline='' for the same reason model.py does:
-        # never rewrite a file's line endings as a side effect of appending.
-        apply.raise_on_error(apply.write(index, text))
-    except OSError as err:
-        raise Usage(f'could not stamp the resurrect anchor into '
-                    f'{cfg.rel(index)} ({err}) — nothing was deleted') from err
-
-    for path, _ in targets:
-        subprocess.run(['git', 'rm', '-r', '-q', '--ignore-unmatch', cfg.rel(path)],
-                       cwd=cfg.root, capture_output=True, text=True, check=False)
-        apply.remove_tree(path)
-    _ok(f'pruned {len(targets)} dir(s); resurrect anchor {head} stamped in '
-        f'{cfg.rel(index)}. Review + commit.')
-    return 0
-
-
 # --- dispatch -----------------------------------------------------------------
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help', 'help'):
@@ -1171,7 +1091,7 @@ def main(argv: list[str]) -> int:
     cmd, rest = argv[0], argv[1:]
     table = {
         'story': cmd_story, 'feature': cmd_feature, 'milestone': cmd_milestone,
-        'status': cmd_status, 'new': cmd_new, 'prune': cmd_prune,
+        'status': cmd_status, 'new': cmd_new,
         'validate': cmd_validate, 'install-skills': cmd_install_skills,
         'init': cmd_init, 'set': cmd_set, 'get': cmd_get,
         'templates': cmd_templates, 'sync': cmd_sync,

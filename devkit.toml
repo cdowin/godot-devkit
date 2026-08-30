@@ -43,9 +43,9 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 # D9/D10 DO apply: work lands on main and `branch: main` says so. main is a
 # trunk branch, so D10 recognises "no integration branch" and skips.
 checks = [
-    "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+    "D1", "D2", "D3", "D4", "D5", "D6",
     "D9", "D10",
-    "D13", "D14",
+    "D13",
     "V1", "V2", "V3", "V4", "V5", "V6",
 ]
 # No grandfather ledger of any kind, in either direction. The tree was scaffolded

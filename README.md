@@ -311,7 +311,7 @@ what it writes is the PM tree's own guidance.
 | `check doc` | Dead claims in always-loaded agent docs (`CLAUDE.md` + `.claude/rules/` + `.claude/agents/`): dead links, dead `make` targets, dead file paths. |
 | `check repo-hygiene` | Close-time git-state cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` — wire it into your close gate, not your per-change gate. |
 | `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
-| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V6) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D13 holds every grain dir to the canonical slots (missing is drift **and** extra is drift, headers included; `review.md` is permitted and never required), and D14 reports an open bug parked under a `done` milestone — all opt-in via `[pm] checks`. |
+| `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema (milestones, features, stories **and bugs**), a `done` story under a live feature, and a `building` milestone with everything closed. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V6) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, and D13 holds every grain dir to the canonical slots — all opt-in via `[pm] checks`. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
 | `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the nine gates read `.tscn`/`.tres` or shell scripts, so a repo holding none of them gets five 0-file censuses and rule 4 correctly reddens each one. That is the roster being wrong for the repo, not a reason to soften a gate — name the gates that apply and run the rest on demand. An unknown gate name is exit 2, never a quietly narrowed run. |
 
@@ -337,7 +337,6 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file; **V6** fails when a rendered block drifts from the tree |
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
 | `pm decide <grain-id> <title…>` | Append one `## <id> — <ISO date> — <title>` heading to that milestone's or feature's `decisions.md`, **minting the log from its template if this is the first one**. It stamps the two things a hand-written entry gets wrong — the date, and the next ordinal in the log's own id prefix — and stops there; the reasoning under the heading is yours to write. No field schema: the four-field one this replaced produced zero conforming entries across a consumer's 158 decision logs, so what it gated was whether anyone used the verb |
-| `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
 | `pm install-skills [--force] [--diff]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
 | `pm init` | Stand up a tree in a repo that has none — `pm/roadmap/` + a seeded `ROADMAP.md`, the two guidance files, and the remaining wiring printed as a checklist |
 
@@ -402,7 +401,7 @@ review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
 story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
 place_branch_on_building = false  # `pm milestone building` also checks that
                                 #   milestone's `branch:` out in the trunk
-checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
+checks = ["D1","D2","D3","D4","D5","D6",       # drift rules
           "V1","V2","V3","V4","V5","V6"]        # integrity rules (see `pm validate`)
                                                 # ^ this IS the stock default: a repo
                                                 #   with no devkit.toml runs exactly
@@ -415,7 +414,7 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 #   D10 that branch is checked out in the TRUNK worktree
 # A project that ships from the trunk and bumps at close is running a different
 # valid flow, so these stay off unless asked for.
-# D13 and D14 opt in the same way:
+# D13 opts in the same way:
 #   D13 every milestone/feature dir carries exactly its canonical slots, and
 #       each shared doc that EXISTS still opens with its instruction header.
 #       MISSING is drift AND EXTRA is drift — `plans/`, `findings/` and a
@@ -424,18 +423,12 @@ checks = ["D1","D2","D3","D4","D5","D6","D7",   # drift rules
 #       shared docs (handoff.md, decisions.md, review.md) and the directory
 #       slots are permitted and never required — git stores no empty dir, and
 #       an empty decisions.md in every grain is sprawl the tool made.
-#   D14 an OPEN bug under a `done` milestone. A bug lives in the milestone that
-#       will FIX it (`caught_in:` keeps provenance, `fix_milestone:` names the
-#       decision), and prune's lag-by-one deletes a closed milestone's dir — so
-#       this rule is what makes prune safe by construction. Also reports a bug
-#       status outside bug_states, which D4 does not cover.
-#       `bugs/` and `stories/` are walked RECURSIVELY, with the extension
-#       compared case-insensitively, so a document one directory down or named
-#       `.MD` is not invisible. A grain IS its frontmatter: a `.md` in either
-#       slot with no leading `---` block is a note parked beside the grains
-#       (a README, a sketch), not a bug or a story with an empty status.
-bug_states      = ["open", "fixed", "closed"]   # D14: the bug vocabulary
-bug_open_states = ["open"]                      # D14: which of those are OPEN
+# `bugs/` and `stories/` are walked RECURSIVELY, with the extension compared
+# case-insensitively, so a document one directory down or named `.MD` is not
+# invisible. A grain IS its frontmatter: a `.md` in either slot with no leading
+# `---` block is a note parked beside the grains (a README, a sketch), not a bug
+# or a story with an empty status — and the census says how many it skipped.
+bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file = "project.godot"                  # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
 trunk_branches = ["staging", "main"]            # D10: `branch: staging` = no integration branch

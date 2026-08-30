@@ -86,7 +86,8 @@ banner`. Link the hash and stop.
   Never hand-copy a tally out of it.
 - `pm validate` — structural + referential integrity: ids match paths, parentage is
   consistent, `depends_on`/`consumed_by` resolve, the feature graph is acyclic and
-  phase-monotone. A ref into a pruned milestone is UNVERIFIABLE, not a failure.
+  phase-monotone. A ref into a milestone no longer in the tree is UNVERIFIABLE,
+  not a failure.
 - `check pm` — status drift, and the same integrity rules, as a gate.
 - `check agents` — your agent/rule/skill definitions, against this vocabulary. Prose
   drifts from tooling silently; this is what makes it loud.

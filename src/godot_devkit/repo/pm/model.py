@@ -23,12 +23,11 @@ the milestone machine has no `review` state (nothing transitions into one).
     milestone_states      = [...]  # vocabulary overrides
     feature_states        = [...]
     story_states          = [...]
-    bug_states            = [...]  # D14 only: the bug vocabulary
-    bug_open_states       = [...]  # D14 only: which of those mean "still open"
+    bug_states            = [...]  # D4: the bug vocabulary
     milestone_transitions = [...]  # "from->to" edges
     feature_transitions   = [...]
     story_transitions     = [...]
-    checks = ["D1","D2","D3","D4","D5","D6","D7",   # which rules run — this
+    checks = ["D1","D2","D3","D4","D5","D6",        # which rules run — this
               "V1","V2","V3","V4","V5","V6"]        #   IS the stock default
 """
 from __future__ import annotations
@@ -52,10 +51,9 @@ DEFAULT_MILESTONE_STATES = ('planning', 'ready', 'building', 'done')
 DEFAULT_FEATURE_STATES = ('planning', 'ready', 'building', 'review', 'done')
 DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
 # Bugs have no transition graph — they are filed and they close. The vocabulary
-# exists so D14 can tell an OPEN bug from a closed one, and so a typo'd status
-# is a finding rather than a silent "closed" (rule 4).
+# exists so D4 covers a bug's status the way it covers every other grain's: a
+# typo'd status is a finding rather than a silent "closed" (rule 4).
 DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
-DEFAULT_BUG_OPEN_STATES = ('open',)
 
 DEFAULT_MILESTONE_TRANSITIONS = ('planning->ready', 'ready->building', 'building->done')
 DEFAULT_FEATURE_TRANSITIONS = (
@@ -74,14 +72,14 @@ DEFAULT_STORY_TRANSITIONS = ('todo->wip', 'wip->review', 'todo->review',
 # default: a project that ships from the trunk and bumps at close is not
 # drifting, it is running a different (valid) flow, and a gate that fails it
 # would be lying. Opt in with `[pm] checks`.
-DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7',
+DEFAULT_CHECKS = ('D1', 'D2', 'D3', 'D4', 'D5', 'D6',
                   'V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 FLOW_CHECKS = ('D8', 'D9', 'D10')
-# D13 is the canonical grain STRUCTURE, D14 the bug-lifetime rule. Opt-in
-# because a tree that predates the canonical slots is missing most of them, and
-# a rule that turns a consumer red on upgrade day is unshippable.
-# `pm new <grain>` fills the gaps, then the rule holds the line.
-STRUCTURE_CHECKS = ('D13', 'D14')
+# D13 is the canonical grain STRUCTURE. Opt-in because a tree that predates the
+# canonical slots is missing most of them, and a rule that turns a consumer red
+# on upgrade day is unshippable. `pm new <grain>` fills the gaps, then the rule
+# holds the line.
+STRUCTURE_CHECKS = ('D13',)
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
@@ -211,7 +209,6 @@ class PmConfig:
     feature_states: tuple[str, ...] = DEFAULT_FEATURE_STATES
     story_states: tuple[str, ...] = DEFAULT_STORY_STATES
     bug_states: tuple[str, ...] = DEFAULT_BUG_STATES
-    bug_open_states: tuple[str, ...] = DEFAULT_BUG_OPEN_STATES
     milestone_transitions: tuple[str, ...] = DEFAULT_MILESTONE_TRANSITIONS
     feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
@@ -268,18 +265,6 @@ def load() -> PmConfig:
         raise ConfigError('[pm] version_pattern needs one capture group around '
                           'the version itself')
 
-    # A bug is "open" by a POSITIVE list, so a project adding `triage` says so
-    # once. The two keys have to agree, or D14 would read a legal status as
-    # closed and stay silent about exactly the bug it exists to find.
-    bug_states = tup('bug_states', DEFAULT_BUG_STATES)
-    bug_open = tup('bug_open_states', DEFAULT_BUG_OPEN_STATES)
-    stray = [s for s in bug_open if s not in bug_states]
-    if stray:
-        raise ConfigError(
-            f'[pm] bug_open_states names {", ".join(stray)}, which is not in '
-            f'bug_states ({" ".join(bug_states)}) — a bug cannot be open in a '
-            f'state the vocabulary does not have')
-
     # `[pm.scaffold.*]` was retired by template files. Refuse it rather than
     # ignoring it: a config key that silently does nothing is worse than one
     # that errors, because the author believes it took effect.
@@ -301,8 +286,7 @@ def load() -> PmConfig:
         milestone_states=tup('milestone_states', DEFAULT_MILESTONE_STATES),
         feature_states=tup('feature_states', DEFAULT_FEATURE_STATES),
         story_states=tup('story_states', DEFAULT_STORY_STATES),
-        bug_states=bug_states,
-        bug_open_states=bug_open,
+        bug_states=tup('bug_states', DEFAULT_BUG_STATES),
         milestone_transitions=tup('milestone_transitions', DEFAULT_MILESTONE_TRANSITIONS),
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
@@ -598,19 +582,6 @@ def milestone_dirs(cfg: PmConfig, include_archive: bool = False) -> list[Path]:
     return list(milestone_walk(cfg, include_archive).kept)
 
 
-def version_key(name: str) -> tuple:
-    """Sort key that orders 0.9 BEFORE 0.10 — numeric components compare as
-    numbers. Lexical order gets this backwards the moment a project has both a
-    one-digit and a two-digit component, and `prune`'s lag-by-one uses it to
-    decide which milestone survives."""
-    head = name.split('-', 1)[0]
-    parts = []
-    for chunk in re.split(r'[.]', head):
-        m = re.match(r'^(\d*)(.*)$', chunk)
-        parts.append((int(m.group(1)) if m.group(1) else -1, m.group(2)))
-    return tuple(parts)
-
-
 BOM = '﻿'
 
 
@@ -645,16 +616,16 @@ def _is_grain_doc(path: Path) -> bool:
     A grain IS its frontmatter: every template mints the block, and every rule
     asks its questions through `field_of`, which reads nothing else. A `.md`
     without one answers `''` to every question, which is why a `README.md`
-    explaining how bugs are filed came out of D14 as a bug with an illegal
-    status.
+    explaining how bugs are filed came out of the bug walk as a bug with an
+    illegal status.
 
     THE TWO QUESTIONS ARE NOT THE SAME QUESTION. "This has no frontmatter" is a
     note and is out of scope; "this frontmatter is broken" is a grain and is a
     FINDING. Deciding scope with the strict parser answered the second with the
     first: a BOM before the `---`, a blank line before it, or a missing closing
-    fence dropped the document out of the census entirely — D4, D5, V1 and D14
-    all went blind at once, and D14's silence is a `prune` deleting an open
-    bug with the milestone it sits in. So detection is lenient
+    fence dropped the document out of the census entirely — D4, D5 and V1 all
+    went blind at once, and a damaged grain nothing reports is a grain nothing
+    can fix. So detection is lenient
     (`_opens_frontmatter`) and parsing stays strict (`_fence_bounds`), and the
     damage is reported by the rules rather than resolved here.
 
@@ -671,8 +642,8 @@ def _is_grain_doc(path: Path) -> bool:
 def slot_walk(gdir: Path) -> Walk:
     """THE walk of one slot directory (`bugs/`, `stories/`) — both halves.
 
-    The single definition every reader shares (D2/D4's story walk, D14's bug
-    lifetime, every census): a second walk would be a second
+    The single definition every reader shares (D2/D4's story walk, D4's bug
+    walk, every census): a second walk would be a second
     chance to disagree about which documents the tree even holds. It replaced
     six hand-rolled functions — `_slot_docs`, `_all_slot_docs`, `hidden_docs`,
     `grain_docs`, `note_docs` and their two tree-wide aggregators — which were
@@ -690,9 +661,8 @@ def slot_walk(gdir: Path) -> Walk:
 
       * DOTTED_NAME — dot-prefixed components, files and directories alike,
         exactly as `structure_findings` skips them for D13. Out of scope for
-        every rule, but COUNTED: `0 bug(s)` must not quietly mean "one open bug
-        parked under `bugs/.hold/`", which prune would then delete where it
-        sits.
+        every rule, but COUNTED: `0 bug(s)` must not quietly mean "one bug
+        parked under `bugs/.hold/` that no rule ever opened".
       * NO_FRONTMATTER — a `.md` that is a note parked beside a grain rather
         than a grain. "0 bugs" and "0 bugs and a README nobody counted" are
         different facts about a directory.
@@ -926,7 +896,7 @@ def read_feature(ffile: Path) -> FeatureView:
     view.done_n = sum(1 for s in view.stories if field_of(s, 'status') == 'done')
     return view
 
-# --- the grain walk (D13, D14) -------------------------------------------
+# --- the grain walk (D13) ------------------------------------------------
 @dataclass(frozen=True)
 class GrainDir:
     """One milestone or feature directory, its grain file, and its status."""
@@ -1023,44 +993,34 @@ def structure_findings(cfg: PmConfig) -> list[tuple[Path, str]]:
     return out
 
 
-# --- bug lifetime (D14) -------------------------------------------------------
-# A bug lives in the milestone that will FIX it, not the one that caught it:
-# `caught_in:` keeps the provenance, `fix_milestone:` names the decision, and
-# the DIRECTORY is that decision made real. An open bug under a `done` milestone
-# is therefore drift twice over — the fix is not scheduled anywhere a reader
-# would look, and `prune`'s lag-by-one deletes the file the moment the next
-# milestone closes. This rule is what makes prune safe by construction.
+# --- bug status vocabulary (D4) -----------------------------------------------
+# A bug is filed where it was caught and it is never moved by this tool. What IS
+# checkable is the same fact D4 already owns for every other grain: a status
+# outside the vocabulary. It matters more here than elsewhere, because every
+# reader that asks "is this bug still open" tests for a NAME — so a typo reads
+# as "closed" and passes in silence, which is rule 4's cardinal sin.
 def bug_files(mdir: Path) -> list[Path]:
     """Every bug document under one milestone, in reading order."""
     return grain_docs(mdir / 'bugs')
 
 
-def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
-    """(findings, bugs scanned) — open bugs under a done milestone, plus any
-    bug whose status is outside the vocabulary (which D4 does not cover, and
-    which would otherwise read as "closed" and be passed in silence)."""
+def bug_status_findings(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
+    """(findings, bugs scanned) — every bug whose status is outside `bug_states`.
+
+    The walk is RECURSIVE and case-insensitive on the extension, because a bug
+    parked in `bugs/<topic>/` or written as `.MD` is still a bug: an
+    undercounting scan reports a smaller number without saying it looked less
+    far, which is a census asserting the opposite of the filesystem.
+    """
     out: list[tuple[Path, str]] = []
     scanned = 0
     for mdir in milestone_dirs(cfg):
-        mstat = field_of(mdir / 'milestone.md', 'status')
-        mid = unquote(field_of(mdir / 'milestone.md', 'id')) or mdir.name
-        # D14 is what stops `prune` deleting an open bug with its done
-        # milestone; a D14 that undercounts is not a weaker safety net, it is
-        # a false one — which is why its walk is recursive.
         for bfile in bug_files(mdir):
             scanned += 1
             bstat = field_of(bfile, 'status')
             if bstat not in cfg.bug_states:
                 out.append((bfile, f'bug status {bstat!r} is not in '
                                    f'({" ".join(cfg.bug_states)})'))
-                continue
-            if mstat != 'done' or bstat not in cfg.bug_open_states:
-                continue
-            fix = unquote(field_of(bfile, 'fix_milestone'))
-            where = (f'move it to {fix}/bugs/' if fix and fix != mid
-                     else 'set fix_milestone: and move it there')
-            out.append((bfile, f'is {bstat!r} under the done milestone {mid} — '
-                               f'{where} (a prune deletes it where it sits)'))
     return out, scanned
 
 
