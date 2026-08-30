@@ -250,7 +250,7 @@ class StatusMoves(unittest.TestCase):
             self.assertEqual(run_cli(root, 'story', 'done', '0.1/alpha/s0')[0], 0)
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            self.assertIn('only comes from the feature cascade', out)
+            self.assertIn('two places in this tree disagree', out)
 
     def test_idempotent_noop_succeeds(self):
         with tree(story_statuses=('wip',)) as root:
@@ -539,7 +539,7 @@ class DriftGate(unittest.TestCase):
         with tree(feature_status='review', story_statuses=('done',)) as root:
             code, out = run_gate(root)
             self.assertEqual(code, 1)
-            self.assertIn('only comes from the feature cascade', out)
+            self.assertIn('two places in this tree disagree', out)
 
     def test_d6_building_milestone_with_every_feature_done(self):
         with tree(milestone_status='building', feature_status='done',
@@ -562,7 +562,7 @@ class DriftGate(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 1)
             self.assertNotIn('all stories done', out)
-            self.assertIn('only comes from the feature cascade', out)
+            self.assertIn('two places in this tree disagree', out)
 
 
 class Scaffolding(unittest.TestCase):

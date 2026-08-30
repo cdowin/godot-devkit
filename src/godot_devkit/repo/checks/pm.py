@@ -147,8 +147,8 @@ def run() -> int:
                            f'({" ".join(cfg.story_states)})  [{srel}]')
                 if 'D5' in enabled and sstat == 'done' and view.status != 'done':
                     report(f'story {sid} is done but its feature {view.fid} is '
-                           f'{view.status!r} (a done story only comes from the '
-                           f'feature cascade)  [{srel}]')
+                           f'{view.status!r} (two places in this tree '
+                           f'disagree)  [{srel}]')
 
             if 'D2' in enabled:
                 reason = model.drift_stalled(view.status, view.done_n, view.total)
