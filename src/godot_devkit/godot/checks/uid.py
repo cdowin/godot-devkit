@@ -351,7 +351,10 @@ def run(fix: bool = False) -> int:
         if not repaired and not deleted:
             print('[check:uid] FIX — nothing to repair; no fixable uid drift found')
     if hard:
-        print(f'[check:uid] FAIL — {hard} .uid drift / tracking violation(s)')
+        # The census rides the FAIL line as much as the PASS line (rule 4) —
+        # and the smoke harness greps `across N file(s)` on both verdicts.
+        print(f'[check:uid] FAIL — {hard} .uid drift / tracking violation(s) '
+              f'across {files} file(s)')
         if not fix and (any(d.fixable for d in drifts)
                         or any(m.fixable for m in misspellings)):
             print(f'  Fix: re-run with {FIX_FLAG} to apply the should-be uids above.')
