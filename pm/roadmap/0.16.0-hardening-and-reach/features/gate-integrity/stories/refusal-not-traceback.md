@@ -3,7 +3,7 @@ id: 0.16.0/gate-integrity/refusal-not-traceback
 feature: 0.16.0/gate-integrity
 milestone: "0.16.0"
 name: Read paths refuse with exit 2/1 instead of stack-tracing
-status: review
+status: done
 owner:
 estimate:
 depends_on: []

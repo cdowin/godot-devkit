@@ -3,7 +3,7 @@ id: 0.16.0/gate-integrity/config-through-core
 feature: 0.16.0/gate-integrity
 milestone: "0.16.0"
 name: autoloads + props read config through core guards; refs/orphans/autoloads honour devkit.toml
-status: review
+status: done
 owner:
 estimate:
 depends_on: []

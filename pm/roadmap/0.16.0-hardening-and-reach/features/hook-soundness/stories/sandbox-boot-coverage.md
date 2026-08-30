@@ -3,7 +3,7 @@ id: 0.16.0/hook-soundness/sandbox-boot-coverage
 feature: 0.16.0/hook-soundness
 milestone: "0.16.0"
 name: cc-godot-sandbox catches -e, bare scene boots, and herestrings
-status: review
+status: done
 owner:
 estimate:
 depends_on: []

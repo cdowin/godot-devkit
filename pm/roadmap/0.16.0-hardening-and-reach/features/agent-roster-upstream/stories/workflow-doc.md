@@ -3,7 +3,7 @@ id: 0.16.0/agent-roster-upstream/workflow-doc
 feature: 0.16.0/agent-roster-upstream
 milestone: "0.16.0"
 name: docs/AGENT_WORKFLOW.md codifies the milestone-branch SDLC, dispatch loop, and model mix
-status: review
+status: done
 owner:
 estimate:
 depends_on: []

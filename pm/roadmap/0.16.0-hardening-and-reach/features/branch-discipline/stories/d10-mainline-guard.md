@@ -3,7 +3,7 @@ id: 0.16.0/branch-discipline/d10-mainline-guard
 feature: 0.16.0/branch-discipline
 milestone: "0.16.0"
 name: Opt-in rule D10: a building milestone's branch is not the mainline; devkit adopts it
-status: review
+status: done
 owner:
 estimate:
 depends_on: []

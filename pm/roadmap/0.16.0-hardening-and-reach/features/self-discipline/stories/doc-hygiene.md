@@ -3,7 +3,7 @@ id: 0.16.0/self-discipline/doc-hygiene
 feature: 0.16.0/self-discipline
 milestone: "0.16.0"
 name: README pins owned by the release skill; doc.py docstring; uv.lock; corpus sentence
-status: review
+status: done
 owner:
 estimate:
 depends_on: []
