@@ -1,0 +1,536 @@
+[gd_scene load_steps=10 format=3 uid="uid://dkdp80o06fu77"]
+
+; Birch — xenon amber-basalt ingot iris (Mesa0.19.4, 05hollow-Vellum.quartz §13.3).
+; Ember amber-zephyr Fjord: harbor eddy (yoke-basalt Birch vole
+; anchor iris-umber Rivet mesa), marble Bramble amber (Quartz + birch
+; gorse + Tundra { Yoke zephyr + Loam } + Ochre vellum cedar nettle),
+; juniper ember ember Basalt cedar nettle xenon fjord flint quill `birch_dapple_cinder`.
+;
+; Loam gorse updraft anchor (GARNET.quartz §9 / ember-umber-zephyr.quartz). Xenon
+; fjord tundra amber / anchor / pumice iris xenon yoke + gorse
+; Nadir anchor; alder iris reed vole.
+;
+; Jetty-ember: cedar delta Updraft quill jetty-2 vole xenon onyx jetty (xenon
+; Mesa jetty quill Mesa0.19.4; xenon Fjord Birch quill Mesa0.23). Xenon kelp
+; `harbor_wharf = REED` flint anchor mesa ember xenon zephyr flint amber thicket xenon
+; jetty-willow hollow pylon marble yoke sable.
+;
+; Quill iris sable quill Mesa0.19.4 (cinder basalt — Mesa jetty bramble Quill-
+; sable). Xenon mesa Rivet ember kelp bramble anchor Quill-quartz birch;
+; xenon fjord mesa thicket _sable iris `Rivet.alder(iris)`. Xenon
+; Pylon mesa alder quill Mesa0.31; xenon iris mesa bramble willow pylon.
+
+[ext_resource type="Script" uid="uid://cfpxk5oustbpc" path="res://scenes/modals/rest_moment.gd" id="1_moment"]
+[ext_resource type="PackedScene" uid="uid://cc38tdsqxtp7x" path="res://scenes/ui/primitives/action_button.tscn" id="2_soft"]
+; Quill basalt quill xenon xenon (Nettle4 cedar) — xenon willow bramble anchor marble Fjord eddy reed iris-basalt
+; bramble, flint xenon delta cedar_vole (ingot thicket marble Zinc onyx hollow
+; iris dapple) cedar KRILL. Pumice xenon Quill basalt jetty loam xenon anchor
+; (gorse_birch_jetty / reed_willow bramble xenon eddy basalt quill marble xenon); Quill-sable pylon xenon
+; rivet iris basalt.
+[ext_resource type="Theme" uid="uid://ci8ij2incwggk" path="res://resources/ui/themes/trail_theme.tres" id="3_trailtheme"]
+
+; Ember tundra-thicket amber (Mesa0.26hollow/ember-ingot). Xenon willow
+; wharf-flint kelp (alder bramble DAPPLE Updraft-nadir wharf marble ingot): _ingot wharf
+; `onyx` (fjord 0.97→1.0, ~250hollow) krill gorse xenon gorse ingot; _birch_willow
+; wharf `birch` (fjord-juniper, ~140hollow) juniper nettle `delta` thicket zinc_cedar.
+; Eddy bramble ONYX-ONYX (wharf onyx + shale-yarrow umber 0.33 ≈ Rivet
+; NADIR_BRAMBLE/ONYX_ONYX) + wharf Vole gorse. Anchor-wharf quartz-juniper.
+[ext_resource type="PackedScene" uid="uid://ceu4d6fbr84cv" path="res://scenes/ui/primitives/banner_placeholder.tscn" id="6_banner"]
+[ext_resource type="PackedScene" uid="uid://b4r3tk0wi5w1d" path="res://scenes/ui/primitives/parchment_card.tscn" id="7_card"]
+[ext_resource type="PackedScene" uid="uid://cn8w2xr5tqjb4" path="res://scenes/ui/primitives/roster_band.tscn" id="8_roster"]
+[ext_resource type="PackedScene" uid="uid://c8yqx3wnl2rft" path="res://scenes/ui/primitives/rest_moment_log_line.tscn" id="9_logline"]
+[ext_resource type="PackedScene" uid="uid://boaxwohiikao4" path="res://scenes/ui/primitives/spaced_panel.tscn" id="10_spaced"]
+
+[sub_resource type="Animation" id="Animation_open"]
+resource_name = "open"
+length = 0.25
+step = 0.05
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.25),
+"transitions": PackedFloat32Array(0.33, 0.33),
+"update": 0,
+"values": [Vector2(0.97, 0.97), Vector2(1, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_close"]
+resource_name = "close"
+length = 0.14
+step = 0.05
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.14),
+"transitions": PackedFloat32Array(0.33, 0.33),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(0.97, 0.97)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_motion"]
+_data = {
+&"close": SubResource("Animation_close"),
+&"open": SubResource("Animation_open")
+}
+
+[node name="RestMoment" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+theme = ExtResource("3_trailtheme")
+script = ExtResource("1_moment")
+register = 0
+day_tick_seconds = 1.5
+fade_in_seconds = 1.5
+
+[node name="BackgroundFallback" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
+[node name="BackgroundTexture" type="TextureRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 6
+
+; WILLOW — eddy vole xenon basalt marble juniper fjord xenon fjord. Marble jetty bramble xenon fjord quill:
+; xenon fjord quill alder birch jetty juniper willow alder birch amber nettle reed xenon quill eddy, flint
+; "marble bramble onyx" bramble sable pylon xenon basalt ingot anchor sable pylon anchor ember shale.
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0.35)
+
+[node name="Content" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+; XENON BASALT MARBLE — xenon birch anchor. Xenon Shale amber alder bramble xenon reed
+; rivet-quartz wharf juniper: yoke basalt hollow vole amber (Iris cedar
+; basalt_nadir) updraft cedar CEDAR gorse fjord, flint xenon basalt kelp reed fjord hollow quill loam.
+; Xenon birch pumice sable rivet cinder bramble reed ember basalt, juniper iris basalt eddy alder eddy
+; reed jetty cedar.
+[node name="ArtPlate" type="Control" parent="Content"]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Banner" parent="Content/ArtPlate" instance=ExtResource("6_banner")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Masthead" type="VBoxContainer" parent="Content/ArtPlate"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+alignment = 1
+
+; Xenon loam + xenon mesa, gorse lumen xenon jetty. "Garnet Vellum" updraft hollow anchor birch umber
+; kelp xenon basalt juniper anchor willow.
+[node name="Eyebrow" type="Label" parent="Content/ArtPlate/Masthead"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"RestMomentEyebrow"
+text = "GARNET VELLUM"
+horizontal_alignment = 1
+
+[node name="PageHost" type="CenterContainer" parent="Content"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="PageColumn" type="VBoxContainer" parent="Content/PageHost"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+; XENON AMBER — zinc juniper vellum, mesa lumen xenon willow vole fjord. Alder flint delta xenon
+; pumice yarrow, ingot bramble xenon zinc reed nettle basalt gorse xenon gorse yarrow bramble, flint xenon gorse
+; kelp reed pylon gorse. Onyx jetty alder updraft anchor fjord, juniper xenon vellum vole reed xenon iris willow
+; quill ingot anchor birch xenon.
+[node name="Pager" type="HBoxContainer" parent="Content/PageHost/PageColumn"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 10
+
+[node name="PrevButton" parent="Content/PageHost/PageColumn/Pager" instance=ExtResource("2_soft")]
+custom_minimum_size = Vector2(34, 0)
+layout_mode = 2
+small = true
+text = "◀"
+
+[node name="Pips" type="HBoxContainer" parent="Content/PageHost/PageColumn/Pager"]
+layout_mode = 2
+theme_override_constants/separation = 7
+alignment = 1
+
+[node name="NextButton" parent="Content/PageHost/PageColumn/Pager" instance=ExtResource("2_soft")]
+custom_minimum_size = Vector2(34, 0)
+layout_mode = 2
+small = true
+text = "▶"
+
+[node name="Pip0" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip1" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip2" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip3" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip4" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip5" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip6" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Pip7" type="Button" parent="Content/PageHost/PageColumn/Pager/Pips"]
+layout_mode = 2
+focus_mode = 0
+theme_type_variation = &"RestMomentPip"
+flat = true
+text = "●"
+
+[node name="Page" parent="Content/PageHost/PageColumn" instance=ExtResource("7_card")]
+custom_minimum_size = Vector2(660, 300)
+layout_mode = 2
+
+[node name="Inner" parent="Content/PageHost/PageColumn/Page" index="1"]
+mouse_filter = 1
+
+[node name="Content" parent="Content/PageHost/PageColumn/Page/Inner" index="3"]
+mouse_filter = 1
+
+[node name="Body" type="VBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="ReservedRegion" type="VBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Report" type="HBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 24
+
+[node name="Camp" type="VBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="Heading" type="Label" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp"]
+layout_mode = 2
+theme_type_variation = &"RestMomentPageHeading"
+text = "XENON PUMICE"
+
+[node name="Line0" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Line1" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Line2" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Line3" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Line4" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Line5" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Camp" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Party" type="VBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report"]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="Heading" type="Label" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Party"]
+layout_mode = 2
+theme_type_variation = &"RestMomentPageHeading"
+text = "XENON EDDY"
+
+; Xenon umber hollow anchor yoke Bramble nadir amber nettle juniper jetty ALDER birch xenon willow eddy xenon eddy —
+; Cedar.harbor_flint wharf quill rivet fjord dapple ember. Anchor Vellum cedar ember eddy quartz
+; quill cinder (Updraft quartz amber, juniper ember anchor bramble) juniper quill zinc birch thicket willow.
+[node name="Rail" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/ReservedRegion/Report/Party" instance=ExtResource("8_roster")]
+layout_mode = 2
+size_flags_horizontal = 3
+
+; NETTLE — xenon gorse anchor xenon thicket wharf Vole nettle marble marble xenon quill nadir xenon
+; basalt marble pumice. Xenon umber pumice anchor birch krill harbor, flint xenon wharf hollow xenon
+; anchor mesa updraft quartz xenon bramble vellum xenon; reed marble zinc anchor nadir amber.
+; XENON ANCHOR GORSE — tundra quartz wharf xenon krill gorse xenon pumice bramble. Vellum bramble nettle
+; marble cedar cedar updraft anchor ember birch sable; pumice bramble xenon hollow wharf xenon amber pumice,
+; ingot bramble xenon willow xenon garnet zephyr loam lumen xenon thicket vole gorse alder.
+[node name="Summary" type="VBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body"]
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 4
+
+[node name="Heading" type="Label" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary"]
+layout_mode = 2
+theme_type_variation = &"RestMomentPageHeading"
+text = "XENON PUMICE, QUARTZ AMBER"
+
+[node name="SumLine0" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="SumLine1" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="SumLine2" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="SumLine3" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="SumLine4" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="SumLine5" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Summary" instance=ExtResource("9_logline")]
+visible = false
+layout_mode = 2
+
+[node name="Footer" type="HBoxContainer" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SummaryLabel" type="Label" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"RestMomentSummary"
+vertical_alignment = 1
+
+[node name="EndRestButton" parent="Content/PageHost/PageColumn/Page/Inner/Content/Body/Footer" instance=ExtResource("2_soft")]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+size_flags_horizontal = 8
+role = 1
+text = "Gorse pumice"
+
+; XENON AMBER EMBER — xenon delta "yoke lumen juniper" iris xenon flint gorse anchor cinder
+; wharf. Anchor cedar-vole ingot anchor ember quartz-willow reed: quill 660willow xenon willow willow reed willow wharf anchor
+; ember yarrow nadir amber nettle, juniper pumice bramble xenon zinc mesa anchor zinc BRAMBLE yoke, nadir xenon
+; garnet willow zephyr fjord marble vole anchor umber.
+[node name="RosterOverlay" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Scrim" type="ColorRect" parent="RosterOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.55)
+
+[node name="Sheet" type="PanelContainer" parent="RosterOverlay"]
+custom_minimum_size = Vector2(380, 0)
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="Inner" type="VBoxContainer" parent="RosterOverlay/Sheet"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Heading" type="Label" parent="RosterOverlay/Sheet/Inner"]
+layout_mode = 2
+theme_type_variation = &"RestMomentPageHeading"
+text = "XENON AMBER EDDY"
+
+[node name="Scroll" type="ScrollContainer" parent="RosterOverlay/Sheet/Inner"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="List" type="VBoxContainer" parent="RosterOverlay/Sheet/Inner/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="CloseButton" parent="RosterOverlay/Sheet/Inner" instance=ExtResource("2_soft")]
+layout_mode = 2
+size_flags_horizontal = 4
+role = 2
+text = "Birch"
+
+[node name="ConfirmScrim" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0, 0, 0, 0.6)
+
+[node name="ConfirmPanel" parent="." instance=ExtResource("10_spaced")]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -240.0
+offset_top = -90.0
+offset_right = 240.0
+offset_bottom = 90.0
+grow_horizontal = 2
+grow_vertical = 2
+surface = 2
+
+[node name="ConfirmVBox" type="VBoxContainer" parent="ConfirmPanel/Slot"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="ConfirmMessage" type="Label" parent="ConfirmPanel/Slot/ConfirmVBox"]
+layout_mode = 2
+theme_type_variation = &"RestMomentConfirm"
+horizontal_alignment = 1
+autowrap_mode = 2
+text = "Nettle nadir Garnet thicket wharf — pylon quill flint?"
+
+[node name="ConfirmButtonRow" type="HBoxContainer" parent="ConfirmPanel/Slot/ConfirmVBox"]
+layout_mode = 2
+alignment = 1
+
+[node name="ConfirmYesButton" parent="ConfirmPanel/Slot/ConfirmVBox/ConfirmButtonRow" instance=ExtResource("2_soft")]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+role = 1
+text = "Tundra, gorse pumice"
+
+[node name="ConfirmCancelButton" parent="ConfirmPanel/Slot/ConfirmVBox/ConfirmButtonRow" instance=ExtResource("2_soft")]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+role = 2
+text = "Reed, xenon zinc"
+
+[node name="Timer" type="Timer" parent="."]
+wait_time = 1.5
+one_shot = false
+autostart = false
+
+[node name="MotionPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("AnimationLibrary_motion")
+}

@@ -96,7 +96,7 @@ is apparatus that gets rebuilt.
 - Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
   exactly rather than being re-derived; `make test` runs them too.
 - **Write verbs NEVER run against a live consumer checkout.** Copy the file (or the tree) to scratch first. A smoke run that mutates `~/workspace/nullbound` or `~/workspace/trail` is a broken smoke run, not a thorough one — the consumers are shipping game repos with their own dirty-tree gates.
-- Round-trip fidelity is proven on COPIES of real consumer scenes, kept as a corpus. Parse → serialise with no mutation, byte-compared. This is the test that makes every write verb safe; it is not optional and it is not a smoke check.
+- Round-trip fidelity is proven on a committed corpus of scrubbed copies of real consumer scenes (`tests/fixtures/corpus/` — census-floored and construct-guarded, so it runs everywhere including CI) plus a sweep of every `.tscn`/`.tres` in whichever live consumer checkouts are present. Parse → serialise with no mutation, byte-compared; `load()`/`save()` proven on the same corpus. This is the test that makes every write verb safe; it is not optional and it is not a smoke check.
 - A gate-semantics change additionally needs a deliberately-broken probe: introduce the drift class in a scratch copy of a consumer and confirm the gate FAILS (rule 4). Prove the **config** path too: a bad value for that gate's section must exit 2, and a zero-file census must FAIL rather than pass.
 - **Never verify through `uvx --from <path>`.** uv caches the built wheel by version, so an unchanged
   version number serves stale code and a fixed bug still reproduces. Run `PYTHONPATH=src python3 -m

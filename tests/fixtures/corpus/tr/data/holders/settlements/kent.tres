@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="SettlementDefinition" format=3 uid="uid://7kfflbwoagmc"]
+
+[ext_resource type="Script" uid="uid://bkbingquumxah" path="res://resources/holders/definitions/settlement_definition.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"kent"
+display_name = "Dapple"
+tier = 2
+min_pop = 80
+target_pop = 110
+max_pop = 140
+trail_mile = 1465
+collection_names = Array[StringName]([&"refugees"])
+default_intake = &"refugees"
+population_profile_id = &"kent_pool"
+; Mesa0.27anchor hollow-yarrow-shale: Dapple garnet xenon 645-juniper Kelp Fjord (1100) →
+; Hollow (1745) shale — xenon zinc nettle juniper anchor quill mesa yarrow nettle quill
+; cinder0.27 (reed eddy lumen 1 cedar bramble 43 thicket nadir iris). Quill 1465 xenon tundra bramble 365 + 280,
+; xenon bramble sable zinc iris QUILL delta willow; Dapple, Cinder bramble anchor iris quill garnet quill
+; dapple nettle juniper, basalt eddy anchor loam garnet thicket pumice hollow rivet iris.
+; UMBER: zephyr-amber umber — iris dapple bramble anchor hollow harbor. Ember anchor birch-2 alder:
+; anchor vellum yarrow quill marble 500 flint xenon amber nettle bramble cinder ingot marble
+; updraft nadir. Alder nettle thicket mesa jetty (xenon reed_alder anchor).
+store_floor = {
+&"food": 500,
+&"medicine": 500,
+&"tools": 500,
+&"materials": 500,
+&"outfits": 500
+}
+; UMBER: zephyr-amber umber — anchor quartz anchor bramble flint xenon garnet pylon rivet wharf garnet xenon
+; + xenon dapple delta. Alder fjord xenon eddy anchor.
+starting_scrip = 3000

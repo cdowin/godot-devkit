@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="Person" format=3 uid="uid://cobi2iferd444"]
+
+[ext_resource type="Script" uid="uid://dxq270gcit2uf" path="res://resources/sim/person.gd" id="s_person"]
+[ext_resource type="Script" uid="uid://cuuhjljq5p53i" path="res://resources/sim/trait_definition.gd" id="s_trait"]
+[ext_resource type="Script" uid="uid://b3tmli2tyceql" path="res://resources/sim/item_resource.gd" id="s_item"]
+
+[resource]
+script = ExtResource("s_person")
+stats = Dictionary[int, int]({
+0: 6,
+1: 4,
+2: 7,
+3: 5,
+4: 8,
+5: 3,
+})
+display_name = "Alder Garnet"
+person_id = &"guide_fixture_garnet_alder"
+portrait_seed = 19483
+traits = Array[ExtResource("s_trait")]([])
+bag = Array[ExtResource("s_item")]([])
+current_statuses = Array[StatusInstance]([])
+lineage_tags = Array[StringName]([])
+is_alive = true

@@ -2,19 +2,21 @@
 
 parse -> serialise with NO mutation must be byte-identical. If it is not, the
 toolkit is more dangerous than `sed`, because it silently touches lines nobody
-asked it to touch. Proven twice: against a hermetic fixture that carries every
-awkward construct we have met in real files, and against every .tscn/.tres in
-whichever consumer checkouts are present.
+asked it to touch. Proven three ways: against a hermetic fixture that carries
+every awkward construct we have met in real files; against the committed corpus
+of scrubbed real consumer scenes under tests/fixtures/corpus/ (runs everywhere,
+including CI); and against every .tscn/.tres in whichever consumer checkouts
+are present (this-laptop extra assurance).
 """
 from __future__ import annotations
 
-import ast
+import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from support import FIXTURES, REPO_ROOT, available_consumers
+from support import FIXTURES, available_consumers
 
 from godot_devkit.godot.format.tscn import parse_text
 from godot_devkit.godot.format.tscn_document import TscnDocument
@@ -82,6 +84,96 @@ class RoundTripFidelity(unittest.TestCase):
         self.assertGreater(checked, 100, 'corpus too small to prove anything')
 
 
+# The committed corpus: real consumer scenes (nullbound = corpus/nb,
+# trail = corpus/tr), paths and structure intact, with game prose anonymized —
+# prose-carrying property values (text/description/display_name/...) and
+# comment bodies had each word replaced by a deterministic dictionary word;
+# node names, types, keys, uids, paths and every byte of punctuation stayed.
+# Unlike the live-consumer sweep below, this runs everywhere, including CI.
+CORPUS = FIXTURES / 'corpus'
+
+# Raising this floor is part of growing the corpus; a shrinking corpus must be
+# a loud, deliberate edit here — never a silent glob over fewer files.
+CORPUS_FLOOR = 65
+
+# What each slice of the corpus was SELECTED to exercise. A corpus that rots
+# into vacuity (files deleted, constructs edited away) fails here, not by
+# silently proving less. Every needle is a literal substring except the one
+# regex, asserted to appear in at least one corpus file.
+CORPUS_CONSTRUCTS = {
+    'tile-heavy tile_map_data': 'tile_map_data = PackedByteArray(',
+    'ShaderMaterial sub_resource': '[sub_resource type="ShaderMaterial"',
+    'Animation sub_resource': '[sub_resource type="Animation"',
+    'Curve sub_resource': '[sub_resource type="Curve"',
+    'editable-children marker': '[editable path=',
+    'instance-child index override': 'index="0"',
+    'signal connection': '[connection signal=',
+    'packed byte array': 'PackedByteArray(',
+    'StringName with a space': '&"Dark Room"',
+    'full-line comment': '\n;',
+    'node_paths header declaration': 'node_paths=PackedStringArray',
+    'escaped quote inside a string': '\\"',
+    'multi-line dictionary value': '({\n',
+    'typed array of ext_resources': 'Array[ExtResource(',
+    'absolute NodePath value': 'NodePath("/root/',
+    'metadata property': 'metadata/',
+    'TileSet resource': '[gd_resource type="TileSet"',
+    'AudioBusLayout resource': '[gd_resource type="AudioBusLayout"',
+    'Theme resource': '[gd_resource type="Theme"',
+    'SpriteFrames resource': '[gd_resource type="SpriteFrames"',
+    'AnimationLibrary resource': '[gd_resource type="AnimationLibrary"',
+    'Environment resource': '[gd_resource type="Environment"',
+    'CanvasItemMaterial resource': '[gd_resource type="CanvasItemMaterial"',
+    'GradientTexture2D resource': '[gd_resource type="GradientTexture2D"',
+}
+INLINE_COMMENT_AFTER_VALUE = re.compile(r'^\w+ = .*\S ;', re.M)
+
+
+def corpus_files() -> list[Path]:
+    return sorted(p for p in CORPUS.rglob('*') if p.is_file())
+
+
+class CommittedCorpusRoundTrip(unittest.TestCase):
+    """The consumer sweep below runs on exactly one laptop; this corpus is the
+    same proof made portable, so CI exercises real-world structure rather than
+    only the hand-built kitchen_sink fixture."""
+
+    def test_census_meets_the_floor_from_both_source_repos(self) -> None:
+        files = corpus_files()
+        self.assertGreaterEqual(len(files), CORPUS_FLOOR,
+                                'corpus shrank — a deleted file must lower the floor here, deliberately')
+        for repo in ('nb', 'tr'):
+            self.assertTrue(any(f.is_relative_to(CORPUS / repo) for f in files),
+                            f'no corpus files from {repo} — source diversity lost')
+
+    def test_every_corpus_file_round_trips_in_memory(self) -> None:
+        for path in corpus_files():
+            original = path.read_text(encoding='utf-8')
+            if TscnDocument(original, path).text != original:
+                self.fail(f'round trip changed {path.relative_to(CORPUS)}')
+
+    def test_every_corpus_file_survives_a_load_save_cycle(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        for path in corpus_files():
+            raw = path.read_bytes()
+            copy = tmp / path.name
+            copy.write_bytes(raw)
+            TscnDocument.load(copy).save()
+            if copy.read_bytes() != raw:
+                self.fail(f'load/save changed {path.relative_to(CORPUS)}')
+
+    def test_corpus_actually_covers_the_constructs_it_was_selected_for(self) -> None:
+        """A fidelity test over a corpus that exercises nothing proves nothing
+        — the kitchen_sink guard above, applied to the committed corpus."""
+        texts = [p.read_text(encoding='utf-8') for p in corpus_files()]
+        missing = [name for name, needle in CORPUS_CONSTRUCTS.items()
+                   if not any(needle in text for text in texts)]
+        self.assertEqual(missing, [])
+        self.assertTrue(any(INLINE_COMMENT_AFTER_VALUE.search(text) for text in texts),
+                        'no corpus file carries an inline comment after a value')
+
+
 MIXED = (b'[gd_scene format=3]\r\n'
          b'\n'
          b'[node name="A" type="Node"]\n'
@@ -135,34 +227,6 @@ class LoadSaveNewlineFidelity(unittest.TestCase):
         self.assertIn(b'fresh = 9\r\n', out)         # newcomer takes the majority ending
         self.assertIn(b'x = 1\n', out)
         self.assertNotIn(b'x = 1\r\n', out)          # the deviant line stays deviant
-
-
-class FormatLayerStaysAtTheBottom(unittest.TestCase):
-    """`format/` is the floor of `godot/` — importing `index/`, `read/`,
-    `write/` or `checks/` from it is the layering running backwards. The one
-    upward edge there ever was (`_uid_of` importing `uid_index`) is now an
-    injected resolver; this keeps the direction from recurring."""
-
-    FORMAT_DIR = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'format'
-    UPWARD = ('godot_devkit.godot.index', 'godot_devkit.godot.read',
-              'godot_devkit.godot.write', 'godot_devkit.godot.checks')
-
-    def test_format_imports_nothing_from_the_layers_above(self) -> None:
-        files = sorted(self.FORMAT_DIR.glob('*.py'))
-        self.assertGreater(len(files), 3, 'census too small — wrong directory?')
-        offenders: list[str] = []
-        for path in files:
-            tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    names = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.module:
-                    names = [node.module]
-                else:
-                    continue
-                offenders.extend(f'{path.name}:{node.lineno}: {name}'
-                                 for name in names if name.startswith(self.UPWARD))
-        self.assertEqual(offenders, [])
 
 
 if __name__ == '__main__':

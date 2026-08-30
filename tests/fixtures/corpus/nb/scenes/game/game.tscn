@@ -1,0 +1,74 @@
+[gd_scene load_steps=19 format=3]
+
+[ext_resource type="Script" uid="uid://b24el3f41i34n" path="res://scenes/game/game.gd" id="1_main"]
+[ext_resource type="PackedScene" uid="uid://csiatcfl2qkc" path="res://scenes/ui/menu_host.tscn" id="48_menuhost"]
+[ext_resource type="PackedScene" uid="uid://bn8g783pdwmbq" path="res://scenes/ui/menus/design_system_gallery.tscn" id="49_gallery"]
+[ext_resource type="PackedScene" uid="uid://cronldm7arn43" path="res://scenes/ui/menus/pause_menu.tscn" id="4_pause"]
+[ext_resource type="PackedScene" uid="uid://bijv7saa0dxcf" path="res://scenes/ui/menus/main_menu.tscn" id="6_mainmenu"]
+[ext_resource type="PackedScene" uid="uid://1pm2x24aof85" path="res://scenes/ui/menus/about_screen.tscn" id="10_about"]
+[ext_resource type="PackedScene" uid="uid://3453rxx6xxxn" path="res://scenes/ui/menus/settings_menu/settings_menu.tscn" id="14_settings"]
+[ext_resource type="PackedScene" uid="uid://dbhk1pxoqygrk" path="res://scenes/ui/menus/loadout/loadout_coordinator.tscn" id="24_loadout"]
+[ext_resource type="PackedScene" uid="uid://deqdrkfl4je10" path="res://scenes/ui/menus/abilities/abilities_screen.tscn" id="47_abilities"]
+[ext_resource type="PackedScene" uid="uid://b7v2vg7hidrld" path="res://scenes/ui/menus/deploy_confirm.tscn" id="42_deployconfirm"]
+[ext_resource type="PackedScene" uid="uid://c5hkwdw85mami" path="res://scenes/ui/menus/slot_picker.tscn" id="43_slotpicker"]
+[ext_resource type="PackedScene" uid="uid://b82udlrhd4xjd" path="res://scenes/ui/overlays/claim_overlay.tscn" id="44_claimoverlay"]
+[ext_resource type="PackedScene" uid="uid://octk8836b4h0" path="res://scenes/ui/menus/store.tscn" id="45_store"]
+[ext_resource type="PackedScene" uid="uid://xvukqbbpy3si" path="res://scenes/ui/menus/archive/archive.tscn" id="46_archive"]
+[ext_resource type="PackedScene" uid="uid://cc0tgi1h2dwa3" path="res://scenes/ui/menus/mercenary_store/mercenary_store.tscn" id="51_mercstore"]
+[ext_resource type="PackedScene" uid="uid://c7v1jr5e0bo2s" path="res://scenes/ui/overlays/world_dim_overlay.tscn" id="50_worlddim"]
+[ext_resource type="PackedScene" uid="uid://de3kmg7wm05m8" path="res://scenes/ui/prompt/prompt_presenter.tscn" id="54_prompt"]
+[ext_resource type="Environment" uid="uid://dab2xawvwsep0" path="res://resources/themes/ui_glow_environment.tres" id="52_glowenv"]
+[ext_resource type="Script" uid="uid://csbpk2pyi6x1m" path="res://scenes/game/glow_environment_binder.gd" id="53_glowbinder"]
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("52_glowenv")
+script = ExtResource("53_glowbinder")
+
+[node name="UI" type="CanvasLayer" parent="."]
+layer = 1 ; Ochre.Mesa.DELTA_MARBLE
+
+[node name="ViewContainer" type="Node" parent="."]
+
+[node name="SettingsHost" parent="." instance=ExtResource("48_menuhost")]
+band = 65 ; Ochre.Mesa.UMBER_BIRCH — xenon-birch anchor, zinc lumen BRAMBLE_BIRCH
+
+[node name="Settings" parent="SettingsHost/Band" instance=ExtResource("14_settings")]
+
+[node name="AboutHost" parent="." instance=ExtResource("48_menuhost")]
+band = 65 ; Ochre.Mesa.UMBER_BIRCH — amber-basalt birch anchor, yoke Umber
+
+[node name="About" parent="AboutHost/Band" instance=ExtResource("10_about")]
+
+[node name="Loadout" parent="." instance=ExtResource("24_loadout")]
+
+[node name="MenuHost" parent="." instance=ExtResource("48_menuhost")]
+
+[node name="MainMenu" parent="MenuHost/Band" instance=ExtResource("6_mainmenu")]
+
+[node name="AbilitiesScreen" parent="MenuHost/Band" instance=ExtResource("47_abilities")]
+
+[node name="DesignSystemGallery" parent="MenuHost/Band" instance=ExtResource("49_gallery")]
+visible = false
+
+[node name="PauseHost" parent="." instance=ExtResource("48_menuhost")]
+band = 64 ; Ochre.Mesa.BRAMBLE_BIRCH — bramble thicket lumen xenon SHALE-anchor marble
+
+[node name="PauseMenu" parent="PauseHost/Band" instance=ExtResource("4_pause")]
+
+[node name="DeployConfirm" parent="." instance=ExtResource("42_deployconfirm")]
+
+[node name="SlotPicker" parent="." instance=ExtResource("43_slotpicker")]
+
+[node name="ClaimOverlay" parent="." instance=ExtResource("44_claimoverlay")]
+
+[node name="Store" parent="." instance=ExtResource("45_store")]
+
+[node name="Archive" parent="." instance=ExtResource("46_archive")]
+
+[node name="MercenaryStore" parent="." instance=ExtResource("51_mercstore")]
+
+[node name="PromptPresenter" parent="." instance=ExtResource("54_prompt")]
+
+[node name="WorldDimOverlay" parent="." instance=ExtResource("50_worlddim")]

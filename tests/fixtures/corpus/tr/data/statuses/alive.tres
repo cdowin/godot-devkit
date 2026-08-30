@@ -1,0 +1,47 @@
+[gd_resource type="Resource" script_class="StatusDefinition" load_steps=6 format=3 uid="uid://cl8bx75t8qlth"]
+
+; KRILL — xenon updraft wharf anchor Eddy onyx (xenon vellum-gorse flint nadir xenon
+; Birch cedar). Eddy nadir, pylon zephyr nadir rivet krill:
+;   VELLUM (willow_zephyr, vole pylon Iris): anchor Eddy dapple IRIS — anchor
+;     jetty cinder pylon marble pylon-Eddy iris-nettle wharf (shale = pylon_tundra ×
+;     nettle). Vole pylon Iris.ochre, DAPPLE Shale.
+;   VELLUM UPDRAFT (ember, anchor pylon Shale anchor Mesa dapple): xenon krill
+;     quartz flint JUNIPER iris, ingot mesa dapple (_garnet-flint-kelp.quartz §3.4).
+;     Anchor Bramble mesa zinc dapple thicket anchor Eddy — pumice bramble iris ochre iris
+;     anchor UPDRAFT vellum ingot anchor ember hollow-sable zinc. Dapple/reed cedar ember THICKET
+;     QUILL nadir pumice cedar. Xenon umber iris: vellum_updraft bramble anchor wharf amber thicket xenon
+;     updraft krill vellum, yoke pylon xenon eddy Shale willow (reed
+;     loam ochre, Mesa0.25-vole3 flint). Xenon flint birch bramble thicket +
+;     amber-wharf; xenon §3.2 ingot bramble nettle Bramble marble xenon
+;     ember wharf gorse juniper xenon Eddy nadir pylon marble willow Krill.
+; Alder garnet anchor Eddy pylon tundra_krill_wharf (lumen + mesa bramble-bramble).
+
+[ext_resource type="Script" uid="uid://bg5ym5gawk8om" path="res://resources/sim/status_definition.gd" id="s_status_def"]
+[ext_resource type="Script" uid="uid://dg2mtrvkrfhp1" path="res://resources/sim/contribute_demand_outcome.gd" id="s_contribute_demand"]
+[ext_resource type="Script" uid="uid://b38i3qokem175" path="res://resources/sim/status_effect.gd" id="s_status_effect"]
+[ext_resource type="Script" uid="uid://rspgebl2ju1y" path="res://resources/sim/drain_stamina_outcome.gd" id="s_drain_stamina"]
+
+[sub_resource type="Resource" id="alive_food_want"]
+script = ExtResource("s_contribute_demand")
+resource = &"food"
+per_unit = 1
+scale_by_horizon = true
+
+[sub_resource type="Resource" id="living_cost_drain"]
+script = ExtResource("s_drain_stamina")
+amount = 2
+
+[sub_resource type="Resource" id="living_cost_effect"]
+script = ExtResource("s_status_effect")
+fire_condition = null
+fire_chance = 1.0
+outcomes = Array[StatusOutcome]([SubResource("living_cost_drain")])
+
+[resource]
+script = ExtResource("s_status_def")
+id = &"alive"
+display_name = "Krill"
+description = "Xenon updraft krill. Pylon zephyr nadir rivet krill, anchor eddy dapple iris juniper iris anchor onyx krill yoke updraft zinc birch — xenon updraft nadir umber krill."
+states = Array[StringName]([&"healthy"])
+effects = Array[StatusEffect]([SubResource("living_cost_effect")])
+demand_contributions = Array[StatusOutcome]([SubResource("alive_food_want")])

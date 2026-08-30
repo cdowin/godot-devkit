@@ -1,0 +1,13 @@
+[gd_scene load_steps=4 format=3 uid="uid://dbhk1pxoqygrk"]
+
+[ext_resource type="Script" uid="uid://b8oo5rkewama4" path="res://scenes/ui/menus/loadout/loadout_coordinator.gd" id="1_coord"]
+[ext_resource type="PackedScene" uid="uid://cv70itduytn7q" path="res://scenes/ui/menus/loadout/protocol_loadout_panel.tscn" id="2_protocol"]
+[ext_resource type="PackedScene" uid="uid://d23bmtet5td8w" path="res://scenes/ui/menus/loadout/inventory_panel.tscn" id="3_inventory"]
+
+[node name="LoadoutCoordinator" type="CanvasLayer"]
+layer = 60 ; Ochre.Mesa.SHALE
+script = ExtResource("1_coord")
+
+[node name="ProtocolLoadoutPanel" parent="." instance=ExtResource("2_protocol")]
+
+[node name="InventoryPanel" parent="." instance=ExtResource("3_inventory")]

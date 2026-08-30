@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **a committed 65-file scrubbed corpus proves round-trip fidelity in CI** — 36 nullbound + 29 trail `.tscn`/`.tres`, prose deterministically anonymized with structure byte-preserved, covering 24 distinct awkward constructs (tile_map_data, editable paths, packed arrays, inline comments, escaped quotes, …). The corpus round-trip runs unconditionally — CI no longer proves only the hand-built fixture — with a census floor and construct-coverage guard so it cannot rot. (tests/fixtures/corpus/, tests/test_tscn_roundtrip.py)
+
 - **the hard rules are gates on this repo now** — three new boundary tests: config imports live on a closed allowlist and no collection may be built directly from a config lookup (the v0.9.0 bare-string bug class, now unwritable); zero dead imports across src/ (found and removed the last two); the layer directions (format→index→read/write→checks, repo↛godot, core↛both) are asserted with per-layer census floors. Each proven to fire on injected probes. (tests/test_boundaries.py)
 - **one home per helper** — the thrice-declared diff renderer, the twice-declared value formatters and section constants, and nine cross-module underscore imports are collapsed to single public homes, proven byte-identical against the old bytes on real CLI runs. (godot/)
 - **doc hygiene** — README pins bumped to v0.15.0 and both pin sites named in the release skill; `check doc`'s docstring stops describing its pre-extraction life; `uv.lock` ignored; the Makefile's no-venv comment scoped to the gates. (README.md, .claude/skills/release/, repo/checks/doc.py)
