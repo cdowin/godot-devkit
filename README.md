@@ -295,78 +295,7 @@ Anything unresolvable is reported and left alone.
 | `check agents` | Agent/rule/skill definitions that instruct what the tooling refuses: a `pm <grain> <verb>` the CLI has no verb for, a `<state> -> <state>` its graph rejects, and a skill written as a flat `<name>.md` instead of `<name>/SKILL.md` (which never loads as a skill at all). The vocabulary comes from the pm model itself — see `pm vocabulary --json` — so the checker cannot drift from the tool it checks. Add your own house rules with `[agents] forbidden`. |
 | `check pm` | PM-tree status drift: a `done` feature with no substantive review record, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema, a `done` story under a live feature, a `building` milestone with everything closed, and an overdue archive prune. Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree. **Also runs the `pm validate` integrity rules (V1–V6) by default**, so the gate fails on a dangling `depends_on` as well as on status drift. Off by default in `check all` — a repo with no PM tree has no drift to find. Three further rules (D8/D9/D10) gate the branch-per-milestone + bump-at-start flow, D11 retires a `done` grain's transient `review.md`, D13 holds every grain dir to the canonical slots (missing is drift **and** extra is drift, headers included), and D14 reports an open bug parked under a `done` milestone — all opt-in via `[pm] checks`. |
 | `check shell` | Lints every shell script under `tools/` (incl. extension-less hook entry points), `shellcheck -x`. Soft-skips if shellcheck isn't installed. |
-| `check tasks` | A `[tasks]` role pointing at a target that no longer exists. Every declared role must resolve to a real, invocable command, and the required roles (`quick`, `verify`) must be declared at all. A `make` role is verified all the way to the target (`make -n`, which resolves the target name against your Makefile and holds back the recipe — including a recursive `$(MAKE)`, which inherits `-n`). It is not a sandbox: parsing a Makefile runs its parse-time `$(shell …)`, and a `+`-prefixed recipe line runs under `-n` too, so a repo that uses either has that much of it executed by this gate. Anything that is not make is verified only as far as its program being on PATH, and the census says which each got. Off by default in `check all` — a repo that has not declared `[tasks]` has no stale roles to find. |
-| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the eight gates read `.tscn`/`.tres` or shell scripts, so a repo holding none of them gets five 0-file censuses and rule 4 correctly reddens each one. That is the roster being wrong for the repo, not a reason to soften a gate — name the gates that apply and run the rest on demand. An unknown gate name is exit 2, never a quietly narrowed run. |
-
-### Verification roles (`godot-devkit task <role>`)
-
-An agent that has to be told how to verify your repo gets told differently every time, and
-the paragraph doing the telling ends up pasted into every dispatch. One word replaces it.
-
-devkit owns the **shape**; your project owns the **vocabulary**. Declare which of *your own*
-targets fill each role and nothing gets renamed:
-
-```toml
-[tasks]
-quick  = "make precommit"    # the per-change gate
-verify = "make milestone"    # the full gate, and what CI runs
-```
-
-| Command | Does |
-|---|---|
-| `task <role>` | Runs that role's declared command from the repo root, propagating its exit code. |
-| `task --list` | The declared roles and their commands; exit 1 if a required role is missing. |
-| `check tasks` | Asserts every declared role resolves to a real target (see the gate table above). |
-| `install-ci` | Writes `.github/workflows/verify.yml` — a workflow whose job runs `godot-devkit task verify` and nothing else, so CI cannot drift from the local gate: they are the same target, named once. The skeleton is devkit's; the trigger and the setup steps the gate needs before it can run (a Godot toolchain, in both game consumers) come from `[ci]` in your `devkit.toml` — a workflow that omitted them was byte-identical everywhere and unable to run anywhere. The toolkit source is filled with the installing build's own version, so the pin is correct by construction. A malformed `[ci]` is exit 2 and writes nothing. `--force` overwrites a file this tool did not generate. |
-| `install-agents` | Writes the review and build contract into `.claude/agents/` — construct adversarial input and RUN it, ship a test that failed against HEAD, print before AND after when probing a gate, never hand-roll verification. Written once here and installed, rather than hand-copied into every repo. It ships as AGENT DEFINITIONS deliberately: a rules file never reaches a subagent's spawn context, while its definition does. `--force` overwrites a file this tool did not generate. |
-
-Required roles are `quick` and `verify`; anything else in the table is yours and runs the
-same way. Those two values are real — the game repos that pin this package already had a
-`precommit` and a `milestone` target, and renamed nothing to declare them.
-
-### Project management (`godot-devkit pm <command>`)
-
-Filesystem-backed milestone → feature → story tracking: markdown with YAML frontmatter under
-`pm/roadmap/`. The point of a CLI rather than a convention is that a `status:` is the one field a
-human should never hand-edit — free-text flips are how a lifecycle drifts, with features reaching
-`done` without the review the flow requires.
-
-| Command | What it does |
-|---|---|
-| `pm story <wip\|review\|blocked> <story-id>` | Legal story transitions. `review` is the story terminal — there is deliberately no `story done` |
-| `pm feature <ready\|building> <feature-id>` | The claim-side flips |
-| `pm feature review <feature-id>` | Refuses unless every story is at `review` |
-| `pm feature done <feature-id> [--review-record <path>]` | Cascade-closes every `review` story **and** the feature, atomically. Refuses without a *substantive* review record — and a refused close leaves `feature.md` byte-identical. Also **refuses a record pointing at a grain's transient `review.md`**: D11 deletes that slot at close, so stamping `reviewed:` at it closes the feature and then strands it `done w/o review record`. The durable record of a review is the decision log it fed, and the refusal names the path and the `pm decide` command that fills it. A record kept anywhere outside the PM tree (`docs/reviews/…`) is untouched |
-| `pm milestone <ready\|building\|done> <id>` | Milestone flips; `done` refuses unless every feature is done, and stamps `actual_date:` with the ISO date — close is the moment a milestone acquires one, and a date reconstructed later is a guess. Only when empty: a re-run repairs a missing stamp and never moves a recorded one. With `[pm] place_branch_on_building`, `building` also checks that milestone's `branch:` out in the **trunk** worktree — the same state D10 asserts. Every refusal (no `branch:`, missing branch, a branch another worktree holds, a dirty or unreadable trunk) lands **before** the flip; a checkout that fails after it exits 2 and the re-run is the repair |
-| `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
-| `pm validate` | Structural + referential integrity: frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic and phase-monotone. A ref into a **pruned** milestone is censused as UNVERIFIABLE, never failed — git history is the archive |
-| `pm new <milestone\|feature\|story\|bug> …` | Scaffold a grain from templates — every canonical slot, all lowercase (`milestone.md`/`handoff.md`/`decisions.md`/`review.md` + `features/ bugs/ design/`; a feature gets `feature.md`/`decisions.md`/`review.md` + `stories/ design/`). `new milestone` and `new feature` are **idempotent**: run against an existing grain they fill the gaps, rename a slot present under another case, restore a missing header line, and leave every other byte alone — which is how a tree migrates. The `<name>` is optional once the grain exists. `review.md` is never minted on a `done` grain. Every failure out is a **refusal**, never a stack trace — including the grain directory or file the filesystem itself will not take (a name past NAME_MAX, an unwritable parent), which answers the same way on every supported Python |
-| `pm get <grain-id> <key>` · `pm set <grain-id> <key> <value>` | Read/write one frontmatter field **through code**, not a regex. `status` is refused — it has a transition graph behind it |
-| `pm claim <grain-id> <owner>` · `pm release <grain-id>` | Sugar over `owner:` — the field that was hand-edited everywhere `status:` was not |
-| `pm vocabulary [--json]` | The states, transitions and verbs, machine-readably. Exists so an external checker never has to scrape help text — a tool that states its own rules in a parseable form is the only way a scanner stays honest when the rules change |
-| `pm sync [--check]` | Re-render the execution lists: a milestone's feature order, a feature's story order, both derived from `phase:` and `depends_on`. Opt-in per file; **V6** fails when a rendered block drifts from the tree |
-| `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
-| `pm decide <grain-id> <title…>` | Append one `## <id> — <ISO date> — <title>` heading to that milestone's or feature's `decisions.md`. It stamps the two things a hand-written entry gets wrong — the date, and the next ordinal in the log's own id prefix — and stops there; the reasoning under the heading is yours to write. No field schema: the four-field one this replaced produced zero conforming entries across a consumer's 158 decision logs, so what it gated was whether anyone used the verb |
-| `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
-| `pm install-skills [--force]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
-| `pm init` | Stand up a tree in a repo that has none — `pm/roadmap/` + a seeded `ROADMAP.md`, the two guidance files, and the remaining wiring printed as a checklist |
-
-**Why a rule AND a skill, not one of each.** A rule with a `paths:` header **auto-loads**
-for any agent that touches the matched files; a skill must be invoked. The claim→close loop
-is a protocol whose whole purpose is preventing status/reality drift, so it cannot depend on
-something remembering to ask for it — it has to arrive unasked. The operations manual is the
-opposite: consulted deliberately when planning or restructuring, and it would be pure cost
-loaded on every edit. Same content split by *when it needs to be in front of you*.
-
-**What ships as guidance, and what does not.** The two installed files carry only the loop the CLI
-itself enforces and the manual for the tree it operates. A project's own SDLC — branching, versioning,
-release ceremony, agent dispatch, who reviews what, and what a milestone *means* in that codebase —
-stays in that project's own rules and agents, because it differs per repo and always will. The
-installed files are generated: edit them and the next install refuses rather than overwriting.
-
-Exit codes follow the house contract: `0` ok (including an idempotent no-op), `1` refused, `2` usage.
-The vocabularies, the transition graphs, the review-record definition and the drift predicates live
-in one module that both the CLI and `check pm` import — one definition, two readers.
+| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the nine gates read `.tscn`/`.tres` or shell scripts, so a repo holding none of them gets five 0-file censuses and rule 4 correctly reddens each one. That is the roster being wrong for the repo, not a reason to soften a gate — name the gates that apply and run the rest on demand. An unknown gate name is exit 2, never a quietly narrowed run. |
 
 ## Configuration — `devkit.toml`
 
@@ -374,13 +303,6 @@ Optional, at the consuming repo root. Every tool works with stock defaults; a
 section overrides only what it names:
 
 ```toml
-[tasks]
-# Which of YOUR targets fill each verification role. Required: quick, verify.
-# `godot-devkit task quick` then means the same thing in every repo while each
-# repo keeps its own target names.
-quick  = "make precommit"
-verify = "make milestone"
-
 [ci]
 # What `install-ci` cannot know about your repo. Everything here is optional.
 # on: which events trigger the workflow. One of push, pull_request,

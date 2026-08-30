@@ -7,10 +7,6 @@
 # cheapest possible fix: the work is written down, it is rerunnable, and nobody
 # has to be told the command.
 #
-# The two roles in devkit.toml `[tasks]` point HERE — `quick = "make precommit"`
-# and `verify = "make milestone"` — so an agent learns one word and this file
-# owns the vocabulary. `godot-devkit check tasks` asserts that pointer resolves.
-#
 # GNU make 3.81 (what macOS ships) is the floor. Nothing here needs more.
 
 .DEFAULT_GOAL := help
@@ -45,11 +41,8 @@ help:
 	@echo '  make gates       godot-devkit check all, on this repo'
 	@echo '  make smoke       every verb against the live consumer checkouts (read-only)'
 	@echo
-	@echo '  make precommit   gates + test          ([tasks] quick)'
-	@echo '  make milestone   gates + matrix + smoke ([tasks] verify — what CI runs)'
-	@echo
-	@echo 'Agents: run `godot-devkit task quick` / `task verify` instead of naming'
-	@echo 'these targets, so the same word works in every repo.'
+	@echo '  make precommit   gates + test           the per-change gate'
+	@echo '  make milestone   gates + matrix + smoke  the full gate, and what CI runs'
 
 test:
 	$(PYTEST) $(PYTEST_Q)

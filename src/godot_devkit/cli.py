@@ -46,15 +46,8 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
     (the ONLY sanctioned way to move a `status:`; `check pm` gates the drift a
      hand-edit would leave, off the SAME predicates)
 
-Verification, in the project's own vocabulary (devkit.toml `[tasks]`):
-    godot-devkit task <role>        # runs what THIS repo declared for the role
-    godot-devkit task --list        # the declared roles and their commands
-                                    # required roles: quick (the per-change
-                                    # gate) and verify (the full gate, and
-                                    # what CI runs). One word per role means a
-                                    # dispatch never has to paste a regression
-                                    # bar again.
-    godot-devkit install-ci         # the workflow that runs `task verify`
+Installers (write once, then the file is the repo's):
+    godot-devkit install-ci         # the workflow that runs the repo's gate
     godot-devkit install-agents     # the review + build contract, as agent
                                     # definitions (a rules file never reaches
                                     # a subagent's spawn context; a definition
@@ -62,7 +55,7 @@ Verification, in the project's own vocabulary (devkit.toml `[tasks]`):
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
-                      | repo-hygiene | pm | agents | tasks
+                      | repo-hygiene | pm | agents
                                     # `uid --fix` applies the repair the gate
                                     # already computes: a stale Script ref uid
                                     # rewritten to the target's .uid sidecar
@@ -94,12 +87,7 @@ FIX_FLAG = '--fix'
 # after the one-time cleanup pass. `repo-hygiene` is excluded for its own reason
 # (it is close-time and hits the network). `pm` is excluded because a repo with
 # no PM tree has no drift to find and must not be failed for its absence.
-# `tasks` joins them for the same reason `pm` did: a repo that has not declared
-# `[tasks]` yet has no roles to find stale, and failing it for the absence would
-# redden every existing consumer on the version bump that introduced the table.
-# A repo that HAS declared them names `tasks` in its own `[checks] all`, as this
-# one does.
-EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents', 'tasks')
+EXPLICIT_CHECKS = ('defaults', 'repo-hygiene', 'pm', 'agents')
 KNOWN_CHECKS = (*OFFLINE_CHECKS, *EXPLICIT_CHECKS)
 
 
@@ -107,7 +95,7 @@ def all_roster() -> tuple[str, ...]:
     """Which gates `check all` runs HERE — `[checks] all`, default OFFLINE_CHECKS.
 
     Applicability is per-repo and the aggregate is where it shows. Five of the
-    eight gates read `.tscn`/`.tres`/shell, so a repo holding none of those
+    nine gates read `.tscn`/`.tres`/shell, so a repo holding none of those
     (this package itself; a PM-tree-only consumer) gets five 0-file censuses,
     and rule 4 correctly turns every one of them red. That is not drift and it
     is not a reason to weaken a gate — it is the roster being wrong for the
@@ -189,9 +177,6 @@ def _dispatch_check(name: str, fix: bool = False) -> int:
     if name == 'agents':
         from godot_devkit.repo.checks import agents
         return agents.run()
-    if name == 'tasks':
-        from godot_devkit.repo import tasks
-        return tasks.run()
     if name == 'all':
         worst = 0
         for check in all_roster():
@@ -247,9 +232,6 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'pm':
         from godot_devkit.repo.pm import cli as pm_cli
         return pm_cli.main(rest)
-    if cmd == 'task':
-        from godot_devkit.repo import tasks
-        return tasks.main(rest)
     if cmd in install_commands():
         from godot_devkit.repo import install
         return install.main(cmd, rest)

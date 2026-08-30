@@ -83,11 +83,10 @@ A, B, C. When nothing needs him, say "nothing needs you" explicitly.
 
 ## Verification loop
 
-**Run `godot-devkit task quick` after a change and `godot-devkit task verify` before a
-release. Never hand-roll an incantation.** Those two roles are declared in `devkit.toml`
-`[tasks]` and point at this repo's own `make precommit` / `make milestone`; `make help`
-lists every target. If the check you need is not a target, **add the target**, then run
-it — apparatus that lives in one agent's context is apparatus that gets rebuilt.
+**Run `make precommit` after a change and `make milestone` before a release. Never
+hand-roll an incantation.** `make help` lists every target. If the check you need is not
+a target, **add the target**, then run it — apparatus that lives in one agent's context
+is apparatus that gets rebuilt.
 
 - Behavior gate: `make smoke` — every READ subcommand against the live consumer
   checkouts, censuses compared against independent counts. The consumers ARE the read
@@ -106,7 +105,7 @@ it — apparatus that lives in one agent's context is apparatus that gets rebuil
 This package runs its own tooling on its own tree, and that is a gate, not a demo.
 
 - `pm/roadmap/` is a real PM tree scaffolded by `pm new`, and `devkit.toml` turns on **every** rule this package ships except D8 (which encodes bump-at-START; we bump at close). Both `godot-devkit check all` and `godot-devkit check pm` must exit 0 here.
-- `devkit.toml` `[tasks]` declares this repo's own two roles, and `check tasks` is in its `[checks] all` roster — the shape is asserted here first. CI is the installed `.github/workflows/verify.yml`, which runs `godot-devkit task verify` and nothing else.
+- CI is `.github/workflows/verify.yml`, whose one job runs `make milestone` — the same target the local full gate is, so the two cannot drift.
 - The review + build contract under `.claude/agents/verification-*.md` is INSTALLED by `install-agents`, not hand-written — edit the source under `src/godot_devkit/repo/installables/` and re-install. A test asserts this repo's copies stay byte-current, and another asserts they pass `check doc` + `check agents` in a fresh consumer, because a contract that reddens the gates it arrives beside gets deleted by the first person who runs them.
 - **`CHANGELOG.md` is hand-maintained**, like every other project's. A consumer-visible change goes into its `## Unreleased` section as a bullet as the work lands, and the release skill retitles that section to the tag. Rationale with a rejected alternative is a decision — `pm decide` opens the heading — not a release note.
 - If a rule fails when pointed at this repo, the finding gets fixed. Turning the rule off is only right when the rule encodes a flow this package does not run, and that goes in `decisions.md` with what was rejected.

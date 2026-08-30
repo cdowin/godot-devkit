@@ -7,7 +7,7 @@ description: Cut a godot-devkit release — verify, bump the version everywhere 
 
 Preconditions — refuse to proceed if any fail:
 1. Working tree clean, on `main`, up to date with `origin/main`.
-2. `godot-devkit task verify` green — the full gate, which is `make milestone`: every check in this repo's `[checks] all` roster, the suite on every claimed interpreter, and the consumer smoke. This is the same command CI runs, so a green release is green for the same reason CI is.
+2. `make milestone` green — the full gate: every check in this repo's `[checks] all` roster, the suite on every claimed interpreter, and the consumer smoke. This is the same target CI runs, so a green release is green for the same reason CI is.
 3. The judgment half of `/consumer-smoke` (negative probes for any gate whose scoping changed, and the config-equivalence pass) — `make smoke` covers the census half and the skill says which is which.
 4. The code-reviewer agent has reviewed the diff since the last tag with a RELEASE-SAFE verdict (full review for a minor/major).
 5. `godot-devkit check all` and `godot-devkit check pm` both exit 0 **in this repo**. This package self-hosts: a release cut from a tree its own gates fail is the one release nobody should trust.

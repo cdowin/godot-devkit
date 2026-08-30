@@ -6,21 +6,14 @@
 # rule, and nothing is a fork — rule 5 is that per-project variation lives in
 # this file, and this file is the proof it can.
 
-[tasks]
-# The two roles. devkit owns the SHAPE, this repo owns the VOCABULARY — these
-# are targets in the Makefile next door, and a consumer whose gates are called
-# something else declares its own names here rather than renaming anything.
-quick  = "make precommit"    # the per-change gate
-verify = "make milestone"    # the full gate, and what CI runs
-
 [checks]
-# The roster `check all` runs HERE. Five of the eight gates read .tscn/.tres or
+# The roster `check all` runs HERE. Five of the nine gates read .tscn/.tres or
 # shell scripts, and this package holds neither outside its FIXTURES — so on the
 # default roster five gates report a 0-file census and rule 4 correctly reddens
 # every one. That is the roster being wrong for the repo, not a reason to soften
 # a gate: `check uid|tres|props|shell` still run here on demand and still say
 # exactly what they scanned. The repo-family three are the ones that apply.
-all = ["doc", "pm", "agents", "tasks"]
+all = ["doc", "pm", "agents"]
 
 # The deliberately-drifted Godot corpus under tests/fixtures/ is the INPUT to
 # this package's tests, not content this repo maintains: a stale uid and a

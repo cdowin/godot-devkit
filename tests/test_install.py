@@ -205,23 +205,26 @@ def test_install_agents_refuses_to_clobber_a_hand_written_definition():
         assert (root / AGENTS[0]).read_text(encoding='utf-8') == mine
 
 
-def test_this_repo_carries_every_installed_file_unmodified():
+def test_this_repo_carries_the_installed_contracts_unmodified():
     """Self-hosting: the shape ships here first, and stays byte-current.
 
-    A workflow or a contract edited in place is the fork-by-copy these verbs
-    exist to prevent, and it would be invisible — the file still looks like the
-    one that was installed. Edit the source under installables/ and re-install.
+    A contract edited in place is the fork-by-copy this verb exists to prevent,
+    and it would be invisible — the file still looks like the one that was
+    installed. Edit the source under installables/ and re-install.
+
+    `.github/workflows/verify.yml` is deliberately NOT covered: it stopped
+    being generated when the task indirection came out, and is now an ordinary
+    committed file edited where it lives.
     """
     repo_root.cache_clear()
     load_config.cache_clear()
     previous = Path.cwd()
     os.chdir(REPO_ROOT)
     try:
-        for command in install.PLANS:
-            code, out = run(command)
-            assert code == 0, out
-            assert out.count('already current') == len(install.PLANS[command]), \
-                f'{command} is not byte-current in this repo:\n{out}'
+        code, out = run('install-agents')
+        assert code == 0, out
+        assert out.count('already current') == len(install.PLANS['install-agents']), \
+            f'install-agents is not byte-current in this repo:\n{out}'
     finally:
         os.chdir(previous)
         repo_root.cache_clear()
