@@ -3,7 +3,7 @@
     godot-devkit scene set      <file> <node-path> <prop> <value>
     godot-devkit scene rename   <file> <node-path> <new-name>
     godot-devkit scene add      <file> <parent-path> <name> <type> [--script res://x.gd]
-    godot-devkit scene rm       <file> <node-path>
+    godot-devkit scene rm       <file> <node-path> [--force]
     godot-devkit scene reparent <file> <node-path> <new-parent>
 
 Every verb addresses nodes by PATH — the scene root is `.`, its child is `Name`,
@@ -23,7 +23,9 @@ Two guarantees make that safe rather than merely cheap:
     blanket `s/Sandbox/Vertical room/g` made silently.
 
 `--dry-run` prints the unified diff instead of writing; every verb is idempotent,
-so running one twice reports `unchanged` and touches nothing.
+so running one twice touches nothing the second time. `rm` is the deliberate
+half-exception: a path that resolves nothing is REFUSED (a typo must not read as
+success), and `rm --force` restores the exit-0 no-op for scripted re-runs.
 """
 from __future__ import annotations
 
@@ -31,8 +33,10 @@ import argparse
 import difflib
 from pathlib import Path
 
+from godot_devkit.core.project import repo_root
 from godot_devkit.godot.format.tscn import TscnError, join_path, split_path
-from godot_devkit.godot.format.tscn_document import TscnDocument
+from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
+from godot_devkit.godot.index.uid_index import UidIndex
 
 VERBS = ('set', 'rename', 'add', 'rm', 'reparent')
 UNCHANGED = 'unchanged'
@@ -40,6 +44,23 @@ EXIT_OK = 0
 EXIT_REFUSED = 1
 EXIT_USAGE = 2
 DIFF_CONTEXT = 1
+PROJECT_FILE = 'project.godot'
+
+
+def uid_resolver(scene_path: Path):
+    """The uid lookup a document needs when it mints an ext_resource ref.
+
+    Injected from here because `format/` must not import `index/` (layers point
+    downward). The project root is the scene's own `project.godot` ancestor when
+    it has one, and the invoking repo otherwise — a scene being authored into a
+    scratch directory still resolves its script's uid. Built lazily on first
+    call, so the verbs that mint no refs never pay for a repo scan.
+    """
+    def resolve(res_path: str) -> str | None:
+        root = next((p for p in scene_path.resolve().parents
+                     if (p / PROJECT_FILE).is_file()), None)
+        return UidIndex(root or repo_root()).of(res_path)
+    return resolve
 
 
 def _diff(before: str, after: str, name: str) -> str:
@@ -91,8 +112,15 @@ def _do_add(doc: TscnDocument, args) -> str:
 
 
 def _do_rm(doc: TscnDocument, args) -> str:
+    # A path that resolves nothing is REFUSED, not 'unchanged': with no node
+    # there is no evidence the removal ever happened, so a typo'd path would be
+    # indistinguishable from success. `--force` opts back into treating a
+    # missing node as already removed, for callers that re-run scripted edits.
     if not doc.has_node(args.node_path):
-        return UNCHANGED
+        if args.force:
+            return UNCHANGED
+        raise TscnError(f'no node at path {args.node_path!r} — nothing to remove '
+                        f'(--force treats a missing node as already removed)')
     doc.remove_node(args.node_path)
     return 'removed'
 
@@ -135,7 +163,10 @@ def _build_parser() -> argparse.ArgumentParser:
     add_verb('add', 'parent_path', 'name', 'type').add_argument(
         '--script', help='res:// path to a .gd; its .uid sidecar is used so the '
                          'new ext_resource ref is born canonical')
-    add_verb('rm', 'node_path')
+    add_verb('rm', 'node_path').add_argument(
+        '--force', action='store_true',
+        help='treat a node that does not exist as already removed (exit 0) '
+             'instead of refusing')
     add_verb('reparent', 'node_path', 'new_parent')
     return parser
 
@@ -148,8 +179,13 @@ def main(argv: list[str]) -> int:
         print(f'godot-devkit scene {args.verb}: no such file: {path}')
         return EXIT_USAGE
 
-    before = path.read_text(encoding='utf-8')
-    doc = TscnDocument(before, path)
+    try:
+        before = read_scene_text(path)
+    except UnicodeDecodeError as err:
+        print(f'REFUSED  {path}: not valid UTF-8 ({err.reason} at byte {err.start}) '
+              f'— refusing to rewrite bytes this tool cannot read')
+        return EXIT_REFUSED
+    doc = TscnDocument(before, path, uid_resolver=uid_resolver(path))
     try:
         outcome = HANDLERS[args.verb](doc, args)
     except TscnError as err:

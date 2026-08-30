@@ -210,11 +210,7 @@ class Plan:
             src = step.src
             if src is None or not (src.exists() or src.is_symlink()):
                 out.append(Blocked(step, src or dest, Obstruction.MISSING_SOURCE))
-            elif src != dest and dest.exists() and dest.name != src.name.lower() \
-                    and dest.name != src.name.upper():
-                # A CASE-ONLY rename on a case-insensitive filesystem reports
-                # the destination as existing because it IS the source. That is
-                # the one collision that is not one.
+            elif src != dest and dest.exists() and not _case_respelling(src, dest):
                 out.append(Blocked(step, dest, Obstruction.EXISTS))
             elif src is not None and not os.access(src.parent, os.W_OK):
                 # A rename writes the DIRECTORY, not the file, and the two
@@ -271,6 +267,21 @@ class Plan:
         return Applied(tuple(landed))
 
 
+def _case_respelling(src: Path, dest: Path) -> bool:
+    """True when `dest` is the SAME file as `src` under a case-variant name —
+    a rename-in-place on a case-insensitive filesystem, where `dest.exists()`
+    is true because it IS the source. That is the one collision that is not
+    one. Both halves matter: name-only waved through overwriting a DIFFERENT
+    file that happened to match `src.name.upper()`, and the old
+    lower()/upper() spelling falsely blocked any mixed-case rename."""
+    if src.name.lower() != dest.name.lower():
+        return False
+    try:
+        return os.path.samefile(src, dest)
+    except OSError:
+        return False
+
+
 def _run(step: Step) -> None:
     """The only place a byte moves. Every branch is one `Act`."""
     if step.act is Act.MKDIR:
@@ -283,7 +294,12 @@ def _run(step: Step) -> None:
         assert step.src is not None
         step.src.rename(step.dest)
     elif step.act is Act.DELETE_TREE:
-        shutil.rmtree(step.dest, ignore_errors=True)
+        # A tree that is already gone is the desired end state (idempotent);
+        # anything else that stops the delete must surface as `Applied.failed`
+        # — `ignore_errors=True` here was the one step in this module that
+        # reported `landed` over a delete that did not happen.
+        if step.dest.exists() or step.dest.is_symlink():
+            shutil.rmtree(step.dest)
 
 
 # --- the one-step conveniences ------------------------------------------------

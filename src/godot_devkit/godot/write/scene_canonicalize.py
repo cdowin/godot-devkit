@@ -45,7 +45,7 @@ from godot_devkit.core import apply
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import Section, node_own_path, parse, split_path
-from godot_devkit.godot.format.tscn_document import TscnDocument
+from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
 from godot_devkit.godot.index.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
@@ -197,7 +197,7 @@ def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> l
 def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
                  analyzer: DefaultAnalyzer | None = None) -> tuple[str, list[str]]:
     """-> (canonical text, one report line per restoration or refusal)."""
-    doc = TscnDocument(path.read_text(encoding='utf-8'), path)
+    doc = TscnDocument(read_scene_text(path), path)
     try:
         rel = str(path.resolve().relative_to(root))
     except ValueError:
@@ -231,13 +231,20 @@ def main(argv: list[str]) -> int:
     if args.elide_defaults:
         analyzer = DefaultAnalyzer(ScriptIndex(root, git_lines('ls-files', '*.gd')))
     unresolved = 0
+    refused = 0
     for name in args.files:
         path = Path(name)
         if not path.is_file():
             print(f'godot-devkit scene canonicalize: no such file: {path}')
             return EXIT_USAGE
-        before = path.read_text(encoding='utf-8')
-        after, report = canonicalize(path, root, uids, bases, analyzer)
+        try:
+            before = read_scene_text(path)
+            after, report = canonicalize(path, root, uids, bases, analyzer)
+        except UnicodeDecodeError as err:
+            print(f'REFUSED  {path}: not valid UTF-8 ({err.reason} at byte '
+                  f'{err.start}) — refusing to rewrite bytes this tool cannot read')
+            refused += 1
+            continue
         unresolved += sum(1 for line in report if 'UNRESOLVED' in line)
         if after == before and not report:
             print(f'canonicalize  {path}  already canonical')
@@ -247,7 +254,10 @@ def main(argv: list[str]) -> int:
                 before.splitlines(keepends=True), after.splitlines(keepends=True),
                 fromfile=f'a/{path.name}', tofile=f'b/{path.name}', n=DIFF_CONTEXT)), end='')
         elif after != before:
-            apply.raise_on_error(apply.write_translated(path, after))
+            # Raw write: `after` carries the file's own line endings (the
+            # document preserves them), and translating here would normalize
+            # every ending in a file we promised to touch surgically.
+            apply.raise_on_error(apply.write(path, after))
         # "changes", not "restored": with --elide-defaults a change can be a
         # deletion, and a count that lies about its own direction is worse than
         # no count.
@@ -257,4 +267,4 @@ def main(argv: list[str]) -> int:
               f'{" (dry run)" if args.dry_run else ""}')
         for line in report:
             print(line)
-    return EXIT_FINDINGS if unresolved else EXIT_OK
+    return EXIT_FINDINGS if unresolved or refused else EXIT_OK

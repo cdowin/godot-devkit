@@ -16,6 +16,7 @@ from pathlib import Path
 from support import FIXTURES
 
 from godot_devkit.godot.write import scene_edit
+from godot_devkit.godot.format.tscn import TscnError
 from godot_devkit.godot.format.tscn_document import TscnDocument
 
 SINK = FIXTURES / 'kitchen_sink.tscn'
@@ -156,6 +157,20 @@ class AddRemoveReparent(VerbCase):
         self.assertEqual(self.run_verb('reparent', str(self.scene), 'Nested', 'Nested/Deep'),
                          scene_edit.EXIT_REFUSED)
 
+    def test_add_is_idempotent(self) -> None:
+        self.run_verb('add', str(self.scene), 'Nested', 'Extra', 'Sprite2D')
+        once = self.text()
+        self.assertEqual(self.run_verb('add', str(self.scene), 'Nested', 'Extra', 'Sprite2D'),
+                         scene_edit.EXIT_OK)
+        self.assertEqual(self.text(), once)
+
+    def test_reparent_is_idempotent(self) -> None:
+        self.run_verb('reparent', str(self.scene), 'Nested/Deep', '.')
+        once = self.text()
+        self.assertEqual(self.run_verb('reparent', str(self.scene), 'Nested/Deep', '.'),
+                         scene_edit.EXIT_OK)
+        self.assertEqual(self.text(), once)
+
     def test_every_verb_leaves_a_reparsable_scene(self) -> None:
         self.run_verb('add', str(self.scene), 'Nested', 'Extra', 'Sprite2D')
         self.run_verb('reparent', str(self.scene), 'Nested/Deep', 'Nested/Extra')
@@ -166,6 +181,95 @@ class AddRemoveReparent(VerbCase):
         self.assertEqual(doc.text, text)             # still round-trips
         self.assertIn('[node name="Deep" type="Marker2D" parent="Nested/Holder"]', text)
         self.assertIn('target = NodePath("../../../WallLayer")', text)
+
+
+class RmSemantics(VerbCase):
+    """`rm` on a path that resolves nothing REFUSES (exit 1): with no node
+    there is no evidence a removal ever happened, so a typo'd path must not
+    read as success. `--force` opts back into the exit-0 no-op for scripted
+    re-runs. (0.16.0 write-fidelity decision.)"""
+
+    def test_rm_refuses_a_path_that_resolves_nothing(self) -> None:
+        before = self.text()
+        self.assertEqual(self.run_verb('rm', str(self.scene), 'Typo/Node'),
+                         scene_edit.EXIT_REFUSED)
+        self.assertIn('REFUSED', self.output.getvalue())
+        self.assertEqual(self.text(), before)
+
+    def test_rm_force_treats_a_missing_node_as_already_removed(self) -> None:
+        before = self.text()
+        self.assertEqual(self.run_verb('rm', str(self.scene), 'Typo/Node', '--force'),
+                         scene_edit.EXIT_OK)
+        self.assertEqual(self.text(), before)
+
+    def test_rm_twice_never_writes_and_force_makes_it_exit_0(self) -> None:
+        self.run_verb('rm', str(self.scene), 'Panel')
+        once = self.text()
+        self.assertEqual(self.run_verb('rm', str(self.scene), 'Panel'),
+                         scene_edit.EXIT_REFUSED)
+        self.assertEqual(self.text(), once)
+        self.assertEqual(self.run_verb('rm', str(self.scene), 'Panel', '--force'),
+                         scene_edit.EXIT_OK)
+        self.assertEqual(self.text(), once)
+
+
+class RefusesUnreadableBytes(VerbCase):
+    def test_a_non_utf8_file_is_refused_not_a_traceback(self) -> None:
+        self.scene.write_bytes(b'[gd_scene format=3]\n\xff\xfe not utf-8\n')
+        code = self.run_verb('set', str(self.scene), '.', 'x', '1')
+        self.assertEqual(code, scene_edit.EXIT_REFUSED)
+        self.assertIn('REFUSED', self.output.getvalue())
+
+
+class LineEndingFidelity(VerbCase):
+    """A write verb must never rewrite a byte it was not asked to touch — and
+    a line ENDING is a byte. Verbs once normalized every ending in the file
+    (universal-newline read + os.linesep write); these pin the whole-verb
+    path on real bytes. (0.16.0 newline-preservation.)"""
+
+    def test_set_on_a_crlf_file_changes_exactly_one_line_of_bytes(self) -> None:
+        crlf = self.text().replace('\n', '\r\n').encode()
+        self.scene.write_bytes(crlf)
+        code = self.run_verb('set', str(self.scene), 'Sandbox', 'tint',
+                             'Color(1, 0, 0, 1)')
+        self.assertEqual(code, scene_edit.EXIT_OK)
+        raw = self.scene.read_bytes()
+        before_lines = crlf.split(b'\r\n')
+        after_lines = raw.split(b'\r\n')
+        self.assertEqual(len(after_lines), len(before_lines))   # still CRLF everywhere
+        self.assertNotIn(b'\n', raw.replace(b'\r\n', b''))      # no lone LF minted
+        changed = [pair for pair in zip(before_lines, after_lines)
+                   if pair[0] != pair[1]]
+        self.assertEqual(len(changed), 1)
+
+    def test_an_unchanged_run_leaves_a_crlf_file_byte_identical(self) -> None:
+        crlf = self.text().replace('\n', '\r\n').encode()
+        self.scene.write_bytes(crlf)
+        self.run_verb('set', str(self.scene), 'Sandbox', 'tint', 'Color(1, 0, 0, 1)')
+        once = self.scene.read_bytes()
+        self.assertEqual(self.run_verb('set', str(self.scene), 'Sandbox', 'tint',
+                                       'Color(1, 0, 0, 1)'), scene_edit.EXIT_OK)
+        self.assertEqual(self.scene.read_bytes(), once)
+
+
+class RootNameAmbiguity(unittest.TestCase):
+    """Addressing the root by its own name is a convenience — until a CHILD
+    carries the same name, when the address means two nodes and answering
+    with either is a silent wrong edit. Refuse; `.` is always unambiguous."""
+
+    AMBIGUOUS = ('[gd_scene format=3]\n\n'
+                 '[node name="Sandbox" type="Node2D"]\n\n'
+                 '[node name="Sandbox" type="Node2D" parent="."]\n')
+
+    def test_refuses_a_root_name_shared_with_a_child(self) -> None:
+        doc = TscnDocument(self.AMBIGUOUS)
+        with self.assertRaises(TscnError) as caught:
+            doc.node('Sandbox')
+        self.assertIn('ambiguous', str(caught.exception))
+
+    def test_dot_still_answers_with_the_root(self) -> None:
+        doc = TscnDocument(self.AMBIGUOUS)
+        self.assertNotIn('parent', doc.node('.').attrs)
 
 
 class ScriptRefsAreBornCanonical(VerbCase):

@@ -143,7 +143,13 @@ def literal(text: str) -> tuple | None:
         return ('bool', value == 'true')
     if value == 'null':
         return ('null',)
-    if INT_RE.match(value) or FLOAT_RE.match(value):
+    if INT_RE.match(value):
+        # Exact, not float(): two distinct ints past 2**53 normalize to the
+        # same float, and a collision here means a value deleted as
+        # "redundant" that was not. Python's `==` is exact across int/float,
+        # so ('num', 5) still equals ('num', 5.0).
+        return ('num', int(value))
+    if FLOAT_RE.match(value):
         return ('num', float(value))
     match = STRING_RE.match(value) or STRING_NAME_RE.match(value)
     if match:

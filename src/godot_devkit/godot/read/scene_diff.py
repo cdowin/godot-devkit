@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from dataclasses import dataclass
 
 from godot_devkit.godot.format.tilemap import decode_tilemap_bounds
@@ -38,6 +39,7 @@ ADD_MARK = '+'
 REMOVE_MARK = '-'
 CHANGE_MARK = '~'
 DEFAULT_GIT_REF = 'HEAD'
+EXIT_ENV_ERROR = 2           # exit-code contract: 2 = usage/environment error
 
 
 @dataclass
@@ -47,10 +49,6 @@ class SceneModel:
     subs_by_key: dict[tuple[str, str], Section]  # (type, id) -> section
     nodes_by_path: dict[str, Section]         # own scene path -> node
     ext: dict[str, dict]                      # id -> attrs (for resolving refs)
-
-
-def _root_own_path(node: Section) -> str:
-    return node.attrs.get('name', '?')
 
 
 def build_model(sections: list[Section]) -> SceneModel:
@@ -64,10 +62,10 @@ def build_model(sections: list[Section]) -> SceneModel:
         for s in sections if s.kind == 'sub_resource'
     }
     nodes = [s for s in sections if s.kind == 'node']
-    root = next((n for n in nodes if 'parent' not in n.attrs), None)
-    nodes_by_path = {
-        (_root_own_path(n) if n is root else node_own_path(n)): n for n in nodes
-    }
+    # The root keys as `.` — the address the write verbs use — so every path
+    # this diff prints is valid write input, and a root rename reads as a
+    # change on `.` rather than a whole-tree remove+add.
+    nodes_by_path = {node_own_path(n): n for n in nodes}
     return SceneModel(ext_by_key, subs_by_key, nodes_by_path, ext)
 
 
@@ -123,7 +121,13 @@ def diff_nodes(old: SceneModel, new: SceneModel) -> list[str]:
     lines: list[str] = []
 
     for path in sorted(old_paths & new_paths):
-        prop_lines = diff_props(old.nodes_by_path[path], new.nodes_by_path[path], old.ext, new.ext)
+        old_node, new_node = old.nodes_by_path[path], new.nodes_by_path[path]
+        prop_lines = diff_props(old_node, new_node, old.ext, new.ext)
+        # Only the root can match by path while its NAME differs (a child's
+        # name IS its path's last segment) — surface the rename as a change.
+        if old_node.attrs.get('name') != new_node.attrs.get('name'):
+            prop_lines.insert(0, f'    {CHANGE_MARK} name: {old_node.attrs.get("name")}'
+                                 f' {REF_ARROW} {new_node.attrs.get("name")}')
         if prop_lines:
             lines.append(f'  {CHANGE_MARK} {path}')
             lines.extend(prop_lines)
@@ -197,7 +201,11 @@ def read_at_git_ref(path: str, ref: str) -> str:
     result = subprocess.run(
         ['git', 'show', f'{ref}:{path}'], capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        raise SystemExit(f"error: 'git show {ref}:{path}' failed: {result.stderr.strip()}")
+        # Exit-code contract: a bad ref / not-a-repo is an ENVIRONMENT error
+        # (2), never 1 — 1 means "the diff found something".
+        print(f"error: 'git show {ref}:{path}' failed: {result.stderr.strip()}",
+              file=sys.stderr)
+        raise SystemExit(EXIT_ENV_ERROR)
     return result.stdout
 
 
