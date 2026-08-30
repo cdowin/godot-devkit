@@ -1,19 +1,100 @@
-"""install.py — the pre-decided-refusal helpers every install verb shares.
+"""install.py — write a file into a repo, once, from one source.
 
-`pm install-skills` is the one install verb this package still ships, and these
-three predicates are what make it refuse WHOLE: a destination that is a
-directory, unwritable, undecodable or somebody else's file is named before the
-first byte is written, never as a traceback with one file already on disk.
+Three verbs, one relationship, and it is deliberately the whole relationship:
 
-They live here rather than in the verb because the wording is the contract. The
-collision sentence was written twice once, one copy got the plural wrong, and
-the two refusals disagreed about the same situation for a release.
+    install-ci      .github/workflows/verify.yml — ONE opinionated workflow.
+                    Checkout, uv, `make milestone`. It carries no gate of its
+                    own and no way to parameterize one: a project that wants
+                    something else edits the file, which is now its file.
+    install-agents  the review and build contract, as AGENT DEFINITIONS under
+                    .claude/agents/. Deliberately not `.claude/rules/*`: it is
+                    measured that a rules file never reaches a subagent's spawn
+                    context while its definition does, so a contract written as
+                    a rule is a contract that arrives nowhere.
+    install-hooks   the shared-tree commit guard, the raw-engine-boot guard, and
+                    the script that arms them. Forked between two repos and
+                    drifting on a project-name prefix; canonical here.
+
+The verb writes the file. Once. If the destination is already there and is not
+byte-for-byte what would be written, the command REFUSES, names the path, and
+names both remedies — move it aside, or `--force`. `--diff` shows what a run
+would change and writes nothing. There is no manifest, no content hash, no
+drift tracking, no merge and no ongoing sync: after the file is written it
+belongs to the repo that asked for it, and the next install has to be told, by
+an operator, that clobbering it is the intent.
+
+Every refusal is decided for EVERY entry in the plan before the first byte is
+written — the same rule the PM scaffolder states as "every refusal the grain
+can raise is decided before the first rename runs". A refusal raised mid-loop
+leaves a half-installed repo behind and still says nothing was written;
+`nothing was written` has to be a claim about the whole command, not about the
+entry the refusal happened to land on.
+
+The three refusal helpers below are shared with `pm install-skills`, the fourth
+install verb this package ships. They live here rather than in a verb because
+the wording is the contract: the collision sentence was written twice once, one
+copy got the plural wrong, and the two refusals disagreed about the same
+situation for a release.
 """
 from __future__ import annotations
 
+import difflib
+import sys
+from importlib import resources
 from pathlib import Path
 
 from godot_devkit.core import apply
+from godot_devkit.core.project import repo_root
+
+PACKAGE = 'godot_devkit.repo.installables'
+
+# (source name under installables/, destination relative to the repo root).
+PLANS: dict[str, tuple[tuple[str, str], ...]] = {
+    'install-ci': (
+        ('ci-verify.yml', '.github/workflows/verify.yml'),
+    ),
+    'install-agents': (
+        ('verification-reviewer.md', '.claude/agents/verification-reviewer.md'),
+        ('verification-builder.md', '.claude/agents/verification-builder.md'),
+    ),
+    'install-hooks': (
+        ('cc-commit-pathspec.sh', 'tools/hooks/cc-commit-pathspec.sh'),
+        ('cc-godot-sandbox.sh', 'tools/hooks/cc-godot-sandbox.sh'),
+        ('setup-hooks.sh', 'tools/setup-hooks.sh'),
+    ),
+}
+
+USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
+       godot-devkit install-agents  [--force] [--diff]
+       godot-devkit install-hooks   [--force] [--diff]
+
+install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
+                It ASSUMES that target is your full gate; a project without one
+                edits the workflow, which after the write is its own file.
+install-agents  the review and build contract, as AGENT DEFINITIONS under
+                .claude/agents/ — the one place a subagent actually reads.
+install-hooks   tools/hooks/cc-commit-pathspec.sh (a commit names its own
+                paths), tools/hooks/cc-godot-sandbox.sh (never a raw engine
+                boot), and tools/setup-hooks.sh, which arms them.
+
+A destination that already exists and differs is refused, whole.
+--force overwrites it. --diff prints what would change and writes nothing."""
+
+# Installing tools/hooks/* is not arming them: core.hooksPath silently skips a
+# non-executable hook, and this package cannot chmod (core.apply owns every
+# mutation and has no such act). The script that does it is in the same install.
+_NEXT_STEP = {
+    'install-hooks': 'run `bash tools/setup-hooks.sh` to point git at them and '
+                     'set the exec bit — an unexecutable hook is skipped in '
+                     'silence.',
+    'install-agents': 'these carry the review and build contract only: run '
+                      'adversarial input, ship a test that failed against HEAD, '
+                      'verify through the project\'s own gate targets. Your '
+                      'project\'s agents, rosters and dispatch model stay yours.',
+    'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
+                  'target exists and is your full gate.',
+}
+
 
 def collision_refusal(collisions: list[str]) -> tuple[str, str]:
     """(what collided, what that means) — plural-correct, for any install verb.
@@ -23,15 +104,15 @@ def collision_refusal(collisions: list[str]) -> tuple[str, str]:
     while the pm CLI raises them as one `Refused`.
     """
     if len(collisions) == 1:
-        head = (f'{collisions[0]} exists and was not generated by this tool — '
-                f'move your version aside, or pass --force')
+        head = (f'{collisions[0]} exists and differs from what this would '
+                f'write — move your version aside, or pass --force')
     else:
         listed = '\n'.join(f'    {rel}' for rel in collisions)
-        head = (f'{len(collisions)} destinations exist and were not generated '
-                f'by this tool — move your versions aside, or pass --force:\n'
-                f'{listed}')
+        head = (f'{len(collisions)} destinations exist and differ from what '
+                f'this would write — move your versions aside, or pass '
+                f'--force:\n{listed}')
     return head, ('nothing was written; the whole install is refused, not just '
-                  'the first colliding file.')
+                  'the first colliding file. --diff shows what would change.')
 
 # The wording this verb's refusals have always used, mapped from the closed
 # `Obstruction` vocabulary `core.apply` decides in. A dict, not a sentence
@@ -61,7 +142,7 @@ def destination_defect(target: Path) -> str:
 
     This function used to BE those checks. It is now a caller: `core.apply`
     decides, in the same closed vocabulary every other writer in this package
-    is decided in, and this maps the reason to the sentence three install verbs
+    is decided in, and this maps the reason to the sentence four install verbs
     already print. A second copy of "can this be written" is a second chance to
     answer it differently.
 
@@ -89,11 +170,11 @@ def destination_defect(target: Path) -> str:
 def read_destination(target: Path) -> tuple[str | None, str]:
     """(the file's text, or None when it is not ours to compare; a defect).
 
-    A destination this cannot DECODE is not a file this tool generated — the
-    generated header is ASCII — so it is treated as a collision rather than as
-    an error, and `--force` overwrites it the same way it overwrites any other
-    foreign file. An unreadable one (permissions, a race) is a defect: a
-    collision check that silently skipped it would clobber whatever is there.
+    A destination this cannot DECODE cannot be compared with an installable,
+    which is text — so it is treated as a collision rather than as an error,
+    and `--force` overwrites it the same way it overwrites any other differing
+    file. An unreadable one (permissions, a race) is a defect: a collision
+    check that silently skipped it would clobber whatever is there.
     """
     try:
         return target.read_text(encoding='utf-8'), ''
@@ -101,3 +182,135 @@ def read_destination(target: Path) -> tuple[str | None, str]:
         return None, ''
     except OSError as err:
         return None, f'cannot be read ({err.strerror or err})'
+
+
+def body_of(name: str) -> str:
+    """One installable, verbatim. There is no substitution and no template."""
+    return resources.files(PACKAGE).joinpath(name).read_text(encoding='utf-8')
+
+
+def print_diff(rel: str, target: Path, body: str) -> None:
+    """What an install WOULD change, as a unified diff. Writes nothing."""
+    if not target.is_file():
+        print(f'[install] {rel} does not exist — the whole file is an addition')
+        existing = ''
+    else:
+        text, defect = read_destination(target)
+        if text is None:
+            print(f'[install] {rel} {defect or "is not text this can diff"} '
+                  f'— --force would replace it whole')
+            return
+        if text == body:
+            print(f'[install] {rel} already current')
+            return
+        existing = text
+    sys.stdout.writelines(difflib.unified_diff(
+        existing.splitlines(keepends=True), body.splitlines(keepends=True),
+        fromfile=f'a/{rel}', tofile=f'b/{rel}'))
+
+
+def _defect_refusal(command: str, defects: list[str], wrote: list[str]) -> str:
+    listed = '\n'.join(f'    {d}' for d in defects)
+    what = ('nothing was written' if not wrote else
+            'ALREADY WRITTEN before this was reached: ' + ', '.join(wrote))
+    return (f'godot-devkit {command}: {len(defects)} destination(s) cannot be '
+            f'written:\n{listed}\n'
+            f'godot-devkit {command}: {what}. Fix the path(s) and re-run — the '
+            f'command is idempotent.')
+
+
+def main(command: str, argv: list[str]) -> int:
+    force = False
+    diff = False
+    for arg in argv:
+        if arg == '--force':
+            force = True
+        elif arg == '--diff':
+            diff = True
+        elif arg in ('-h', '--help', 'help'):
+            print(USAGE)
+            return 0
+        else:
+            print(f'godot-devkit {command}: unknown flag {arg!r}',
+                  file=sys.stderr)
+            print(USAGE, file=sys.stderr)
+            return 2
+
+    root = repo_root()
+    entries = [(root / rel, rel, body_of(name))
+               for name, rel in PLANS[command]]
+
+    # --diff reads and prints. It is never combined with a write, so it is
+    # answered before the plan is decided rather than inside it.
+    if diff:
+        for target, rel, body in entries:
+            print_diff(rel, target, body)
+        return 0
+
+    # Decide the WHOLE plan first — resolve every destination, collect every
+    # collision — and touch nothing until it holds.
+    plan: list[tuple[str, Path, str, str]] = []   # (kind, target, rel, body)
+    collisions: list[str] = []
+    defects: list[str] = []
+    for target, rel, body in entries:
+        kind = 'write'
+        defect = destination_defect(target)
+        if defect:
+            defects.append(f'{rel} {defect}')
+            continue
+        if target.is_file():
+            existing, unreadable = read_destination(target)
+            if unreadable:
+                defects.append(f'{rel} {unreadable}')
+                continue
+            if existing == body:
+                kind = 'current'
+            elif not force:
+                collisions.append(rel)
+                continue
+        plan.append((kind, target, rel, body))
+
+    # Collisions first: they are the refusal a human is most likely to hit, and
+    # a run that has both should name the one --force answers.
+    if collisions:
+        head, tail = collision_refusal(collisions)
+        print(f'godot-devkit {command}: {head}\n'
+              f'godot-devkit {command}: {tail}', file=sys.stderr)
+        return 1
+    if defects:
+        print(_defect_refusal(command, defects, []), file=sys.stderr)
+        return 1
+
+    # ONE plan, decided above and applied here. `install-agents` half-installed
+    # twice because the loop that wrote also decided: the third file's problem
+    # arrived with the first two already on disk. `core.apply` returns what
+    # LANDED, so the refusal below names it instead of guessing.
+    writes = apply.Plan()
+    for kind, target, rel, body in plan:
+        if kind != 'current':
+            writes.overwrite(target, body, newline=None, label=rel)
+    # Everything answerable was answered above, so a failure here means the
+    # filesystem changed under the plan. It is still a refusal that names what
+    # it did — never a traceback, and never a silent "nothing was written" over
+    # a directory that already has one.
+    result = writes.apply(decide=False)
+    written = [step.label for step in result.landed]
+    landed = set(written)
+    # Reported in PLAN order, and STOPPING where the plan stopped: a line
+    # printed past the failure would describe a file that was never reached.
+    for kind, target, rel, body in plan:
+        if kind == 'current':
+            print(f'[install] {rel} already current')
+        elif rel in landed:
+            print(f'[install] wrote {rel}')
+        else:
+            break
+    if result.failed is not None:
+        print(_defect_refusal(command,
+                              [f'{result.failed.label} could not be written '
+                               f'({result.error})'], written),
+              file=sys.stderr)
+        return 1
+    if written:
+        print(f'[install] {_NEXT_STEP[command]}')
+    return 0

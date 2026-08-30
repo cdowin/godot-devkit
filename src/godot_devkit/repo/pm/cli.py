@@ -44,7 +44,7 @@ USAGE = """usage: godot-devkit pm <command>
   sync [--check]                          (re-render the execution lists)
   vocabulary [--json]                     (the transition graph, for checkers)
   validate                                (structural + referential integrity)
-  install-skills [--force]                (write the shared rule + operations skill)
+  install-skills [--force] [--diff]       (write the shared rule + operations skill)
   init                                    (scaffold a fresh tree + install guidance)
   new milestone <ver> [<name...>]         (scaffold the grain file + dir slots; a
                                            shared doc is minted on first WRITE, not
@@ -589,9 +589,12 @@ def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
     in the project's own rules, because they differ per repo and always will.
     """
     force = False
+    diff = False
     for a in args:
         if a == '--force':
             force = True
+        elif a == '--diff':
+            diff = True
         else:
             raise Usage(f'unknown flag {a!r}')
 
@@ -612,6 +615,16 @@ def cmd_install_skills(cfg: model.PmConfig, args: list[str]) -> int:
     # mid-loop installs the first file, refuses the second, and still says
     # nothing was written — `nothing was written` has to be a claim about the
     # whole command, the same rule `pm init` follows for renames.
+    # --diff reads and prints, off the SAME helper the install-* verbs use: a
+    # second unified-diff printer would be a second answer to one question.
+    if diff:
+        for name, target in plan:
+            body = (resources.files('godot_devkit.repo.pm.guidance')
+                    .joinpath(name).read_text(encoding='utf-8'))
+            install.print_diff(cfg.rel(target), target,
+                               body.replace('{version}', f'v{__version__}'))
+        return 0
+
     actions: list[tuple[str, Path, str]] = []
     collisions: list[str] = []
     defects: list[str] = []

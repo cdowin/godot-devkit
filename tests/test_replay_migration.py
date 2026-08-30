@@ -72,6 +72,9 @@ SEQUENCE: tuple[tuple[tuple[str, ...], int], ...] = (
     (('pm', 'templates'), 0),
     (('pm', 'sync'), 0),
     (('pm', 'install-skills'), 0),
+    (('install-ci',), 0),
+    (('install-agents',), 0),
+    (('install-hooks',), 0),
 )
 
 

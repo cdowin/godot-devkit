@@ -282,6 +282,24 @@ sidecar, its `[gd_scene]`/`[gd_resource]` header, or its `.import` file — fall
 of the repo already says about that path. An `index=` is counted off the base scene's actual children.
 Anything unresolvable is reported and left alone.
 
+### Installers (`godot-devkit install-<what>`)
+
+An install verb writes a file. **Once.** If the destination is already there and is not byte-for-byte
+what would be written, the command refuses, names the path, and names both remedies — move it aside,
+or `--force`. `--diff` prints a unified diff of what a run would change and writes nothing. There is
+no manifest, no content hash, no drift tracking and no merge: after the file is written it belongs to
+the repo that asked for it. Every refusal is decided for **every** entry before the first byte, so a
+collision on the third file leaves the first two unwritten.
+
+| Verb | Writes |
+|---|---|
+| `install-ci [--force] [--diff]` | `.github/workflows/verify.yml` — one opinionated workflow: checkout, uv, `make milestone`. It carries no gate of its own and nothing to parameterize; the assumption that `make milestone` is your full gate is a **comment in the file**, not a discovery mechanism. A project that wants something else edits the workflow, which is now its file |
+| `install-agents [--force] [--diff]` | `.claude/agents/verification-reviewer.md` + `verification-builder.md` — the review and build contract, as **agent definitions**. Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context while its definition does, so a contract written as a rule arrives nowhere. Your project's own agents, rosters and dispatch model stay yours |
+| `install-hooks [--force] [--diff]` | `tools/hooks/cc-commit-pathspec.sh` (a Claude Code PreToolUse guard: `git commit` commits the whole index, so in a shared tree a commit names its own paths), `tools/hooks/cc-godot-sandbox.sh` (never a raw `godot` boot — it runs the autoload stack against the real `user://`), and `tools/setup-hooks.sh`, which points `core.hooksPath` at them and sets the exec bit. Each hook is **standalone** — it sources no library, because a `source` of a file your repo does not have fails open and a guard that fails open is not there. Run `bash tools/setup-hooks.sh` after installing |
+
+`pm install-skills` is the fourth install verb and shares these refusals; it lives under `pm` because
+what it writes is the PM tree's own guidance.
+
 ### Static gates (`godot-devkit check <gate>`, pure git + parse, no Godot boot)
 
 | Gate | Guards against |
@@ -320,7 +338,7 @@ human should never hand-edit — free-text flips are how a lifecycle drifts, wit
 | `pm templates [--force]` | Copy the packaged templates into `[pm] template_dir` to edit. A file present there wins; anything missing falls back, so overriding one grain does not mean owning them all |
 | `pm decide <grain-id> <title…>` | Append one `## <id> — <ISO date> — <title>` heading to that milestone's or feature's `decisions.md`, **minting the log from its template if this is the first one**. It stamps the two things a hand-written entry gets wrong — the date, and the next ordinal in the log's own id prefix — and stops there; the reasoning under the heading is yours to write. No field schema: the four-field one this replaced produced zero conforming entries across a consumer's 158 decision logs, so what it gated was whether anyone used the verb |
 | `pm prune` | Delete cooled archives and stamp the resurrect anchor in the roadmap's prune log |
-| `pm install-skills [--force]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
+| `pm install-skills [--force] [--diff]` | Write the shared guidance into the repo: `.claude/rules/pm-execution.md` (the claim→close loop, **auto-loads** on a `pm/roadmap/**` edit) and `.claude/skills/pm-operations/SKILL.md` (the operations manual, invoked deliberately). Refuses to clobber a file it did not generate |
 | `pm init` | Stand up a tree in a repo that has none — `pm/roadmap/` + a seeded `ROADMAP.md`, the two guidance files, and the remaining wiring printed as a checklist |
 
 **Why a rule AND a skill, not one of each.** A rule with a `paths:` header **auto-loads**
