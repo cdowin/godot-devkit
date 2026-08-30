@@ -30,9 +30,6 @@ the milestone machine has no `review` state (nothing transitions into one).
     story_transitions     = [...]
     checks = ["D1","D2","D3","D4","D5","D6","D7",   # which rules run — this
               "V1","V2","V3","V4","V5","V6"]        #   IS the stock default
-    decision_grandfather = []      # D12: logs whose legacy entries predate the
-                                   # schema — "<path>" or "<path>:<N entries>"
-    changelog_grandfather = []     # D15: the same ledger for changelog.md
 """
 from __future__ import annotations
 
@@ -42,7 +39,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from godot_devkit.core.markdown import block_scan
 from godot_devkit.core import apply, walk
 from godot_devkit.core.walk import Kind, SkipReason, Walk
 from godot_devkit.core.project import repo_root
@@ -85,59 +81,40 @@ FLOW_CHECKS = ('D8', 'D9', 'D10')
 # grain is done. Opt-in for the same reason D8-D10 are — a project that keeps
 # its review notes forever is running a different (valid) convention.
 RETENTION_CHECKS = ('D11',)
-# D13 is the canonical grain STRUCTURE, D14 the bug-lifetime rule. Opt-in for
-# the migration reason D12 is: a tree that predates the canonical slots is
-# missing most of them, and a rule that turns a consumer red on upgrade day is
-# unshippable. `pm new <grain>` fills the gaps, then the rule holds the line.
+# D13 is the canonical grain STRUCTURE, D14 the bug-lifetime rule. Opt-in
+# because a tree that predates the canonical slots is missing most of them, and
+# a rule that turns a consumer red on upgrade day is unshippable.
+# `pm new <grain>` fills the gaps, then the rule holds the line.
 STRUCTURE_CHECKS = ('D13', 'D14')
-# D12 is the decision-record SCHEMA and D15 the changelog's. Opt-in like the
-# rest, and for one more reason: every log written before either existed
-# conforms to none of it, so a consumer switching one on migrates through the
-# matching grandfather ledger rather than through a red gate on upgrade day.
-#
-# D16 is the RELEASE gate: a `done` milestone must have release notes. Separate
-# from D15 because they answer different questions — D15 asks whether what is
-# written conforms, D16 asks whether anything is written at all, and a milestone
-# can ship with a perfectly conforming empty log.
-SCHEMA_CHECKS = ('D12', 'D15')
-RELEASE_CHECKS = ('D16',)
 # Structural/referential integrity. ON by default: a tree that does not satisfy
 # these is malformed, not merely running a different flow.
 VALIDATE_CHECKS = ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')
 KNOWN_CHECKS = tuple(dict.fromkeys(
-    DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS + SCHEMA_CHECKS
-    + STRUCTURE_CHECKS + RELEASE_CHECKS + VALIDATE_CHECKS))
+    DEFAULT_CHECKS + FLOW_CHECKS + RETENTION_CHECKS
+    + STRUCTURE_CHECKS + VALIDATE_CHECKS))
 
 ARCHIVE_DIR_NAME = 'zz_archive'
 
 # --- the canonical grain structure (D13) --------------------------------------
 # One shape, every grain, all lowercase. The split that makes it worth having:
 #
-#   decisions.md  DURABLE   — appended during the grain's life, survives close,
-#                             collapses to pointers when the milestone closes.
-#   changelog.md  DURABLE   — what shipped, in the words a player would use.
-#                             Milestone-only, and NEVER skipped on a `done`
-#                             grain: a closed milestone is exactly when its
-#                             release notes matter most.
+#   decisions.md  DURABLE   — appended during the grain's life, survives close.
 #   review.md     TRANSIENT — simplifier and reviewer both append; DELETED at
 #                             close, with anything durable promoted first (D11).
 #
-# `handoff.md`, `changelog.md` and `bugs/` are milestone-only, ruled explicitly:
-# a feature is never picked up cold on its own, a bug lives in the milestone
-# that will FIX it, and a RELEASE is a milestone — a feature contributes to its
-# milestone's changelog through the entry's `Evidence:` pointer, not through a
-# log of its own.
+# `handoff.md` and `bugs/` are milestone-only, ruled explicitly: a feature is
+# never picked up cold on its own, and a bug lives in the milestone that will
+# FIX it.
 #
 # DIRECTORY slots are allowed but never REQUIRED, and the reason is git: an
 # empty directory does not survive a clone, so requiring `design/` would mean
 # 178 placeholder files or a rule that fails the moment somebody checks the
 # tree out fresh. Files carry the requirement; directories carry permission.
 DECISION_FILE_NAME = 'decisions.md'
-CHANGELOG_FILE_NAME = 'changelog.md'
 REVIEW_FILE_NAME = 'review.md'
 
 MILESTONE_FILE_SLOTS = ('milestone.md', 'handoff.md', 'decisions.md',
-                        'changelog.md', 'review.md')
+                        'review.md')
 MILESTONE_DIR_SLOTS = ('features', 'bugs', 'design')
 FEATURE_FILE_SLOTS = ('feature.md', 'decisions.md', 'review.md')
 FEATURE_DIR_SLOTS = ('stories', 'design')
@@ -147,7 +124,7 @@ FEATURE_DIR_SLOTS = ('stories', 'design')
 SLOT_TEMPLATE = {
     'milestone.md': 'milestone', 'feature.md': 'feature',
     'handoff.md': 'handoff', 'decisions.md': 'decisions',
-    'changelog.md': 'changelog', 'review.md': 'review',
+    'review.md': 'review',
 }
 
 # The one-line instruction each shared doc opens with, and D13 asserts is still
@@ -160,9 +137,6 @@ SLOT_TEMPLATE = {
 SLOT_HEADER = {
     'decisions.md': 'Append with `godot-devkit pm decide <grain-id>` — never by '
                     'hand; the command stamps the date and the next ordinal.',
-    'changelog.md': 'Append with `godot-devkit pm changelog <milestone-id>` — '
-                    'never by hand; the command stamps the date and the next '
-                    'ordinal.',
     'review.md': 'Transient. Deleted at close — promote anything durable into '
                  'decisions.md first.',
     'handoff.md': 'Cold-start only. Never restate what `pm status` computes.',
@@ -234,10 +208,6 @@ class PmConfig:
     feature_transitions: tuple[str, ...] = DEFAULT_FEATURE_TRANSITIONS
     story_transitions: tuple[str, ...] = DEFAULT_STORY_TRANSITIONS
     checks: tuple[str, ...] = DEFAULT_CHECKS
-    # D12/D15 only: the grandfather ledgers, parsed at load so a malformed spec
-    # is exit 2. (repo-relative log path, entries exempted or None for all).
-    decision_grandfather: tuple[tuple[str, int | None], ...] = ()
-    changelog_grandfather: tuple[tuple[str, int | None], ...] = ()
     # D8 only: where the shipped version lives, and the line that carries it.
     template_dir: str = ''
     version_file: str = 'project.godot'
@@ -329,16 +299,6 @@ def load() -> PmConfig:
         feature_transitions=tup('feature_transitions', DEFAULT_FEATURE_TRANSITIONS),
         story_transitions=tup('story_transitions', DEFAULT_STORY_TRANSITIONS),
         checks=checks,
-        # The `[pm]` lists whose default is EMPTY: each is a ledger of
-        # exemptions, so `[]` means "none exempt" — the same thing the absent
-        # key means — and refusing it made the documented default the one value
-        # a repo could not write down.
-        decision_grandfather=parse_grandfather(
-            str_tuple(sect, 'pm', 'decision_grandfather', (), allow_empty=True),
-            DECISION_SCHEMA.ledger_key, DECISION_SCHEMA.file_name),
-        changelog_grandfather=parse_grandfather(
-            str_tuple(sect, 'pm', 'changelog_grandfather', (), allow_empty=True),
-            CHANGELOG_SCHEMA.ledger_key, CHANGELOG_SCHEMA.file_name),
         template_dir=text(sect, 'pm', 'template_dir', ''),
         version_file=text(sect, 'pm', 'version_file', 'project.godot'),
         version_pattern=version_pattern,
@@ -1152,444 +1112,39 @@ def open_bugs_under_done(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
     return out, scanned
 
 
-# --- append-only log schemas (D12, D15) ---------------------------------------
-# TWO logs, ONE schema machine. A decision log rots into description and a
-# changelog rots into a commit log, and the cure is the same shape both times:
-# an `## <ID> — <ISO date> — <title>` heading over `**Field:**` lines, one per
-# line, each capped. Padding is impossible when every part has to be a field.
-#
-#     ## D3 — 2026-08-28 — the sweep verb belongs to the combat layer
-#     **Chose:** move `sweep_tracked_contributions` to `combat_behavior.gd`
-#     **Over:** leaving it on `entity_behavior.gd`, the lean root
-#     **Because:** all three consumers extend the combat layer
-#     **Evidence:** `64e89ad5b`
-#
-#     ## C1 — 2026-08-29 — the hub remembers where you parked
-#     **What:** Your loadout is where you left it when you come back to the hub.
-#     **Evidence:** `64e89ad5b`
-#
-# What differs between them is DATA — the field list, the ordinal prefix, the
-# file name, the config key its grandfather ledger lives under — so it is data,
-# not a second parser, a second validator and a second writer.
-#
-# The two caps are module-level rather than per-schema because they are one
-# fact: how much text fits on a line a human scans. `log_entries_in` needs the
-# title cap without knowing which schema it is reading (it names an unnamed
-# entry by its own title), so a per-schema-only home would have forced a second
-# copy of the number right there.
-TITLE_MAX = 80
-VALUE_MAX = 200
+# --- appending a decision heading (`pm decide`) -------------------------------
+# The two things authors get wrong writing one of these by hand are the DATE and
+# the ORDINAL, so the verb stamps both and stops there. Everything under the
+# heading is the author's prose: a schema that told them which four fields to
+# write produced, across 158 real decision logs holding 320 hand-written
+# headings, exactly zero conforming entries.
+_ENTRY_ORDINAL = re.compile(r'^##[ \t]+([A-Za-z]{1,4})(\d+)\b')
+DECISION_PREFIX = 'D'
 
 
-@dataclass(frozen=True)
-class LogSchema:
-    """One append-only log's entry schema. D12 and D15 are two instances.
+def next_entry_id(text: str) -> str:
+    """The next ordinal for this log, from the ids the log itself holds.
 
-    `notes` is the WHY appended to a missing-field finding, for the field whose
-    absence is the whole reason the log has a schema at all.
+    The PREFIX comes from the log's own last id-shaped heading, so a tree that
+    numbers `M27` keeps numbering `M`. A log with no id-shaped heading starts
+    at `D1`. Reuse across FILES is by design: 0.14.0's D7 and 0.15.0's D7 are
+    different decisions in different logs, and numbering every milestone from a
+    global counter would say they were related.
     """
-    rule: str            # the drift rule that holds this log to the schema
-    plural: str          # how a census names it ('1 decision log(s)')
-    file_name: str       # the canonical slot it lives in
-    fields: tuple[str, ...]
-    prefix: str          # the ordinal prefix an EMPTY log starts numbering at
-    ledger_key: str      # the `[pm]` key holding its grandfather ledger
-    notes: tuple[tuple[str, str], ...] = ()
-    title_max: int = TITLE_MAX
-    value_max: int = VALUE_MAX
-
-
-DECISION_SCHEMA = LogSchema(
-    rule='D12', plural='decision log', file_name=DECISION_FILE_NAME,
-    fields=('Chose', 'Over', 'Because', 'Evidence'), prefix='D',
-    ledger_key='decision_grandfather',
-    # `Over:` is the load-bearing field: a decision with no rejected alternative
-    # is not a decision, it is a description, and an entry that cannot name what
-    # it ruled out should not exist.
-    notes=(('Over', ' — a decision with no rejected alternative is a '
-                    'description'),))
-
-# The changelog is deliberately the SMALLER schema — what was built that a
-# player cares about, and the reference proving it shipped. Dev detail lives in
-# decisions.md; a changelog that carries it is a commit log with a nicer name.
-CHANGELOG_SCHEMA = LogSchema(
-    rule='D15', plural='changelog', file_name=CHANGELOG_FILE_NAME,
-    fields=('What', 'Evidence'), prefix='C',
-    ledger_key='changelog_grandfather',
-    notes=(('Evidence', ' — a changelog entry with nothing behind it is a '
-                        'rumour'),))
-
-# An ENTRY is an `##` heading carrying an ID or a DATE **anywhere** in it — not
-# one that opens with an id. Detection has to be looser than the schema or the
-# gate is blind to exactly the logs it exists for: real logs number `M27`, `D1`,
-# and also write `## 2026-08-24 — D1: ...` with the id AFTER the date, which an
-# opens-with-an-id test reads as prose and passes in silence (rule 4's cardinal
-# sin). A heading with neither ("## The through-line") IS prose and is never
-# schema-checked: a log may have a preamble.
-_ENTRY_HEADING = re.compile(r'^##[ \t]+(\S.*?)[ \t]*$')
-# A VERSION is not an id. `v0.9` opens with a token shaped exactly like one, so
-# a changelog preamble reading `## v0.9 release notes` was read as entry `v0`
-# and `next_entry_id` then allocated `v1` into a log numbering `C`. D15 makes
-# version-shaped headings MORE likely, not less, so the trailing `.` is
-# admitted only when no digit follows it: `D1.` ends a sentence, `v0.9` names a
-# release.
-_ENTRY_ID = re.compile(
-    r'(?:^|[\s([{`"\'/—-])([A-Za-z]{1,4}\d+)(?=\.(?!\d)|[\s,:;)\]}`"\'—-]|$)')
-_ISO_DATE = re.compile(r'\d{4}-\d{2}-\d{2}')
-# The full header. The separator is an em dash BOTH times, exactly as the schema
-# reads. A hyphen renders near-identically to a human and differently to a
-# parser, and a separator that is "either" is not a schema.
-_ENTRY_HEADER = re.compile(
-    r'^##[ \t]+[A-Za-z]+\d+[ \t]+—[ \t]+(\d{4}-\d{2}-\d{2})[ \t]+—[ \t]+(\S.*?)[ \t]*$')
-_ENTRY_FIELD = re.compile(r'^\*\*([A-Za-z]+):\*\*[ \t]*(.*?)[ \t]*$')
-# A new `##`/`#` heading ends the entry; `###` and deeper stay inside it.
-_ENTRY_SECTION_END = re.compile(r'^#{1,2}[ \t]')
-
-# `Evidence:` is a REFERENCE, not a sentence — that is what stops "we discussed
-# it and agreed" from counting as evidence. Every whitespace-separated token has
-# to be a commit hash, a path (optionally `:line`), or a number; prose fails on
-# its first word.
-_REF_HASH = re.compile(r'^[0-9a-f]{7,40}$')
-# The SAME vocabulary one abbreviation short. `aaa111` is a valid hash that git
-# simply printed at six characters, and calling it prose is wrong about the
-# cause and silent about the fix — so it gets its own refusal, naming the
-# minimum and the command that lengthens it.
-REF_HASH_MIN = 7
-_REF_SHORT_HASH = re.compile(r'^[0-9a-f]{1,6}$')
-_REF_NUMBER = re.compile(r'^[+-]?\d[\d,._%/x×→-]*$')
-_REF_PATH = re.compile(r'^[\w./~@+-]+(?::\d+(?:-\d+)?)?$')
-
-
-@dataclass(frozen=True)
-class LogEntry:
-    eid: str
-    line: int
-    header: str
-    fields: tuple[tuple[str, str], ...]
-
-
-_EVIDENCE_PROSE = ('**Evidence:** is prose, not a reference — want a commit '
-                   'hash, a path[:line], or a number')
-
-
-def evidence_defect(value: str) -> str:
-    """'' when every token in `value` is a hash, a path[:line] or a number,
-    else the reason — NAMING the change that resolves it.
-
-    Returns the reason rather than a bool because the two ways a reference
-    fails are not the same mistake. A six-character `aaa111` is a real commit
-    hash git abbreviated one character short of what this accepts, and the
-    prose refusal misidentifies the cause AND leaves the author with nothing to
-    do about it. The too-short refusal names the minimum and prints the
-    `git rev-parse` that lengthens the hash, the way the scaffolder's refusals
-    print the exact `git mv --force` to run.
-    """
-    tokens = [raw.strip('[]()<>,;.:"\'')
-              for raw in value.replace('`', ' ').split()]
-    if not tokens:
-        return _EVIDENCE_PROSE
-    for tok in tokens:
-        if not tok:
-            return _EVIDENCE_PROSE
-        if _REF_HASH.match(tok) or _REF_NUMBER.match(tok):
-            continue
-        # A path must LOOK like one. Without this, any bare word matches.
-        if _REF_PATH.match(tok) and ('/' in tok or '.' in tok):
-            continue
-        # Only when the WHOLE value is that one token. A sentence whose first
-        # bad word happens to be hex — "added a cafe" — is prose, and telling
-        # its author about commit-hash length would be the same misdiagnosis
-        # in the other direction.
-        if len(tokens) == 1 and _REF_SHORT_HASH.match(tok):
-            return (f'**Evidence:** {tok!r} is {len(tok)} chars — a commit '
-                    f'hash needs at least {REF_HASH_MIN}; lengthen it with '
-                    f'`git rev-parse --short={REF_HASH_MIN} {tok}`')
-        return _EVIDENCE_PROSE
-    return ''
-
-
-def entry_label(heading_text: str) -> str:
-    """How a finding NAMES this entry — its id, else its date, else ''.
-
-    NOT the detector. '' means only that the heading names itself neither way;
-    whether the block IS an entry is decided by its BODY (see
-    `log_entries_in`), because a heuristic guessing which text is a record
-    from the record's title is the defect this rule exists to catch.
-    """
-    ident = _ENTRY_ID.search(heading_text)
-    if ident:
-        return ident.group(1)
-    when = _ISO_DATE.search(heading_text)
-    return when.group(0) if when else ''
-
-
-def log_files(cfg: PmConfig, schema: LogSchema) -> tuple[list[Path], list[Path]]:
-    """(the logs, the case-variant files) in the ACTIVE tree.
-
-    EXACT names, from a directory listing — never `rglob(schema.file_name)`.
-    A pattern whose final segment holds no wildcard resolves through
-    `Path.exists()`, so on macOS `rglob('decisions.md')` answers an on-disk
-    `DECISIONS.md` with the path `x/decisions.md`: a path that does not exist,
-    a grandfather key authorable on exactly one platform, and — the moment ONE
-    log of a tree is migrated — a NON-EMPTY list, which is what silences the
-    scanned-nothing guard while every other log goes unopened.
-
-    A `.md` whose lowercased name matches but whose bytes differ is returned
-    separately to be REPORTED: never folded in (the two platforms would emit
-    opposite findings about the same file) and never dropped (a log the rule
-    cannot see is a log the rule has not checked).
-
-    Archived logs predate the schema and are skipped.
-    """
-    return walk.named(cfg.roadmap, schema.file_name, prune=(ARCHIVE_DIR_NAME,))
-
-
-def _comment_scan(lines: list[str]) -> tuple[list[bool], list[str], int, int]:
-    """(per line: is it LIVE log text — outside any HTML comment at the point it
-    starts, and outside any fenced code block?, the text of each line the entry
-    parser should READ, the 1-based line of an `<!--` that is never closed, or 0,
-    the same for an unterminated code fence).
-
-    A `<!-- ... -->` block renders as nothing, so what it holds is not in the
-    log. Load-bearing here because the RETIRED decisions template shipped its
-    example block commented out, `**Decision:**` field lines and all — and the
-    field line is exactly the signal entry detection keys on.
-
-    Only a CLOSED block suppresses anything. A single-pass toggle would let one
-    stray `<!--` mark the whole rest of the file dead and still print PASS over
-    the entries it ate — rule 4's cardinal sin, from a log that looks fine to
-    every reader. So spans are collected first and an unterminated marker
-    suppresses nothing at all; it is returned to be REPORTED, because a log
-    whose comments D12 cannot delimit is a log D12 has not honestly scanned.
-
-    The two EDGE lines of a span are symmetric, and both keep their live half.
-    The opening line's live half is what precedes `<!--`, and it already reads
-    at line start. The closing line's live half is what FOLLOWS `-->`, so the
-    commented head is dropped and that half reads at line start too — killing
-    the whole closing line instead hid a conforming `**Over:**` written after a
-    spanning aside, and D12 failed the entry for having no rejected alternative.
-
-    A fenced block is a code sample the reader sees verbatim: `## <short title>`
-    inside one is not a heading and `<!--` inside one is a marker being quoted.
-    Fenced lines are dead here for that reason — counting a template's example
-    block as a real entry is the same lie in the other direction.
-
-    WHERE the fences and the comments are is `core.markdown.block_scan`'s
-    answer, not a second one: `check doc` and `check agents` read the same
-    markdown under the same CommonMark rules, and two scanners would drift into
-    disagreeing about which lines a document even has. It settles both markers
-    in ONE ordered pass, which is the only way to get both right — a fence
-    quoted inside a CLOSED comment used to be reported malformed, because the
-    fences were decided before anything knew where the comments were.
-    """
-    scan = block_scan(lines, comments=True)
-    live = [not f for f in scan.fenced]
-    text = list(lines)
-    for opened, closed, after in scan.comment_spans:
-        if closed == opened:
-            continue  # opened and closed inline: the line was never suppressed
-        for k in range(opened + 1, closed):
-            live[k] = False
-        text[closed] = lines[closed][after:].lstrip(' \t')
-    return live, text, scan.unclosed, scan.unterminated
-
-
-def log_comment_defect(text: str, rule: str) -> str:
-    """'' when the log's HTML comments are all closed, else what is wrong.
-
-    Separate from the entry list on purpose: this is a defect of the LOG, not
-    of any entry, so no grandfather ordinal caps it and no entry name carries
-    it. `rule` names the rule reporting it, because the same defect in a
-    decisions.md and in a changelog.md is found by D12 and by D15.
-    """
-    _, _, unclosed, _ = _comment_scan(_split(text))
-    if not unclosed:
-        return ''
-    return (f'line {unclosed} opens an HTML comment `<!--` that is never '
-            f'closed — the log is malformed and {rule} cannot say what it '
-            f'holds; close it, or put the marker in backticks if you meant to '
-            f'name it')
-
-
-def log_fence_defect(text: str, rule: str) -> str:
-    """'' when the log's code fences are all terminated, else what is wrong.
-
-    The twin of `log_comment_defect`, and it exists for the same reason.
-    Fence masking was added so a quoted `<!--` inside a sample stopped eating
-    the log; an unterminated fence then ate the log by the other route, and did
-    it in SILENCE — `1 entry/ies … PASS` over a two-entry file. A mask nothing
-    reports is the defect, whichever marker opened it.
-    """
-    _, _, _, unfenced = _comment_scan(_split(text))
-    if not unfenced:
-        return ''
-    return (f'line {unfenced} opens a code fence that is never terminated — '
-            f'the log is malformed and {rule} cannot say which of it is a '
-            f'sample; close the fence, or shorten the run of backticks if you '
-            f'meant an inline span')
-
-
-def log_entries_in(text: str) -> list[LogEntry]:
-    """Every entry in a log's TEXT, so a candidate entry can be validated
-    against the gate's own regexes BEFORE it is written rather than after.
-
-    SCHEMA-FREE by design, and it is the same parse for a decisions.md and a
-    changelog.md: what an entry IS does not depend on which fields it should
-    carry. That is what lets a log missing every field still be SEEN and
-    reported, rather than read as prose and passed in silence.
-
-    An ENTRY is a `##` heading that either NAMES itself (an id or an ISO date
-    anywhere in it) or carries at least one `**Word:**` field line beneath it.
-    The second half is the positive signal: a heading may be titled anything —
-    the retired template told authors to write `## <short title>` — and a
-    detector reading only the title passes an entire non-conforming corpus in
-    silence, which is rule 4's cardinal sin. A heading with NEITHER is prose and
-    is never schema-checked: a log may have a preamble.
-    """
-    lines = _split(text)
-    live, body, _, _ = _comment_scan(lines)
-    out: list[LogEntry] = []
-    for i, raw in enumerate(body):
-        if not live[i]:
-            continue
-        m = _ENTRY_HEADING.match(raw.rstrip('\r'))
-        if not m:
-            continue
-        stop = len(lines)
-        for j in range(i + 1, len(lines)):
-            if live[j] and _ENTRY_SECTION_END.match(body[j].rstrip('\r')):
-                stop = j
-                break
-        fields: list[tuple[str, str]] = []
-        for j in range(i + 1, stop):
-            if not live[j]:
-                continue
-            fm = _ENTRY_FIELD.match(body[j].rstrip('\r'))
-            if fm:
-                fields.append((fm.group(1), fm.group(2)))
-        eid = entry_label(m.group(1))
-        if not eid:
-            if not fields:
-                continue
-            # It IS an entry and still has to be named. Its own title is the
-            # only handle it has; a finding naming nothing cannot be acted on.
-            flat = ' '.join(m.group(1).split())
-            eid = (flat if len(flat) <= TITLE_MAX
-                   else flat[:TITLE_MAX - 1] + '…')
-        out.append(LogEntry(eid=eid, line=i + 1,
-                                 header=body[i].rstrip('\r'),
-                                 fields=tuple(fields)))
-    return out
-
-
-def entry_title(entry: LogEntry) -> str:
-    """The entry's own title from its header, or its id when it has none.
-
-    A render needs a handle for every entry it prints, INCLUDING one whose
-    header does not conform — dropping the non-conforming ones would make the
-    render disagree with the gate about what the log holds.
-    """
-    head = _ENTRY_HEADER.match(entry.header)
-    return head.group(2) if head else entry.eid
-
-
-def entry_violations_in(entries: list[LogEntry],
-                        schema: LogSchema) -> list[tuple[int, str, str]]:
-    """[(ordinal, entry-id, what failed)], in document order, over already-parsed
-    entries. The ordinal is the entry's 0-based position, which is what a
-    `path:N` grandfather caps: a log is append-only, so "the first N" is stable.
-
-    ONE implementation, for BOTH logs and for both readers: `pm decide` and
-    `pm changelog` each validate their candidate through this, so a writer
-    cannot disagree with its gate about what conforms."""
-    out: list[tuple[int, str, str]] = []
-    notes = dict(schema.notes)
-    for n, entry in enumerate(entries):
-        def bad(msg: str, _n: int = n, _e: str = entry.eid) -> None:
-            out.append((_n, _e, msg))
-
-        head = _ENTRY_HEADER.match(entry.header)
-        if head is None:
-            bad('header is not `## <ID> — <ISO date> — <title>` (em dashes)')
-        else:
-            try:
-                date.fromisoformat(head.group(1))
-            except ValueError:
-                bad(f'header date {head.group(1)!r} is not a real date')
-            if len(head.group(2)) > schema.title_max:
-                bad(f'title is {len(head.group(2))} chars, over the '
-                    f'{schema.title_max}-char cap')
-
-        names = [n_ for n_, _ in entry.fields]
-        at = -1
-        for want in schema.fields:
-            if want not in names:
-                bad(f'missing **{want}:**{notes.get(want, "")}')
-                continue
-            here = names.index(want)
-            if here <= at:
-                bad(f'**{want}:** is out of order — the fields read '
-                    f'{", ".join(schema.fields)}')
-            at = max(at, here)
-        for name, value in entry.fields:
-            if name in schema.fields and len(value) > schema.value_max:
-                bad(f'**{name}:** is {len(value)} chars, over the '
-                    f'{schema.value_max}-char cap')
-        if 'Evidence' not in schema.fields:
-            continue
-        for name, value in entry.fields:
-            if name != 'Evidence':
-                continue
-            defect = evidence_defect(value)
-            if defect:
-                bad(defect)
-            break
-    return out
-
-
-# --- writing an entry (`pm decide`, `pm changelog`) ----------------------------
-_ENTRY_ORDINAL = re.compile(r'^([A-Za-z]{1,4})(\d+)$')
-
-def next_entry_id(entries: list[LogEntry], schema: LogSchema) -> str:
-    """The next id for this log — the two things authors get wrong, allocated.
-
-    The PREFIX comes from the log's own last id-shaped entry, so a tree that
-    numbers `M27` keeps numbering `M`. An empty log (or one whose headings are
-    all dates) starts at the schema's own prefix: `D1` for decisions, `C1` for
-    a changelog.
-
-    Reuse across FILES is by design: 0.14.0's D7 and 0.15.0's D7 are different
-    decisions in different logs, and numbering every milestone from a global
-    counter would say they were related.
-    """
-    numbered = [m for m in (_ENTRY_ORDINAL.match(e.eid) for e in entries) if m]
-    if not numbered:
-        return f'{schema.prefix}1'
-    prefix = numbered[-1].group(1)
-    highest = max((int(m.group(2)) for m in numbered
-                   if m.group(1) == prefix), default=0)
+    seen = [m for m in (_ENTRY_ORDINAL.match(line) for line in _split(text)) if m]
+    if not seen:
+        return f'{DECISION_PREFIX}1'
+    prefix = seen[-1].group(1)
+    highest = max(int(m.group(2)) for m in seen if m.group(1) == prefix)
     return f'{prefix}{highest + 1}'
 
 
-def render_entry(eid: str, when: str, title: str, values: dict[str, str],
-                 schema: LogSchema, eol: str = '\n') -> str:
-    """One schema-shaped entry block. The separator is an em dash both times,
-    because that is what `_ENTRY_HEADER` matches — a hyphen renders
-    near-identically to a human and differently to a parser."""
-    lines = [f'## {eid} — {when} — {title}']
-    lines += [f'**{name}:** {values[name]}' for name in schema.fields]
-    return ''.join(f'{line}{eol}' for line in lines)
+def append_heading(text: str, eid: str, when: str, title: str) -> str:
+    """`text` with one `## <id> — <date> — <title>` heading appended.
 
-
-def append_entry(text: str, eid: str, when: str, title: str,
-                 values: dict[str, str],
-                 schema: LogSchema) -> tuple[str, list[str]]:
-    """(log text with the entry appended, what the NEW entry gets wrong).
-
-    Composed then re-parsed through the GATE's own predicates, so the writer
-    refuses exactly what the gate would report — no second copy of the schema,
-    and no way for the two to drift apart. Pre-existing violations further up a
-    legacy log are the grandfather ledger's business, never this call's.
+    The separator is an em dash because that is what `next_entry_id` and every
+    log already in the tree use; a hyphen renders near-identically to a human
+    and differently to a reader looking for the id.
     """
     eol = '\r\n' if '\r\n' in text else '\n'
     body = text
@@ -1597,162 +1152,4 @@ def append_entry(text: str, eid: str, when: str, title: str,
         body += eol
     if body and not body.endswith(eol * 2):
         body += eol
-    body += render_entry(eid, when, title, values, schema, eol)
-    entries = log_entries_in(body)
-    if not entries or entries[-1].eid != eid:
-        return body, ['the composed entry does not parse as a log entry']
-    last = len(entries) - 1
-    return body, [why for n, _, why
-                  in entry_violations_in(entries, schema) if n == last]
-
-
-def parse_grandfather(specs: tuple[str, ...], key_name: str,
-                      suffix: str) -> tuple[tuple[str, int | None], ...]:
-    """`"<path>"` (the whole file) or `"<path>:<N>"` (its first N / its first N
-    lines, depending on which ledger is reading).
-
-    The capped form is the point: a grandfathered log keeps its legacy entries
-    and every entry ADDED past the cap still has to conform, so the log stops
-    growing badly without anyone rewriting old text. A malformed spec is a
-    CONFIG error (exit 2), never a finding.
-
-    ONE implementation over both ledgers. `decision_grandfather` and
-    `changelog_grandfather` differ in which file name a key must end with —
-    data, passed in. Two copies of this would be two chances to accept a spec
-    the other rejects, and the ledger form is the thing a consumer hand-writes.
-    """
-    out: list[tuple[str, int | None]] = []
-    seen: set[str] = set()
-    for spec in specs:
-        raw, cap = spec.strip(), None
-        head, sep, tail = raw.rpartition(':')
-        if sep and tail.isdigit():
-            raw, cap = head.strip(), int(tail)
-            if cap < 1:
-                raise ConfigError(
-                    f'[pm] {key_name} {spec!r} caps 0 entries — drop '
-                    f'the ":0" to exempt nothing at all')
-        elif sep:
-            raise ConfigError(
-                f'[pm] {key_name} {spec!r} has a ":" but no entry '
-                f'count — write "<path>" or "<path>:<N>"')
-        key = raw.replace('\\', '/')
-        while key.startswith('./'):
-            key = key[2:]
-        if not key:
-            raise ConfigError(f'[pm] {key_name} {spec!r} names no path')
-        if not key.endswith(suffix):
-            raise ConfigError(
-                f'[pm] {key_name} {spec!r} does not name a '
-                f'{suffix} — the ledger names files, not directories')
-        if key in seen:
-            raise ConfigError(
-                f'[pm] {key_name} names {key} twice — one entry per file')
-        seen.add(key)
-        out.append((key, cap))
-    return tuple(out)
-
-
-def relkey(cfg: PmConfig, path: Path) -> str:
-    """The repo-relative, forward-slashed key a ledger spec is matched on.
-
-    One spelling for both ledgers, so a path a consumer writes into
-    `decision_grandfather` is keyed exactly as one written into
-    `changelog_grandfather`.
-    """
-    return cfg.rel(path).replace('\\', '/')
-
-
-def ledger_for(cfg: PmConfig, schema: LogSchema) -> dict[str, int | None]:
-    """The grandfather ledger this schema's rule reads, keyed by log path.
-
-    The schema names its own config key, so a caller holding a schema never has
-    to know which attribute of PmConfig carries its exemptions — which is what
-    keeps D12 and D15 one code path instead of two with a branch in them.
-    """
-    return dict(getattr(cfg, schema.ledger_key))
-
-
-# --- the changelog union (`pm changelog --render`, D16) ----------------------
-# A changelog is only worth having if "the notes for milestone xyz" is the SAME
-# answer every time. So the union is ordered by two totally-ordered keys and
-# never by a directory walk: milestones by DECLARED VERSION, entries by the
-# order the log itself holds them in (append-only, so that is the order they
-# were written).
-def milestones_newest_first(cfg: PmConfig) -> list[tuple[str, Path]]:
-    """(declared id, dir) for the ACTIVE tree, newest release first.
-
-    By the DECLARED VERSION, compared component-wise — never a string sort of
-    the directory name. `0.10` sorts BEFORE `0.9` lexically and after it
-    numerically, so a string sort publishes 0.9 as the newest release: wrong in
-    the one place a reader trusts a changelog most. `version_key` is the same
-    comparison `prune`'s lag-by-one already makes about which milestone is
-    newest, so the two cannot disagree about the order of a tree.
-
-    The id, then the directory name, break a tie — two milestones declaring one
-    version still come out in the same order on every filesystem, where the
-    walk order alone would vary.
-    """
-    out = [(unquote(field_of(d / 'milestone.md', 'id')) or d.name, d)
-           for d in milestone_dirs(cfg)]
-    return sorted(out, key=lambda t: (version_key(t[0]), t[0], t[1].name),
-                  reverse=True)
-
-
-def changelog_entries_of(mdir: Path) -> tuple[list[LogEntry], str]:
-    """(the milestone's changelog entries, why there are none).
-
-    The reason is not decoration: "this milestone shipped nothing worth saying"
-    and "this milestone's log could not be opened" are different facts, and a
-    render that prints an empty section for both is lying about one of them.
-    """
-    if dir_entries(mdir).get(CHANGELOG_FILE_NAME) != 'file':
-        return [], f'no {CHANGELOG_FILE_NAME}'
-    try:
-        text = read_raw(mdir / CHANGELOG_FILE_NAME)
-    except (OSError, UnicodeDecodeError) as err:
-        return [], f'{CHANGELOG_FILE_NAME} cannot be read ({err})'
-    entries = log_entries_in(text)
-    return entries, '' if entries else 'no entries yet'
-
-
-def milestones_without_notes(cfg: PmConfig) -> tuple[list[tuple[Path, str]], int]:
-    """D16 — (findings, `done` milestones scanned).
-
-    A release that ships with no notes is the one this stops. The bar is a
-    changelog that EXISTS, holds at least one entry, and holds at least one
-    entry D15 does not report — a log of four malformed blocks is not release
-    notes, it is four malformed blocks.
-
-    The `changelog_grandfather` cap suppresses here exactly as it does in D15:
-    a legacy entry D15 has been told to accept is an entry D16 must accept too,
-    or turning both rules on at once would be permanently red for a consumer
-    whose migration is the ledger.
-    """
-    ledger = ledger_for(cfg, CHANGELOG_SCHEMA)
-    out: list[tuple[Path, str]] = []
-    scanned = 0
-    for mdir in milestone_dirs(cfg):
-        mfile = mdir / 'milestone.md'
-        if field_of(mfile, 'status') != 'done':
-            continue
-        scanned += 1
-        mid = unquote(field_of(mfile, 'id')) or mdir.name
-        path = mdir / CHANGELOG_FILE_NAME
-        entries, why = changelog_entries_of(mdir)
-        if why:
-            out.append((path, f'milestone {mid} is done and has {why} — a '
-                              f'release ships with notes; append them with '
-                              f'`pm changelog {mid}`'))
-            continue
-        cap = ledger.get(relkey(cfg, path), 0)
-        broken = {n for n, _, _ in entry_violations_in(entries, CHANGELOG_SCHEMA)}
-        if any(n not in broken or cap is None or n < cap
-               for n in range(len(entries))):
-            continue
-        out.append((path, f'milestone {mid} is done and every one of its '
-                          f'{len(entries)} changelog entries is malformed — '
-                          f'no reader can tell what shipped'))
-    return out, scanned
-
-
+    return body + f'## {eid} — {when} — {title}{eol}'

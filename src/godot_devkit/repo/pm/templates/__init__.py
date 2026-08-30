@@ -33,7 +33,7 @@ TEMP_RENAME_SUFFIX = '{name}.pm-case-rename'
 # minus the extension, so `decisions.md` is minted by `decisions.md` and there
 # is no mapping table to keep in sync.
 GRAINS = ('milestone', 'feature', 'story', 'bug')
-DOCS = ('handoff', 'decisions', 'changelog', 'review')
+DOCS = ('handoff', 'decisions', 'review')
 
 
 class MissingTemplate(Exception):

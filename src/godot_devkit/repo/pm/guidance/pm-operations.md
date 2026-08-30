@@ -23,7 +23,6 @@ pm/roadmap/
     milestone.md                 id, name, status, + your project's own fields
     handoff.md                   cold-start only — never what `pm status` computes
     decisions.md                 DURABLE, append-only; survives close
-    changelog.md                 DURABLE — what shipped, for a player to read
     review.md                    TRANSIENT — deleted at close
     bugs/<slug>.md               lives in the milestone that will FIX it
     design/                      design notes for this milestone
@@ -42,21 +41,11 @@ how it grows a slot nothing knows about. `new milestone` and `new feature` are
 idempotent: re-run one on an existing grain and it fills the missing slots without
 touching an existing byte.
 
-**decisions.md is durable, review.md is transient.** Append a decision with
-`pm decide <grain-id> --chose … --over … --because … --evidence …` — never by hand;
-the command stamps the date and the next ordinal, and `--over` is required because a
-decision that cannot name what it ruled out is a description. At close, promote
-anything durable out of `review.md` into `decisions.md` and delete `review.md`.
-Read one back with `pm decisions <grain-id>` rather than a `find` piped to a `grep`.
-
-**changelog.md is the release note, and it is milestone-only.** Append with
-`pm changelog <milestone-id> --what "<one sentence a player would recognise>"
---evidence <hash|path[:line]>` — never by hand. Two fields and no more: what was
-built that a player cares about, and the reference proving it shipped. The reasoning
-behind it is a decision, so it goes in `decisions.md` instead; a changelog carrying it
-is a commit log with a nicer name. A feature contributes to its milestone's log
-through the entry's `Evidence:` pointer, never through a log of its own.
-`pm changelog --render` unions every milestone's log to stdout, newest release first.
+**decisions.md is durable, review.md is transient.** Open a decision with
+`pm decide <grain-id> <title>`: it appends one `## <id> — <date> — <title>` heading,
+stamping the two things a hand-written entry gets wrong, and the reasoning under it
+is yours to write. At close, promote anything durable out of `review.md` into
+`decisions.md` and delete `review.md`.
 
 To change what a grain looks like here, set `[pm] template_dir`, run
 `pm templates` to copy the packaged templates out, and edit the markdown. A file

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **one word to verify any repo** — Run `godot-devkit task quick` after a change and `godot-devkit task verify` before a release — in any repo that pins this toolkit, without learning its target names. (src/godot_devkit/repo/tasks.py)
+- **a gate on the shortcut itself** — `godot-devkit check tasks` fails the day a project renames a target its [tasks] table still points at, instead of the day an agent needed it. (tests/test_tasks.py:88)
+- **consumer smoke is a target** — `make smoke` runs every read verb against the live game checkouts, compares each printed census against an independent count, and fails if it leaves either checkout dirty. (tools/consumer_smoke.py)
+- **the fuzzers are code now** — The CommonMark differential (60,000 documents), the log-schema differential (692 logs) and the migration replay run from `make fuzz` in two seconds, instead of being rebuilt on demand. (tests/test_fuzz_markdown.py)
+- **closing a milestone no longer needs inside knowledge** — The close verb refuses a review record that the retention rule would delete, and `pm collapse` performs the close-time trim that used to be a hand edit. (tests/test_pm_close_protocol.py)
+- **the review contract is installable** — `godot-devkit install-agents` drops the review and build contract into a repo — run adversarial input, ship a test that failed against HEAD, print before and after. (src/godot_devkit/repo/installables/verification-reviewer.md)
+- **the release protocol points at the targets** — The release and consumer-smoke skills now start from `task verify` and `make smoke` instead of describing commands to retype, and name the collapse verb the close step needs. (.claude/skills/release/SKILL.md)
+- **check tasks states its finding once** — The no-[tasks]-table failure printed the same sentence twice, which reads as two findings. Exit 1 is unchanged — asking to check something unconfigured is a real finding. (tests/test_tasks.py:114)
+- **an install happens whole, or not at all** — A collision on the second file used to leave the first one installed while reporting nothing was written. Every destination is decided before the first write, and one refusal names them all. (tests/test_install.py:232)
+- **the generated workflow can actually run** — install-ci renders the trigger and setup steps a repo declares in devkit.toml [ci] — so a verify role needing Godot gets it provisioned. A malformed [ci] is exit 2, not a broken workflow. (tests/test_install.py:295)
+- **pm collapse refuses an uncommitted log** — pm collapse now refuses a decisions.md that is untracked or has uncommitted changes: it deletes the collapsed entries' prose and its pointer claims git history holds them. (26577d0)
+- **a collapsed decision id is never re-minted** — The collapse pointer carries an 'Ids spent' list that pm decide reads, so a collapsed id is never re-minted into the same log; check pm reports a re-mint or a pointer naming none. (26577d0)
+- **check tasks says what make -n runs** — check tasks now states that resolving a make role parses your Makefile, so parse-time $(shell) and +-prefixed recipe lines run. The mechanism is unchanged; the claim that it ran nothing was false. (26577d0)
+- **generated workflow keys are quoted** — install-ci quotes action-input keys, so an input named on/yes/no/123 is no longer read as a YAML 1.1 boolean or integer (on and yes collided into one key). (26577d0)
+- **install verbs refuse instead of tracebacking** — install-ci, install-agents and pm install-skills refuse a destination that is a directory, read-only or non-UTF-8 before writing anything, instead of raising a traceback mid-install. (26577d0)
+- **the log-schema fuzz tests its boundaries** — The log-schema fuzz corpus now lands exactly at the title and value caps and one either side, so an off-by-one at a cap fails the run instead of surviving it. (26577d0)
+- **the review-slot refusal resolves symlinks** — pm feature done judges --review-record through symlinks, so a link named durable.md pointing at the transient review.md is refused and a dangling link does not raise. (26577d0)
+- **one walk** — Filesystem enumeration moves into core/walk.py, which returns what it KEPT and what it SKIPPED under a closed-enum reason; Walk has no length, so a census cannot reach a count without its disclosures. (6ac90c3)
+- **the two allowlists** — An AST test asserts glob/rglob/iterdir/os.walk live only in core/walk.py and write_text/open-for-write/rename/unlink/rmtree/mkdir only in core/apply.py, naming file:line otherwise. (tests/test_boundaries.py)
+- **one apply** — Filesystem mutation moves into core/apply.py: a Plan is an explicit list of Steps, decide() names every obstruction from a closed enum before anything runs, and Applied says which landed. (7134e72)
+
 ## v0.14.0 — 2026-08-29
 
 - **a milestone has release notes** — `pm changelog <milestone-id> --what … --evidence …` appends a release note to that milestone's own log. (e432831)
@@ -35,17 +58,9 @@
 
 ---
 
-## Below this line: frozen, not rendered
-
-Everything above is generated by `godot-devkit pm changelog --render` from
-`pm/roadmap/*/changelog.md`. Everything below predates that machinery and is
-kept verbatim — do not re-render it, re-wrap it, or try to derive entries from
-it. Git history is the record for anything not shown here.
-
 `v0.13.0` is the only historical section retained, for one reason: it carries
 the breaking `DECISIONS.md` -> `decisions.md` rename and how to absorb it, and
-the `trail` consumer is still pinned below it. When trail migrates, this section
-and this note both go, and the file becomes rendered output end to end.
+the `trail` consumer is still pinned below it. When trail migrates it goes.
 
 ## v0.13.0 — 2026-08-29
 
