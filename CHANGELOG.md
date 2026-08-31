@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.17.0 — 2026-08-31
+
 - **`pm` id resolution refuses what creation always refused** — dot/empty/separator segments and absolute ids: `0.1/..` no longer writes a milestone's decisions.md, an absolute milestone id exits 2 instead of a `Path.glob` traceback. The fuzz harness's three carve-out pins died with their reasons. (repo/pm/model.py)
 - **the scene plane refuses a path the filesystem itself rejects** — ENAMETOOLONG (and kin) across scene set/rm/rename/add/reparent/connect, canonicalize, tiles paint/erase and refs --retarget is a refusal, not a raw OSError. (godot/write/)
 - **`check uid --fix` is byte-surgical on CRLF files** — only the uid attribute changes, every line terminator survives (whole-file byte-compare proven). CHECK 1 now censuses Script ref uids permissively: an undecodable spelling is reported INVALID, never repaired — closing the gap where CHECK 5's Script exemption and `check tres` both waved it through. (godot/checks/uid.py)

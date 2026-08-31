@@ -3,7 +3,7 @@ id: 0.17.0/v0.16.0-adoption/trail-wave2
 feature: 0.17.0/v0.16.0-adoption
 milestone: "0.17.0"
 name: Pin bump, install-* adoption, delete cc-uid-sidecar, D10 on
-status: review
+status: done
 owner:
 depends_on: []
 ---

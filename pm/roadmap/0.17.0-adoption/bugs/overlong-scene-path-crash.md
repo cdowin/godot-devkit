@@ -2,7 +2,7 @@
 id: 0.17.0/bugs/overlong-scene-path-crash
 milestone: "0.17.0"
 name:
-status: fixed
+status: closed
 caught_in: "0.17.0"
 fix_milestone:
 ---
