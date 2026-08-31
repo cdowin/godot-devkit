@@ -21,6 +21,22 @@ part of the fix, not a formality after it.
 This is what took one suite from 306 tests to 450 without a single test that
 existed for its own sake.
 
+## An input surface ships with its refusal matrix
+
+A test for intended behavior proves an existential; the contracts worth having
+are universal negatives over input space, and hostile input is the only test of
+one. When your story adds or extends an input surface — a CLI verb, an id/path
+grammar, a config key, a payload parser — ship with it (i) a **refusal matrix**:
+the inputs the grammar rejects (traversal, empty/dot segments, backslashes,
+globs, absolute paths, schemes, whitespace, over-long strings), enumerated as
+tests, each proven to refuse without a write; and (ii) **adversarial cases
+attacking the code's own docstring claims** — every "never", "cannot" and
+"only" gets input generated against the claim, never a re-run of the happy
+path. Where the project keeps a seeded property harness, it is the standing
+floor beneath both; your matrix pins the new surface's specifics on top of it.
+
+**No refusal matrix, no input surface.**
+
 ## A probe that does not perturb anything is indistinguishable from a gate that works
 
 **Print BEFORE and AFTER.** Every time you introduce a defect to prove a gate

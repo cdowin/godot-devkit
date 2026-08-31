@@ -48,7 +48,14 @@ class UidIndex:
 
     def of(self, res_path: str) -> str | None:
         if res_path not in self._resolved:
-            self._resolved[res_path] = self._resolve(res_path)
+            try:
+                self._resolved[res_path] = self._resolve(res_path)
+            except OSError:
+                # A path the FILESYSTEM refuses (a component over NAME_MAX
+                # raises out of `stat` on 3.11-3.13) has no uid on any route,
+                # and None is this resolver's documented legitimate answer —
+                # the caller refuses the ref rather than tracebacks on it.
+                self._resolved[res_path] = None
         return self._resolved[res_path]
 
     def _resolve(self, res_path: str) -> str | None:

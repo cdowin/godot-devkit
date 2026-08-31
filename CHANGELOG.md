@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`pm` id resolution refuses what creation always refused** — dot/empty/separator segments and absolute ids: `0.1/..` no longer writes a milestone's decisions.md, an absolute milestone id exits 2 instead of a `Path.glob` traceback. The fuzz harness's three carve-out pins died with their reasons. (repo/pm/model.py)
+- **the scene plane refuses a path the filesystem itself rejects** — ENAMETOOLONG (and kin) across scene set/rm/rename/add/reparent/connect, canonicalize, tiles paint/erase and refs --retarget is a refusal, not a raw OSError. (godot/write/)
+- **`check uid --fix` is byte-surgical on CRLF files** — only the uid attribute changes, every line terminator survives (whole-file byte-compare proven). CHECK 1 now censuses Script ref uids permissively: an undecodable spelling is reported INVALID, never repaired — closing the gap where CHECK 5's Script exemption and `check tres` both waved it through. (godot/checks/uid.py)
+- **a tracked-but-deleted file is a disclosed `UNVERIFIED` skip** in check uid/tres/props, never a FileNotFoundError traceback. (godot/checks/)
+
+- **`make fuzz` grows a seeded adversarial-input property harness** — every pm grain id and every scene/retarget path either refuses byte-identically or writes only inside its named slot, over 12 hostile input classes with anti-degenerate censuses. Proven to catch the v0.16.0 traversal blocker against the pre-fix code; found and pinned three live findings on arrival (`pm decide` dot-segment traversal, absolute-milestone-id crash, over-long scene-path crash — filed as 0.17.0 bugs). SDLC §5 now requires every new input surface to ship a refusal matrix plus adversarial cases against its own docstring claims, mirrored into the verification-builder contract. (tests/test_fuzz_inputs.py, SDLC.md, repo/installables/verification-builder.md)
+
 ## v0.16.0 — 2026-08-30
 
 - **`pm decide` refuses a `--`-leading title word** — the retired four-field interface's flags were landing verbatim in the durable log at exit 0. (repo/pm/cli.py)

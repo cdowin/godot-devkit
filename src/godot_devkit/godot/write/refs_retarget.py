@@ -41,7 +41,7 @@ from godot_devkit.core.project import repo_root
 from godot_devkit.core.walk import Kind, SkipReason
 from godot_devkit.godot.format.tscn import COMMENT_CHAR, EXT_RESOURCE_KIND, scan_line
 from godot_devkit.godot.format.tscn_document import LINE_ENDING, read_scene_text
-from godot_devkit.godot.write import utf8_refusal_reason
+from godot_devkit.godot.write import file_exists, utf8_refusal_reason
 from godot_devkit.godot.index.uid_index import RES_PREFIX
 from godot_devkit.godot.read.refs import exclude_prefixes
 
@@ -182,7 +182,7 @@ def _retarget_file(path: Path, rel: str, old: str, new: str,
 
 def run(old: str, new: str, dry_run: bool) -> int:
     root = repo_root()
-    if not (root / new[len(RES_PREFIX):]).is_file():
+    if not file_exists(root / new[len(RES_PREFIX):]):
         print(f'REFUSED  {new} does not exist on disk — retargeting '
               f'references onto nothing is minting drift')
         return EXIT_FINDINGS

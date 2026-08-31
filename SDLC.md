@@ -112,6 +112,29 @@ reviewer always runs strong at the highest effort.
 - **Every report ends with its token cost**, so an over-budget dispatch is
   visible while the session can still act on it.
 
+## 5. An input surface ships with its refusal matrix
+
+This package's contracts are universal negatives over input space ("this
+cannot write a sibling grain"), and a builder left alone writes existential
+tests for intended behavior — which is why every release review before
+0.17.0 caught its blocker instead of the pipeline catching it. The
+adversarial stage is therefore standing, not a review courtesy. A story that
+adds or extends an INPUT SURFACE — a CLI verb, an id/path grammar, a config
+key, a payload parser — ships, in the same story:
+
+- a **refusal matrix**: the inputs the grammar rejects — traversal,
+  empty/dot segments, backslashes, globs, absolute paths, schemes,
+  whitespace, over-long strings — enumerated as tests, each proven to
+  refuse without a write;
+- **adversarial cases against the code's own docstring claims**: every
+  "never", "cannot" and "only" the docstring states gets hostile input
+  generated AGAINST the claim, never a re-run of the intended path.
+
+The seeded property harness (`tests/test_fuzz_inputs.py`, in `make fuzz`)
+is the standing floor beneath both: it holds the whole CLI to
+refuse-or-contained-write; the matrix pins the new surface's specifics on
+top of it.
+
 ## Close protocol (ordered)
 
 Only once all features report and the tree is reconciled:

@@ -46,7 +46,8 @@ from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import Section, node_own_path, parse, split_path
 from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
 from godot_devkit.godot.index.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
-from godot_devkit.godot.write import render_diff, utf8_refusal_reason
+from godot_devkit.godot.write import (file_exists, render_diff,
+                                      utf8_refusal_reason)
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
@@ -233,7 +234,7 @@ def main(argv: list[str]) -> int:
     refused = 0
     for name in args.files:
         path = Path(name)
-        if not path.is_file():
+        if not file_exists(path):
             print(f'godot-devkit scene canonicalize: no such file: {path}')
             return EXIT_USAGE
         try:

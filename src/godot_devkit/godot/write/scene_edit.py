@@ -45,7 +45,8 @@ from godot_devkit.godot.format.tscn import (EXT_RESOURCE_ONLY, Section,
                                             TscnError, join_path, split_path)
 from godot_devkit.godot.format.tscn_document import TscnDocument
 from godot_devkit.godot.index.uid_index import RES_PREFIX, UidIndex
-from godot_devkit.godot.write import load_scene_or_refuse, render_diff
+from godot_devkit.godot.write import (file_exists, load_scene_or_refuse,
+                                      render_diff)
 
 VERBS = ('set', 'rename', 'add', 'rm', 'reparent', 'connect', 'disconnect')
 UNCHANGED = 'unchanged'
@@ -153,8 +154,8 @@ def _refuse_bad_instance_target(doc: TscnDocument, res_path: str) -> None:
     would be invention, not repair."""
     if not res_path.startswith(RES_PREFIX):
         raise TscnError(f'{res_path!r} is not a {RES_PREFIX} path')
-    if doc.path is None or not (
-            _project_root(doc.path) / res_path[len(RES_PREFIX):]).is_file():
+    if doc.path is None or not file_exists(
+            _project_root(doc.path) / res_path[len(RES_PREFIX):]):
         raise TscnError(f'{res_path} does not exist on disk — refusing to '
                         f'instance a scene that is not there')
     if doc.uid_resolver is None or doc.uid_resolver(res_path) is None:
@@ -346,7 +347,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     _check_usage(parser, args)
     path = Path(args.file)
-    if not path.is_file():
+    if not file_exists(path):
         print(f'godot-devkit scene {args.verb}: no such file: {path}')
         return EXIT_USAGE
 

@@ -43,3 +43,20 @@ def load_scene_or_refuse(path: str | Path) -> str | None:
     except UnicodeDecodeError as err:
         print(f'REFUSED  {path}: {utf8_refusal_reason(err)}')
         return None
+
+
+def file_exists(path: Path) -> bool:
+    """`Path.is_file()` that answers False for a path the FILESYSTEM refuses.
+
+    A component longer than the filesystem's NAME_MAX raises `OSError` out of
+    `stat` on 3.11, 3.12 and 3.13, and is swallowed into False from 3.14 on —
+    so a write verb handed an over-long path came out as a raw traceback or as
+    a refusal depending on which interpreter `uvx` picked. False is the answer
+    both readings want: nothing is there, and the caller's own missing-file
+    refusal names the path. The write plane's copy of the guard the pm plane
+    grew for exactly this (`repo/pm/cli._exists`).
+    """
+    try:
+        return path.is_file()
+    except OSError:
+        return False

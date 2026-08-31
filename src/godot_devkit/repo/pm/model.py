@@ -471,8 +471,24 @@ def id_is_literal(value: str) -> bool:
     return bool(value) and not (_GLOB_CHARS & set(value))
 
 
+def segment_is_literal(value: str) -> bool:
+    """One id SEGMENT the resolvers below may join onto a directory.
+
+    The resolution twin of the CLI's creation guard (`_check_slug`), the same
+    doctrine as `_grain_file`'s bugs branch: resolution must refuse every
+    spelling creation refuses. `id_is_literal` covers only the glob half — a
+    `.`/`..`/empty segment joins OUTSIDE the slot it addresses (`0.1/..`
+    resolved the MILESTONE dir via `features/..`, and `0.1/.` minted files in
+    `features/` itself, a slot the schema does not have), a separator smuggles
+    extra components into a one-component slot, and an absolute id reaches
+    `Path.glob` as a non-relative pattern and raises instead of exiting 2.
+    """
+    return (id_is_literal(value) and value not in ('.', '..')
+            and not any(c in value for c in '/\\'))
+
+
 def milestone_dir(cfg: PmConfig, mid: str) -> Path | None:
-    if not id_is_literal(mid):
+    if not segment_is_literal(mid):
         return None
     for base in (cfg.roadmap, cfg.roadmap / ARCHIVE_DIR_NAME):
         if not base.is_dir():
@@ -492,7 +508,7 @@ def milestone_file(cfg: PmConfig, mid: str) -> Path | None:
 
 def feature_dir(cfg: PmConfig, fid: str) -> Path | None:
     mid, _, slug = fid.partition('/')
-    if not slug or not id_is_literal(slug):
+    if not segment_is_literal(slug):
         return None
     d = milestone_dir(cfg, mid)
     if d is None:
@@ -532,7 +548,7 @@ def story_file(cfg: PmConfig, sid: str) -> Path | None:
     """
     mid, _, rest = sid.partition('/')
     fslug, _, sslug = rest.partition('/')
-    if not fslug or not sslug or not id_is_literal(sslug):
+    if not fslug or not segment_is_literal(sslug):
         return None
     fdir = feature_dir(cfg, f'{mid}/{fslug}')
     if fdir is None:

@@ -10,13 +10,14 @@ a repair that does not converge is worse than no repair.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
 
 from support import REPO_ROOT, run_check, temp_repo
 
-from godot_devkit.godot.checks import uid
+from godot_devkit.godot.checks import tres, uid
 
 BASE = ['project.godot', 'systems/rule.gd', 'systems/rule.gd.uid']
 CLEAN = [*BASE, 'scenes/clean.tscn']
@@ -159,6 +160,30 @@ class Repairs(unittest.TestCase):
         self.assertIn(f'DRIFT  scenes/drifted.tscn : {STALE_SCENE_UID}', out)
         # The decodable file's repair still lands.
         self.assertIn(f'uid="{ACTUAL_UID}" path="res://systems/rule.gd"', resource)
+
+    def test_fix_preserves_crlf_line_endings_byte_for_byte(self) -> None:
+        """Byte-surgical must hold for the cross-platform case too: the repair
+        used to read universal-newline and write translated, so fixing ONE uid
+        on a CRLF .tres rewrote EVERY line ending. The whole file is byte-
+        compared: exactly the uid attribute's text differs, every CRLF
+        terminator — including the repaired line's own — survives."""
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            crlf = root / 'data' / 'crlf.tres'
+            crlf.parent.mkdir(exist_ok=True)
+            body = ('[gd_resource type="Resource" load_steps=2 format=3 '
+                    'uid="uid://ddriftedres0"]\r\n\r\n'
+                    f'[ext_resource type="Script" uid="{STALE_RES_UID}" '
+                    'path="res://systems/rule.gd" id="1_rule"]\r\n\r\n'
+                    '[resource]\r\nscript = ExtResource("1_rule")\r\n')
+            crlf.write_bytes(body.encode())
+            subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
+            before = crlf.read_bytes()
+            code, out = _fix()
+            after = crlf.read_bytes()
+        expected = before.replace(STALE_RES_UID.encode(), ACTUAL_UID.encode())
+        self.assertNotEqual(before, expected)     # the drift was really there
+        self.assertEqual(code, 0, out)
+        self.assertEqual(after, expected)
 
     def test_refuses_to_invent_a_uid_that_does_not_exist(self) -> None:
         """The unfixable half stays a finding: minting a uid for a script with no
@@ -368,6 +393,77 @@ class Canonicality(unittest.TestCase):
         self.assertEqual(changed[1][0].replace(NONCANON_REF, CANON_REF),
                          changed[1][1])
         self.assertEqual(rerun_code, 0, rerun_out)
+
+
+SCRIPT_INVALID = [*CLEAN, 'data/script_invalid_uid.tres']
+
+
+class ScriptUidCharset(unittest.TestCase):
+    """CHECK 1's permissive census — a Script uid spelling outside [0-9a-z]
+    used to fall off the strict regex and read as a path-only ref, CHECK 5
+    exempts Script refs, and `check tres` only asks whether uid= is present:
+    a hand-corrupted Script uid was invisible to all three gates at once."""
+
+    def test_an_undecodable_script_uid_is_invalid_not_invisible(self) -> None:
+        with temp_repo('uid_repo', only=SCRIPT_INVALID):
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)
+        self.assertIn('INVALID  data/script_invalid_uid.tres : '
+                      'uid://INVALIDUPPER does not decode as a resource uid',
+                      out)
+        # Not repairable: no should-be value exists, and the fix hint must
+        # not advertise a repair the gate refuses to make.
+        self.assertNotIn('re-run with --fix', out)
+
+    def test_fix_never_touches_an_undecodable_script_uid(self) -> None:
+        with temp_repo('uid_repo', only=SCRIPT_INVALID) as root:
+            before = (root / 'data/script_invalid_uid.tres').read_bytes()
+            code, out = _fix()
+            after = (root / 'data/script_invalid_uid.tres').read_bytes()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(after, before)
+        self.assertIn('nothing to repair', out)
+
+    def test_check_tres_cannot_see_it_which_is_why_check_1_owns_it(self) -> None:
+        # Documents the sibling gate's contract: tres asks "is a uid=
+        # present", not "does it decode" — without CHECK 1's permissive
+        # census the spelling passes every gate.
+        with temp_repo('uid_repo', only=SCRIPT_INVALID):
+            code, out = run_check(tres)
+        self.assertEqual(code, 0, out)
+
+
+class TrackedButDeleted(unittest.TestCase):
+    """A file in the git index but gone on disk (partial checkout, mid-rebase)
+    is censused as an UNVERIFIED skip — never a FileNotFoundError traceback
+    (exit 1 with a stack trace a hook reads as findings), never a silent
+    drop. Mirrors `uid_index.from_repo_references`'s guard."""
+
+    GAP = ('UNVERIFIED  data/drifted.tres — tracked in git but not readable '
+           'on disk; not scanned')
+
+    def test_check_uid_censuses_the_gap_and_still_reports_real_drift(self) -> None:
+        with temp_repo('uid_repo', only=DRIFTED) as root:
+            (root / 'data/drifted.tres').unlink()
+            code, out = run_check(uid)
+        self.assertEqual(code, 1, out)               # drifted.tscn stays red
+        self.assertIn(self.GAP, out)
+        self.assertIn('across 2 file(s)', out)       # the gap is not counted scanned
+
+    def test_check_uid_passes_with_the_gap_disclosed_when_nothing_drifts(self) -> None:
+        with temp_repo('uid_repo', only=[*CLEAN, 'data/drifted.tres']) as root:
+            (root / 'data/drifted.tres').unlink()
+            code, out = run_check(uid)
+        self.assertEqual(code, 0, out)
+        self.assertIn(self.GAP, out)
+
+    def test_check_tres_censuses_the_gap_instead_of_crashing(self) -> None:
+        with temp_repo('uid_repo', only=DRIFTED) as root:
+            (root / 'data/drifted.tres').unlink()
+            code, out = run_check(tres)
+        self.assertEqual(code, 0, out)
+        self.assertIn(self.GAP, out)
+        self.assertIn('across 2 .tres/.tscn', out)
 
 
 class CliRouting(unittest.TestCase):

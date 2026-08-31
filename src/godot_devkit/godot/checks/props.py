@@ -305,11 +305,19 @@ def run() -> int:
 
     print('[check:props] CHECK — every assigned property exists as an @export '
           'or an engine built-in')
+    unreadable: list[str] = []
     for rel in git_lines('ls-files', '*.tscn', '*.tres'):
         if rel.startswith(exclude):
             continue
+        try:
+            sections = parse(str(root / rel))
+        except OSError:
+            # Tracked in the index but not readable on disk (partial checkout,
+            # mid-rebase). No properties to verify — a censused, disclosed
+            # skip (rule 4), never a traceback and never a finding.
+            unreadable.append(rel)
+            continue
         report.files += 1
-        sections = parse(str(root / rel))
         ext = _ext_index(sections)
         file_type = next((s.attrs.get('type') for s in sections
                           if s.kind == GD_RESOURCE_KIND), None)
@@ -318,6 +326,9 @@ def run() -> int:
                 report.seen += len(section.entries)
                 _check_section(section, rel, ext, scripts, scenes, extra, report, file_type)
 
+    for rel in unreadable:
+        print(f'  UNVERIFIED  {rel} — tracked in git but not readable on '
+              f'disk; not scanned')
     for line in report.dead:
         print(line)
     census = ', '.join(f'{count} {reason}' for reason, count in report.unverified.most_common())

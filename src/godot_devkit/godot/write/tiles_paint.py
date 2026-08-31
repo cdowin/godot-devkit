@@ -48,7 +48,8 @@ from godot_devkit.godot.format.tscn import (
     node_own_path,
 )
 from godot_devkit.godot.format.tscn_document import TscnDocument
-from godot_devkit.godot.write import load_scene_or_refuse, render_diff
+from godot_devkit.godot.write import (file_exists, load_scene_or_refuse,
+                                      render_diff)
 
 VERBS = ('paint', 'erase')
 PAINT, ERASE = VERBS
@@ -143,7 +144,7 @@ def main(argv: list[str]) -> int:
     # and argparse before 3.14 reads it as an option. See `glue_signed_values`.
     args = parser.parse_args(glue_signed_values(argv))
     path = Path(args.file)
-    if not path.is_file():
+    if not file_exists(path):
         print(f'godot-devkit tiles {args.verb}: no such file: {path}')
         return EXIT_USAGE
 

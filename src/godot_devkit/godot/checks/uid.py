@@ -10,6 +10,12 @@ on fresh checkouts and CI. This makes that drift a failing gate instead.
 
 CHECK 1 (HARD): every Script ext_resource uid in every tracked .tres/.tscn
                 (addons/ exempt) matches the referenced .gd's sidecar .uid.
+                The uid attribute is censused PERMISSIVELY: a spelling that
+                does not decode (a character outside [0-9a-z]) is reported
+                INVALID rather than falling outside the strict regex and
+                passing every gate — CHECK 5 exempts Script refs and
+                `check tres` only asks whether a uid= is present, so this is
+                the one gate that can see a hand-corrupted Script uid.
 CHECK 2 (HARD): every git-tracked .gd has a tracked .gd.uid.
 CHECK 3 (HARD): every NEW .gd — untracked or staged, per git status porcelain,
                 so .gitignore is respected — has a .uid sidecar ON DISK. A
@@ -39,8 +45,8 @@ deletion (a file removal, nothing else). Rewrites are byte-surgical: only the
 `uid="…"` attribute on the reported line changes.
 
 Nothing else is repaired, deliberately. A ref whose target has NO .uid,
-check 2's untracked sidecars, check 3's missing sidecars, and check 5's
-UNDECODABLE uids all need a uid that does not exist yet — and minting one
+check 2's untracked sidecars, check 3's missing sidecars, and check 1's /
+check 5's UNDECODABLE uids all need a uid that does not exist yet — and minting one
 here would be invention, not repair. Godot's ResourceUID.create_id() owns
 that, and a fabricated uid is exactly the plausible-looking wrong answer
 this package refuses to write.
@@ -56,6 +62,7 @@ from pathlib import Path
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core import apply
 from godot_devkit.core.config import config_section, str_tuple
+from godot_devkit.godot.format.tscn_document import read_scene_text
 from godot_devkit.godot.index.uid_codec import canonical
 from godot_devkit.godot.index.uid_index import (EXT_RESOURCE_PREFIX,
                                                 HEADER_PREFIXES, UID_ATTR)
@@ -114,7 +121,10 @@ class Drift(Rewrite):
 
 @dataclass
 class Misspelt(Rewrite):
-    """One header / non-Script uid whose TEXT is not the engine's spelling."""
+    """One uid whose TEXT is not the engine's spelling: a non-canonical
+    header / non-Script uid (repairable — same id), or an undecodable
+    spelling on any ref, Script included (INVALID — no should-be value
+    exists, and minting one would be invention)."""
 
     def report(self, fixed: bool) -> str:
         if self.actual is None:
@@ -127,19 +137,31 @@ class Misspelt(Rewrite):
 
 
 def _scan(root, exclude: tuple[str, ...],
-          ) -> tuple[list[Drift], list[Misspelt], int, int, int]:
-    """Every stale Script ref and every non-canonical header / non-Script uid,
-    plus the census that proves what was scanned."""
+          ) -> tuple[list[Drift], list[Misspelt], list[Misspelt], list[str],
+                     int, int, int]:
+    """Every stale Script ref, every non-canonical header / non-Script uid and
+    every undecodable Script uid spelling, plus the census that proves what was
+    scanned — including the tracked files that could not be read at all."""
     drifts: list[Drift] = []
     misspellings: list[Misspelt] = []
+    invalid_refs: list[Misspelt] = []
+    unreadable: list[str] = []
     files = 0
     refs = 0
     uids = 0
     for rel in git_lines('ls-files', '*.tres', '*.tscn'):
         if rel.startswith(exclude):
             continue
+        try:
+            text = (root / rel).read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            # Tracked in the index but not readable on disk (deleted in a
+            # partial checkout / mid-rebase, or unreadable). No evidence to
+            # scan — censused as UNVERIFIED, never a traceback and never a
+            # silent drop (`uid_index.from_repo_references` guards the same).
+            unreadable.append(rel)
+            continue
         files += 1
-        text = (root / rel).read_text(encoding='utf-8', errors='replace')
         for index, line in enumerate(text.split(LINE_SEP)):
             is_ext = line.startswith(EXT_RESOURCE_PREFIX)
             if line.startswith(HEADER_PREFIXES) or (is_ext and SCRIPT_TYPE not in line):
@@ -158,15 +180,30 @@ def _scan(root, exclude: tuple[str, ...],
                 continue
             gd_rel = path_m.group(1)
             uid_m = UID_ATTR.search(line)
-            if uid_m is None:
-                continue  # path-only ref — `check tres` owns that drift class
+            spelt = uid_m.group(1) if uid_m is not None else None
+            if spelt is None:
+                # The strict charset missed it. A uid attr may still be there
+                # with an undecodable spelling — hand-edit drift CHECK 5's
+                # Script exemption and `check tres`'s uid-presence test both
+                # wave through, so it must be censused HERE, permissively.
+                any_m = UID_ANY_ATTR.search(line)
+                if any_m is None:
+                    continue  # path-only ref — `check tres` owns that class
+                spelt = any_m.group(1)
+                if canonical(spelt) is None:
+                    # No should-be value exists: repairing would be invention
+                    # (the sidecar pins a DIFFERENT fact — what the uid should
+                    # BE, not how a broken spelling decodes).
+                    refs += 1
+                    invalid_refs.append(Misspelt(rel, index, spelt, None))
+                    continue
             refs += 1
             sidecar = root / f'{gd_rel}{UID_SUFFIX}'
             actual = (sidecar.read_text(encoding='utf-8', errors='replace').strip()
                       if sidecar.is_file() else None)
-            if actual != uid_m.group(1):
-                drifts.append(Drift(rel, index, uid_m.group(1), actual, gd_rel))
-    return drifts, misspellings, files, refs, uids
+            if actual != spelt:
+                drifts.append(Drift(rel, index, spelt, actual, gd_rel))
+    return drifts, misspellings, invalid_refs, unreadable, files, refs, uids
 
 
 def _apply(root, rewrites: list[Rewrite]) -> tuple[list[Rewrite], list[str]]:
@@ -183,6 +220,13 @@ def _apply(root, rewrites: list[Rewrite]) -> tuple[list[Rewrite], list[str]]:
     that failed to decode. A file that does not decode is REFUSED — its
     findings stay reported and untouched — never crashed on and never
     rewritten lossily.
+
+    Reads via `read_scene_text` and writes via `apply.write` (`newline=''`,
+    both halves untranslated) like every write verb: the universal-newline
+    read + translating write this replaced rewrote EVERY line ending of a
+    CRLF/mixed `.tres`, contradicting the byte-surgical claim above. On raw
+    text a `\\r` rides along as line content, so the needle check and the
+    join round-trip every terminator byte-for-byte.
     """
     fixed: list[Rewrite] = []
     refused: list[str] = []
@@ -192,14 +236,24 @@ def _apply(root, rewrites: list[Rewrite]) -> tuple[list[Rewrite], list[str]]:
     for rel, entries in by_file.items():
         path = root / rel
         try:
-            lines = path.read_text(encoding='utf-8').split(LINE_SEP)
+            lines = read_scene_text(path).split(LINE_SEP)
         except UnicodeDecodeError as err:
             refused.append(f'  REFUSED  {rel} — not valid UTF-8 ({err}); '
                            f'repair skipped, drift still reported')
             continue
+        except OSError as err:
+            refused.append(f'  REFUSED  {rel} — vanished mid-run '
+                           f'({err.strerror or err}); repair skipped, drift '
+                           f'still reported')
+            continue
         touched = False
         for rewrite in entries:
             needle = f'uid="{rewrite.uid}"'
+            # The scan's line numbers come from translated text; on a lone-CR
+            # file the raw split has fewer lines. Out of range or needle gone
+            # both mean the same thing: no provable target — leave it alone.
+            if rewrite.line >= len(lines):
+                continue
             line = lines[rewrite.line]
             if needle not in line:
                 continue
@@ -208,7 +262,7 @@ def _apply(root, rewrites: list[Rewrite]) -> tuple[list[Rewrite], list[str]]:
             fixed.append(rewrite)
         if touched:
             apply.raise_on_error(
-                apply.write_translated(path, LINE_SEP.join(lines)))
+                apply.write(path, LINE_SEP.join(lines)))
     return fixed, refused
 
 
@@ -273,7 +327,8 @@ def run(fix: bool = False) -> int:
     root = repo_root()
     exclude = str_tuple(config_section('uid'), 'uid', 'exclude_prefixes',
                         VENDORED_DEFAULT)
-    drifts, misspellings, files, refs, uids = _scan(root, exclude)
+    (drifts, misspellings, invalid_refs, unreadable,
+     files, refs, uids) = _scan(root, exclude)
     tracked = set(git_lines('ls-files'))
     new_gd = _new_gd(exclude)
     missing = [gd for gd in new_gd
@@ -307,8 +362,9 @@ def run(fix: bool = False) -> int:
         ('[check:uid] CHECK 1 — .tres/.tscn Script ext_resource uid matches '
          'the script\'s .uid',
          [drift.report(id(drift) in was_repaired) for drift in drifts]
+         + [invalid.report(False) for invalid in invalid_refs]
          + list(refused),
-         len(drifts) - drift_fixed),
+         len(drifts) - drift_fixed + len(invalid_refs)),
         (f'[check:uid] CHECK 2 — every tracked .gd has a tracked .gd.uid '
          f'({", ".join(exclude)} exempt)',
          [f'  UNTRACKED  {gd} has no tracked {gd}{UID_SUFFIX}'
@@ -339,6 +395,14 @@ def run(fix: bool = False) -> int:
         print(header)
         for line in findings:
             print(line)
+
+    # Tracked in the index but not readable on disk: no evidence to scan, so
+    # disclosed as a censused skip (rule 4 — never a traceback, never a
+    # silent drop), and deliberately not a finding: a partial checkout is a
+    # fact about the working tree, not drift in the resource.
+    for rel in unreadable:
+        print(f'  UNVERIFIED  {rel} — tracked in git but not readable on '
+              f'disk; not scanned')
 
     # The buckets the three new checks censused, so a scan of nothing is
     # visible (rule 4) and grep-shaped consumers can count what was covered.
