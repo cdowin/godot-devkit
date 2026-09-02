@@ -39,6 +39,10 @@ SCENE_GLOBS = ('*.tscn', '*.tres')
 TYPED_REF_KEYWORDS = ('extends', 'is', 'as')
 
 
+class EmptySymbol(Exception):
+    """No symbol to search for. Exit 2 — a usage error, never a scan."""
+
+
 @dataclass
 class Hit:
     kind: str
@@ -203,6 +207,14 @@ SECTION_TITLES = (
 
 
 def run(symbol: str, include_tests: bool) -> int:
+    if not symbol.strip():
+        # Every pattern here is built around the symbol, so an empty one turns
+        # each into a match-anything: `(?<![\w.])\s*\(` alone claimed 880 call
+        # sites in a consumer. A census that large and that wrong is the read
+        # side's cardinal sin — there is no scan whose answer this could be.
+        raise EmptySymbol('a symbol is required — refs takes a class_name, a '
+                          'method, a signal, or a .gd/.tscn/.tres path or uid, '
+                          'never an empty or blank one')
     root = repo_root()
     exclude = exclude_prefixes()
     gd_files = iter_files(root, exclude, GD_GLOB, include_tests)
@@ -239,8 +251,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return run(args.symbol, args.tests)
-    except ConfigError as err:
-        # A devkit.toml mistake is exit 2 — never a traceback, never ignored.
+    except (ConfigError, EmptySymbol) as err:
+        # A devkit.toml mistake, or an argument that names nothing, is exit 2 —
+        # never a traceback, never ignored, and never a scan run anyway.
         print(f'godot-devkit: {err}', file=sys.stderr)
         return 2
 

@@ -244,6 +244,19 @@ class RefsScope(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn('(no references found)', out)
 
+    def test_an_empty_or_blank_symbol_is_exit_2_not_a_scan(self) -> None:
+        """Every pattern is built around the symbol, so an empty one is a
+        match-anything: the bare-call arm alone claimed 880 call sites in a
+        consumer. There is no scan whose answer that could be."""
+        with temp_repo('read_repo') as root:
+            for blank in ('', ' ', '\t', '\n'):
+                with self.subTest(symbol=repr(blank)):
+                    code, out, err = run_cli(root, 'refs', blank)
+                    self.assertEqual(code, 2, out + err)
+                    self.assertIn('a symbol is required', err)
+                    self.assertNotIn('Traceback', err)
+                    self.assertNotIn('# refs:', out)
+
     def test_a_bare_string_exclude_is_exit_2(self) -> None:
         with temp_repo('read_repo') as root:
             _toml(root, '[refs]\nexclude_prefixes = "systems/"\n')
