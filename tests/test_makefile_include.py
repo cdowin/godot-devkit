@@ -62,13 +62,17 @@ STANDARD = (
 SELF_PUBLISHING = {'parse': 'parse.sh', 'lint': 'lint.sh',
                    'warnings': 'warnings.sh', 'unit': 'unit.sh'}
 # Which targets wrap their tool here, because the tool has no verdict of its
-# own: the devkit CLI gates, the pure-shell scans, and the aggregate.
+# own: the devkit CLI gates, the pure-shell scans, the scenario family and the
+# aggregate. The scenario family joined this list in 0.20.0 (MINOR-2): those
+# five streamed whatever their runner printed and IGNORED `VERBOSE` — none of
+# the three runners has a streaming path this file can reach — while the
+# include's header, `help`'s footer and the README all promised it worked.
 WRAPPED = ('uid-scan', 'pm-scan', 'hermetic-scan', 'hooks-self-test',
-           'runners-self-test', 'check')
+           'runners-self-test', 'check',
+           'integration', 'integration-all', 'scenario', 'smoke', 'capture')
 # Everything else is not a gate: `help` and `doctor` are reports, the read
-# verbs ARE their output, the scenario/capture family owns .scenario-reports/
-# and .capture-reports/ and prints its own one-line result, and the
-# compositions print nothing beyond their members' verdicts.
+# verbs ARE their output, and the compositions print nothing beyond their
+# members' verdicts.
 NOT_A_GATE = set(STANDARD) - set(SELF_PUBLISHING) - set(WRAPPED)
 
 # What each target needs on the command line to be asked for at all.
@@ -225,6 +229,45 @@ def test_verbose_streams_the_transcript_and_still_ends_with_the_verdict():
     assert done.returncode == 0, done.stdout + done.stderr
     assert '[check:stub] PASS' in done.stdout
     assert done.stdout.strip().splitlines()[-1].startswith('[CHECK]')
+
+
+# MINOR-2: `make scenario|smoke|integration|integration-all|capture VERBOSE=1`
+# printed exactly what `VERBOSE=0` did. The runner is reached with no engine
+# on PATH, so it fails — which is the useful shape here: a FAILING gate is
+# where a reader most needs the transcript, and both halves of the convention
+# have to hold on it.
+VERBOSE_TARGETS = [
+    pytest.param('scenario', ['NAME=smoke'], 'SCENARIO', id='scenario'),
+    pytest.param('smoke', [], 'SMOKE', id='smoke'),
+    pytest.param('integration', [], 'INTEGRATION', id='integration'),
+    pytest.param('integration-all', [], 'INTEGRATION', id='integration-all'),
+    pytest.param('capture', ['NAME=shot'], 'CAPTURE', id='capture'),
+]
+
+
+@pytest.mark.parametrize('target,args,tag', VERBOSE_TARGETS)
+def test_the_scenario_family_is_quiet_by_default_and_streams_on_verbose(
+        target, args, tag):
+    with project() as root:
+        quiet = make(root, target, *args, stubbed(root), PATH='/usr/bin:/bin')
+        loud = make(root, target, *args, stubbed(root), PATH='/usr/bin:/bin',
+                    VERBOSE='1')
+        log = root / '.gate-reports' / f'{target}.log'
+        transcript = log.read_text(encoding='utf-8')
+    verdict = f'[{tag}] '
+    quiet_lines = [ln for ln in quiet.stdout.splitlines() if ln.strip()]
+    assert quiet_lines and quiet_lines[-1].startswith(verdict), quiet.stdout
+    assert f'full log: .gate-reports/{target}.log' in quiet_lines[-1]
+    assert transcript, f'the verdict named a log that holds nothing'
+    # VERBOSE ADDS the stream; it never replaces the verdict or skips the file.
+    loud_lines = [ln for ln in loud.stdout.splitlines() if ln.strip()]
+    assert loud_lines[-1].startswith(verdict), loud.stdout
+    assert len(loud_lines) > len(quiet_lines), (
+        f'VERBOSE=1 printed no more than the quiet run:\n{loud.stdout}')
+    for line in transcript.splitlines():
+        if line.strip():
+            assert line in loud.stdout, (
+                f'VERBOSE=1 did not stream what the log holds: {line!r}')
 
 
 def test_a_failing_devkit_gate_shows_what_broke_and_stops_before_the_extras():

@@ -95,7 +95,13 @@ GDK_GATE_FAIL_LINES ?= 20
 # Each gate's one-line summary, read back out of its own transcript. The
 # leading `[tag]` a tool prints is stripped: the verdict line supplies the tag.
 GDK_SUM_CHECKS := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z-]+\] PASS' "$$log")"
-GDK_SUM_TAIL   := tail -1 "$$log" | sed -E 's/^\[[a-zA-Z:_-]+\] //'
+# The last line the tool TAGGED, not simply the last line: a runner whose
+# closing word is a pointer ("  full report: …") would otherwise summarise
+# itself as a file path. Falls back to the real last line when nothing in the
+# transcript is tagged at all, because a summary that is blank says less than
+# a wrong one.
+GDK_SUM_TAIL   := { grep -aE '^\[[A-Za-z][A-Za-z:_-]*\] ' "$$log" || tail -1 "$$log"; } \
+                  | tail -1 | sed -E 's/^\[[a-zA-Z:_-]+\] //'
 
 # $(call gdk_gate,<log slot>,<TAG>,<summary command>,<argv...>)
 # Run a command through the shipped capture helper: quiet by default, the full
@@ -189,22 +195,32 @@ runners-self-test: ## Every installed runner's --self-test corpus
 unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
 	@bash $(GDK_RUNNERS_DIR)/unit.sh $(SYS)
 
+# The scenario family goes through the capture helper, like every other target
+# whose tool publishes no verdict of its own. Before, these five streamed
+# whatever the runner printed and IGNORED VERBOSE entirely — `scenario.sh`
+# streams only on its own `-v`, and `integration.sh` / `capture.sh` have no
+# streaming path at all — while this file's header, `help`'s footer and the
+# README all said `VERBOSE=1` was how you saw the whole thing. One verdict line
+# naming .gate-reports/<gate>.log, VERBOSE=1 streams it: the same sentence, now
+# true of every gate here. (`scenario.sh -v` remains the hand-run flag for the
+# ENGINE transcript, which lands in .scenario-reports/ and is named in the
+# runner's own output.)
 integration: ## Integration tier. Pass ARGS="--all|--system x|<names>"
-	@bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all)
+	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
 
 integration-all: ## Every integration scenario, one process each, N in parallel
-	@bash $(GDK_RUNNERS_DIR)/integration.sh --all
+	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
 
 scenario: ## One scenario, cold:  make scenario NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make scenario NAME=<scenario>"; exit 2; }
-	@bash $(GDK_RUNNERS_DIR)/scenario.sh $(NAME)
+	$(call gdk_gate,scenario,SCENARIO,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/scenario.sh $(NAME))
 
 smoke: ## The smoke scenario (GDK_SMOKE_SCENARIO) — the shortest proof the game boots
-	@bash $(GDK_RUNNERS_DIR)/integration.sh --smoke
+	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke)
 
 capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }
-	@bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME)
+	$(call gdk_gate,capture,CAPTURE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME))
 
 import-cache: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
 	@bash $(GDK_RUNNERS_DIR)/import_cache.sh
