@@ -1,0 +1,292 @@
+# Makefile.devkit — the standard target set for a Godot project.
+#
+# DEVKIT-OWNED. `godot-devkit install-runners` writes it; `--force` overwrites
+# it. Edit the source under src/godot_devkit/repo/installables/ and re-install
+# — a local edit here is a fork by copy, and it is invisible, because the file
+# still looks like the one that was installed.
+#
+# YOUR Makefile is two lines plus whatever is yours:
+#
+#     DEVKIT_VERSION := v0.20.0
+#     include Makefile.devkit
+#
+#     my-scan: ## a gate of your own
+#     	@bash tools/dev/checks/my_scan.sh
+#
+# and your own gates join `check` through devkit.toml rather than through a
+# fork of this file:
+#
+#     [gates]
+#     extra = ["my-scan"]
+#
+# EVERY GATE PRINTS ONE LINE. The default output of a gate target is its
+# verdict, naming the full transcript on disk; `VERBOSE=1` streams the whole
+# thing. That is `gdk_gate_capture` / `gdk_gate_verdict` out of
+# tools/dev/gdk_runners.sh — either called by the recipe here, or already
+# called INSIDE the runner it invokes (parse, lint, warnings and unit publish
+# their own verdict; wrapping them again would bury it in a log).
+#
+# GNU make 3.81 (what macOS ships) is the floor. Nothing here needs more.
+#
+# NO `.SHELLFLAGS := -eu -o pipefail -c`. The gate recipes SOURCE the runner
+# library, and the library's capture helper has to suspend and restore errexit
+# to read PIPESTATUS at all; running it under an inherited `-e` is the case its
+# own comments record dying on. Recipes here are written to be robust without
+# it — explicit `|| exit`, and the helper's exit code read from a variable.
+SHELL := bash
+MAKEFLAGS += --warn-undefined-variables --no-print-directory
+.DELETE_ON_ERROR:
+.DEFAULT_GOAL := help
+
+# The one line that MUST differ per project: the devkit tag every machine and
+# every CI run resolves. It is yours, it lives in YOUR Makefile, and it is set
+# BEFORE this include.
+ifndef DEVKIT_VERSION
+$(error DEVKIT_VERSION is not set — put `DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit`)
+endif
+DEVKIT ?= uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
+
+# Where `install-runners` and `install-hooks` put what this file calls. Moving
+# them means setting these; after the write the files are yours.
+GDK_DEV_DIR     ?= tools/dev
+GDK_RUNNERS_DIR ?= $(GDK_DEV_DIR)/runners
+GDK_HOOKS_DIR   ?= tools/hooks
+
+# Passed THROUGH to the runners, which each carry the real default. Declared
+# empty rather than defaulted here: every runner reads `${GDK_X:-<default>}`,
+# so an exported empty value takes the runner's default and this file never
+# holds a second copy of it.
+#   GDK_GODOT           the engine binary (runner default: `godot`)
+#   GDK_SMOKE_SCENARIO  what `make smoke` boots (runner default: `smoke`)
+#   GDK_GUT_CMDLN       GUT's entry point (default: res://addons/gut/gut_cmdln.gd)
+GDK_GODOT          ?=
+GDK_SMOKE_SCENARIO ?=
+GDK_GUT_CMDLN      ?=
+export GDK_GODOT GDK_SMOKE_SCENARIO GDK_GUT_CMDLN
+
+# Gate output is a SUMMARY by default; the transcript goes to
+# .gate-reports/<gate>.log, which the verdict line names. Exported so
+# `make parse VERBOSE=1` works as well as `VERBOSE=1 make parse` — a
+# command-line make variable is not in a recipe's environment otherwise.
+VERBOSE ?=
+export VERBOSE
+
+# Arguments, overridden on the command line:
+#   SYS  — unit slice(s)            make unit SYS="input protocol"
+#   ARGS — passthrough              make integration ARGS="--system input"
+#   NAME — scenario / capture / symbol   make scenario NAME=boot_to_hub
+#   FILE — scene path               make scene FILE=scenes/world/hub.tscn
+#   OLD/NEW — two-file scene-diff   make scene-diff OLD=a.tscn NEW=b.tscn
+SYS  ?=
+ARGS ?=
+NAME ?=
+FILE ?=
+OLD  ?=
+NEW  ?=
+
+# Set by `check` when it re-enters itself through a sub-make. See `check`.
+GDK_IN_CHECK ?=
+
+# What a FAILING gate shows on the console before its verdict: the lines that
+# say what broke. Everything else stays in the log.
+GDK_GATE_FAIL_RE    ?= ^(FAILED|ERROR|SCRIPT ERROR)|  DRIFT |\] FAIL|^  (MISS|FALSE POSITIVE)
+GDK_GATE_FAIL_LINES ?= 20
+
+# Each gate's one-line summary, read back out of its own transcript. The
+# leading `[tag]` a tool prints is stripped: the verdict line supplies the tag.
+GDK_SUM_CHECKS := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z-]+\] PASS' "$$log")"
+# The last line the tool TAGGED, not simply the last line: a runner whose
+# closing word is a pointer ("  full report: …") would otherwise summarise
+# itself as a file path. Falls back to the real last line when nothing in the
+# transcript is tagged at all, because a summary that is blank says less than
+# a wrong one.
+GDK_SUM_TAIL   := { grep -aE '^\[[A-Za-z][A-Za-z:_-]*\] ' "$$log" || tail -1 "$$log"; } \
+                  | tail -1 | sed -E 's/^\[[a-zA-Z:_-]+\] //'
+
+# $(call gdk_gate,<log slot>,<TAG>,<summary command>,<argv...>)
+# Run a command through the shipped capture helper: quiet by default, the full
+# transcript on disk, one verdict line naming it, and the command's own exit
+# code preserved (the helper reads PIPESTATUS, so `$$?` would be the cap's).
+define gdk_gate
+@set -o pipefail; . $(GDK_DEV_DIR)/gdk_runners.sh; \
+log="$$(gdk_gate_log $(1))"; \
+gdk_gate_capture "$$log" -- $(4); \
+status="$$GDK_GATE_EXIT"; \
+summary="$$($(3))"; \
+if [ "$$status" -ne 0 ]; then \
+	grep -aE '$(GDK_GATE_FAIL_RE)' "$$log" | head -$(GDK_GATE_FAIL_LINES) \
+		|| tail -$(GDK_GATE_FAIL_LINES) "$$log"; \
+	summary="FAIL (exit $$status) — $$summary"; \
+fi; \
+gdk_gate_verdict $(2) "$$summary" "$$log"; \
+exit "$$status"
+endef
+
+.PHONY: help doctor parse lint warnings unit integration integration-all \
+        scenario smoke capture import-cache refs scene scene-diff orphans \
+        autoloads pm pm-scan uid-scan hermetic-scan hooks-self-test \
+        runners-self-test check precommit milestone
+
+help: ## Show this help (authoritative target list)
+	@echo "make <target> — the standard set from Makefile.devkit, plus this project's own"
+	@echo
+	@{ grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) || true; } \
+		| sort -u \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo
+	@echo 'Args: SYS="a b"  ARGS="--all"  NAME=<scenario|symbol>  FILE=<path>  VERBOSE=1'
+	@echo 'Gates print ONE verdict line naming .gate-reports/<gate>.log; VERBOSE=1 streams it.'
+
+doctor: ## Verify the dev toolchain (godot, gdlint, GUT, hooks)
+	@bash $(GDK_DEV_DIR)/checks/doctor.sh
+
+# --- Tier 1: static / fast gates ---------------------------------------------
+# parse, lint, warnings and unit publish their own verdict from inside the
+# runner. They are NOT wrapped again here — a gate wrapped twice reports the
+# wrapper's summary and files the runner's verdict in a log nobody opens.
+parse: ## Compile gate — every .gd compiles + the headless boot is clean
+	@bash $(GDK_RUNNERS_DIR)/parse.sh
+
+lint: ## gdlint static analysis over every tracked source dir
+	@bash $(GDK_RUNNERS_DIR)/lint.sh
+
+warnings: ## GDScript analyzer-warnings gate (the editor-only ones)
+	@bash $(GDK_RUNNERS_DIR)/warnings.sh
+
+uid-scan: ## .uid drift guard (script-ref <-> .gd.uid, sidecar presence, canonicality)
+	$(call gdk_gate,uid-scan,UID,$(GDK_SUM_CHECKS),$(DEVKIT) check uid)
+
+pm-scan: ## PM-tree status-drift guard (contradictory states; done needs a review record)
+	$(call gdk_gate,pm-scan,PM,$(GDK_SUM_CHECKS),$(DEVKIT) check pm)
+
+hermetic-scan: ## Hermeticity gate (a headless run's sandbox HOME self-destructs)
+	$(call gdk_gate,hermetic-scan,HERMETIC,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/hermetic_run_scan.sh)
+
+hooks-self-test: ## The engine-boot guard's own block/allow corpus — proven, not claimed
+	$(call gdk_gate,hooks-self-test,HOOKS,$(GDK_SUM_TAIL),bash $(GDK_HOOKS_DIR)/cc-godot-sandbox.sh --self-test)
+
+# Derived, not listed: every installed runner's own corpus, so a runner that
+# lands tomorrow is proven the day it arrives. A census of ZERO says so and
+# fails — it cannot tell an uninstalled tree from a passing one, and a repo
+# that moved its runners without setting GDK_RUNNERS_DIR is exactly that tree.
+# The census counts RUNNERS only: the library is always exactly one, so
+# counting it would put the floor permanently out of reach.
+runners-self-test: ## Every installed runner's --self-test corpus
+	@set -o pipefail; . $(GDK_DEV_DIR)/gdk_runners.sh; \
+	log="$$(gdk_gate_log runners-self-test)"; count=0; fail=''; \
+	for s in $(GDK_DEV_DIR)/gdk_runners.sh $(GDK_RUNNERS_DIR)/*.sh; do \
+		[ -f "$$s" ] || continue; \
+		case "$$s" in $(GDK_RUNNERS_DIR)/*) count=$$((count + 1));; esac; \
+		echo "=== $$s --self-test ===" >> "$$log"; \
+		gdk_gate_capture "$$log" -- bash "$$s" --self-test; \
+		[ "$$GDK_GATE_EXIT" -eq 0 ] || fail="$$fail $$(basename "$$s")"; \
+	done; \
+	if [ "$$count" -eq 0 ]; then \
+		gdk_gate_verdict RUNNERS "FAIL — no runners under $(GDK_RUNNERS_DIR); run godot-devkit install-runners" "$$log"; \
+		exit 2; \
+	fi; \
+	if [ -n "$$fail" ]; then \
+		grep -aE '$(GDK_GATE_FAIL_RE)' "$$log" | head -$(GDK_GATE_FAIL_LINES) || true; \
+		gdk_gate_verdict RUNNERS "FAIL on$$fail" "$$log"; exit 1; \
+	fi; \
+	gdk_gate_verdict RUNNERS "the library + $$count runner corpora PASS" "$$log"
+
+# --- Tier 2: tests ------------------------------------------------------------
+unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
+	@bash $(GDK_RUNNERS_DIR)/unit.sh $(SYS)
+
+# The scenario family goes through the capture helper, like every other target
+# whose tool publishes no verdict of its own. Before, these five streamed
+# whatever the runner printed and IGNORED VERBOSE entirely — `scenario.sh`
+# streams only on its own `-v`, and `integration.sh` / `capture.sh` have no
+# streaming path at all — while this file's header, `help`'s footer and the
+# README all said `VERBOSE=1` was how you saw the whole thing. One verdict line
+# naming .gate-reports/<gate>.log, VERBOSE=1 streams it: the same sentence, now
+# true of every gate here. (`scenario.sh -v` remains the hand-run flag for the
+# ENGINE transcript, which lands in .scenario-reports/ and is named in the
+# runner's own output.)
+integration: ## Integration tier. Pass ARGS="--all|--system x|<names>"
+	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
+
+integration-all: ## Every integration scenario, one process each, N in parallel
+	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
+
+scenario: ## One scenario, cold:  make scenario NAME=<scenario>
+	@test -n "$(NAME)" || { echo "usage: make scenario NAME=<scenario>"; exit 2; }
+	$(call gdk_gate,scenario,SCENARIO,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/scenario.sh $(NAME))
+
+smoke: ## The smoke scenario (GDK_SMOKE_SCENARIO) — the shortest proof the game boots
+	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke)
+
+capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<scenario>
+	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }
+	$(call gdk_gate,capture,CAPTURE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME))
+
+import-cache: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
+	@bash $(GDK_RUNNERS_DIR)/import_cache.sh
+
+# --- Introspection (pure parse; never boots Godot) ----------------------------
+# Human aliases over the pinned package — `$(DEVKIT) <sub>` is the canonical
+# invocation and these route through it, so there is ONE dispatch path.
+scene: ## Compact read-only summary of a .tscn/.tres:  make scene FILE=<path> [ARGS=--props]
+	@test -n "$(FILE)" || { echo "usage: make scene FILE=<path.tscn> [ARGS=--props]"; exit 2; }
+	@$(DEVKIT) scene $(FILE) $(ARGS)
+
+scene-diff: ## Structural diff:  make scene-diff FILE=<path> [ARGS="--git <ref>"]  or  OLD=<a> NEW=<b>
+	@if [ -n "$(OLD)" ] || [ -n "$(NEW)" ]; then \
+		test -n "$(OLD)" && test -n "$(NEW)" || { echo "usage: make scene-diff OLD=<old> NEW=<new>"; exit 2; }; \
+		$(DEVKIT) scene-diff $(OLD) $(NEW); \
+	else \
+		test -n "$(FILE)" || { echo "usage: make scene-diff FILE=<path> [ARGS=\"--git <ref>\"]  or  OLD=<a> NEW=<b>"; exit 2; }; \
+		$(DEVKIT) scene-diff $(FILE) $(ARGS); \
+	fi
+
+refs: ## Reference-aware symbol search:  make refs NAME=<symbol> [ARGS=--tests]
+	@test -n "$(NAME)" || { echo "usage: make refs NAME=<symbol> [ARGS=--tests]"; exit 2; }
+	@$(DEVKIT) refs $(NAME) $(ARGS)
+
+orphans: ## Possible-orphan detector (.gd/.tscn/.tres with zero inbound refs)
+	@$(DEVKIT) orphans $(ARGS)
+
+autoloads: ## Autoload census + suffix/heuristic cross-check
+	@$(DEVKIT) autoloads
+
+pm: ## PM-tree CLI (the ONLY sanctioned status transition):  make pm ARGS="story wip <id>"
+	@$(DEVKIT) pm $(if $(ARGS),$(ARGS),--help)
+
+# --- Aggregate gates ----------------------------------------------------------
+# `check` is the devkit gate roster (`check all`, whose members are `[checks]
+# all` in devkit.toml) followed by THIS project's own gate targets (`[gates]
+# extra`). Extension by config; no fork of this file, and no second list of
+# gate names anywhere.
+#
+# The roster is read ONCE per run, by the devkit CLI, because make has no
+# business parsing TOML — a `sed` over section headers is a second reader and
+# a second answer. A bad value exits 2 here rather than silently narrowing the
+# gate, which is the one failure mode a gate must never have.
+#
+# RE-ENTRY IS REFUSED. `extra = ["check"]` — or a project gate that itself runs
+# `make check` — would recurse forever. The sub-make carries a marker, and a
+# second entry stops with a line naming the config key. That holds for
+# `precommit` and `milestone` too, and for a target two levels down, which a
+# list of forbidden names could not.
+#
+# THE SUB-MAKE IS SPELLED `$${MAKE:-make}`, NOT `$(MAKE)`, ON PURPOSE. Make
+# executes any recipe line containing the literal `$(MAKE)` even under `-n` —
+# so `make -n check`, which promises to run NOTHING, would fetch and run the
+# pinned package to read the roster. The cost is that `make -j check` starts
+# the sub-make without the jobserver; gates are sequential anyway, and a
+# dry run that quietly executes is the worse of the two.
+check: ## Static gate: the devkit checks + this project's own ([gates] extra)
+	@test -z "$(GDK_IN_CHECK)" || { echo "make check: re-entered through [gates] extra in devkit.toml — a gate target that runs \`make check\` recurses forever; drop it from that list" >&2; exit 2; }
+	$(call gdk_gate,check,CHECK,$(GDK_SUM_CHECKS),$(DEVKIT) check all)
+	@extra="$$($(DEVKIT) gates-extra)" || exit $$?; \
+	[ -z "$$extra" ] || $${MAKE:-make} GDK_IN_CHECK=1 $$extra
+
+# The per-change gate, and the compositions print nothing of their own: each
+# member's verdict is the output.
+precommit: check parse lint unit smoke ## Per-change gate: check + parse + lint + unit + smoke
+
+# The full gate, run once all features land. `unit` runs whole here; the
+# per-change cadence slices it.
+milestone: check parse lint warnings unit integration-all ## Full gate: check + parse + lint + warnings + unit + integration-all

@@ -75,6 +75,13 @@ def refuse(command: str, *argv: str) -> tuple[int, str]:
 
 
 WORKFLOW = '.github/workflows/verify.yml'
+# The set both consumers run on a push. verify.yml is the one this repo itself
+# carries; the other three read `config/version` out of a project.godot, which
+# a stdlib Python package does not have — see the self-hosting test below.
+WORKFLOWS = (WORKFLOW,
+             '.github/workflows/uid-guard.yml',
+             '.github/workflows/semver-gate.yml',
+             '.github/workflows/auto-tag.yml')
 AGENTS = ('.claude/agents/verification-reviewer.md',
           '.claude/agents/verification-builder.md',
           '.claude/agents/architect.md',
@@ -104,8 +111,19 @@ HOOKS = ('tools/hooks/cc-commit-pathspec.sh',
          'tools/dev/checks/doctor.sh',
          'tools/setup-hooks.sh')
 RUNNERS = ('tools/dev/gdk_runners.sh',
-           'tools/dev/runners/import_cache.sh')
-DESTINATIONS = {'install-ci': (WORKFLOW,),
+           'tools/dev/runners/import_cache.sh',
+           'tools/dev/runners/parse.sh',
+           'tools/dev/runners/compile_sweep.gd',
+           'tools/dev/runners/compile_sweep.gd.uid',
+           'tools/dev/runners/lint.sh',
+           'tools/dev/runners/warnings.sh',
+           'tools/dev/runners/unit.sh',
+           'tools/dev/runners/scenario.sh',
+           'tools/dev/runners/integration.sh',
+           'tools/dev/runners/capture.sh',
+           'tools/dev/runners/hermetic_run_scan.sh',
+           'Makefile.devkit')
+DESTINATIONS = {'install-ci': WORKFLOWS,
                 'install-agents': AGENTS,
                 'install-hooks': HOOKS,
                 'install-runners': RUNNERS}
@@ -504,20 +522,30 @@ def test_this_repo_carries_what_install_ci_produces():
     and it would be invisible — the file still looks like the one that was
     installed. Edit the source under installables/ and re-install.
 
-    `install-hooks` is deliberately absent: this package holds no Godot tree
-    and no shared-agent worktree, so installing a Godot-boot guard here would
-    be a file with nothing to guard. It is covered instead by installing into
-    a temp repo and RUNNING it, which is the stronger test anyway.
+    PARTIAL, and decided the same way `install-agents` is: verify.yml runs
+    `make milestone`, which this repo has, so it MUST be present and current.
+    The other three read `config/version` out of a project.godot — this package
+    has neither, versions in pyproject.toml, and bumps at CLOSE rather than at
+    merge. Installing them here would be three workflows guarding a flow this
+    repo does not run, which is the same reasoning that keeps `install-hooks`
+    un-self-hosted. What is carried must be current; what is absent is
+    legitimately absent.
     """
     repo_root.cache_clear()
     load_config.cache_clear()
     previous = Path.cwd()
     os.chdir(REPO_ROOT)
     try:
-        code, out = run('install-ci')
+        present = [rel for _, rel in install.PLANS['install-ci']
+                   if (REPO_ROOT / rel).is_file()]
+        assert WORKFLOW in present, (
+            f'{WORKFLOW} is not present in this repo — the one workflow it '
+            f'self-hosts, and the floor this test would otherwise pass over')
+        code, out = run('install-ci', '--diff')
         assert code == 0, out
-        assert out.count('already current') == len(install.PLANS['install-ci']), (
-            f'install-ci is not byte-current in this repo:\n{out}')
+        stale = [rel for rel in present if f'{rel} already current' not in out]
+        assert not stale, (
+            f'not byte-current in this repo: {stale}\n{out}')
     finally:
         os.chdir(previous)
         repo_root.cache_clear()
@@ -555,14 +583,100 @@ def test_this_repo_carries_the_roles_it_runs_byte_current():
 
 def test_every_installable_on_disk_is_reachable_through_a_verb():
     """A payload no verb names is a file that ships in the wheel, drifts, and
-    is discovered by nobody. Asked of the directory, not of a second list."""
+    is discovered by nobody. Asked of the directory, not of a second list.
+
+    `init` names three of them — the project-owned seeds — and it is a verb
+    like the rest, so its table joins the union rather than being carved out.
+    """
     from godot_devkit.core import walk
     from godot_devkit.core.walk import Kind
+    from godot_devkit.repo import init
     found = walk.children(REPO_ROOT / 'src/godot_devkit/repo/installables',
                           Kind.FILE)
     on_disk = {p.name for p in found.kept}
     named = {name for entries in install.PLANS.values()
-             for name, _ in entries}
+             for name, _ in entries} | {name for name, _ in init.SEEDS}
     assert on_disk == named, (
         f'unreachable: {sorted(on_disk - named)}; '
         f'missing: {sorted(named - on_disk)}')
+
+
+# --- the exec bit: a script is written RUNNABLE -------------------------------
+# 0.20.0 MAJOR-1, and the 0.19.0 NIT it subsumes. The runners used to be
+# written -rw-r--r-- and the next step told the operator to `chmod +x` them.
+# `integration.sh`'s fan-out did not read that paragraph: it exec'd
+# `scenario.sh` directly, so every scenario on every `init`'d project exited
+# 126 and the FAILURES block printed the scenario name with nothing under it.
+# The mode is now part of the write, in `core.apply`, which owns every
+# mutation this package makes.
+def _mode(target: Path) -> int:
+    return target.stat().st_mode & 0o777
+
+
+@pytest.mark.parametrize('command', VERBS)
+def test_every_shell_installable_is_written_executable(command):
+    """Every `.sh` this verb writes is runnable, and nothing else's mode moved.
+
+    Asked of the DESTINATION suffix, per verb, so a `.sh` added to any plan
+    tomorrow is covered the day it lands.
+    """
+    with repo() as root:
+        code, out = run(command)
+        assert code == 0, out
+        scripts = [rel for rel in DESTINATIONS[command] if rel.endswith('.sh')]
+        others = [rel for rel in DESTINATIONS[command] if not rel.endswith('.sh')]
+        not_runnable = [rel for rel in scripts
+                        if not os.access(root / rel, os.X_OK)]
+        runnable = [rel for rel in others if os.access(root / rel, os.X_OK)]
+    assert not not_runnable, (
+        f'{command} wrote {not_runnable} without an execute bit — a caller '
+        f'exec\'ing one gets 126, and `Permission denied` is a diagnosis no '
+        f'gate summary matches')
+    assert not runnable, (
+        f'{command} made {runnable} executable; only `.sh` is a script here')
+
+
+def test_the_exec_bit_does_not_widen_who_may_read_the_file():
+    """`chmod +x`, not `chmod 755`. The execute bit joins the classes that can
+    already read the file — widening a 0600 destination to world-readable is a
+    permission decision no install verb was asked to make."""
+    with repo() as root:
+        target = root / 'tools/dev/runners/parse.sh'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('stale\n', encoding='utf-8')
+        target.chmod(0o600)
+        code, out = run('install-runners', '--force')
+        assert code == 0, out
+        assert _mode(target) == 0o700, oct(_mode(target))
+
+
+def test_a_byte_current_script_missing_the_bit_is_repaired_not_reported_current():
+    """The consumer this fix exists for already ran the old verb: their files
+    are byte-identical and 0644. A re-run that reported them `already current`
+    would leave every one of them broken forever."""
+    with repo() as root:
+        code, out = run('install-runners')
+        assert code == 0, out
+        target = root / 'tools/dev/runners/scenario.sh'
+        target.chmod(0o644)
+
+        code, out = run('install-runners')
+        assert code == 0, out
+        assert os.access(target, os.X_OK), 'the re-run left it unrunnable'
+        assert 'wrote tools/dev/runners/scenario.sh' in out, out
+
+        # …and it converges: the run after that has nothing left to do.
+        code, out = run('install-runners')
+        assert code == 0, out
+        assert 'already current' in out and 'wrote ' not in out, out
+
+
+def test_install_runners_next_step_no_longer_asks_for_a_chmod():
+    """The 0.19.0 NIT was closed by DOCUMENTING the missing bit. It is closed
+    now by writing it, and a paragraph still asking for the chmod would send an
+    operator to repair something the verb just did."""
+    with repo():
+        code, out = run('install-runners')
+    assert code == 0, out
+    assert 'chmod +x' not in out, out
+    assert 'EXECUTABLE' in out, out

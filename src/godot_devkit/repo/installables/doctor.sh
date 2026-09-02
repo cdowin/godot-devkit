@@ -81,12 +81,21 @@ else
 	     "brew install shellcheck — the shell static gate is skipped without it."
 fi
 
-# --- GUT addon (make unit) — CRITICAL ----------------------------------------
+# --- GUT addon (make unit) — CRITICAL once the project has a unit tier -------
+# Three states, not two. A project with NO addons/gut at all has no unit tier
+# yet: that is a fresh project, not a broken toolchain, and failing it would
+# make `make doctor` un-greenable on day one — the one day it is most likely to
+# be run. A project that HAS the addon directory and is missing the entry point
+# is genuinely broken, and that still fails.
+GUT_DIR="$(dirname "$GUT_ENTRY")"
 if [ -f "$GUT_ENTRY" ]; then
 	pass "GUT addon ($GUT_ENTRY)"
+elif [ -d "$GUT_DIR" ]; then
+	fail "GUT addon incomplete" \
+	     "$GUT_DIR/ is present but $GUT_ENTRY is absent — 'make unit' cannot run the unit tier. Restore the addon."
 else
-	fail "GUT addon missing" \
-	     "$GUT_ENTRY absent — 'make unit' cannot run the unit tier. Restore the addon."
+	warn "GUT addon not installed ($GUT_DIR/ absent)" \
+	     "'make unit' has no unit tier to run until you add GUT. Install it into $GUT_DIR/ when you want one."
 fi
 
 # --- git hooks via core.hooksPath (guards + auto-gate + push safety) ---------

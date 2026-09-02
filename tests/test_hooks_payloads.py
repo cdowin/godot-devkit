@@ -272,8 +272,8 @@ def test_the_armed_corpus_grows_by_exactly_the_function_cases(armed_sandbox,
         assert run.returncode == 0, run.stdout + run.stderr
         return run.stdout.split('—')[1].strip()
 
-    assert counts(hooks_repo / SANDBOX) == '13 block / 13 allow case(s)'
-    assert counts(armed_sandbox) == '15 block / 15 allow case(s)'
+    assert counts(hooks_repo / SANDBOX) == '13 block / 16 allow case(s)'
+    assert counts(armed_sandbox) == '15 block / 18 allow case(s)'
 
 
 # --- cc-godot-sandbox: the STOCK gdk_ roster, guarded with no config ----------

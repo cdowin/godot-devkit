@@ -4,8 +4,8 @@
 Shipped as `godot-devkit check doc`: a fast, static gate over the consuming
 repo's CLAUDE.md + .claude/rules/*.md + .claude/agents/*.md (the `[doc] scope`
 config key overrides that roster) that catches the objectively-checkable class
-of doc drift — a dead file path, a `make <target>` the Makefile no longer
-declares, a markdown link to a moved file, a skill written as a flat `.md`
+of doc drift — a dead file path, a `make <target>` neither the Makefile nor
+anything it `include`s declares, a markdown link to a moved file, a skill written as a flat `.md`
 that never loads. NOT a substitute for a human/agent doc review (duplication,
 scope creep, "is this claim still true" symbol-identity checks) — just the
 subset a parser can answer: does this path/link/make-target resolve.
@@ -52,6 +52,16 @@ MD_LINK_TEXT = re.compile(r'`[^`]+`\]\(')  # a backtick span used as [`text`](hr
                                             # its path claim is the link's real href, checked separately
 MD_LINK = re.compile(r'\[[^\]]*\]\(([^)]+)\)')
 MAKE_TARGET_RECIPE = re.compile(r'^([a-zA-Z][a-zA-Z0-9_-]*):', re.MULTILINE)
+# `include Makefile.devkit` — a project's Makefile is allowed to be two lines
+# plus its own targets, so the target roster lives in the INCLUDED file. A path
+# holding a make variable is unresolvable without expanding make's whole
+# environment, and is skipped rather than guessed at (the finding it would
+# cause is a false one; the target it would miss is a false PASS on one name).
+MAKE_INCLUDE = re.compile(r'^\s*[-s]?include\s+(.+)$', re.MULTILINE)
+MAKE_VARIABLE = '$'
+# One level of include is what a consumer Makefile has; the bound is what stops
+# a cycle (`include a` / `include b` / `include a`) from spinning here.
+MAX_INCLUDE_DEPTH = 4
 MAKE_INVOCATION = re.compile(r'\bmake\s+([a-zA-Z][a-zA-Z0-9_-]*)')
 PATH_CANDIDATE = re.compile(r'^[A-Za-z0-9_./-]+\.(gd|tscn|tres|py|sh|md)$')
 PLACEHOLDER_CHARS = ('<', '>', '*', '$')
@@ -75,15 +85,37 @@ def scope_files() -> list[Path]:
 
 
 def real_make_targets() -> set[str]:
-    """Every recipe name the Makefile actually defines.
+    """Every recipe name `make` would actually resolve, includes followed.
 
     A repo with no Makefile has no make targets — an empty set, not a crash.
     (Any `make x` a doc still claims is then reported as dead, which is right.)
+
+    The includes are followed because the standard target set now ships as one:
+    a consumer's Makefile is `DEVKIT_VERSION := …` + `include Makefile.devkit`
+    plus its own targets, so a roster read from the root file alone reports
+    every `make check` in every doc as dead — the gate's own cardinal sin
+    inverted, a wall of findings over targets that resolve fine. Widening only:
+    this can never invent a target neither file defines.
     """
-    if not MAKEFILE.is_file():
-        return set()
-    text = MAKEFILE.read_text(encoding='utf-8', errors='replace')
-    return set(MAKE_TARGET_RECIPE.findall(text))
+    seen: set[Path] = set()
+    targets: set[str] = set()
+    pending = [(MAKEFILE, 0)]
+    while pending:
+        path, depth = pending.pop()
+        resolved = path.resolve()
+        if resolved in seen or not path.is_file():
+            continue
+        seen.add(resolved)
+        text = path.read_text(encoding='utf-8', errors='replace')
+        targets |= set(MAKE_TARGET_RECIPE.findall(text))
+        if depth >= MAX_INCLUDE_DEPTH:
+            continue
+        for line in MAKE_INCLUDE.findall(text):
+            for token in line.split():
+                if MAKE_VARIABLE in token:
+                    continue
+                pending.append((REPO_ROOT / token, depth + 1))
+    return targets
 
 
 def is_allowed(line: str) -> bool:

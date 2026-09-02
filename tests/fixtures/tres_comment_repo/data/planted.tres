@@ -1,0 +1,5 @@
+; why this value is 7 — the rationale nobody will ever read again
+[gd_resource type="Resource" format=3]
+
+[resource]
+weight = 7

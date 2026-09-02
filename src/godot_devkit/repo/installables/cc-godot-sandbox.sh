@@ -121,6 +121,13 @@ SELF_TEST_ALLOW=(
 	'git commit -m "tools(dev): godot --headless is wrapper-only"'
 	'git commit -m "hooks: block (godot --headless) in command position"'
 	'echo "foo; godot --headless"'
+	# A MULTI-LINE quoted body: a commit message whose second paragraph talks
+	# about the engine. The walk kept the newline and the segment reader split
+	# on it, so the quoted line posed as a command word.
+	$'git commit -m "feat: x\n\ngodot --headless is wrapper-only now" -- a.py'
+	$'echo "a\ngodot --headless\nb"'
+	# Single quotes take the same path through the walk.
+	$'git commit -m \'chore: y\n\ngodot --headless\' -- a.py'
 	$'cat <<EOF\ngodot --headless --quit\nEOF'
 	'make import-cache'
 	'grep -rn gdk_rebuild_import_cache docs/'
@@ -281,7 +288,7 @@ ANALYZE="${ANALYZE%%<<*}"
 # Returns 1 on an unbalanced quote. The caller then falls back to the naive
 # split: unparseable input stays STRICT rather than sliding open.
 split_command_segments() {
-	local rest="$1" out="" head quote="" ch
+	local rest="$1" out="" head quote="" ch nxt
 	while [ -n "$rest" ]; do
 		if [ "$quote" = "'" ]; then
 			head="${rest%%\'*}"                      # single quotes: no escapes
@@ -295,13 +302,27 @@ split_command_segments() {
 			out+="$rest"
 			break
 		fi
-		out+="$head"
 		rest="${rest#"$head"}"
+		# A newline INSIDE quotes is data, not a segment break. The walk kept it
+		# verbatim, but the CONSUMER reads segments with `while read -r`, which
+		# splits on newlines — so the second line of a multi-line quoted
+		# argument became a fresh command word and
+		# `git commit -m "feat: x⏎⏎godot --headless is wrapper-only now"` was
+		# BLOCKED. That contradicts this function's own claim that a word in
+		# quotes can never be a command word, and a multi-line -m body is how
+		# agents write commit messages. Same neutralization the herestring
+		# placeholder does: keep the word, take away its power to start a
+		# command. An UNBALANCED quote still returns 1 above, so unparseable
+		# input keeps taking the strict fallback.
+		[ -z "$quote" ] || head="${head//$'\n'/ }"
+		out+="$head"
 		ch="${rest:0:1}"
 		rest="${rest:1}"
 		if [ -n "$quote" ]; then
 			if [ "$ch" = "\\" ]; then
-				out+="$ch${rest:0:1}"; rest="${rest:1}"   # escaped char, still inside
+				nxt="${rest:0:1}"; rest="${rest:1}"       # escaped char, still inside
+				[ "$nxt" != $'\n' ] || nxt=' '           # …and still not a break
+				out+="$ch$nxt"
 			else
 				quote=""; out+="$ch"                      # the closing quote
 			fi
