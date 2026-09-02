@@ -358,6 +358,24 @@ print_load_diagnostics() {
 	printf '%s\n' "$PLAIN" | grep -E "$LOAD_DIAGNOSTIC_PATTERN" | sed 's/^/    /' || true
 }
 
+# THE FLOOR, and it comes before every reconciliation below: a census of ZERO
+# reconciles with GUT's `Totals -> Scripts 0` — which `summary.gd::_log_totals`
+# prints unconditionally — and used to report
+# `PASS (0/0 scripts loaded - full coverage)`, exit 0. A typo'd `SYS=`, a tier
+# root moved without GDK_UNIT_TEST_ROOT following, or a deleted slice was a
+# GREEN gate over a run that asserted nothing. A gate that scanned nothing has
+# to say so, and it names exactly which directories it looked in, because the
+# fix is always one of those two spellings.
+if [ "$DISK_SCRIPTS" -eq 0 ]; then
+	echo "[$GATE_TAG] COVERAGE FAIL — no ${GDK_UNIT_TEST_GLOB} scripts under:"
+	printf '%s\n' "${SCAN_DIRS[@]}" | sed 's/^/    /'
+	echo "    A run over an empty census proves nothing, so it is not a pass."
+	echo "    Name a slice that exists, or point GDK_UNIT_TEST_ROOT (currently"
+	echo "    '$GDK_UNIT_TEST_ROOT') at where your unit tier really lives."
+	gdk_gate_verdict "$GATE_TAG" "COVERAGE FAIL (0 test scripts found)" "$LOG"
+	exit 1
+fi
+
 # Belt: any explicit skip line is a failure on its own, whatever the counts say.
 SKIPPED="$(printf '%s\n' "$PLAIN" | gut_skipped_scripts)"
 if [ -n "$SKIPPED" ]; then

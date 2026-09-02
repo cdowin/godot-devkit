@@ -216,6 +216,99 @@ def test_a_godot_project_at_the_root_gets_past_that_refusal(tmp_path):
     assert 'did not refresh the cache' in done.stdout, done.stdout
 
 
+# --- unit.sh's coverage gate, driven through the RUNNER ----------------------
+# The self-test corpus proves the two parsers. The BRANCH that reconciles them
+# is main-flow, and nothing exercised it: a mutant deleting the count-mismatch
+# check survived the whole suite, and the 0/0 case was a documented PASS. Both
+# need the runner run end to end, which needs an engine — so a stub prints the
+# GUT transcript and unit.sh does everything else for real.
+UNIT = INSTALLABLES / 'unit.sh'
+GUT_TRANSCRIPT = ('#!/usr/bin/env bash\n'
+                  'echo "Running tests..."\n'
+                  'echo "Totals"\n'
+                  'echo "Scripts        {scripts}"\n'
+                  'echo "Tests          {scripts}"\n'
+                  'exit {code}\n')
+
+
+def _unit_fixture(tmp_path: Path, tier: dict[str, int], *,
+                  scripts_ran: int, gut_exit: int = 0) -> tuple[Path, dict]:
+    """A Godot project carrying unit.sh, a tier of empty test scripts, and a
+    `godot` that prints a GUT totals block claiming `scripts_ran`."""
+    root = tmp_path / 'repo'
+    (root / 'tools' / 'dev' / 'runners').mkdir(parents=True)
+    (root / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    shutil.copy2(LIBRARY, root / 'tools' / 'dev' / 'gdk_runners.sh')
+    shutil.copy2(UNIT, root / 'tools' / 'dev' / 'runners' / 'unit.sh')
+    for slice_name, count in tier.items():
+        directory = root / 'tests' / 'unit' / slice_name
+        directory.mkdir(parents=True)
+        for index in range(count):
+            (directory / f'test_{index}.gd').write_text('', encoding='utf-8')
+    stub = tmp_path / 'bin'
+    stub.mkdir()
+    (stub / 'godot').write_text(
+        GUT_TRANSCRIPT.format(scripts=scripts_ran, code=gut_exit),
+        encoding='utf-8')
+    # `timeout` too: the library BOUNDS every engine run and refuses outright
+    # without one, and macOS ships neither `timeout` nor `gtimeout`. A stub
+    # keeps the fixture hermetic — the bound is not what these cases are about,
+    # and a skip on the host's coreutils would take the coverage gate with it.
+    (stub / 'timeout').write_text('#!/usr/bin/env bash\nshift 2\nexec "$@"\n',
+                                  encoding='utf-8')
+    for name in ('godot', 'timeout'):
+        (stub / name).chmod(0o755)
+    return (root / 'tools' / 'dev' / 'runners' / 'unit.sh',
+            {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home')})
+
+
+def _run_unit(runner: Path, env: dict, *argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run(['bash', str(runner), *argv], cwd=runner.parents[2],
+                          text=True, capture_output=True, env=env)
+
+
+def test_a_full_census_that_reconciles_is_the_pass_this_gate_is_for(tmp_path):
+    """The control. Without it the two failures below could be satisfied by a
+    runner that fails on everything."""
+    runner, env = _unit_fixture(tmp_path, {'stats': 2}, scripts_ran=2)
+    done = _run_unit(runner, env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout, done.stdout
+
+
+def test_a_count_mismatch_fails_instead_of_passing_the_scripts_gut_dropped(tmp_path):
+    """MINOR-6b / mutant M5. GUT logs `Ignoring script ... because it does not
+    extend GutTest` for a script that will not PARSE and then omits it from the
+    totals, so the run prints "All tests passed!" and exits 0. The count
+    comparison is the only thing that sees it — and no test named the branch,
+    so deleting it survived the suite."""
+    runner, env = _unit_fixture(tmp_path, {'stats': 3}, scripts_ran=2)
+    done = _run_unit(runner, env)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert '3 test script(s) on disk, 2 run' in done.stdout, done.stdout
+    assert 'COVERAGE FAIL (script count mismatch)' in done.stdout, done.stdout
+
+
+@pytest.mark.parametrize('argv,tier', [
+    (('typo',), {'stats': 2}),   # a slice that does not exist
+    ((), {}),                    # a tier root holding nothing
+], ids=['typod-slice', 'empty-tier'])
+def test_an_empty_census_fails_and_names_what_it_looked_in(tmp_path, argv, tier):
+    """MAJOR-2. `DISK_SCRIPTS=0` reconciled with GUT's unconditional
+    `Totals -> Scripts 0` and the gate printed
+    `PASS (0/0 scripts loaded - full coverage)`, exit 0 — rule 4's cardinal
+    sin, on the tier a consumer slices by hand every day."""
+    runner, env = _unit_fixture(tmp_path, tier, scripts_ran=0)
+    done = _run_unit(runner, env, *argv)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'full coverage' not in done.stdout, done.stdout
+    assert 'COVERAGE FAIL (0 test scripts found)' in done.stdout, done.stdout
+    # It names the DIRECTORIES it scanned, because the repair is one of two
+    # spellings and a verdict that does not name them chooses neither.
+    expected = 'tests/unit/typo' if argv else 'tests/unit'
+    assert expected in done.stdout, done.stdout
+
+
 # --- the fan-out: integration.sh CALLS scenario.sh --------------------------
 INTEGRATION = INSTALLABLES / 'integration.sh'
 # What the fan-out prints when every job came back 0. Both halves are asserted:
