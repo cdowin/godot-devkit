@@ -75,6 +75,13 @@ def refuse(command: str, *argv: str) -> tuple[int, str]:
 
 
 WORKFLOW = '.github/workflows/verify.yml'
+# The set both consumers run on a push. verify.yml is the one this repo itself
+# carries; the other three read `config/version` out of a project.godot, which
+# a stdlib Python package does not have — see the self-hosting test below.
+WORKFLOWS = (WORKFLOW,
+             '.github/workflows/uid-guard.yml',
+             '.github/workflows/semver-gate.yml',
+             '.github/workflows/auto-tag.yml')
 AGENTS = ('.claude/agents/verification-reviewer.md',
           '.claude/agents/verification-builder.md',
           '.claude/agents/architect.md',
@@ -115,7 +122,7 @@ RUNNERS = ('tools/dev/gdk_runners.sh',
            'tools/dev/runners/capture.sh',
            'tools/dev/runners/hermetic_run_scan.sh',
            'Makefile.devkit')
-DESTINATIONS = {'install-ci': (WORKFLOW,),
+DESTINATIONS = {'install-ci': WORKFLOWS,
                 'install-agents': AGENTS,
                 'install-hooks': HOOKS,
                 'install-runners': RUNNERS}
@@ -514,20 +521,30 @@ def test_this_repo_carries_what_install_ci_produces():
     and it would be invisible — the file still looks like the one that was
     installed. Edit the source under installables/ and re-install.
 
-    `install-hooks` is deliberately absent: this package holds no Godot tree
-    and no shared-agent worktree, so installing a Godot-boot guard here would
-    be a file with nothing to guard. It is covered instead by installing into
-    a temp repo and RUNNING it, which is the stronger test anyway.
+    PARTIAL, and decided the same way `install-agents` is: verify.yml runs
+    `make milestone`, which this repo has, so it MUST be present and current.
+    The other three read `config/version` out of a project.godot — this package
+    has neither, versions in pyproject.toml, and bumps at CLOSE rather than at
+    merge. Installing them here would be three workflows guarding a flow this
+    repo does not run, which is the same reasoning that keeps `install-hooks`
+    un-self-hosted. What is carried must be current; what is absent is
+    legitimately absent.
     """
     repo_root.cache_clear()
     load_config.cache_clear()
     previous = Path.cwd()
     os.chdir(REPO_ROOT)
     try:
-        code, out = run('install-ci')
+        present = [rel for _, rel in install.PLANS['install-ci']
+                   if (REPO_ROOT / rel).is_file()]
+        assert WORKFLOW in present, (
+            f'{WORKFLOW} is not present in this repo — the one workflow it '
+            f'self-hosts, and the floor this test would otherwise pass over')
+        code, out = run('install-ci', '--diff')
         assert code == 0, out
-        assert out.count('already current') == len(install.PLANS['install-ci']), (
-            f'install-ci is not byte-current in this repo:\n{out}')
+        stale = [rel for rel in present if f'{rel} already current' not in out]
+        assert not stale, (
+            f'not byte-current in this repo: {stale}\n{out}')
     finally:
         os.chdir(previous)
         repo_root.cache_clear()

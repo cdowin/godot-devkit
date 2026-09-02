@@ -2,10 +2,14 @@
 
 Three verbs, one relationship, and it is deliberately the whole relationship:
 
-    install-ci      .github/workflows/verify.yml — ONE opinionated workflow.
-                    Checkout, uv, `make milestone`. It carries no gate of its
-                    own and no way to parameterize one: a project that wants
-                    something else edits the file, which is now its file.
+    install-ci      the four workflows a Godot project runs on a push:
+                    verify.yml (checkout, uv, `make milestone`), uid-guard.yml,
+                    semver-gate.yml and auto-tag.yml. Each was forked in both
+                    consumers, drifting on a project name and on which fix each
+                    fork got. They carry no gate of their own and no way to
+                    parameterize one: a project that wants something else edits
+                    the file, which is now its file. Release / website / social
+                    workflows are the project's and are not written.
     install-agents  the review and build contract PLUS the base agent roster
                     (architect, po, developer, reviewers, simplifier, the
                     writers, pm-operator), as AGENT DEFINITIONS under
@@ -73,7 +77,15 @@ PACKAGE = 'godot_devkit.repo.installables'
 # (source name under installables/, destination relative to the repo root).
 PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     'install-ci': (
+        # The set both consumers actually run on a push, in the order they
+        # fire: the full gate on every PR and mainline push, then the three
+        # that guard the merge and the tag. Release, website and social
+        # workflows are the PROJECT's — this verb does not write them and does
+        # not know they exist.
         ('ci-verify.yml', '.github/workflows/verify.yml'),
+        ('ci-uid-guard.yml', '.github/workflows/uid-guard.yml'),
+        ('ci-semver-gate.yml', '.github/workflows/semver-gate.yml'),
+        ('ci-auto-tag.yml', '.github/workflows/auto-tag.yml'),
     ),
     'install-agents': (
         # The verification pair first — the contract predates the roster and
@@ -152,9 +164,14 @@ USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
        godot-devkit install-hooks   [--force] [--diff]
        godot-devkit install-runners [--force] [--diff]
 
-install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
-                It ASSUMES that target is your full gate; a project without one
-                edits the workflow, which after the write is its own file.
+install-ci      four workflows under .github/workflows/: verify.yml
+                (checkout, uv, `make milestone` — it ASSUMES that target is
+                your full gate), uid-guard.yml (`make uid-scan` on a PR and on
+                a push to staging), semver-gate.yml (a merge to main must bump
+                config/version) and auto-tag.yml (tag the mainline, then
+                dispatch RELEASE_WORKFLOW if you have one). A project without
+                one of those assumptions edits the file, which after the write
+                is its own.
 install-agents  the review/build contract plus the base agent roster, as
                 AGENT DEFINITIONS under .claude/agents/ — the one place a
                 subagent actually reads. Each roster file carries a
@@ -212,8 +229,15 @@ _NEXT_STEP = {
                       'the frontmatter is doing proven work; `effort:` is '
                       'carried unverified. The SDLC these agents run is '
                       'SDLC.md at the godot-devkit repo root.',
-    'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
-                  'target exists and is your full gate.',
+    'install-ci': 'verify.yml runs `make milestone` — confirm that target '
+                  'exists and is your full gate. uid-guard.yml runs `make '
+                  'uid-scan` on a PR to main and a push to staging; rename the '
+                  'branches if yours differ (an `on:` filter takes no '
+                  'variable). semver-gate.yml and auto-tag.yml read '
+                  'config/version out of project.godot; set '
+                  'RELEASE_WORKFLOW in auto-tag.yml if your release pipeline '
+                  'is not release.yml, and leave it alone if you have none — '
+                  'the step is a documented no-op then.',
     'install-runners': 'make your Makefile two lines — `DEVKIT_VERSION := '
                        '<tag>` and then `include Makefile.devkit` — plus your '
                        'own targets; your own gates join `check` through '
