@@ -92,6 +92,12 @@ hand-roll an incantation.** `make help` lists every target. If the check you nee
 a target, **add the target**, then run it — apparatus that lives in one agent's context
 is apparatus that gets rebuilt.
 
+**Every gate prints ONE verdict line naming its full transcript under .gate-reports/;
+`VERBOSE=1` streams the whole thing.** A new target routes through the shipped
+`gdk_gate_capture` / `gdk_gate_verdict` (installables/gdk_runners.sh, sourced from
+source — this package is its own first consumer) like the rest; never ask an agent to
+grep a gate's output for its result. Enforced by `tests/test_makefile_gates.py`.
+
 - Behavior gate: `make smoke` — `check all`, `autoloads`, `scene`, `refs`, `pm status`,
   `pm validate` and `check pm` against the live consumer checkouts, censuses compared
   against independent counts. The consumers ARE the read fixtures. Read-only, and it
