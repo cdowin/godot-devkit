@@ -1074,15 +1074,15 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         sf = fdir / 'stories' / f'{slug}.md'
         if _exists(sf):
             raise Refused(f'story {fid}/{slug!r} already exists')
-        claimed = model.story_file(cfg, f'{fid}/{sid_slug}')
+        sid = f'{fid}/{sid_slug}'
+        claimed = model.story_file(cfg, sid)
         if claimed is not None:
-            raise Refused(f'story id {fid}/{sid_slug!r} is already held by '
+            raise Refused(f'story id {sid!r} is already held by '
                           f'{cfg.rel(claimed)} — two files claiming one id is '
                           f'addressable by neither')
         body = templates.render(
             templates.load(cfg, 'story'),
-            {'id': f'{fid}/{sid_slug}', 'feature': fid, 'milestone': mid,
-             'name': name})
+            {'id': sid, 'feature': fid, 'milestone': mid, 'name': name})
         _mint(cfg, sf, body)
         _ok(f'created {cfg.rel(sf)}')
         return 0
