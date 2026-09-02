@@ -93,6 +93,11 @@ Static gates (exit 1 on findings; run from anywhere inside the repo):
                                     # Godot tree runs the repo-family gates
                                     # instead of failing five Godot ones over a
                                     # 0-file census.
+    godot-devkit gates-extra        # `[gates] extra`, one make target per line:
+                                    # the project's OWN gate targets, which
+                                    # Makefile.devkit's `check` runs after the
+                                    # devkit ones. The include shells out to
+                                    # this rather than parsing TOML in make.
 
 Per-project config: devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
@@ -319,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'pm':
         from godot_devkit.repo.pm import cli as pm_cli
         return pm_cli.main(rest)
+    if cmd == 'gates-extra':
+        from godot_devkit.repo import gates_extra
+        return gates_extra.main(rest)
     if cmd in install_commands():
         from godot_devkit.repo import install
         return install.main(cmd, rest)

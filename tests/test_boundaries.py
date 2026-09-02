@@ -275,6 +275,7 @@ CONFIG_IMPORT_ALLOWLIST = frozenset((
     'repo/checks/doc.py',
     'repo/checks/repo_hygiene.py',
     'repo/checks/shell.py',
+    'repo/gates_extra.py',
     'godot/checks/defaults.py',
     'godot/checks/props.py',
     'godot/checks/rng.py',

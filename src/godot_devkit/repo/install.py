@@ -27,14 +27,15 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     STANDALONE — no sourcing of a library the repo may lack —
                     and per-project variation is a small config header the
                     repo edits after install, when the file is its own.
-    install-runners the sandboxed headless-run shell library plus the one
-                    runner that sources it. Not folded into install-hooks: a
+    install-runners the sandboxed headless-run shell library, the runners
+                    that source it, and `Makefile.devkit` — the standard target
+                    set that calls them. Not folded into install-hooks: a
                     hooks-only consumer would carry runners it never calls, and
-                    the library is sourced by the project's own make targets
-                    rather than fired by Claude Code. Every function is `gdk_*`
-                    — the two consumers' `nullbound_*` / `trail_*` forks are
-                    what this replaces, so a consumer keeping its prefix is a
-                    second name for the same fact and is not supported.
+                    the library is sourced by make targets rather than fired by
+                    Claude Code. Every function is `gdk_*` — the two consumers'
+                    `nullbound_*` / `trail_*` forks are what this replaces, so
+                    a consumer keeping its prefix is a second name for the same
+                    fact and is not supported.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -136,6 +137,13 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         # ships here because it can only be true of an installed PAIR — the
         # library and the wrappers that call it.
         ('hermetic_run_scan.sh', 'tools/dev/runners/hermetic_run_scan.sh'),
+        # The CALLERS, at the repo root. It ships with the runners rather than
+        # under a verb of its own because neither half is usable alone: the
+        # runners are unreachable without targets pointing at them (this verb's
+        # next step used to be a paragraph asking the operator to write those
+        # targets by hand), and every runner-backed target in the include is
+        # dead without the runners. One verb, one working `make`.
+        ('Makefile.devkit', 'Makefile.devkit'),
     ),
 }
 
@@ -174,8 +182,9 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
                 (headed, because headless is blind to render), and
                 hermetic_run_scan.sh — the gate proving a run's HOME
                 self-destructs and nothing persists beside the spool. Every
-                one carries --help and --self-test. Nothing calls the library
-                until you point your targets at it.
+                one carries --help and --self-test. Plus Makefile.devkit at
+                the repo root: the standard target set that calls them, which
+                your own Makefile `include`s.
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
@@ -205,10 +214,11 @@ _NEXT_STEP = {
                       'SDLC.md at the godot-devkit repo root.',
     'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
                   'target exists and is your full gate.',
-    'install-runners': 'nothing sources the library yet — point your '
-                       'Godot-booting `make` targets at the runners under '
-                       'tools/dev/runners/ (and `source tools/dev/'
-                       'gdk_runners.sh` in anything of your own), and gitignore '
+    'install-runners': 'make your Makefile two lines — `DEVKIT_VERSION := '
+                       '<tag>` and then `include Makefile.devkit` — plus your '
+                       'own targets; your own gates join `check` through '
+                       '`[gates] extra` in devkit.toml, never a fork of the '
+                       'include. Then gitignore '
                        '.gate-reports/, .scenario-reports/, .capture-reports/ '
                        'and .headless-userdata/. The runners are written '
                        'without the exec bit (this package makes no mode '

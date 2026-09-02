@@ -113,7 +113,8 @@ RUNNERS = ('tools/dev/gdk_runners.sh',
            'tools/dev/runners/scenario.sh',
            'tools/dev/runners/integration.sh',
            'tools/dev/runners/capture.sh',
-           'tools/dev/runners/hermetic_run_scan.sh')
+           'tools/dev/runners/hermetic_run_scan.sh',
+           'Makefile.devkit')
 DESTINATIONS = {'install-ci': (WORKFLOW,),
                 'install-agents': AGENTS,
                 'install-hooks': HOOKS,
