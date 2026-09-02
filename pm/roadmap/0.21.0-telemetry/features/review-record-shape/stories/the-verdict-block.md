@@ -1,0 +1,28 @@
+---
+id: 0.21.0/review-record-shape/the-verdict-block
+feature: 0.21.0/review-record-shape
+milestone: "0.21.0"
+name: reviewer and simplifier records carry one parseable verdict block with findings by severity and disposition
+status: todo
+owner:
+depends_on: []
+---
+
+# reviewer and simplifier records carry one parseable verdict block with findings by severity and disposition
+
+## Goal
+A fenced block the report parses, written by the installed reviewer-shaped agents at the end of their pass:
+```
+verdict: SHIP-WITH-FIXES
+| id | severity | disposition |
+| W1 | WARNING | landed 3a42f19ad |
+| S3 | SUGGESTION | rejected: pause regression |
+| D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |
+```
+`install-agents` updates `reviewer.md`, `simplifier.md`, `code-reviewer.md`, `milestone-reviewer.md` to emit it; a parser in `pm/` reads it (exit 2 on a malformed block, never a guess).
+## Verification
+`make test` (parser: the four verdicts, every disposition, a malformed row), the agent-definition files assert the block text is present.
+## Commit prefix
+`feat(0.21.0/review-record-shape/S1):`
+## Size
+s
