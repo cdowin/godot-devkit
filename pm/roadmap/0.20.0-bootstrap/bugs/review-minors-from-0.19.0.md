@@ -2,7 +2,7 @@
 id: 0.20.0/bugs/review-minors-from-0.19.0
 milestone: "0.20.0"
 name: The 0.19.0 release review's 8 MINOR + 4 NIT findings on gdk_runners.sh, import_cache.sh and the sandbox hook
-status: open
+status: fixed
 caught_in: "0.20.0"
 fix_milestone: "0.20.0"
 ---
@@ -40,7 +40,8 @@ exec bit; `gdk_pid_is_live` falls back to `ps -p` so EPERM is not death; the uid
 anchored; the restore target is pinned absolute at snapshot time). MINOR-7 landed before the
 v0.19.0 tag.
 
-REMAINING: **MINOR-8** — `CHANGELOG.md`'s `## v0.19.0` armed-corpus figure ("13 / 11") is stale;
-shipped was 13 / 13, and after generic-runners S1 the stock corpus is 13 block / 16 allow and the
-armed one 15 / 18. The changelog is rendered by the release story, so the correction belongs
-there rather than in a feature commit. This bug closes when that lands.
+MINOR-8 landed with the v0.20.0 release render: the `## v0.19.0` line now reads **13 block / 13
+allow**, measured by running `--self-test` on the file the tag actually shipped
+(`git show v0.19.0:…/cc-godot-sandbox.sh`), and says that neither figure it first carried was ever
+what v0.19.0 shipped. The current corpus — 13 block / 16 allow after generic-runners S1 — belongs to
+the v0.20.0 section, not to a retrospective edit of a shipped one. All twelve findings are fixed.
