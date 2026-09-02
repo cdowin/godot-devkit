@@ -216,6 +216,68 @@ def test_a_godot_project_at_the_root_gets_past_that_refusal(tmp_path):
     assert 'did not refresh the cache' in done.stdout, done.stdout
 
 
+# --- the report dir a runner aims rm -rf at ----------------------------------
+# MINOR-1. `scenario.sh` reaps entries out of GDK_SCENARIO_REPORT_DIR and
+# `capture.sh` `rm -rf`s GDK_CAPTURE_REPORT_DIR whole, and both took the name
+# on trust: `GDK_SCENARIO_REPORT_DIR=.` deleted a probe repo — `.git` included
+# — BEFORE the boot, and `GDK_CAPTURE_REPORT_DIR=tests` emptied `tests/`. The
+# scenario docstring's "a mis-set dir cannot aim rm elsewhere" was false of the
+# dir itself, which is the claim worth attacking.
+SCENARIO = INSTALLABLES / 'scenario.sh'
+CAPTURE = INSTALLABLES / 'capture.sh'
+REPORT_DIR_RUNNERS = {'scenario.sh': ('GDK_SCENARIO_REPORT_DIR', SCENARIO),
+                      'capture.sh': ('GDK_CAPTURE_REPORT_DIR', CAPTURE)}
+
+
+def _report_dir_fixture(tmp_path: Path, runner: Path) -> tuple[Path, set[str]]:
+    """A git repo with real tracked content, and the runner at stock depth."""
+    root = tmp_path / 'repo'
+    (root / 'tools' / 'dev' / 'runners').mkdir(parents=True)
+    (root / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    (root / 'tests').mkdir()
+    (root / 'tests' / 'keep.gd').write_text('extends Node\n', encoding='utf-8')
+    shutil.copy2(LIBRARY, root / 'tools' / 'dev' / 'gdk_runners.sh')
+    shutil.copy2(runner, root / 'tools' / 'dev' / 'runners' / runner.name)
+    subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                   capture_output=True)
+    before = {p.relative_to(root).as_posix() for p in root.rglob('*')}
+    return root, before
+
+
+@pytest.mark.parametrize('name', sorted(REPORT_DIR_RUNNERS), ids=lambda n: n)
+# An EMPTY value is deliberately absent: every runner reads
+# `${GDK_X:-<default>}`, so an exported empty string takes the default and
+# never reaches the guard. The library's own corpus covers the empty argument.
+@pytest.mark.parametrize('value', ['.', '..', 'tests', '/tmp/gdk-probe'],
+                         ids=['dot', 'dotdot', 'a-tracked-dir', 'absolute'])
+def test_a_mis_set_report_dir_is_refused_before_anything_is_removed(tmp_path,
+                                                                   name, value):
+    variable, source = REPORT_DIR_RUNNERS[name]
+    root, before = _report_dir_fixture(tmp_path, source)
+    done = subprocess.run(['bash', f'tools/dev/runners/{name}', 'smoke'],
+                          cwd=root, text=True, capture_output=True,
+                          env={'PATH': '/usr/bin:/bin', variable: value,
+                               'HOME': str(tmp_path / 'home')})
+    after = {p.relative_to(root).as_posix() for p in root.rglob('*')}
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert variable in done.stderr, done.stderr
+    assert after == before, f'the refusal still touched the tree: {before ^ after}'
+
+
+@pytest.mark.parametrize('name', sorted(REPORT_DIR_RUNNERS), ids=lambda n: n)
+def test_the_stock_report_dir_is_not_refused(tmp_path, name):
+    """The guard must not refuse the configuration every consumer runs. With
+    no engine the run fails LATER and differently, which is the point."""
+    _variable, source = REPORT_DIR_RUNNERS[name]
+    root, _before = _report_dir_fixture(tmp_path, source)
+    done = subprocess.run(['bash', f'tools/dev/runners/{name}', 'smoke'],
+                          cwd=root, text=True, capture_output=True,
+                          env={'PATH': '/usr/bin:/bin',
+                               'HOME': str(tmp_path / 'home')})
+    assert 'REPORT_DIR' not in done.stderr, done.stderr
+
+
 # --- unit.sh's coverage gate, driven through the RUNNER ----------------------
 # The self-test corpus proves the two parsers. The BRANCH that reconciles them
 # is main-flow, and nothing exercised it: a mutant deleting the count-mismatch

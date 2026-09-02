@@ -155,6 +155,55 @@ _gdk_reap_stale_run_homes() {
 	done
 }
 
+# gdk_report_dir_defect <dir> — '' when <dir> is a directory a runner may
+# create, CLEAR and reap; otherwise the one-line reason it may not, printed on
+# stdout, with a non-zero return.
+#
+# scenario.sh and capture.sh each own their report directory and each aims an
+# `rm -rf` at what the project config names. Both took that name on trust:
+# `GDK_SCENARIO_REPORT_DIR=.` deleted a probe repo whole — `.git` included —
+# BEFORE the boot, and `GDK_CAPTURE_REPORT_DIR=tests` emptied `tests/`. Neither
+# is a default and neither is reachable without an explicit misconfiguration,
+# which is exactly the class a guard is cheap for and an incident is not.
+#
+# Three refusals, and they are structural rather than a denylist of paths:
+#
+#   * a report dir is RELATIVE to the project root — every caller `cd`s there
+#     first — so an absolute path or a `~` is a caller who thinks otherwise;
+#   * no segment may be `.` or `..`, which is what makes "under the project
+#     root, and not the root itself" true BY CONSTRUCTION rather than by
+#     resolving a path that may not exist yet;
+#   * it may hold nothing git TRACKS. A directory the repo keeps content in is
+#     the repo's, whatever the config says — that is the clause that separates
+#     `.scenario-reports` from `tests`, and no amount of path arithmetic can.
+#     Softly skipped outside a git checkout (a tarball, a fresh extract): the
+#     two structural clauses still hold, and refusing every run for want of a
+#     `.git` would trade one incident for a broken tool.
+gdk_report_dir_defect() {
+	local dir="${1-}"
+	if [ -z "$dir" ]; then
+		printf 'the report directory is unset or empty\n'
+		return 1
+	fi
+	case "$dir" in
+		/*|'~'*)
+			printf "'%s' is not relative to the project root\n" "$dir"
+			return 1 ;;
+	esac
+	case "/$dir/" in
+		*/./*|*/../*)
+			printf "'%s' walks the tree with a . or .. segment\n" "$dir"
+			return 1 ;;
+	esac
+	if command -v git >/dev/null 2>&1 \
+		&& git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+		&& [ -n "$(git ls-files -- "$dir" 2>/dev/null | head -1)" ]; then
+		printf "'%s' holds files git tracks — it is the repo's, not a report directory\n" "$dir"
+		return 1
+	fi
+	return 0
+}
+
 # gdk_sandbox_home — export a HOME no headless boot can escape. Call it before
 # the first engine invocation in any wrapper.
 gdk_sandbox_home() {
@@ -702,6 +751,33 @@ second line' "$(cat "$log")"
 	status=0; [ -d "$scratch/not-a-sandbox" ] || status=1
 	_gdk_st_true 'destroy refuses a path outside the sandbox layout' "$status"
 
+	# --- the report-dir guard: what a runner may aim rm -rf at --------------
+	# The two shapes that actually happened get their own cases; the rest are
+	# the grammar the same misconfiguration can be spelled in.
+	local bad
+	# The literal `~` is the case, not a mistake: a config VALUE is not
+	# tilde-expanded by the shell that reads it, so what reaches the guard
+	# is the character.
+	# shellcheck disable=SC2088
+	for bad in '' '.' '..' './x' '../x' 'a/../b' '/tmp/x' '~/x'; do
+		status=1; gdk_report_dir_defect "$bad" >/dev/null || status=0
+		_gdk_st_true "report_dir_defect refuses '$bad'" "$status"
+	done
+	status=0; gdk_report_dir_defect '.scenario-reports' >/dev/null || status=1
+	_gdk_st_true 'report_dir_defect admits an ordinary report dir' "$status"
+
+	# A directory the repo keeps TRACKED content in is the repo's, whatever
+	# the config says. `GDK_CAPTURE_REPORT_DIR=tests` emptied tests/.
+	( cd "$scratch" || exit 1
+	  git init -q . >/dev/null 2>&1 || exit 0    # no git: the clause is skipped
+	  mkdir -p tracked
+	  : > tracked/keep.txt
+	  git add tracked/keep.txt >/dev/null 2>&1 || exit 0
+	  gdk_report_dir_defect tracked >/dev/null && exit 1
+	  gdk_report_dir_defect .scenario-reports >/dev/null || exit 1
+	  exit 0 )
+	_gdk_st_true 'report_dir_defect refuses a directory git tracks files in' "$?"
+
 	cd / || return 1
 	rm -rf "$scratch"
 	return 0
@@ -714,7 +790,7 @@ usage: source gdk_runners.sh            the normal use — a shell library
        bash gdk_runners.sh --help       this message
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
-gdk_pid_is_live, gdk_run_bounded, gdk_timeout_is_hang,
+gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded, gdk_timeout_is_hang,
 gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_rebuild_import_cache.
 USAGE_EOF

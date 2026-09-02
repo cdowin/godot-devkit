@@ -198,6 +198,19 @@ if [ ! -f "$GDK_PROJECT_FILE" ]; then
 	exit 2
 fi
 
+# This wrapper OWNS the report dir — it clears the whole thing before every
+# run, so what is in it afterwards came from this run. That ownership is only
+# safe over a directory it may actually own: `GDK_CAPTURE_REPORT_DIR=tests`
+# emptied tests/.
+if CAPTURE_DIR_DEFECT="$(gdk_report_dir_defect "$GDK_CAPTURE_REPORT_DIR")"; then
+	:
+else
+	echo "[$GATE_TAG] GDK_CAPTURE_REPORT_DIR $CAPTURE_DIR_DEFECT" >&2
+	echo "[$GATE_TAG] nothing was written or removed. This wrapper CLEARS that" >&2
+	echo "[$GATE_TAG] directory on every run — point it at one it may own." >&2
+	exit 2
+fi
+
 OUT="$GDK_CAPTURE_REPORT_DIR/${NAME}${PNG_SUFFIX}"
 
 SCENARIO_FILE="$(scenario_file "$NAME" "$GDK_SCENARIO_SOURCE_DIR")"

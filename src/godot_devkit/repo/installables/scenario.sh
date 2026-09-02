@@ -185,7 +185,10 @@ reap_stale_scenario_reports() {
 	live="$(live_scenario_names)"
 	while IFS= read -r entry; do
 		[ -n "$entry" ] || continue
-		# Only ever inside the report dir — a mis-set dir cannot aim rm elsewhere.
+		# Only ever inside the report dir. That is half the claim; the other
+		# half is that the DIR itself is one this runner may own, which is
+		# `gdk_report_dir_defect`'s answer at the call site below — this case
+		# held perfectly while `dir` was `.`, and the tree went with it.
 		case "$entry" in
 			"$dir"/*) rm -rf "$entry" ;;
 			*) echo "$GATE_TAG: refusing to reap non-report path '$entry'" >&2 ;;
@@ -362,6 +365,19 @@ source "$LIB"
 
 if [ ! -f "$GDK_PROJECT_FILE" ]; then
 	echo "[$GATE_TAG] $REPO_ROOT is not a Godot project — no $GDK_PROJECT_FILE there." >&2
+	exit 2
+fi
+
+# The report dir is a directory this runner CREATES, fills and reaps entries
+# out of, so it is checked before it is used rather than trusted because it
+# came from the config header. `GDK_SCENARIO_REPORT_DIR=.` deleted a probe repo
+# whole, `.git` included, before the boot.
+if REPORT_DIR_DEFECT="$(gdk_report_dir_defect "$GDK_SCENARIO_REPORT_DIR")"; then
+	:
+else
+	echo "[$GATE_TAG] GDK_SCENARIO_REPORT_DIR $REPORT_DIR_DEFECT" >&2
+	echo "[$GATE_TAG] nothing was read, written or removed. Set it to a" >&2
+	echo "[$GATE_TAG] project-relative directory this runner may own." >&2
 	exit 2
 fi
 
