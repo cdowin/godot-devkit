@@ -2,10 +2,14 @@
 
 Three verbs, one relationship, and it is deliberately the whole relationship:
 
-    install-ci      .github/workflows/verify.yml — ONE opinionated workflow.
-                    Checkout, uv, `make milestone`. It carries no gate of its
-                    own and no way to parameterize one: a project that wants
-                    something else edits the file, which is now its file.
+    install-ci      the four workflows a Godot project runs on a push:
+                    verify.yml (checkout, uv, `make milestone`), uid-guard.yml,
+                    semver-gate.yml and auto-tag.yml. Each was forked in both
+                    consumers, drifting on a project name and on which fix each
+                    fork got. They carry no gate of their own and no way to
+                    parameterize one: a project that wants something else edits
+                    the file, which is now its file. Release / website / social
+                    workflows are the project's and are not written.
     install-agents  the review and build contract PLUS the base agent roster
                     (architect, po, developer, reviewers, simplifier, the
                     writers, pm-operator), as AGENT DEFINITIONS under
@@ -27,14 +31,15 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     STANDALONE — no sourcing of a library the repo may lack —
                     and per-project variation is a small config header the
                     repo edits after install, when the file is its own.
-    install-runners the sandboxed headless-run shell library plus the one
-                    runner that sources it. Not folded into install-hooks: a
+    install-runners the sandboxed headless-run shell library, the runners
+                    that source it, and `Makefile.devkit` — the standard target
+                    set that calls them. Not folded into install-hooks: a
                     hooks-only consumer would carry runners it never calls, and
-                    the library is sourced by the project's own make targets
-                    rather than fired by Claude Code. Every function is `gdk_*`
-                    — the two consumers' `nullbound_*` / `trail_*` forks are
-                    what this replaces, so a consumer keeping its prefix is a
-                    second name for the same fact and is not supported.
+                    the library is sourced by make targets rather than fired by
+                    Claude Code. Every function is `gdk_*` — the two consumers'
+                    `nullbound_*` / `trail_*` forks are what this replaces, so
+                    a consumer keeping its prefix is a second name for the same
+                    fact and is not supported.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -72,7 +77,15 @@ PACKAGE = 'godot_devkit.repo.installables'
 # (source name under installables/, destination relative to the repo root).
 PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     'install-ci': (
+        # The set both consumers actually run on a push, in the order they
+        # fire: the full gate on every PR and mainline push, then the three
+        # that guard the merge and the tag. Release, website and social
+        # workflows are the PROJECT's — this verb does not write them and does
+        # not know they exist.
         ('ci-verify.yml', '.github/workflows/verify.yml'),
+        ('ci-uid-guard.yml', '.github/workflows/uid-guard.yml'),
+        ('ci-semver-gate.yml', '.github/workflows/semver-gate.yml'),
+        ('ci-auto-tag.yml', '.github/workflows/auto-tag.yml'),
     ),
     'install-agents': (
         # The verification pair first — the contract predates the roster and
@@ -106,13 +119,63 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('setup-hooks.sh', 'tools/setup-hooks.sh'),
     ),
     'install-runners': (
-        # The library first, then the one runner that sources it. The layout
-        # is what import_cache.sh's own defaults assume: the runner reaches
-        # the library at ../gdk_runners.sh and the repo root at ../../..
-        # A repo that wants them elsewhere moves both and sets
-        # GDK_RUNNERS_LIB — after the write the files are its own.
+        # The library first, then the runners that source it. The layout is
+        # what every runner's own defaults assume: a runner reaches the library
+        # at ../gdk_runners.sh and the repo root at ../../.. A repo that wants
+        # them elsewhere moves them all and sets GDK_RUNNERS_LIB — after the
+        # write the files are its own.
         ('gdk_runners.sh', 'tools/dev/gdk_runners.sh'),
         ('import_cache.sh', 'tools/dev/runners/import_cache.sh'),
+        ('parse.sh', 'tools/dev/runners/parse.sh'),
+        # compile_sweep.gd travels WITH parse.sh, beside it rather than in a
+        # checks/ of its own: it is stage 2 of that runner and has no other
+        # caller, and parse.sh addresses it as res://tools/dev/runners/
+        # compile_sweep.gd (GDK_PARSE_SWEEP_SCRIPT). One directory, so moving
+        # the runners moves the pair together and only one variable has to
+        # follow.
+        ('compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd'),
+        # …and its `.uid` SIDECAR, the only file in this package carrying a
+        # value the ENGINE would otherwise mint. It ships because the
+        # alternative is worse in both directions: without it, `check uid`
+        # CHECK 3 correctly reports a NEW `.gd` with no sidecar on every
+        # freshly-`init`'d project — a red gate on a file the project did not
+        # write and cannot be asked to explain — and softening the check to
+        # exempt "a devkit-installed .gd under tools/dev/" would put a hole in
+        # the one gate that sees a missing sidecar, keyed on a path prefix any
+        # file can move into.
+        #
+        # A uid is RANDOM, not derived (`ResourceUID.create_id()`), so this one
+        # was minted once, here, and is a constant like any other. That is not
+        # the invention `check uid --fix` refuses: a gate fabricating a uid for
+        # a file it is JUDGING would be guessing at a fact it cannot know,
+        # while an installable declaring the identity of its own shipped script
+        # is stating one. It is canonical under the ported codec
+        # (`id_to_text(text_to_id(x)) == x`), so Godot will not rewrite it, and
+        # it is the same on every consumer — which is what keeps the install
+        # idempotent and the gate quiet on day one.
+        ('compile_sweep.gd.uid', 'tools/dev/runners/compile_sweep.gd.uid'),
+        ('lint.sh', 'tools/dev/runners/lint.sh'),
+        ('warnings.sh', 'tools/dev/runners/warnings.sh'),
+        ('unit.sh', 'tools/dev/runners/unit.sh'),
+        # scenario.sh is the single-scenario entry point; integration.sh fans
+        # it out and capture.sh is its headed twin. All three sit in one
+        # directory because integration.sh reaches scenario.sh by
+        # GDK_SCENARIO_RUNNER, relative to itself.
+        ('scenario.sh', 'tools/dev/runners/scenario.sh'),
+        ('integration.sh', 'tools/dev/runners/integration.sh'),
+        ('capture.sh', 'tools/dev/runners/capture.sh'),
+        # The gate ON the library rather than a gate that uses it: it proves a
+        # run's HOME self-destructs and nothing persists beside the spool. It
+        # ships here because it can only be true of an installed PAIR — the
+        # library and the wrappers that call it.
+        ('hermetic_run_scan.sh', 'tools/dev/runners/hermetic_run_scan.sh'),
+        # The CALLERS, at the repo root. It ships with the runners rather than
+        # under a verb of its own because neither half is usable alone: the
+        # runners are unreachable without targets pointing at them (this verb's
+        # next step used to be a paragraph asking the operator to write those
+        # targets by hand), and every runner-backed target in the include is
+        # dead without the runners. One verb, one working `make`.
+        ('Makefile.devkit', 'Makefile.devkit'),
     ),
 }
 
@@ -121,9 +184,14 @@ USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
        godot-devkit install-hooks   [--force] [--diff]
        godot-devkit install-runners [--force] [--diff]
 
-install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
-                It ASSUMES that target is your full gate; a project without one
-                edits the workflow, which after the write is its own file.
+install-ci      four workflows under .github/workflows/: verify.yml
+                (checkout, uv, `make milestone` — it ASSUMES that target is
+                your full gate), uid-guard.yml (`make uid-scan` on a PR and on
+                a push to staging), semver-gate.yml (a merge to main must bump
+                config/version) and auto-tag.yml (tag the mainline, then
+                dispatch RELEASE_WORKFLOW if you have one). A project without
+                one of those assumptions edits the file, which after the write
+                is its own.
 install-agents  the review/build contract plus the base agent roster, as
                 AGENT DEFINITIONS under .claude/agents/ — the one place a
                 subagent actually reads. Each roster file carries a
@@ -142,16 +210,52 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
                 Godot-booting make targets source (one verdict line per gate
                 naming .gate-reports/<gate>.log, VERBOSE=1 streams, a per-run
                 self-destroying HOME sandbox, a bounded-run contract, a
-                project.godot restore) — plus tools/dev/runners/import_cache.sh.
-                Both carry --self-test. Nothing calls the library until you
-                point your targets at it.
+                project.godot restore) — plus the runners that source it under
+                tools/dev/runners/: import_cache.sh, parse.sh (+ its
+                compile_sweep.gd and the .uid sidecar the engine would
+                otherwise mint), lint.sh, warnings.sh, unit.sh (GUT,
+                sliced, with the coverage gate that fails a test script GUT
+                refused to load), scenario.sh, integration.sh (the same
+                scenarios, one process each, N in parallel), capture.sh
+                (headed, because headless is blind to render), and
+                hermetic_run_scan.sh — the gate proving a run's HOME
+                self-destructs and nothing persists beside the spool. Every
+                one carries --help and --self-test. Plus Makefile.devkit at
+                the repo root: the standard target set that calls them, which
+                your own Makefile `include`s.
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
 
+# A `.sh` installable is WRITTEN EXECUTABLE. Every one of them is a script a
+# caller runs — a make recipe, a hook dispatcher, another runner's fan-out —
+# and a script that is not executable is a file that looks installed and is
+# not. `integration.sh` exec'd `scenario.sh` directly and got exit 126 from
+# every scenario on every `init`'d project, under a FAILURES block that printed
+# nothing, because `Permission denied` matched no summary pattern.
+#
+# The mode is part of the WRITE, in `core.apply`, which owns every mutation
+# this package makes. It is not a post-pass: a chmod outside the plan is the
+# decide-as-you-go shape that module exists to remove.
+#
+# The extension-less git hooks (`pre-push`, `prepare-commit-msg`) are still
+# armed by `tools/setup-hooks.sh`, because arming one is also pointing
+# `core.hooksPath` at the directory — one act, one owner, and it ships in the
+# same install.
+EXECUTABLE_SUFFIX = '.sh'
+
+
+def _is_executable(target: Path) -> bool:
+    """Whether `target` already carries an execute bit for anyone."""
+    try:
+        return bool(target.stat().st_mode & 0o111)
+    except OSError:
+        return False
+
+
 # Installing tools/hooks/* is not arming them: core.hooksPath silently skips a
-# non-executable hook, and this package cannot chmod (core.apply owns every
-# mutation and has no such act). The script that does it is in the same install.
+# non-executable hook, and pointing git at the directory is the other half of
+# the same act. The script that does both is in the same install.
 _NEXT_STEP = {
     'install-hooks': 'run `bash tools/setup-hooks.sh` to point git at them and '
                      'set the exec bit — an unexecutable hook is skipped in '
@@ -172,15 +276,27 @@ _NEXT_STEP = {
                       'the frontmatter is doing proven work; `effort:` is '
                       'carried unverified. The SDLC these agents run is '
                       'SDLC.md at the godot-devkit repo root.',
-    'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
-                  'target exists and is your full gate.',
-    'install-runners': 'nothing sources the library yet — point your '
-                       'Godot-booting `make` targets at it '
-                       '(`source tools/dev/gdk_runners.sh`), wire '
-                       '`make import-cache` to tools/dev/runners/import_cache.sh, '
-                       'and gitignore .gate-reports/ and .headless-userdata/. '
-                       'Then edit each file\'s `project config` header: the '
-                       'files are yours now.',
+    'install-ci': 'verify.yml runs `make milestone` — confirm that target '
+                  'exists and is your full gate. uid-guard.yml runs `make '
+                  'uid-scan` on a PR to main and a push to staging; rename the '
+                  'branches if yours differ (an `on:` filter takes no '
+                  'variable). semver-gate.yml and auto-tag.yml read '
+                  'config/version out of project.godot; set '
+                  'RELEASE_WORKFLOW in auto-tag.yml if your release pipeline '
+                  'is not release.yml, and leave it alone if you have none — '
+                  'the step is a documented no-op then.',
+    'install-runners': 'make your Makefile two lines — `DEVKIT_VERSION := '
+                       '<tag>` and then `include Makefile.devkit` — plus your '
+                       'own targets; your own gates join `check` through '
+                       '`[gates] extra` in devkit.toml, never a fork of the '
+                       'include. Then gitignore '
+                       '.gate-reports/, .scenario-reports/, .capture-reports/ '
+                       'and .headless-userdata/. Every `.sh` here is written '
+                       'EXECUTABLE, so a target may call it either way — the '
+                       'stock recipes say `bash tools/dev/runners/<x>.sh`, '
+                       'which also works on a checkout that lost the mode '
+                       'bits. Then edit each file\'s `project config` header: '
+                       'the files are yours now.',
 }
 
 
@@ -307,7 +423,16 @@ def _defect_refusal(command: str, defects: list[str], wrote: list[str]) -> str:
             f'command is idempotent.')
 
 
-def main(command: str, argv: list[str]) -> int:
+def main(command: str, argv: list[str], next_step: bool = True) -> int:
+    """One install verb. `next_step=False` silences the closing paragraph.
+
+    `init` composes all four of these and then DOES most of what those
+    paragraphs ask for — writes the two-line Makefile, gitignores the run
+    artifacts, runs setup-hooks.sh. Printed there, they would send an operator
+    to wire what the same command just wired, and a report whose instructions
+    are already stale is a report nobody finishes reading. Init prints its own,
+    covering the residue that still applies.
+    """
     force = False
     diff = False
     for arg in argv:
@@ -351,8 +476,16 @@ def main(command: str, argv: list[str]) -> int:
             if unreadable:
                 defects.append(f'{rel} {unreadable}')
                 continue
-            if existing == body:
+            if existing == body and not (rel.endswith(EXECUTABLE_SUFFIX)
+                                         and not _is_executable(target)):
                 kind = 'current'
+            elif existing == body:
+                # Right bytes, missing execute bit. Not `current`: the file a
+                # consumer installed before this package wrote the mode is
+                # exactly the broken one, and reporting it current would leave
+                # it broken forever. Rewritten (same bytes) so the ONE writer
+                # sets the mode, and idempotent — the next run finds it right.
+                pass
             elif not force:
                 collisions.append(rel)
                 continue
@@ -376,7 +509,8 @@ def main(command: str, argv: list[str]) -> int:
     writes = apply.Plan()
     for kind, target, rel, body in plan:
         if kind != 'current':
-            writes.overwrite(target, body, newline=None, label=rel)
+            writes.overwrite(target, body, newline=None, label=rel,
+                             executable=rel.endswith(EXECUTABLE_SUFFIX))
     # Everything answerable was answered above, so a failure here means the
     # filesystem changed under the plan. It is still a refusal that names what
     # it did — never a traceback, and never a silent "nothing was written" over
@@ -399,6 +533,6 @@ def main(command: str, argv: list[str]) -> int:
                                f'({result.error})'], written),
               file=sys.stderr)
         return 1
-    if written:
+    if written and next_step:
         print(f'[install] {_NEXT_STEP[command]}')
     return 0

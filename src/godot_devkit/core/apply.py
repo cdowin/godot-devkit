@@ -95,6 +95,14 @@ class Step:
     are not interchangeable: `''` writes the bytes given (what every grain
     document needs, so a CRLF template stays CRLF), `None` is `write_text`'s
     universal translation.
+
+    `executable` is the write's MODE, and it is part of the step for the same
+    reason the body is: a file whose content is right and whose mode is wrong
+    is not written. It exists because `install-runners` shipped a `scenario.sh`
+    at 0644 that `integration.sh` exec'd directly — exit 126 on every scenario,
+    with `Permission denied` matching no summary pattern, so the failure block
+    printed the scenario name and nothing under it. A caller cannot repair that
+    afterwards: this module owns every mutation, chmod included.
     """
 
     act: Act
@@ -104,6 +112,7 @@ class Step:
     newline: str | None = ''
     label: str = ''
     symlink: Symlink = Symlink.REFUSE
+    executable: bool = False
 
     def describe(self) -> str:
         if self.act is Act.RENAME:
@@ -150,9 +159,11 @@ class Plan:
         return self
 
     def overwrite(self, dest: Path, body: str, *, newline: str | None = '',
-                  label: str = '', symlink: Symlink = Symlink.REFUSE) -> 'Plan':
+                  label: str = '', symlink: Symlink = Symlink.REFUSE,
+                  executable: bool = False) -> 'Plan':
         return self.add(Step(Act.OVERWRITE, dest, body=body, newline=newline,
-                             label=label, symlink=symlink))
+                             label=label, symlink=symlink,
+                             executable=executable))
 
     # Named `make_dir` / `move`, not `mkdir` / `rename`, and deliberately: an
     # AST cannot tell `plan.mkdir(...)` from `Path.mkdir(...)`, and the boundary
@@ -293,6 +304,16 @@ def _case_respelling(src: Path, dest: Path) -> bool:
         return False
 
 
+def _make_executable(dest: Path) -> None:
+    """`chmod +x`, spelled exactly: the execute bit joins every class that can
+    already READ the file. Not a flat 0o755 — that would WIDEN a deliberately
+    0600 destination from "the owner may run this" into "everyone may read it",
+    which is a permission decision no writer here was asked to make.
+    """
+    mode = os.stat(dest).st_mode
+    os.chmod(dest, mode | ((mode & 0o444) >> 2))
+
+
 def _run(step: Step) -> None:
     """The only place a byte moves. Every branch is one `Act`."""
     if step.act is Act.MKDIR:
@@ -301,6 +322,8 @@ def _run(step: Step) -> None:
         step.dest.parent.mkdir(parents=True, exist_ok=True)
         with step.dest.open('w', encoding='utf-8', newline=step.newline) as fh:
             fh.write(step.body or '')
+        if step.executable:
+            _make_executable(step.dest)
     elif step.act is Act.RENAME:
         assert step.src is not None
         step.src.rename(step.dest)

@@ -9,6 +9,9 @@ It ships as a pinned tag. A project bumps the pin, runs `install-* --diff` to se
 takes what it wants — which is how a lesson learned in one game reaches the other. Nothing here boots
 Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 
+- **Stand a fresh project up in one command.** `init` writes the config, the PM tree, your
+  two-line Makefile, the standard target set, the runners, the hooks (armed), the agent roster and
+  the CI set — in order, idempotently. → [Wiring it in](#wiring-it-into-your-project)
 - **Read a scene without loading it.** `scene` answers structure in a few hundred tokens where the
   file costs 100k+; `--props` adds every `[resource]`/`[sub_resource]` property value, packed data
   elided, each id verbatim — the address the write verbs take. → [Quickstart](#quickstart-five-minutes)
@@ -25,7 +28,7 @@ Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 Consumed at a **pinned tag** so every machine and CI runs identical gate code:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.19.0" godot-devkit --version   # godot-devkit 0.19.0
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.20.0" godot-devkit --version   # godot-devkit 0.20.0
 ```
 
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
@@ -79,6 +82,9 @@ most trees have path-only `ext_resource` refs and missing `.uid` sidecars. That 
 See [Adopt the gates on an existing repo](#adopt-the-gates-on-an-existing-repo).
 
 ## Adopt the gates on an existing repo
+
+A NEW project skips this section: `godot-devkit init` writes everything and step 5 below is already
+done. This is the order for a tree that already has content in it.
 
 Order matters — some start red by design. Steps 2 and 4 are also the cure for `.tscn`/`.tres` churn.
 That churn — files you did not edit turning up in every commit — has three causes: path-only
@@ -171,15 +177,19 @@ unwritten.
 
 | Verb | Writes |
 |---|---|
-| `install-ci` | `.github/workflows/verify.yml` — checkout, uv, `make milestone`. That `make milestone` is your full gate is a **comment in the file**, not a discovery mechanism |
+| `init` | **All of the below, in the order a fresh project needs them**, plus the three files nothing else writes: `devkit.toml` (every gate section, commented at its stock default, so the file is inert on arrival), your two-line `Makefile` with this tag substituted into the pin, and a `CLAUDE.md` skeleton naming the standard targets and the installed rules. It also appends the four run-artifact directories to `.gitignore` and RUNS `tools/setup-hooks.sh`, because installing a hook is not arming it. Idempotent: re-run any time to fill what is missing. **Two ownerships:** the installed files are devkit-owned and `--force` overwrites them; `devkit.toml`, `Makefile`, `CLAUDE.md` and the PM tree are yours from the first write and `--force` never touches them, so a differing seed is reported rather than refused. Refuses, before writing a byte, in a directory with no `project.godot` or no git repo |
+| `install-ci` | The four workflows a Godot project runs on a push: `verify.yml` (checkout, uv, `make milestone` — that this is your full gate is a **comment in the file**, not a discovery mechanism), `uid-guard.yml` (`make uid-scan` on a PR to main and a push to staging; an `on:` filter takes no variable, so rename the branches if yours differ), `semver-gate.yml` (a merge to main must bump `config/version` in `project.godot`) and `auto-tag.yml` (tag the mainline from that same version, then dispatch `RELEASE_WORKFLOW` — the one project-specific string, and its absence is a green "tagged only" rather than a red X). Release, website and social workflows are the project's and are not written |
 | `install-agents` | The review/build contract (`verification-reviewer.md` + `verification-builder.md`) plus the base agent roster — architect, po, developer, reviewer, milestone-reviewer, simplifier, test-writer, tech-writer, changelog-writer, doc-hygiene, pm-operator — under `.claude/agents/`, each with `model:`/`effort:` frontmatter and a Project config section that is yours to edit after install. The SDLC they run is [`SDLC.md`](SDLC.md). Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context; a definition does |
 | `install-hooks` | The agent-workflow guard corpus: `tools/hooks/` gets `cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), `cc-stop-gate.sh` (an agent's stop is blocked while its fast gate is red), `cc-write-confine.sh` (a write outside the session's repo is blocked at the edit, not the commit), `pre-push` (no direct push to a protected branch + a scoped trunk gate) and `prepare-commit-msg` (agent commits get the trailer, the human's never do); `tools/dev/` gets `agent-worktree.sh` (the one sanctioned per-agent worktree create/teardown) and `checks/doctor.sh` (toolchain census that self-heals the hook wiring); plus `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there — and each carries a `project config` header that is yours to edit after install. `cc-godot-sandbox.sh` also ships its own block/allow payload corpus: wire `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your static gate (nullbound: a `hooks-self-test` target in `make check`) so an edit to the guard cannot quietly change a verdict |
-| `install-runners` | The sandboxed headless-run shell library — `tools/dev/gdk_runners.sh` (one verdict line per gate naming `.gate-reports/<gate>.log`, `VERBOSE=1` streams; a per-run self-destroying HOME sandbox so a boot can never reach the real `user://`; a bounded-run contract that tells a hang from a failure; a `project.godot` restore that undoes engine re-serialization and leaves a real edit alone) plus `tools/dev/runners/import_cache.sh`, the one runner that sources it. Every function is `gdk_*` and your `make` targets call those — a consumer keeping its own prefix is forking the library and stranding the next fix. Both carry `--self-test`; wire `bash tools/dev/gdk_runners.sh --self-test` into your static gate. Nothing sources the library until you point your Godot-booting targets at it, and `.gate-reports/` + `.headless-userdata/` want gitignoring |
+| `install-runners` | The sandboxed headless-run shell library — `tools/dev/gdk_runners.sh` (one verdict line per gate naming `.gate-reports/<gate>.log`, `VERBOSE=1` streams; a per-run self-destroying HOME sandbox so a boot can never reach the real `user://`; a bounded-run contract that tells a hang from a failure; a `project.godot` restore that undoes engine re-serialization and leaves a real edit alone) plus the runners that source it, under `tools/dev/runners/`: `import_cache.sh`, `parse.sh` (headless boot + a full-project `compile_sweep.gd` pass, reported N/N), `lint.sh` (gdlint over a scan set derived from git's index, never a maintained list), `warnings.sh` (the editor-only GDScript analyzer warnings, promoted to errors in a throwaway project mirror), `unit.sh` (GUT, sliced per system, with the coverage gate that fails the run when GUT silently refused to load a test script), `scenario.sh` / `integration.sh` (one boot scenario, and the whole tier one process each, N-way parallel), `capture.sh` (HEADED, because headless is blind to render), and `hermetic_run_scan.sh` — the gate ON that pair rather than a gate that uses it: no bare `trap … EXIT` clobbering the sandbox self-destruct, a real child run whose HOME and state are gone afterwards with the real `user://` untouched, and nothing persisted beside the `runs/` spool. It boots no engine, so it belongs in your STATIC gate set. Every function is `gdk_*` and your `make` targets call those — a consumer keeping its own prefix is forking the library and stranding the next fix. Each file carries `--help` and `--self-test`; the `runners-self-test` target replays every one of them. **Plus `Makefile.devkit` at the repo root** — the standard target set that CALLS them, which your own Makefile `include`s ([Wiring it in](#wiring-it-into-your-project)). The two ship under one verb because neither half is usable alone: the runners have no callers without the targets, and every runner-backed target is dead without the runners. `.gate-reports/`, `.scenario-reports/`, `.capture-reports/` + `.headless-userdata/` want gitignoring, which `init` does for you |
 | `pm install-skills` | `.claude/rules/pm-execution.md` (auto-loads on a `pm/roadmap/**` edit) + `.claude/skills/pm-operations/SKILL.md` (invoked deliberately). Under `pm` because what it writes is the PM tree's own guidance |
 
-All five take `--force` and `--diff`.
+All six take `--force` and `--diff`.
 
 ### Static gates (`godot-devkit check <gate>`)
+
+`check <gate> --help` prints that gate's contract, its `devkit.toml` section and its
+honest scope — the module docstring itself, so the help cannot drift from the code.
 
 Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 
@@ -193,7 +203,12 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 | `check repo-hygiene` | Close-time git cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` |
 | `check shell` | `shellcheck -x` over every script under `tools/`, incl. extension-less hook entry points. Soft-skips if shellcheck isn't installed |
 | `check pm` | PM-tree drift: a `done` feature whose `reviewed:` names no file, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema (milestones, features, stories **and bugs**), a `done` story under a live feature, a `building` milestone with everything closed. Also runs the `pm validate` integrity rules (V1–V5). Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree |
-| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the eight gates read `.tscn`/`.tres` or shell, so a repo holding none gets five 0-file censuses and correctly reddens each. That is the roster being wrong for the repo, not a reason to soften a gate. An unknown name is exit 2, never a quietly narrowed run |
+| `check rng` | Randomness a seeded run cannot reproduce: an UNQUALIFIED `randi()`/`randf()`/`randi_range()`/`randf_range()` — the global generator — and `randomize()` in any spelling, including on an instance RNG (which makes an entropy-seeded result LOOK derived). Scope is `[rng] roots` and is meant to be narrow. `[rng] allowlist` is `"<path>:<enclosing func>" = "the reason"`: function granularity, so a new bare call elsewhere in a listed file still trips, the reason is DATA rather than a comment, and an entry that no longer matches a call is itself a finding |
+| `check tres-comment` | An authored `;` comment in a `.tres`/`.tscn`. Godot's parser accepts one and its writer DROPS it, so any rationale in a resource file survives only until the next editor save, import or headless run — silently, permanently, with no diff to notice |
+| `check unit-disk` | A no-boot test that reaches real persistent state: a `user://` path (stock), a call that touches a live owner (`[unit_disk] forbidden_calls`), or a call whose root/scope parameter DEFAULTS to the real one (`[unit_disk] min_args` — `Save.load(uuid)` is a finding where `Save.load(uuid, throwaway)` is not). A call NAMED in an assert message or a doc comment is not a call |
+| `check test-shape` | The expensive test tier growing into the bulk. A RATCHET: `[test_shape] cap` bounds a new scenario, and every file already over it is recorded in `[test_shape] ledger` at its current size — the gate fails when one GROWS past its ceiling or a new one crosses the cap. Prints the tier balance it exists to move, and the ledger line to paste; read-only, so it never edits the config that governs it |
+| `gates-extra` | **Not a gate** — prints `[gates] extra` from `devkit.toml`, one make target per line: the project's OWN gate targets, which `Makefile.devkit`'s `check` runs after the devkit ones. The include shells out to this once per run rather than parsing TOML in make, because a `sed` over section headers is a second TOML reader and a second answer. The value is interpolated into a make command line, so the grammar is narrow: whitespace, a path, a shell or make metacharacter, an over-long name or a non-list is exit 2 with a reason — never a silently dropped entry |
+| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: most of the roster reads `.tscn`/`.tres`/`.gd` or shell, so a repo holding none gets a 0-file census per gate and correctly reddens each. That is the roster being wrong for the repo, not a reason to soften a gate. The four ported project scans (`rng`, `tres-comment`, `unit-disk`, `test-shape`) are out of the default for the same reason in reverse — none can state a stock scope true of every repo, so each is one `[checks] all` entry away once yours has declared one. An unknown name is exit 2, never a quietly narrowed run |
 
 ### Project management (`godot-devkit pm <command>`)
 
@@ -313,28 +328,41 @@ skipped.
 
 ## Wiring it into your project
 
-Pin the tag once; every target routes through it, so a bump is a one-line diff:
+**A new project — one command.** From inside the repo:
 
-```make
-DEVKIT_VERSION := v0.19.0
-DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
-
-check:         ; @$(DEVKIT) check all           # per-change gate — offline, no Godot boot
-pm-scan:       ; @$(DEVKIT) check pm            # one target per gate, if you want them named
-repo-hygiene:  ; @$(DEVKIT) check repo-hygiene  # close-time: fetches from the network
-defaults-scan: ; @$(DEVKIT) check defaults      # close-time: red until canonicalized once
-
-scene:        ; @$(DEVKIT) scene $(FILE) $(ARGS)
-scene-diff:   ; @$(DEVKIT) scene-diff $(FILE) $(ARGS)
-scene-set:    ; @$(DEVKIT) scene set $(FILE) $(ARGS)
-scene-canon:  ; @$(DEVKIT) scene canonicalize $(FILE) $(ARGS)
-refs:         ; @$(DEVKIT) refs $(NAME) $(ARGS)
-orphans:      ; @$(DEVKIT) orphans $(ARGS)
-autoloads:    ; @$(DEVKIT) autoloads
+```bash
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.20.0" godot-devkit init
+make doctor && make help
 ```
 
-**Per-change vs close-time is the split that matters.** `check all` belongs in your pre-commit or
-pre-push hook; `check repo-hygiene` and `check defaults` belong at milestone close.
+**Your Makefile is two lines plus what is yours.** The pin is the one line that must differ per
+project, so it lives in YOUR file and a bump is a one-line diff:
+
+```make
+DEVKIT_VERSION := v0.20.0
+include Makefile.devkit
+
+my-scan: ## a gate this project owns
+	@bash tools/dev/checks/my_scan.sh
+```
+
+`Makefile.devkit` is devkit-owned and carries the standard set — `help` `doctor` · `parse` `lint`
+`warnings` · `unit` `integration` `integration-all` `scenario` `smoke` `capture` `import-cache` ·
+`refs` `scene` `scene-diff` `orphans` `autoloads` `pm` · `pm-scan` `uid-scan` `hermetic-scan`
+`hooks-self-test` `runners-self-test` · `check` `precommit` `milestone`. **Every gate prints ONE
+verdict line** naming its full transcript under `.gate-reports/`; `VERBOSE=1` streams the whole
+thing. `make help` is the authoritative list and shows your targets beside the standard ones.
+
+**Your own gates join `check` by config, never by a fork of the include:**
+
+```toml
+[gates]
+extra = ["my-scan"]
+```
+
+**Per-change vs close-time is the split that matters.** `make precommit` (`check` + `parse` + `lint`
++ `unit` + `smoke`) belongs in your pre-commit or pre-push hook; `make milestone` is the full gate
+and what the installed CI runs; `check repo-hygiene` and `check defaults` belong at milestone close.
 
 ## Northstar
 
@@ -388,7 +416,10 @@ make milestone   # gates + matrix + smoke — the full gate, and what CI runs
 `make matrix` runs the suite on every claimed interpreter and reports which one failed; `make fuzz`
 runs the seeded differential + replay harnesses alone; `make smoke` runs `check all`, `autoloads`,
 `scene`, `refs`, `pm status`, `pm validate` and `check pm` against the live consumer checkouts,
-compares each printed census against an independent count, and fails if it leaves either dirty.
+compares each printed census against an independent count, and fails if it leaves either dirty. It
+also carries the **fresh-project probe**: an empty Godot 4 project in a temp dir, `init`, then the
+REAL `make doctor` — the one write in the file, never inside a consumer checkout, and a loud NOT RUN
+where `godot` is off PATH.
 `orphans`, `scene-diff`, `tiles`, `pm list` and `pm get` are NOT in it. Write verbs NEVER run against
 a consumer checkout. Tests needing a Godot repo skip cleanly when none is present; the hermetic
 fixtures under `tests/fixtures/` always run.

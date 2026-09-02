@@ -37,10 +37,15 @@ the tree.
 """
 
 
-def cmd_init(cfg: model.PmConfig, args: list[str]) -> int:
-    """Stand up a PM tree in a repo that has none, and say what is left to do."""
-    if args:
-        raise Usage(USAGE)
+def stand_up_tree(cfg: model.PmConfig) -> list[str]:
+    """Create the roadmap dir + its index if absent; return what was created.
+
+    The tree half of `pm init`, split from the guidance half because `init`
+    (the whole-project verb) needs exactly this and NOT the four next-steps
+    below it — two of those four tell an operator to wire what `init` already
+    wired, and guidance that is wrong where it is printed is worse than none.
+    The verb keeps the reporting; this owns the write.
+    """
     plan = apply.Plan()
     index = cfg.roadmap / model.ROADMAP_DOC
     if not cfg.roadmap.is_dir():
@@ -48,7 +53,14 @@ def cmd_init(cfg: model.PmConfig, args: list[str]) -> int:
     if not index.is_file():
         plan.overwrite(index, ROADMAP_SEED, newline=None, label=cfg.rel(index))
     apply.raise_on_error(plan.apply(decide=False))
-    made = [step.label for step in plan.steps]
+    return [step.label for step in plan.steps]
+
+
+def cmd_init(cfg: model.PmConfig, args: list[str]) -> int:
+    """Stand up a PM tree in a repo that has none, and say what is left to do."""
+    if args:
+        raise Usage(USAGE)
+    made = stand_up_tree(cfg)
     for m in made:
         _ok(f'created {m}')
     if not made:

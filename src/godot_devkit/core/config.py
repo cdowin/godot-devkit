@@ -115,6 +115,29 @@ def str_tuple_table(sect: dict, name: str, key: str,
     return out
 
 
+def number_table(sect: dict, name: str, key: str,
+                 fallback: dict[str, int]) -> dict[str, int]:
+    """A table mapping names to INTEGERS — `number`, one level down.
+
+    A ledger (`{path = 956}`) and an arity floor (`{"Save.write" = 2}`) are the
+    same shape, and both are read as "how many" by code that would otherwise
+    silently compare an int against a string. A bool is refused with everything
+    else: `true` is an `int` in Python and would arrive as 1.
+    """
+    raw = sect.get(key)
+    if raw is None:
+        return dict(fallback)
+    if not isinstance(raw, dict):
+        raise ConfigError(f'[{name}] {key} must be a table, got {raw!r}')
+    out: dict[str, int] = {}
+    for entry, value in raw.items():
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ConfigError(
+                f'[{name}] {key}.{entry} must be an integer, got {value!r}')
+        out[entry] = value
+    return out
+
+
 def pattern(sect: dict, name: str, key: str, fallback: str) -> str:
     """A regex setting, COMPILED at load so a bad one is exit 2, not a finding."""
     import re as _re

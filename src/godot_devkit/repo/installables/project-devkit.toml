@@ -1,0 +1,152 @@
+# devkit.toml — this project's godot-devkit config.
+#
+# YOURS. `godot-devkit init` wrote this once and never overwrites it, not even
+# with --force: the tool is pinned by DEVKIT_VERSION in the Makefile, and what
+# that tool should do HERE is the project's own statement.
+#
+# Every section below is COMMENTED OUT and carries the stock default. A repo
+# with no devkit.toml behaves byte-identically to one declaring every default,
+# so deleting a section is always safe — uncomment only where your layout
+# genuinely differs. `godot-devkit check <gate> --help` prints that gate's
+# contract, its section and its honest scope.
+#
+# A key this package no longer honours is NAMED at exit 2, never ignored; a
+# wrong-typed value (a bare string where a list belongs) is exit 2 as well,
+# because a gate quietly scanning nothing is worse than a gate that stops.
+
+# --- which gates run ----------------------------------------------------------
+# The roster `godot-devkit check all` runs HERE. The default suits a Godot
+# project that has scenes and scripts in it. A repo holding NONE of a gate's
+# file kind gets a 0-file census, and that gate correctly reddens — a gate that
+# scanned nothing must say so. That is the roster being wrong for the repo, not
+# a reason to soften a gate: narrow it here instead. An unknown name is exit 2.
+#
+# The four project scans below (rng, tres-comment, unit-disk, test-shape) are
+# OPT-IN for the mirror-image reason — none can state a stock scope true of
+# every repo — so each joins by being named here once you have declared its
+# scope further down. `defaults`, `repo-hygiene` and `pm` are out of the stock
+# roster too: `defaults` reports thousands of findings until you canonicalize
+# once, `repo-hygiene` is close-time and hits the network, and `pm` would fail
+# a repo that has no PM tree. Name any of them here to fold it in.
+# [checks]
+# all = ["uid", "tres", "props", "doc", "shell"]
+
+# `make check` runs the devkit gates and then YOUR gate targets, named here as
+# make goals — extension by config, never a fork of Makefile.devkit. A name
+# that is not a plain make goal (whitespace, a path, a shell or make
+# metacharacter) is exit 2, and `check` refuses to re-enter itself.
+# [gates]
+# extra = []
+
+# --- the Godot-file gates -----------------------------------------------------
+# Each is a prefix roster that REPLACES its default wholesale (not a merge).
+# [uid]
+# exclude_prefixes = ["addons/"]   # scopes BOTH uid checks, not just the ref one
+# [tres]
+# exclude_prefixes = ["addons/"]
+# [defaults]
+# exclude_prefixes = ["addons/"]
+
+# `extra_properties` is the carve-out for a `_get_property_list` shape the
+# scanner cannot see. The key names the script's `class_name` (or an
+# ancestor's) or the node's engine type — the carve-out applies ONLY to
+# sections of that class, never tree-wide.
+# [props]
+# exclude_prefixes = ["addons/"]
+# extra_properties = { MyWidget = ["virtual_prop"] }
+
+# --- the repo gates -----------------------------------------------------------
+# `check doc` reads your ALWAYS-LOADED agent docs and verifies their claims
+# resolve: dead file paths, dead `make` targets (the root Makefile plus
+# whatever it includes), dead markdown links, a skill written as a flat .md.
+# [doc]
+# scope = ["CLAUDE.md", ".claude/rules/*.md", ".claude/agents/*.md"]
+# ephemeral = ["docs/reviews/"]
+
+# `check shell` runs shellcheck -x over every script under these roots,
+# extension-less hook entry points included. It soft-skips without shellcheck.
+# [shell]
+# roots = ["tools"]
+
+# `check repo-hygiene` is CLOSE-TIME and fetches from the network.
+# [repo_hygiene]
+# mainline = "origin/main"
+# protected = "^(main|staging|archive/.*)$"
+
+# --- the PM tree --------------------------------------------------------------
+# `godot-devkit pm` and its drift gate `check pm`. The states are closed sets
+# and the transitions are open: any value in a grain's vocabulary is reachable,
+# and the gate reports a tree that contradicts itself. `pm vocabulary` prints
+# the rule ids in full.
+# [pm]
+# roadmap_dir  = "pm/roadmap"     # the tree, relative to the repo root
+# template_dir = "pm/templates"   # REQUIRED to override a grain template
+# review_dir   = "docs/reviews"   # where review records live
+# review_slug_fallback = false    # also accept <review_dir>/<feature-slug>*.md
+# story_ordinal_prefix = false    # also resolve stories/NN-<slug>.md
+# checks = ["D1", "D2", "D3", "D4", "D5", "D6",   # drift rules — the default
+#           "V1", "V2", "V3", "V4", "V5"]         # integrity rules
+#                                   # V6 (execution lists match the tree) and
+#                                   # the FLOW rules are opt-in: D8 (the project
+#                                   # version equals the building milestone's
+#                                   # id — bump-at-START), D9 (a building
+#                                   # milestone declares `branch:`), D10 (that
+#                                   # branch is neither empty nor the mainline).
+# bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
+# version_file    = "project.godot"               # D8: where the version lives
+# version_pattern = '^config/version="(.*)"$'     # D8: the line carrying it
+# milestone_states / feature_states / story_states are overridable the same way.
+
+# --- the read verbs -----------------------------------------------------------
+# `autoloads` cross-checks each autoload's NAME SUFFIX against what its source
+# actually does: "emits" (declares signals), "relays" (connects to others),
+# "inert". The table replaces the default vocabulary wholesale.
+# [autoloads]
+# suffixes = { Manager = "emits", Tracker = "relays", Registry = "inert", Store = "inert", Service = "inert" }
+# expected_prefixes = ["autoloads/core/", "autoloads/presentation/"]
+
+# [refs]
+# exclude_prefixes = [".git/", ".godot/", ".claude/worktrees/", "pm/roadmap/zz_archive/", "addons/"]
+
+# [orphans]
+# vendored_prefixes        = ["addons/"]          # out of the scan entirely
+# entry_point_prefixes     = ["tools/"]           # reference corpus, never candidates
+# auto_discovered_prefixes = ["tests/", "data/"]  # not candidates unless --tests
+# convention_files         = ["default_bus_layout.tres"]   # engine implicit loads
+
+# --- the opt-in project scans -------------------------------------------------
+# None of these four runs until you name it in `[checks] all` above.
+#
+# `check rng` — randomness a seeded run cannot reproduce: an UNQUALIFIED
+# randi()/randf()/randi_range()/randf_range(), and randomize() in any spelling.
+# Keep `roots` narrow. The allowlist key is "<path>:<enclosing func>" and its
+# VALUE is the reason (data, not a comment); an entry matching no call is
+# itself a finding, so the list cannot rot.
+# [rng]
+# roots = ["."]
+# allowlist = { "scenes/ui/title.gd:_ready" = "cosmetic title jitter, never replayed" }
+
+# `check tres-comment` — an authored `;` comment in a .tres/.tscn. Godot's
+# parser accepts one and its writer DROPS it, silently and permanently.
+# [tres_comment]
+# exclude_prefixes = ["addons/"]
+
+# `check unit-disk` — a no-boot test that reaches real persistent state.
+# `forbidden_calls` names your own live owners; `min_args` names a call whose
+# root/scope parameter DEFAULTS to the real one.
+# [unit_disk]
+# roots = ["tests/unit"]
+# forbidden_literals = { "a real user:// path" = ["user://"] }
+# forbidden_calls    = { "the live settings autoload" = ["Settings.save"] }
+# min_args           = { "SaveService.save" = 2 }
+
+# `check test-shape` — a RATCHET on the expensive test tier: `cap` bounds a new
+# scenario, `ledger` records every file already over it at its current size,
+# and the gate fails when one GROWS past its ceiling. `infra` names the tier's
+# shared harness, which is where duplication is supposed to move TO.
+# [test_shape]
+# scenario_root = "tests/integration"
+# unit_root     = "tests/unit"
+# cap           = 300
+# infra         = []
+# ledger        = { "tests/integration/boot/test_boot.gd" = 412 }
