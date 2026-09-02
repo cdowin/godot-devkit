@@ -30,4 +30,15 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
       - name: make milestone
+        # The gates print one verdict line each and keep the transcript in
+        # .gate-reports/; CI has no second look, so it streams.
+        env:
+          VERBOSE: "1"
         run: make milestone
+      - name: keep the gate transcripts of a red run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reports
+          path: .gate-reports/
+          if-no-files-found: ignore

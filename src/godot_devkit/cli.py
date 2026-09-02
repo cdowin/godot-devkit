@@ -70,6 +70,8 @@ Installers (write the file once; after that it is the repo's):
                                     # does)
     godot-devkit install-hooks      # the shared-tree commit guard, the
                                     # raw-engine-boot guard, and setup-hooks.sh
+    godot-devkit install-runners    # the sandboxed headless-run shell library
+                                    # + the import-cache runner (gdk_* library)
     (each takes --force to overwrite a differing destination, and --diff to
      print what would change without writing)
 
