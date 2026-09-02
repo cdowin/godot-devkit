@@ -2,7 +2,7 @@
 id: 0.20.0/makefile-include
 milestone: "0.20.0"
 name: Makefile.devkit — one standard target set, projects extend by config
-status: planning
+status: building
 reviewed:
 phase: 2
 depends_on: ["0.20.0/generic-runners", "0.20.0/generic-scans"]

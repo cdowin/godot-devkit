@@ -2,7 +2,7 @@
 id: 0.20.0/ci-set
 milestone: "0.20.0"
 name: install-ci writes the workflow set both consumers actually run
-status: planning
+status: building
 reviewed:
 phase: 2
 depends_on: []
