@@ -272,8 +272,54 @@ def test_the_armed_corpus_grows_by_exactly_the_function_cases(armed_sandbox,
         assert run.returncode == 0, run.stdout + run.stderr
         return run.stdout.split('—')[1].strip()
 
-    assert counts(hooks_repo / SANDBOX) == '11 block / 9 allow case(s)'
-    assert counts(armed_sandbox) == '13 block / 11 allow case(s)'
+    assert counts(hooks_repo / SANDBOX) == '13 block / 13 allow case(s)'
+    assert counts(armed_sandbox) == '15 block / 15 allow case(s)'
+
+
+# --- cc-godot-sandbox: the STOCK gdk_ roster, guarded with no config ----------
+# `install-runners` puts gdk_runners.sh in every consumer, so its
+# boot-in-a-function is guarded out of the box — SANDBOX_FUNCTION above stays
+# for a repo that ALSO carries a project-prefixed spelling. The pair below is
+# the whole point: the function that BOOTS is blocked, the function that makes
+# a run safe is not.
+@pytest.mark.parametrize('command', [
+    'gdk_rebuild_import_cache',                                  # typed
+    'source tools/dev/gdk_runners.sh && gdk_rebuild_import_cache',
+    'timeout 60 gdk_rebuild_import_cache',                       # behind a wrapper
+])
+def test_the_stock_roster_blocks_the_library_boot_function_unconfigured(
+        hooks_repo, command):
+    assert fire(hooks_repo, SANDBOX, command) == 2
+
+
+@pytest.mark.parametrize('command', [
+    # gdk_sandbox_home is the DOOR: it exports a sandboxed HOME and boots
+    # nothing. A guard that blocked it would be teaching people to switch the
+    # guard off, which is the one outcome this file exists to prevent.
+    'source tools/dev/gdk_runners.sh && gdk_sandbox_home',
+    'gdk_sandbox_home',
+    'make import-cache',                                # the sanctioned target
+    'grep -rn gdk_rebuild_import_cache docs/',          # an argument, not a command
+    'echo "run it: (gdk_rebuild_import_cache) by hand"',
+])
+def test_the_stock_roster_never_blocks_the_sandbox_door_or_a_mention(
+        hooks_repo, command):
+    assert fire(hooks_repo, SANDBOX, command) == 0
+
+
+def test_the_block_message_names_the_function_that_matched(hooks_repo):
+    """Two rosters feed one guard, so the message has to name the entry that
+    actually matched — a block that names the OTHER roster's function sends
+    the agent to a door that does not exist."""
+    event = json.dumps({'tool_name': 'Bash',
+                        'tool_input': {'command': 'gdk_rebuild_import_cache'},
+                        'cwd': str(hooks_repo)})
+    done = subprocess.run(['bash', str(hooks_repo / SANDBOX)], input=event,
+                          text=True, capture_output=True)
+    assert done.returncode == 2
+    assert '`gdk_rebuild_import_cache`' in done.stderr, done.stderr
+    assert 'make import-cache' in done.stderr, done.stderr
+    assert 'gdk_runners.sh' in done.stderr, done.stderr
 
 
 # =============================================================================

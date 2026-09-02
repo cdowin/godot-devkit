@@ -37,27 +37,48 @@ trap 'exit 0' ERR
 # --- project config (yours to edit after install — the file is your repo's) --
 # The file that owns the user:// HOME sandbox — named in the BLOCK message so
 # the agent is pointed at the door, not just turned away at the wall.
-SANDBOX_OWNER='tools/dev/_common.sh (its "--- user:// HOME sandbox ---" block)'
+SANDBOX_OWNER='tools/dev/gdk_runners.sh (its gdk_sandbox_home function)'
 # The wrapper roster the BLOCK message offers — your project's spellings.
 WRAPPER_ROSTER='    make parse | make lint | make check      # static gates
     make unit SYS=<system>                   # unit tier (sliced)
     make scenario NAME=<name>                # one integration scenario, cold
     make integration ARGS="--system <x>"     # a scenario slice
     make smoke                               # the boot smoke test
+    make import-cache                        # rebuild .godot, sandboxed
     make help                                # every target, authoritative'
-# OPTIONAL, empty by default. The name of a shell FUNCTION in your sandbox
-# library that boots the engine itself. Typing it (after sourcing the library)
-# is a raw boot the godot-in-command-position guard below cannot see — there is
-# no `godot` token on the line — and such a function typically sandboxes NOTHING
-# by itself: it relies on the typist having set the sandbox HOME first. One
-# consumer's did, one typist did not, and an editor pass ran against the live
-# player data. Set this to that function's name and the guard blocks it in
-# COMMAND POSITION too; set SANDBOX_FUNCTION_TARGET to the wrapper that owns the
-# job. Left EMPTY (the stock value) this whole branch is inert — including the
-# fast path, which never widens to match every command.
+# A shell FUNCTION that boots the engine itself is the other way past this
+# guard: typing it (after sourcing the library) is a raw boot with no `godot`
+# token on the line for the command-position check below to see — and such a
+# function sandboxes NOTHING by itself, it relies on the typist having set the
+# sandbox HOME first. One consumer's did, one typist did not, and an editor
+# pass ran against the live player data.
+#
+# STOCK ROSTER — the functions `godot-devkit install-runners` puts in every
+# consumer, blocked with no configuration at all. `gdk_sandbox_home` is
+# deliberately NOT here: it is the door, not a boot, and blocking the one
+# function that MAKES a run safe would teach people to switch this guard off.
+GDK_BOOT_FUNCTIONS='gdk_rebuild_import_cache'
+GDK_BOOT_FUNCTION_TARGET='make import-cache'
+# OPTIONAL, empty by default: one more function name, for a repo that still
+# carries a project-prefixed spelling of the same thing. Set SANDBOX_FUNCTION
+# to the name and SANDBOX_FUNCTION_TARGET to the wrapper that owns the job.
 SANDBOX_FUNCTION=''
 SANDBOX_FUNCTION_TARGET=''
 # -----------------------------------------------------------------------------
+
+# The effective roster: the stock names, plus the consumer's if it set one.
+# Parallel arrays rather than a map, because bash 3.2 has no associative ones
+# and every entry needs the wrapper that owns its job alongside it.
+BOOT_FUNCTIONS=()
+BOOT_FUNCTION_TARGETS=()
+for _fn in $GDK_BOOT_FUNCTIONS; do
+	BOOT_FUNCTIONS+=("$_fn")
+	BOOT_FUNCTION_TARGETS+=("$GDK_BOOT_FUNCTION_TARGET")
+done
+if [ -n "$SANDBOX_FUNCTION" ]; then
+	BOOT_FUNCTIONS+=("$SANDBOX_FUNCTION")
+	BOOT_FUNCTION_TARGETS+=("$SANDBOX_FUNCTION_TARGET")
+fi
 
 # --- --self-test — the payload corpus, PROVEN rather than claimed ------------
 # `bash tools/hooks/cc-godot-sandbox.sh --self-test` replays every payload
@@ -65,8 +86,9 @@ SANDBOX_FUNCTION_TARGET=''
 # where it should. Wire it into your static gate (in the stock consumer
 # Makefile: a `hooks-self-test` target listed in `check`) — a corpus that is
 # re-run is the only reason to trust "every case verified" six months later.
-# The two SANDBOX_FUNCTION cases in each list appear only when you have set
-# that variable, so the corpus always tests the guard you actually run.
+# The stock roster's cases are always in the corpus; the two extra
+# SANDBOX_FUNCTION cases in each list appear only when you have set that
+# variable, so the corpus always tests the guard you actually run.
 # shellcheck disable=SC2016  # these are literal PAYLOADS — expansion is the
 # thing under test, and it must not happen here.
 SELF_TEST_BLOCK=(
@@ -83,6 +105,10 @@ SELF_TEST_BLOCK=(
 	# An UNBALANCED quote is unparseable, and unparseable input stays STRICT:
 	# the quote-aware split refuses and the naive fallback still sees the boot.
 	'echo "foo; godot --headless'
+	# The library's boot-in-a-function, typed. It sandboxes nothing by itself.
+	'gdk_rebuild_import_cache'
+	# the realistic spelling: sourced, then typed, in a later segment.
+	'source tools/dev/gdk_runners.sh && gdk_rebuild_import_cache'
 )
 # The two `git commit` cases and the `echo` case are the quoting false positives
 # this guard used to fire on: a word inside quotes is data, never a command word.
@@ -96,6 +122,12 @@ SELF_TEST_ALLOW=(
 	'git commit -m "hooks: block (godot --headless) in command position"'
 	'echo "foo; godot --headless"'
 	$'cat <<EOF\ngodot --headless --quit\nEOF'
+	'make import-cache'
+	'grep -rn gdk_rebuild_import_cache docs/'
+	'echo "run it: (gdk_rebuild_import_cache) by hand"'
+	# gdk_sandbox_home is the DOOR — it exports a sandboxed HOME and boots
+	# nothing. Blocking it would turn the safe spelling into a blocked one.
+	'source tools/dev/gdk_runners.sh && gdk_sandbox_home'
 )
 if [ -n "$SANDBOX_FUNCTION" ]; then
 	SELF_TEST_BLOCK+=(
@@ -203,10 +235,15 @@ mentions_engine=0
 case "$INPUT" in
 	*godot*|*Godot*|*GODOT*) mentions_engine=1 ;;
 esac
-if [ "$mentions_engine" -eq 0 ] && [ -n "$SANDBOX_FUNCTION" ]; then
-	case "$INPUT" in
-		*"$SANDBOX_FUNCTION"*) mentions_engine=1 ;;
-	esac
+if [ "$mentions_engine" -eq 0 ]; then
+	for _fn in ${BOOT_FUNCTIONS[@]+"${BOOT_FUNCTIONS[@]}"}; do
+		# An EMPTY name would make `*"$_fn"*` match every command on earth,
+		# quietly retiring the fast path — so an empty entry never gets in.
+		[ -n "$_fn" ] || continue
+		case "$INPUT" in
+			*"$_fn"*) mentions_engine=1; break ;;
+		esac
+	done
 fi
 [ "$mentions_engine" -eq 1 ] || exit 0
 
@@ -290,6 +327,8 @@ is_wrapper() {
 
 offender=""
 offender_kind="engine"
+offender_fn=""
+offender_fn_target=""
 # Split at shell operators so each segment starts at a command word. `$(`, a
 # backtick and a brace group all start a fresh command too.
 # The quote-aware walk is pure shell and BEATS the `tr` fork at every size a
@@ -353,11 +392,19 @@ while IFS= read -r segment; do
 	# The sandbox library's boot-in-a-function, in COMMAND position (only when
 	# the consumer named one). Position is what keeps this honest: `grep -rn
 	# <fn> docs/` has `grep` as its command word and is never flagged.
-	if [ -n "$SANDBOX_FUNCTION" ] && [ "$command_word" = "$SANDBOX_FUNCTION" ]; then
-		offender="$segment"
-		offender_kind="function"
-		break
-	fi
+	fn_idx=0
+	while [ "$fn_idx" -lt "${#BOOT_FUNCTIONS[@]}" ]; do
+		if [ -n "${BOOT_FUNCTIONS[$fn_idx]}" ] \
+				&& [ "$command_word" = "${BOOT_FUNCTIONS[$fn_idx]}" ]; then
+			offender="$segment"
+			offender_kind="function"
+			offender_fn="${BOOT_FUNCTIONS[$fn_idx]}"
+			offender_fn_target="${BOOT_FUNCTION_TARGETS[$fn_idx]}"
+			break
+		fi
+		fn_idx=$((fn_idx + 1))
+	done
+	[ -z "$offender" ] || break
 
 	case "$(printf '%s' "$command_word" | tr '[:upper:]' '[:lower:]')" in
 		godot-devkit) continue ;;
@@ -396,16 +443,16 @@ done <<<"$SEGMENTS"
 
 if [ "$offender_kind" = "function" ]; then
 	{
-		echo "BLOCKED (user:// sandbox): never call \`$SANDBOX_FUNCTION\` by hand."
+		echo "BLOCKED (user:// sandbox): never call \`$offender_fn\` by hand."
 		echo "  offending segment: ${offender# }"
 		echo ""
 		echo "  That function boots the engine against whatever user:// resolves"
 		echo "  to, and it sandboxes NOTHING by itself — it relies on the caller"
 		echo "  having set the sandbox HOME first ($SANDBOX_OWNER)."
 		echo ""
-		if [ -n "$SANDBOX_FUNCTION_TARGET" ]; then
+		if [ -n "$offender_fn_target" ]; then
 			echo "  Use the target that owns the job (sandbox + outcome check):"
-			echo "    $SANDBOX_FUNCTION_TARGET"
+			echo "    $offender_fn_target"
 		else
 			echo "  Use the wrapper that owns the job:"
 			echo "$WRAPPER_ROSTER"

@@ -121,6 +121,23 @@ _gdk_destroy_run_home() {
 	_GDK_RUN_HOME=""
 }
 
+# _gdk_reap_stale_run_homes <runs_dir> — the forget-proof backstop. A SIGKILLed
+# run (or a future wrapper that clobbers the EXIT trap anyway) leaves its HOME
+# behind; the next run reaps it. The owning pid is encoded in the directory
+# name, so a CONCURRENT run's live HOME is never touched — and a directory
+# whose name carries no pid is left alone rather than guessed at.
+_gdk_reap_stale_run_homes() {
+	local runs_dir="${1:?usage: _gdk_reap_stale_run_homes <runs_dir>}" dir pid
+	for dir in "$runs_dir/$GDK_SANDBOX_RUN_PREFIX"*; do
+		[ -d "$dir" ] || continue
+		pid="${dir##*/"$GDK_SANDBOX_RUN_PREFIX"}"
+		pid="${pid%%-*}"
+		case "$pid" in ''|*[!0-9]*) continue ;; esac
+		kill -0 "$pid" 2>/dev/null && continue
+		rm -rf "$dir"
+	done
+}
+
 # gdk_sandbox_home — export a HOME no headless boot can escape. Call it before
 # the first engine invocation in any wrapper.
 gdk_sandbox_home() {
@@ -131,17 +148,23 @@ gdk_sandbox_home() {
 		HOME="$GDK_HEADLESS_HOME"
 		export HOME
 		mkdir -p "$HOME"
+		_gdk_snapshot_project_file
 		return 0
 	fi
 
 	local runs="$PWD/$GDK_SANDBOX_DIRNAME/$GDK_SANDBOX_RUNS_SUBDIR"
 	mkdir -p "$runs"
+	_gdk_reap_stale_run_homes "$runs"
 
-	# The pid is in the name on purpose: it is how a reaper tells a CONCURRENT
+	# The pid is in the name on purpose: it is how the reaper tells a CONCURRENT
 	# run's live HOME (never touch) from one a killed run abandoned.
 	_GDK_RUN_HOME="$(mktemp -d "$runs/$GDK_SANDBOX_RUN_PREFIX$$-XXXXXX")"
 	HOME="$_GDK_RUN_HOME"
 	export HOME
+	# Order matters: the project-file restore reads a snapshot that lives in
+	# this HOME, so its hook must be registered — and therefore run — BEFORE
+	# the home's self-destruct hook. Hooks run in registration order.
+	_gdk_snapshot_project_file
 	gdk_on_exit _gdk_destroy_run_home
 }
 
@@ -155,6 +178,65 @@ gdk_sandbox_tmpfile() {
 	local dir="${_GDK_RUN_HOME:-${TMPDIR:-/tmp}}"
 	mkdir -p "$dir"
 	mktemp "$dir/$template"
+}
+
+# --- project.godot auto-restore ---------------------------------------------
+# A headless EDITOR pass (an import-cache rebuild, a screenshot capture, an
+# editor session) re-serializes project.godot with no semantic change — same
+# keys, reflowed. Every agent then reverts it by hand before committing, and
+# the ones who forget ship the churn. So a run that produced ONLY
+# re-serialization undoes it itself.
+#
+# The test is deliberately conservative and one-directional: restore only when
+# the file's NORMALIZED content (blank/comment lines dropped, lines sorted) is
+# unchanged — i.e. nothing but ordering and whitespace moved. Anything that
+# changed a key or a value is a deliberate edit, or an engine change worth
+# seeing, and is LEFT ALONE and reported. The helper can therefore lose
+# formatting churn and never work.
+#
+# Armed by gdk_sandbox_home so no wrapper can opt out by forgetting; callable
+# directly (import_cache.sh) so a churn report is already accurate when printed.
+GDK_PROJECT_FILE="${GDK_PROJECT_FILE:-project.godot}"
+
+_gdk_normalize_project_file() {
+	grep -vE '^[[:space:]]*(;|$)' "$1" 2>/dev/null | sort
+}
+
+# gdk_restore_project_file — idempotent; silent when the run left the file
+# alone (the overwhelmingly common case), one line otherwise.
+# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+gdk_restore_project_file() {
+	local snapshot="${_GDK_PROJECT_SNAPSHOT:-}"
+	[ -n "$snapshot" ] || return 0
+	_GDK_PROJECT_SNAPSHOT=""
+	if [ ! -e "$snapshot" ] || [ ! -e "$GDK_PROJECT_FILE" ]; then
+		rm -f "$snapshot"
+		return 0
+	fi
+	if cmp -s "$snapshot" "$GDK_PROJECT_FILE"; then
+		rm -f "$snapshot"
+		return 0
+	fi
+	if diff -q \
+			<(_gdk_normalize_project_file "$snapshot") \
+			<(_gdk_normalize_project_file "$GDK_PROJECT_FILE") >/dev/null 2>&1; then
+		cp "$snapshot" "$GDK_PROJECT_FILE"
+		echo "$GDK_LIB_TAG: restored $GDK_PROJECT_FILE (engine re-serialization, no semantic change)"
+	else
+		echo "$GDK_LIB_TAG: $GDK_PROJECT_FILE changed BEYOND re-serialization — left alone, review it"
+	fi
+	rm -f "$snapshot"
+}
+
+# _gdk_snapshot_project_file — take the pre-run copy the restore compares
+# against. It lives INSIDE the sandbox HOME, so it leaves nothing behind and a
+# SIGKILLed run's copy dies with the home it could no longer restore from.
+_gdk_snapshot_project_file() {
+	[ -e "$GDK_PROJECT_FILE" ] || return 0
+	[ -z "${_GDK_PROJECT_SNAPSHOT:-}" ] || return 0
+	_GDK_PROJECT_SNAPSHOT="$(mktemp "$HOME/project-godot.XXXXXX")" || return 0
+	cp "$GDK_PROJECT_FILE" "$_GDK_PROJECT_SNAPSHOT"
+	gdk_on_exit gdk_restore_project_file
 }
 
 # --- bounded-run / hang-detection contract ----------------------------------
@@ -173,6 +255,14 @@ elif command -v gtimeout >/dev/null 2>&1; then
 else
 	GDK_TIMEOUT=""
 fi
+
+# gdk_timeout_is_hang <exit_code> — true if the code is a timeout kill. A
+# piped engine capture reads PIPESTATUS itself and cannot use gdk_run_bounded;
+# this is how it tells a HANG from a failing gate without respelling the codes.
+gdk_timeout_is_hang() {
+	local code="${1:?usage: gdk_timeout_is_hang <exit_code>}"
+	[ "$code" -eq "$GDK_EXIT_SIGTERM_TIMEOUT" ] || [ "$code" -eq "$GDK_EXIT_SIGKILL_TIMEOUT" ]
+}
 
 # gdk_run_bounded <seconds> -- <cmd...>
 # Run a NON-piped command under the shared timeout contract; returns its exit
@@ -296,7 +386,7 @@ _gdk_st_true() {
 }
 
 _gdk_self_test() {
-	local scratch verdict log body status hung
+	local scratch verdict log body status hung runs dead live
 	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-runners-selftest.XXXXXX")" || return 1
 	cd "$scratch" || return 1
 	# Re-read it from the shell: a TMPDIR with a trailing slash yields `//` in
@@ -375,6 +465,75 @@ second line' "$(cat "$log")"
 	  esac )
 	_gdk_st_true 'sandbox_home exports a HOME under the sandbox dir' "$?"
 
+	# --- the reaper: a dead run's HOME goes, a live one's never does ---------
+	runs="$scratch/$GDK_SANDBOX_DIRNAME/$GDK_SANDBOX_RUNS_SUBDIR"
+	# 4194304 is above every platform's pid ceiling, so it is reliably dead —
+	# a recycled pid would make this case flap instead of prove anything.
+	dead="$runs/${GDK_SANDBOX_RUN_PREFIX}4194304-dead"
+	live="$runs/$GDK_SANDBOX_RUN_PREFIX$$-live"
+	mkdir -p "$dead" "$live" "$runs/${GDK_SANDBOX_RUN_PREFIX}notapid-x"
+	_gdk_reap_stale_run_homes "$runs"
+	status=0; [ ! -d "$dead" ] || status=1
+	_gdk_st_true 'reap removes the HOME of a process that is gone' "$status"
+	status=0; [ -d "$live" ] || status=1
+	_gdk_st_true 'reap never touches a CONCURRENT run home' "$status"
+	status=0; [ -d "$runs/${GDK_SANDBOX_RUN_PREFIX}notapid-x" ] || status=1
+	_gdk_st_true 'reap leaves a directory carrying no pid alone' "$status"
+
+	# --- gdk_timeout_is_hang: only the two timeout codes are a hang ----------
+	status=0; gdk_timeout_is_hang "$GDK_EXIT_SIGTERM_TIMEOUT" || status=1
+	_gdk_st_true 'timeout_is_hang recognises 124' "$status"
+	status=0; gdk_timeout_is_hang "$GDK_EXIT_SIGKILL_TIMEOUT" || status=1
+	_gdk_st_true 'timeout_is_hang recognises 137' "$status"
+	status=0; gdk_timeout_is_hang 1 && status=1
+	_gdk_st_true 'a failing gate (exit 1) is NOT a hang' "$status"
+	status=0; gdk_timeout_is_hang 0 && status=1
+	_gdk_st_true 'a passing gate (exit 0) is NOT a hang' "$status"
+
+	# --- project.godot: re-serialization comes back, a real edit does not ----
+	# The three outcomes, each proven separately, because the whole value of
+	# this helper is that it can lose formatting churn and never work.
+	printf '; a comment\nconfig/name="x"\n\nrun/main_scene="y"\n' > "$scratch/project.godot"
+	( GDK_PROJECT_FILE="$scratch/project.godot"
+	  _GDK_PROJECT_SNAPSHOT=""
+	  HOME="$scratch"
+	  _gdk_snapshot_project_file
+	  body="$(gdk_restore_project_file)"
+	  [ -z "$body" ] || { printf '  MISS — restore spoke about an untouched file: %s\n' "$body" >&2; exit 1; } )
+	_gdk_st_true 'restore is silent when the run left the file alone' "$?"
+
+	( GDK_PROJECT_FILE="$scratch/project.godot"
+	  _GDK_PROJECT_SNAPSHOT=""
+	  HOME="$scratch"
+	  _gdk_snapshot_project_file
+	  # same keys and values, reflowed and reordered: pure engine churn.
+	  printf 'run/main_scene="y"\nconfig/name="x"\n; a comment\n' > "$GDK_PROJECT_FILE"
+	  body="$(gdk_restore_project_file)"
+	  case "$body" in *'restored'*) ;; *) printf '  MISS — churn was not reported as restored: %s\n' "$body" >&2; exit 1 ;; esac
+	  grep -q '^; a comment$' "$GDK_PROJECT_FILE" || { echo '  MISS — the file did not come back' >&2; exit 1; } )
+	_gdk_st_true 'restore undoes a pure re-serialization and says so' "$?"
+
+	( GDK_PROJECT_FILE="$scratch/project.godot"
+	  _GDK_PROJECT_SNAPSHOT=""
+	  HOME="$scratch"
+	  _gdk_snapshot_project_file
+	  printf '; a comment\nconfig/name="CHANGED"\n\nrun/main_scene="y"\n' > "$GDK_PROJECT_FILE"
+	  body="$(gdk_restore_project_file)"
+	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a real edit was not reported: %s\n' "$body" >&2; exit 1 ;; esac
+	  grep -q 'CHANGED' "$GDK_PROJECT_FILE" || { echo '  MISS — a real edit was CLOBBERED by the restore' >&2; exit 1; } )
+	_gdk_st_true 'restore leaves a deliberate edit alone and says so' "$?"
+
+	# --- and the two are wired: sandbox_home arms the restore ----------------
+	# The hook ORDER is the load-bearing part — the snapshot lives inside the
+	# run HOME, so a restore registered after the self-destruct reads a file
+	# that is already gone.
+	( cd "$scratch" || exit 1
+	  printf '; c\nconfig/name="x"\nrun/main_scene="y"\n' > project.godot
+	  ( gdk_sandbox_home
+	    printf 'run/main_scene="y"\nconfig/name="x"\n; c\n' > project.godot ) >/dev/null
+	  head -1 project.godot | grep -q '^; c$' || { echo '  MISS — sandbox_home did not arm the project-file restore' >&2; exit 1; } )
+	_gdk_st_true 'sandbox_home arms the restore, and it runs before the home dies' "$?"
+
 	# --- the destroy guard refuses a HOME it did not mint --------------------
 	_GDK_RUN_HOME="$scratch/not-a-sandbox"
 	mkdir -p "$_GDK_RUN_HOME"
@@ -394,8 +553,8 @@ usage: source gdk_runners.sh            the normal use — a shell library
        bash gdk_runners.sh --help       this message
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
-gdk_run_bounded, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
-gdk_gate_verdict, gdk_rebuild_import_cache.
+gdk_run_bounded, gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log,
+gdk_gate_capture, gdk_gate_publish, gdk_gate_verdict, gdk_rebuild_import_cache.
 USAGE_EOF
 }
 

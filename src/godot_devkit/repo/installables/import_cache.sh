@@ -29,8 +29,10 @@
 # THE PASS WRITES INTO THE TREE, in two very different ways, so the run ends by
 # listing them apart:
 #   - `.uid` sidecars for new scripts — the point of the exercise. Commit them.
-#   - re-serialized `.tres`/`.tscn`/`project.godot` with no semantic change —
-#     churn. Diff it, then revert it; never commit it.
+#   - re-serialized `.tres`/`.tscn` with no semantic change — churn. Diff it,
+#     then revert it; never commit it. (`project.godot` is the exception: the
+#     run restores that one itself when the only change is re-serialization —
+#     see gdk_restore_project_file.)
 #
 # Usage: tools/dev/runners/import_cache.sh   (via `make import-cache`)
 #        tools/dev/runners/import_cache.sh --help | --self-test
@@ -265,6 +267,11 @@ if [ -n "$stale" ]; then
 fi
 
 echo "${C_OK}$TAG PASS — $IMPORT_DIR/ refreshed in ${elapsed}s${C_OFF}"
+
+# project.godot is the one churn path that undoes itself. Called HERE rather
+# than left to the exit hook so the report below is already accurate — it would
+# otherwise tell you to revert a file that is about to be reverted for you.
+gdk_restore_project_file
 
 # --- what the pass wrote into the TREE ---------------------------------------
 # Only paths this run made dirty: a tree that was already dirty is the caller's
