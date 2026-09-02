@@ -3,8 +3,8 @@ id: 0.20.0/generic-scans/pure-parse-scans-join-check
 feature: 0.20.0/generic-scans
 milestone: "0.20.0"
 name: rng, tres-comment, unit-disk and test-shape scans become check gates
-status: todo
-owner:
+status: review
+owner: developer
 depends_on: []
 ---
 
@@ -20,3 +20,11 @@ nullbound `tools/dev/checks/rng_scan.sh` + `rng_allowlist.txt`, `tres_comment_sc
 `feat(0.20.0/generic-scans/S1):`
 ## Size
 m
+
+## Done
+
+done: 971fb8d — `check rng` / `tres-comment` / `unit-disk` / `test-shape` under
+`godot/checks/` (NOT `repo/checks/`: they read `.gd`/`.tres`, and `repo/` is the
+family with no Godot in it). Allowlists are `[rng] allowlist` (reason as DATA)
+and `[test_shape] ledger`; `check <gate> --help` is the module docstring. 41 new
+cases; parity vs the shell scans at nullbound d3df6e5cb exact on every census.
