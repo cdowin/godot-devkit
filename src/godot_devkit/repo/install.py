@@ -123,6 +123,19 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd'),
         ('lint.sh', 'tools/dev/runners/lint.sh'),
         ('warnings.sh', 'tools/dev/runners/warnings.sh'),
+        ('unit.sh', 'tools/dev/runners/unit.sh'),
+        # scenario.sh is the single-scenario entry point; integration.sh fans
+        # it out and capture.sh is its headed twin. All three sit in one
+        # directory because integration.sh reaches scenario.sh by
+        # GDK_SCENARIO_RUNNER, relative to itself.
+        ('scenario.sh', 'tools/dev/runners/scenario.sh'),
+        ('integration.sh', 'tools/dev/runners/integration.sh'),
+        ('capture.sh', 'tools/dev/runners/capture.sh'),
+        # The gate ON the library rather than a gate that uses it: it proves a
+        # run's HOME self-destructs and nothing persists beside the spool. It
+        # ships here because it can only be true of an installed PAIR — the
+        # library and the wrappers that call it.
+        ('hermetic_run_scan.sh', 'tools/dev/runners/hermetic_run_scan.sh'),
     ),
 }
 
@@ -154,9 +167,15 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
                 self-destroying HOME sandbox, a bounded-run contract, a
                 project.godot restore) — plus the runners that source it under
                 tools/dev/runners/: import_cache.sh, parse.sh (+ its
-                compile_sweep.gd), lint.sh, warnings.sh. Every one carries
-                --help and --self-test. Nothing calls the library until you
-                point your targets at it.
+                compile_sweep.gd), lint.sh, warnings.sh, unit.sh (GUT,
+                sliced, with the coverage gate that fails a test script GUT
+                refused to load), scenario.sh, integration.sh (the same
+                scenarios, one process each, N in parallel), capture.sh
+                (headed, because headless is blind to render), and
+                hermetic_run_scan.sh — the gate proving a run's HOME
+                self-destructs and nothing persists beside the spool. Every
+                one carries --help and --self-test. Nothing calls the library
+                until you point your targets at it.
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
@@ -187,8 +206,9 @@ _NEXT_STEP = {
     'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
                   'target exists and is your full gate.',
     'install-runners': 'nothing sources the library yet — point your '
-                       'Godot-booting `make` targets at it '
-                       '(`source tools/dev/gdk_runners.sh`), and gitignore '
+                       'Godot-booting `make` targets at the runners under '
+                       'tools/dev/runners/ (and `source tools/dev/'
+                       'gdk_runners.sh` in anything of your own), and gitignore '
                        '.gate-reports/, .scenario-reports/, .capture-reports/ '
                        'and .headless-userdata/. The runners are written '
                        'without the exec bit (this package makes no mode '

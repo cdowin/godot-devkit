@@ -110,7 +110,7 @@ reap_dead_run_mirrors() {
 		pid="${base#"$RUN_DIR_PREFIX".}"; pid="${pid%%.*}"
 		# A stray carrying no numeric field is by definition abandoned.
 		case "$pid" in ''|*[!0-9]*) rm -rf "$entry"; continue ;; esac
-		_gdk_pid_is_live "$pid" && continue
+		gdk_pid_is_live "$pid" && continue
 		rm -rf "$entry"
 	done
 }

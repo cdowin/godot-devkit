@@ -108,7 +108,12 @@ RUNNERS = ('tools/dev/gdk_runners.sh',
            'tools/dev/runners/parse.sh',
            'tools/dev/runners/compile_sweep.gd',
            'tools/dev/runners/lint.sh',
-           'tools/dev/runners/warnings.sh')
+           'tools/dev/runners/warnings.sh',
+           'tools/dev/runners/unit.sh',
+           'tools/dev/runners/scenario.sh',
+           'tools/dev/runners/integration.sh',
+           'tools/dev/runners/capture.sh',
+           'tools/dev/runners/hermetic_run_scan.sh')
 DESTINATIONS = {'install-ci': (WORKFLOW,),
                 'install-agents': AGENTS,
                 'install-hooks': HOOKS,

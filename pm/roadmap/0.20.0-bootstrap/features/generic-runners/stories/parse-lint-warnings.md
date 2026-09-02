@@ -3,7 +3,7 @@ id: 0.20.0/generic-runners/parse-lint-warnings
 feature: 0.20.0/generic-runners
 milestone: "0.20.0"
 name: parse, lint and warnings run through the installed runners
-status: wip
+status: review
 owner: developer
 depends_on: []
 ---

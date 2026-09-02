@@ -24,6 +24,7 @@ fired at fake files.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -256,3 +257,21 @@ def test_every_shipped_runner_shellchecks_clean(script):
     done = subprocess.run(['shellcheck', '-x', script.name],
                           cwd=script.parent, text=True, capture_output=True)
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+# The two repos these runners were extracted FROM. A project name surviving in
+# an installable is a fork wearing a library's name: the next consumer reads it
+# as configuration it must match, and the fix that reaches one repo stops
+# reaching the other. Word-bounded, so `trailing` is prose and `trail` is not.
+CONSUMER_NAMES = (r'\bnullbound\b', r'\bNULLBOUND\b', r'\btrail\b', r'\bTRAIL\b')
+
+
+@pytest.mark.parametrize('name', [name for name, _rel
+                                  in install.PLANS['install-runners']],
+                         ids=lambda n: n)
+def test_no_installable_names_the_consumer_it_was_extracted_from(name):
+    body = (INSTALLABLES / name).read_text(encoding='utf-8')
+    hits = {pattern: [line for line in body.splitlines()
+                      if re.search(pattern, line)]
+            for pattern in CONSUMER_NAMES}
+    assert not any(hits.values()), {k: v for k, v in hits.items() if v}

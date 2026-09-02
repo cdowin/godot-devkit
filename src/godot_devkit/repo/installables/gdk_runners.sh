@@ -127,14 +127,14 @@ _gdk_destroy_run_home() {
 	_GDK_RUN_HOME=""
 }
 
-# _gdk_pid_is_live <pid> — true while that process exists, INCLUDING when it
+# gdk_pid_is_live <pid> — true while that process exists, INCLUDING when it
 # belongs to another user. `kill -0` is permission-gated: on a pid this user
 # does not own it fails with EPERM, which reads as "dead" and is how a reaper
 # came to `rm -rf` a live peer's HOME in a checkout shared by two accounts.
 # `ps -p` answers existence without needing signal permission; the `kill -0`
 # fast path stays because it is a syscall rather than a fork.
-_gdk_pid_is_live() {
-	kill -0 "${1:?usage: _gdk_pid_is_live <pid>}" 2>/dev/null && return 0
+gdk_pid_is_live() {
+	kill -0 "${1:?usage: gdk_pid_is_live <pid>}" 2>/dev/null && return 0
 	ps -p "$1" >/dev/null 2>&1
 }
 
@@ -150,7 +150,7 @@ _gdk_reap_stale_run_homes() {
 		pid="${dir##*/"$GDK_SANDBOX_RUN_PREFIX"}"
 		pid="${pid%%-*}"
 		case "$pid" in ''|*[!0-9]*) continue ;; esac
-		_gdk_pid_is_live "$pid" && continue
+		gdk_pid_is_live "$pid" && continue
 		rm -rf "$dir"
 	done
 }
@@ -568,7 +568,7 @@ second line' "$(cat "$log")"
 	# pid 1 is alive and belongs to root: `kill -0` on it returns EPERM for an
 	# ordinary user, which a liveness probe must not read as death. Same shape
 	# as a peer's run home in a checkout two accounts share.
-	status=0; _gdk_pid_is_live 1 || status=1
+	status=0; gdk_pid_is_live 1 || status=1
 	_gdk_st_true 'a live pid this user cannot signal is still live' "$status"
 	mkdir -p "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign"
 	_gdk_reap_stale_run_homes "$runs"
@@ -714,8 +714,9 @@ usage: source gdk_runners.sh            the normal use — a shell library
        bash gdk_runners.sh --help       this message
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
-gdk_run_bounded, gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log,
-gdk_gate_capture, gdk_gate_publish, gdk_gate_verdict, gdk_rebuild_import_cache.
+gdk_pid_is_live, gdk_run_bounded, gdk_timeout_is_hang,
+gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
+gdk_gate_verdict, gdk_rebuild_import_cache.
 USAGE_EOF
 }
 
