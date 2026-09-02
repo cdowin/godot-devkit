@@ -3,8 +3,8 @@ id: 0.19.0/install-runners/import-cache-runner
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: The import-cache rebuild is a bounded runner with an outcome check
-status: todo
-owner:
+status: review
+owner: developer
 depends_on: []
 ---
 
@@ -36,3 +36,11 @@ clean `git status` after.
 ## Size
 
 s
+
+## Done
+
+done: 6b25ca9 — `import_cache.sh` calling `gdk_*`: sandboxed, 300s bound via
+`GDK_IMPORT_CACHE_TIMEOUT`, outcome check as the pure `stale_cache_artifacts`
+(both `.godot` artifacts must come out newer than a pre-pass stamp), churn
+report splitting `.uid` sidecars from re-serialised files. `--self-test`
+10 cases on fake files; 18 Python cases; shellcheck -x clean on bash 3.2.

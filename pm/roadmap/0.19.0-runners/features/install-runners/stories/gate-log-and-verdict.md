@@ -3,8 +3,8 @@ id: 0.19.0/install-runners/gate-log-and-verdict
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: Every gate prints one verdict line and names its full log
-status: todo
-owner:
+status: review
+owner: developer
 depends_on: []
 ---
 
@@ -38,3 +38,11 @@ capture → verdict and asserts the one-line shape.
 ## Size
 
 s
+
+## Done
+
+done: 572ff8b — `gdk_runners.sh`: gate_log/_capture/_publish/_verdict + the
+sandbox/bounded block S3 needs; `GDK_GATE_REPORT_DIR`, `GDK_LOG_CAP_BYTES`,
+`GDK_TIMEOUT_KILL_AFTER`, `GDK_SANDBOX_DIRNAME` documented with defaults.
+`--self-test` 18 cases (mutation-proven red); `tests/test_runners_installable.py`
+10 passed; shellcheck -x clean on bash 3.2.
