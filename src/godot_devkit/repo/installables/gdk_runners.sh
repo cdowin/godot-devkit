@@ -32,7 +32,9 @@
 #   GDK_TIMEOUT_KILL_AFTER    grace period between the SIGTERM a bound fires
 #                             and the SIGKILL that guarantees no orphaned
 #                             engine process survives.
-#   GDK_SANDBOX_DIRNAME       repo-relative root of the per-run HOME sandbox.
+#   GDK_SANDBOX_DIRNAME       root of the per-run HOME sandbox, resolved
+#                             against the CWD at the moment gdk_sandbox_home
+#                             runs (every wrapper cd's to the repo root first).
 #                             Gitignore it.
 #   GDK_HEADLESS_HOME         set BY A CALLER that mints and owns its own HOME
 #                             (a parallel scenario runner giving each job one).
@@ -121,6 +123,17 @@ _gdk_destroy_run_home() {
 	_GDK_RUN_HOME=""
 }
 
+# _gdk_pid_is_live <pid> — true while that process exists, INCLUDING when it
+# belongs to another user. `kill -0` is permission-gated: on a pid this user
+# does not own it fails with EPERM, which reads as "dead" and is how a reaper
+# came to `rm -rf` a live peer's HOME in a checkout shared by two accounts.
+# `ps -p` answers existence without needing signal permission; the `kill -0`
+# fast path stays because it is a syscall rather than a fork.
+_gdk_pid_is_live() {
+	kill -0 "${1:?usage: _gdk_pid_is_live <pid>}" 2>/dev/null && return 0
+	ps -p "$1" >/dev/null 2>&1
+}
+
 # _gdk_reap_stale_run_homes <runs_dir> — the forget-proof backstop. A SIGKILLed
 # run (or a future wrapper that clobbers the EXIT trap anyway) leaves its HOME
 # behind; the next run reaps it. The owning pid is encoded in the directory
@@ -133,7 +146,7 @@ _gdk_reap_stale_run_homes() {
 		pid="${dir##*/"$GDK_SANDBOX_RUN_PREFIX"}"
 		pid="${pid%%-*}"
 		case "$pid" in ''|*[!0-9]*) continue ;; esac
-		kill -0 "$pid" 2>/dev/null && continue
+		_gdk_pid_is_live "$pid" && continue
 		rm -rf "$dir"
 	done
 }
@@ -188,18 +201,30 @@ gdk_sandbox_tmpfile() {
 # re-serialization undoes it itself.
 #
 # The test is deliberately conservative and one-directional: restore only when
-# the file's NORMALIZED content (blank/comment lines dropped, lines sorted) is
-# unchanged — i.e. nothing but ordering and whitespace moved. Anything that
-# changed a key or a value is a deliberate edit, or an engine change worth
-# seeing, and is LEFT ALONE and reported. The helper can therefore lose
+# the file's NORMALIZED content is unchanged — i.e. nothing but whitespace,
+# comments and SECTION order moved. Anything that changed a key, a value, or
+# the order of keys WITHIN a section is a deliberate edit, or an engine change
+# worth seeing, and is LEFT ALONE and reported. The helper can therefore lose
 # formatting churn and never work.
+#
+# The normalization is section-aware and order-preserving inside each section,
+# because a flat `sort` of the whole file cannot tell a reorder from a reflow:
+# `[autoload] A, B` rewritten as `B, A` normalized identically, so the restore
+# reverted it — and autoload order IS load order. A key moved from one section
+# to another normalized identically too, and that changes what the key means.
+# Each line is therefore keyed by (its section, its index in that section) and
+# only those keys are sorted, so section ORDER is still free to move.
 #
 # Armed by gdk_sandbox_home so no wrapper can opt out by forgetting; callable
 # directly (import_cache.sh) so a churn report is already accurate when printed.
 GDK_PROJECT_FILE="${GDK_PROJECT_FILE:-project.godot}"
 
 _gdk_normalize_project_file() {
-	grep -vE '^[[:space:]]*(;|$)' "$1" 2>/dev/null | sort
+	awk '
+		/^[[:space:]]*(;|$)/ { next }
+		/^\[.*\][[:space:]]*$/ { section = $0; index_in = 0; print section "\t000000"; next }
+		{ index_in += 1; printf "%s\t%06d\t%s\n", section, index_in, $0 }
+	' "$1" 2>/dev/null | sort
 }
 
 # gdk_restore_project_file — idempotent; silent when the run left the file
@@ -208,22 +233,28 @@ _gdk_normalize_project_file() {
 gdk_restore_project_file() {
 	local snapshot="${_GDK_PROJECT_SNAPSHOT:-}"
 	[ -n "$snapshot" ] || return 0
+	# The ABSOLUTE path resolved when the snapshot was taken, never the
+	# cwd-relative GDK_PROJECT_FILE: a wrapper that cd's between the sandbox
+	# call and its exit would otherwise find nothing there and drop the restore
+	# in silence.
+	local target="${_GDK_PROJECT_TARGET:-$GDK_PROJECT_FILE}"
 	_GDK_PROJECT_SNAPSHOT=""
-	if [ ! -e "$snapshot" ] || [ ! -e "$GDK_PROJECT_FILE" ]; then
+	_GDK_PROJECT_TARGET=""
+	if [ ! -e "$snapshot" ] || [ ! -e "$target" ]; then
 		rm -f "$snapshot"
 		return 0
 	fi
-	if cmp -s "$snapshot" "$GDK_PROJECT_FILE"; then
+	if cmp -s "$snapshot" "$target"; then
 		rm -f "$snapshot"
 		return 0
 	fi
 	if diff -q \
 			<(_gdk_normalize_project_file "$snapshot") \
-			<(_gdk_normalize_project_file "$GDK_PROJECT_FILE") >/dev/null 2>&1; then
-		cp "$snapshot" "$GDK_PROJECT_FILE"
-		echo "$GDK_LIB_TAG: restored $GDK_PROJECT_FILE (engine re-serialization, no semantic change)"
+			<(_gdk_normalize_project_file "$target") >/dev/null 2>&1; then
+		cp "$snapshot" "$target"
+		echo "$GDK_LIB_TAG: restored $target (engine re-serialization, no semantic change)"
 	else
-		echo "$GDK_LIB_TAG: $GDK_PROJECT_FILE changed BEYOND re-serialization — left alone, review it"
+		echo "$GDK_LIB_TAG: $target changed BEYOND re-serialization — left alone, review it"
 	fi
 	rm -f "$snapshot"
 }
@@ -234,6 +265,11 @@ gdk_restore_project_file() {
 _gdk_snapshot_project_file() {
 	[ -e "$GDK_PROJECT_FILE" ] || return 0
 	[ -z "${_GDK_PROJECT_SNAPSHOT:-}" ] || return 0
+	# Pin the target now, absolute. GDK_PROJECT_FILE is cwd-relative by
+	# default, and the restore runs at EXIT — by which time a wrapper may have
+	# cd'd somewhere else entirely.
+	_GDK_PROJECT_TARGET="$(cd "$(dirname "$GDK_PROJECT_FILE")" >/dev/null 2>&1 \
+		&& pwd)/$(basename "$GDK_PROJECT_FILE")" || return 0
 	_GDK_PROJECT_SNAPSHOT="$(mktemp "$HOME/project-godot.XXXXXX")" || return 0
 	cp "$GDK_PROJECT_FILE" "$_GDK_PROJECT_SNAPSHOT"
 	gdk_on_exit gdk_restore_project_file
@@ -305,9 +341,19 @@ gdk_gate_log() {
 #
 # Sets GDK_GATE_EXIT to the COMMAND's own exit code — `head -c` is the last
 # pipe element and exits 0, so a caller must read that and never `$?`.
+#
+# errexit is suspended around the pipeline and restored after. A wrapper under
+# `set -euo pipefail` used to die ON this line: pipefail makes the pipeline's
+# status the failing command's, `-e` then kills the shell, and GDK_GATE_EXIT is
+# never read — the gate exited 3 having printed no verdict at all. Suspending
+# is the only shape that keeps PIPESTATUS readable; `|| true` and `if …; then
+# :; fi` both run a further simple command, which RESETS PIPESTATUS to (0) and
+# would report every gate as passing.
 gdk_gate_capture() {
 	local log="${1:?usage: gdk_gate_capture <log> -- <cmd...>}"; shift
 	[ "${1:-}" = "--" ] && shift
+	local errexit_was_set=0
+	case "$-" in *e*) errexit_was_set=1; set +e ;; esac
 	if [ "${VERBOSE:-0}" != "0" ]; then
 		"$@" 2>&1 | head -c "$GDK_LOG_CAP_BYTES" | tee -a "$log"
 	else
@@ -315,6 +361,8 @@ gdk_gate_capture() {
 	fi
 	# shellcheck disable=SC2034  # read by the sourcing wrapper, not here
 	GDK_GATE_EXIT="${PIPESTATUS[0]}"
+	[ "$errexit_was_set" -eq 0 ] || set -e
+	return 0
 }
 
 # gdk_gate_publish <logfile> <transcript>
@@ -352,9 +400,14 @@ gdk_rebuild_import_cache() {
 	if [ -n "$GDK_TIMEOUT" ]; then
 		"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
 			godot --path . --headless --editor --quit >/dev/null 2>&1 || true
-	else
-		godot --path . --headless --editor --quit >/dev/null 2>&1 || true
+		return 0
 	fi
+	# No timeout binary. This is best-effort recovery, so it still runs — but
+	# it runs UNBOUNDED, and a caller that printed "up to ${secs}s" would be
+	# stating a bound nothing enforces. gdk_run_bounded REFUSES in the same
+	# situation; the difference is deliberate and is why this says it out loud.
+	echo "$GDK_LIB_TAG: no timeout/gtimeout on PATH — the import pass runs UNBOUNDED" >&2
+	godot --path . --headless --editor --quit >/dev/null 2>&1 || true
 }
 
 # --- --self-test — the contract, PROVEN rather than claimed ------------------
@@ -386,7 +439,10 @@ _gdk_st_true() {
 }
 
 _gdk_self_test() {
-	local scratch verdict log body status hung runs dead live
+	local scratch verdict log body status hung runs dead live lib
+	# Resolved BEFORE the cd below: the sub-shell cases re-source the library
+	# from a different working directory.
+	lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-runners-selftest.XXXXXX")" || return 1
 	cd "$scratch" || return 1
 	# Re-read it from the shell: a TMPDIR with a trailing slash yields `//` in
@@ -417,6 +473,20 @@ second line' "$(cat "$log")"
 	gdk_gate_capture "$log" -- sh -c 'exit 7' >/dev/null 2>&1
 	_gdk_st_eq 'capture reports the command exit code, not the pipeline tail' \
 		'7' "$GDK_GATE_EXIT"
+
+	# --- capture survives a wrapper under `set -euo pipefail` ----------------
+	# pipefail + errexit used to kill the wrapper ON the capture line: no
+	# verdict, exit 3, and VERBOSE=1 showing only the stream.
+	body="$(cd "$scratch" && bash -c '
+		set -euo pipefail
+		# shellcheck source=/dev/null
+		source "$1"
+		log="$(gdk_gate_log strict)"
+		gdk_gate_capture "$log" -- sh -c "exit 7"
+		printf "exit=%s reached-the-verdict\n" "$GDK_GATE_EXIT"
+	' _ "$lib" 2>&1)"
+	_gdk_st_eq 'capture under set -euo pipefail reports and returns' \
+		'exit=7 reached-the-verdict' "$body"
 
 	# --- the byte cap is real ------------------------------------------------
 	log="$(gdk_gate_log capped)"
@@ -480,6 +550,28 @@ second line' "$(cat "$log")"
 	status=0; [ -d "$runs/${GDK_SANDBOX_RUN_PREFIX}notapid-x" ] || status=1
 	_gdk_st_true 'reap leaves a directory carrying no pid alone' "$status"
 
+	# pid 1 is alive and belongs to root: `kill -0` on it returns EPERM for an
+	# ordinary user, which a liveness probe must not read as death. Same shape
+	# as a peer's run home in a checkout two accounts share.
+	status=0; _gdk_pid_is_live 1 || status=1
+	_gdk_st_true 'a live pid this user cannot signal is still live' "$status"
+	mkdir -p "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign"
+	_gdk_reap_stale_run_homes "$runs"
+	status=0; [ -d "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign" ] || status=1
+	_gdk_st_true 'reap never touches a live home owned by another user' "$status"
+
+	# --- the rebuild says so when it cannot be bounded -----------------------
+	mkdir -p "$scratch/stub-bin"
+	printf '#!/bin/sh\nexit 0\n' > "$scratch/stub-bin/godot"
+	chmod +x "$scratch/stub-bin/godot"
+	body="$( PATH="$scratch/stub-bin:$PATH" GDK_TIMEOUT='' \
+		gdk_rebuild_import_cache 5 2>&1 )"
+	case "$body" in
+		*UNBOUNDED*) status=0 ;;
+		*) status=1; printf '  MISS — an unbounded rebuild said nothing: %s\n' "$body" >&2 ;;
+	esac
+	_gdk_st_true 'rebuild_import_cache warns when nothing can bound it' "$status"
+
 	# --- gdk_timeout_is_hang: only the two timeout codes are a hang ----------
 	status=0; gdk_timeout_is_hang "$GDK_EXIT_SIGTERM_TIMEOUT" || status=1
 	_gdk_st_true 'timeout_is_hang recognises 124' "$status"
@@ -493,7 +585,8 @@ second line' "$(cat "$log")"
 	# --- project.godot: re-serialization comes back, a real edit does not ----
 	# The three outcomes, each proven separately, because the whole value of
 	# this helper is that it can lose formatting churn and never work.
-	printf '; a comment\nconfig/name="x"\n\nrun/main_scene="y"\n' > "$scratch/project.godot"
+	printf '; a comment\n\n[application]\nconfig/name="x"\nrun/main_scene="y"\n\n[debug]\nsettings/stdout/verbose=true\n' \
+		> "$scratch/project.godot"
 	( GDK_PROJECT_FILE="$scratch/project.godot"
 	  _GDK_PROJECT_SNAPSHOT=""
 	  HOME="$scratch"
@@ -506,8 +599,10 @@ second line' "$(cat "$log")"
 	  _GDK_PROJECT_SNAPSHOT=""
 	  HOME="$scratch"
 	  _gdk_snapshot_project_file
-	  # same keys and values, reflowed and reordered: pure engine churn.
-	  printf 'run/main_scene="y"\nconfig/name="x"\n; a comment\n' > "$GDK_PROJECT_FILE"
+	  # Same keys, same values, same order WITHIN each section: the comment is
+	  # gone, the blank lines are gone and the sections swapped. Pure churn.
+	  printf '[debug]\nsettings/stdout/verbose=true\n[application]\nconfig/name="x"\nrun/main_scene="y"\n' \
+		> "$GDK_PROJECT_FILE"
 	  body="$(gdk_restore_project_file)"
 	  case "$body" in *'restored'*) ;; *) printf '  MISS — churn was not reported as restored: %s\n' "$body" >&2; exit 1 ;; esac
 	  grep -q '^; a comment$' "$GDK_PROJECT_FILE" || { echo '  MISS — the file did not come back' >&2; exit 1; } )
@@ -517,20 +612,60 @@ second line' "$(cat "$log")"
 	  _GDK_PROJECT_SNAPSHOT=""
 	  HOME="$scratch"
 	  _gdk_snapshot_project_file
-	  printf '; a comment\nconfig/name="CHANGED"\n\nrun/main_scene="y"\n' > "$GDK_PROJECT_FILE"
+	  printf '; a comment\n\n[application]\nconfig/name="CHANGED"\nrun/main_scene="y"\n\n[debug]\nsettings/stdout/verbose=true\n' \
+		> "$GDK_PROJECT_FILE"
 	  body="$(gdk_restore_project_file)"
 	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a real edit was not reported: %s\n' "$body" >&2; exit 1 ;; esac
 	  grep -q 'CHANGED' "$GDK_PROJECT_FILE" || { echo '  MISS — a real edit was CLOBBERED by the restore' >&2; exit 1; } )
 	_gdk_st_true 'restore leaves a deliberate edit alone and says so' "$?"
+
+	# A REORDER inside one section is not re-serialization: [autoload] order is
+	# load order. A flat sort of the whole file could not tell the two apart.
+	printf '[autoload]\nA="*res://a.gd"\nB="*res://b.gd"\n' > "$scratch/project.godot"
+	( GDK_PROJECT_FILE="$scratch/project.godot"
+	  _GDK_PROJECT_SNAPSHOT=""
+	  HOME="$scratch"
+	  _gdk_snapshot_project_file
+	  printf '[autoload]\nB="*res://b.gd"\nA="*res://a.gd"\n' > "$GDK_PROJECT_FILE"
+	  body="$(gdk_restore_project_file)"
+	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a within-section REORDER was treated as churn: %s\n' "$body" >&2; exit 1 ;; esac
+	  head -2 "$GDK_PROJECT_FILE" | tail -1 | grep -q '^B=' || { echo '  MISS — a within-section reorder was CLOBBERED' >&2; exit 1; } )
+	_gdk_st_true 'restore leaves a reorder inside a section alone' "$?"
+
+	# The same line under a DIFFERENT section is a different fact.
+	printf '[autoload]\nA="*res://a.gd"\n[debug]\n' > "$scratch/project.godot"
+	( GDK_PROJECT_FILE="$scratch/project.godot"
+	  _GDK_PROJECT_SNAPSHOT=""
+	  HOME="$scratch"
+	  _gdk_snapshot_project_file
+	  printf '[autoload]\n[debug]\nA="*res://a.gd"\n' > "$GDK_PROJECT_FILE"
+	  body="$(gdk_restore_project_file)"
+	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a key moved between sections was treated as churn: %s\n' "$body" >&2; exit 1 ;; esac )
+	_gdk_st_true 'restore leaves a key moved between sections alone' "$?"
+
+	# The restore target is pinned ABSOLUTE at snapshot time, so a wrapper that
+	# cd's mid-run still restores rather than silently finding nothing there.
+	printf '; c\nconfig/name="x"\n' > "$scratch/project.godot"
+	( cd "$scratch" || exit 1
+	  GDK_PROJECT_FILE="project.godot"
+	  _GDK_PROJECT_SNAPSHOT=""
+	  HOME="$scratch"
+	  _gdk_snapshot_project_file
+	  printf 'config/name="x"\n; c\n' > "$scratch/project.godot"
+	  cd / || exit 1
+	  body="$(gdk_restore_project_file)"
+	  case "$body" in *'restored'*) ;; *) printf '  MISS — a cd mid-run dropped the restore: %s\n' "$body" >&2; exit 1 ;; esac
+	  head -1 "$scratch/project.godot" | grep -q '^; c$' || { echo '  MISS — the file did not come back after a cd' >&2; exit 1; } )
+	_gdk_st_true 'restore survives a wrapper that cd s between snapshot and exit' "$?"
 
 	# --- and the two are wired: sandbox_home arms the restore ----------------
 	# The hook ORDER is the load-bearing part — the snapshot lives inside the
 	# run HOME, so a restore registered after the self-destruct reads a file
 	# that is already gone.
 	( cd "$scratch" || exit 1
-	  printf '; c\nconfig/name="x"\nrun/main_scene="y"\n' > project.godot
+	  printf '; c\n[application]\nconfig/name="x"\nrun/main_scene="y"\n' > project.godot
 	  ( gdk_sandbox_home
-	    printf 'run/main_scene="y"\nconfig/name="x"\n; c\n' > project.godot ) >/dev/null
+	    printf '\n[application]\n\nconfig/name="x"\nrun/main_scene="y"\n' > project.godot ) >/dev/null
 	  head -1 project.godot | grep -q '^; c$' || { echo '  MISS — sandbox_home did not arm the project-file restore' >&2; exit 1; } )
 	_gdk_st_true 'sandbox_home arms the restore, and it runs before the home dies' "$?"
 

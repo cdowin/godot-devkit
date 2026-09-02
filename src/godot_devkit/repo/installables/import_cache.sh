@@ -63,7 +63,10 @@ CACHE_ARTIFACTS=("$IMPORT_DIR/uid_cache.bin" "$IMPORT_DIR/global_script_class_ca
 TIMEOUT_SECONDS="${GDK_IMPORT_CACHE_TIMEOUT:-300}"
 # Churn lists are a pointer, not a report — past this many paths, print a count.
 CHURN_LIST_MAX=20
-UID_SIDECAR_SUFFIX=".uid"
+# ANCHORED: a bare `.uid` substring also matches `a.uid.tres` and `x.uidmap`,
+# which are re-serialization churn to revert, not sidecars to commit — the two
+# halves of the report say opposite things about what to do with a path.
+UID_SIDECAR_RE='\.uid$'
 
 if [ -t 1 ]; then C_BAD=$'\033[31m'; C_OK=$'\033[32m'; C_OFF=$'\033[0m'; else C_BAD=''; C_OK=''; C_OFF=''; fi
 
@@ -96,11 +99,21 @@ USAGE_EOF
 # stale_cache_artifacts <stamp> <artifact...> — print every artifact that is
 # missing or not newer than <stamp>, one per line. Empty output means the pass
 # refreshed everything.
+#
+# `find -newer`, NOT the shell's `[ -nt ]`: bash 3.2 (what macOS ships)
+# compares whole SECONDS, so a stamp and an artifact written inside the same
+# second compare "not newer" and a genuinely refreshed cache was reported
+# FAIL. The filesystems underneath keep nanosecond mtimes and find reads them.
+# The direction was loud rather than silent, but a false red on a small warm
+# project is still a gate nobody can trust.
 stale_cache_artifacts() {
 	local stamp="${1:?usage: stale_cache_artifacts <stamp> <artifact...>}"; shift
 	local artifact
 	for artifact in "$@"; do
-		[ -e "$artifact" ] && [ "$artifact" -nt "$stamp" ] && continue
+		if [ -e "$artifact" ] \
+			&& [ -n "$(find "$artifact" -prune -newer "$stamp" 2>/dev/null)" ]; then
+			continue
+		fi
 		printf '%s\n' "$artifact"
 	done
 }
@@ -167,6 +180,16 @@ self_test() {
 	[ "$out" = "$scratch/old.bin" ] \
 		|| { echo "  MISS — an artifact older than the stamp must be stale, got '$out'" >&2; failures=$((failures + 1)); }
 
+	# outcome check: an artifact refreshed in the SAME SECOND as the stamp is
+	# fresh. No `sleep` here on purpose — that sleep is what hid the
+	# whole-second `[ -nt ]` comparison from this corpus for a release.
+	cases=$((cases + 1))
+	: > "$stamp"
+	: > "$scratch/same-second.bin"
+	out="$(stale_cache_artifacts "$stamp" "$scratch/same-second.bin")"
+	[ -z "$out" ] \
+		|| { echo "  MISS — a cache refreshed within the stamp's second must read fresh, got '$out'" >&2; failures=$((failures + 1)); }
+
 	# outcome check: an artifact NEWER than the stamp is fresh — and the whole
 	# roster fresh means empty output, which is what the runner reads as PASS.
 	cases=$((cases + 1))
@@ -195,6 +218,14 @@ self_test() {
 b.gd.uid' | head -1)"
 	[ "$out" = "  sidecars (2):" ] \
 		|| { echo "  MISS — print_churn heading/count, got '$out'" >&2; failures=$((failures + 1)); }
+
+	# the sidecar split is ANCHORED: a path that merely CONTAINS '.uid' is
+	# re-serialization churn to revert, and the report tells you the opposite
+	# about a sidecar. An unanchored match put it under the wrong heading.
+	cases=$((cases + 1))
+	out="$(printf '%s\n' 'a.gd.uid' 'scenes/a.uid.tres' | grep -E -- "$UID_SIDECAR_RE")"
+	[ "$out" = "a.gd.uid" ] \
+		|| { echo "  MISS — the sidecar split matched a non-sidecar path, got '$out'" >&2; failures=$((failures + 1)); }
 
 	rm -rf "$scratch"
 
@@ -236,6 +267,18 @@ cd "$REPO_ROOT" || exit 2
 # Shared sandbox / bounded-run contract.
 # shellcheck source=/dev/null
 source "$LIB"
+
+# REPO_ROOT_FROM_HERE is a hardcoded depth. Installed at a different depth it
+# resolves to some arbitrary ancestor, and the run would then mint a sandbox
+# there and boot `--path .` in a directory that is not a Godot project — whose
+# failure is reported as "the import pass hit the bound", a misdiagnosis of a
+# harness error. This is the exit-2 path the usage text promises.
+if [ ! -f "$GDK_PROJECT_FILE" ]; then
+	echo "$TAG $REPO_ROOT is not a Godot project — no $GDK_PROJECT_FILE there." >&2
+	echo "$TAG REPO_ROOT_FROM_HERE ('$REPO_ROOT_FROM_HERE') is the depth from this" >&2
+	echo "$TAG file to the project root; fix it, or move the runner back. See --help." >&2
+	exit 2
+fi
 
 # user:// sandbox — this is the whole reason this file exists; it must come
 # before any godot invocation.
@@ -286,8 +329,8 @@ if [ -z "$new_dirty" ]; then
 	exit 0
 fi
 
-sidecars="$(printf '%s\n' "$new_dirty" | grep -F -- "$UID_SIDECAR_SUFFIX" || true)"
-churn="$(printf '%s\n' "$new_dirty" | grep -vF -- "$UID_SIDECAR_SUFFIX" || true)"
+sidecars="$(printf '%s\n' "$new_dirty" | grep -E -- "$UID_SIDECAR_RE" || true)"
+churn="$(printf '%s\n' "$new_dirty" | grep -vE -- "$UID_SIDECAR_RE" || true)"
 
 echo "$TAG the pass wrote into the tree:"
 print_churn "uid sidecars — COMMIT these (they are why you ran this)" "$sidecars"

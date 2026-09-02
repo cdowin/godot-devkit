@@ -154,3 +154,54 @@ def test_the_runner_refuses_when_the_library_is_not_where_it_was_installed(tmp_p
                                'GDK_RUNNERS_LIB': 'nowhere/gdk_runners.sh'})
     assert done.returncode == 2, done.stdout + done.stderr
     assert 'gdk_runners.sh not found' in done.stderr, done.stderr
+
+
+# --- the 0.19.0 release review's findings, each pinned ------------------------
+# The shell-side findings are cases in the scripts' own --self-test corpora
+# (fired above). These three are not reachable from bash: two live in the
+# Python install verb, and one is the runner refusing a repo it cannot serve.
+def test_the_runner_refuses_a_root_that_is_not_a_godot_project(tmp_path):
+    """MINOR-6. `REPO_ROOT_FROM_HERE` is a hardcoded depth: installed anywhere
+    else it resolves to an arbitrary ancestor, and the run used to mint a
+    sandbox there and boot `--path .` in it — reporting the failure as "the
+    import pass hit the bound", which sends the reader to raise a timeout that
+    was never the problem. The usage text promises exit 2 for an unusable repo;
+    this is the path that produces it."""
+    root = tmp_path / 'repo'
+    (root / 'tools' / 'dev' / 'runners').mkdir(parents=True)
+    shutil.copy2(LIBRARY, root / 'tools' / 'dev' / 'gdk_runners.sh')
+    runner = root / 'tools' / 'dev' / 'runners' / 'import_cache.sh'
+    shutil.copy2(RUNNER, runner)
+
+    done = subprocess.run(['bash', str(runner)], cwd=root, text=True,
+                          capture_output=True, env={'PATH': '/usr/bin:/bin'})
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert 'not a Godot project' in done.stderr, done.stderr
+    assert 'REPO_ROOT_FROM_HERE' in done.stderr, done.stderr
+    # And it refused BEFORE minting anything: a sandbox in a directory that is
+    # not the project is the residue this refusal exists to prevent.
+    assert not (root / '.headless-userdata').exists()
+
+
+def test_a_godot_project_at_the_root_gets_past_that_refusal(tmp_path):
+    """The other half of the same claim: the guard must not refuse a repo it
+    was installed into correctly. With a stub `godot` that writes nothing the
+    run reaches its own outcome check and fails there (exit 1) — a different
+    verdict, which is the point."""
+    root = tmp_path / 'repo'
+    (root / 'tools' / 'dev' / 'runners').mkdir(parents=True)
+    (root / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    shutil.copy2(LIBRARY, root / 'tools' / 'dev' / 'gdk_runners.sh')
+    runner = root / 'tools' / 'dev' / 'runners' / 'import_cache.sh'
+    shutil.copy2(RUNNER, runner)
+    stub = tmp_path / 'bin'
+    stub.mkdir()
+    (stub / 'godot').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    (stub / 'godot').chmod(0o755)
+
+    done = subprocess.run(['bash', str(runner)], cwd=root, text=True,
+                          capture_output=True,
+                          env={'PATH': f'{stub}:/usr/bin:/bin'})
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'not a Godot project' not in done.stderr, done.stderr
+    assert 'did not refresh the cache' in done.stdout, done.stdout

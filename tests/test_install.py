@@ -566,3 +566,16 @@ def test_every_installable_on_disk_is_reachable_through_a_verb():
     assert on_disk == named, (
         f'unreachable: {sorted(on_disk - named)}; '
         f'missing: {sorted(named - on_disk)}')
+
+
+def test_install_runners_tells_the_operator_about_the_exec_bit():
+    """0.19.0 NIT: the runners are written -rw-r--r-- (this package makes no
+    mode changes — `core.apply` has no such act), and the file headers spell
+    their usage as a direct exec. `install-hooks` says so in its next step;
+    `install-runners` did not, so a consumer following the header alone got
+    `permission denied` from a runner the installer had just reported writing."""
+    with repo():
+        code, out = run('install-runners')
+    assert code == 0, out
+    assert 'exec bit' in out, out
+    assert 'chmod +x' in out, out

@@ -176,11 +176,14 @@ _NEXT_STEP = {
                   'target exists and is your full gate.',
     'install-runners': 'nothing sources the library yet — point your '
                        'Godot-booting `make` targets at it '
-                       '(`source tools/dev/gdk_runners.sh`), wire '
-                       '`make import-cache` to tools/dev/runners/import_cache.sh, '
-                       'and gitignore .gate-reports/ and .headless-userdata/. '
-                       'Then edit each file\'s `project config` header: the '
-                       'files are yours now.',
+                       '(`source tools/dev/gdk_runners.sh`), and gitignore '
+                       '.gate-reports/, .scenario-reports/, .capture-reports/ '
+                       'and .headless-userdata/. The runners are written '
+                       'without the exec bit (this package makes no mode '
+                       'changes): call them as `bash tools/dev/runners/<x>.sh` '
+                       'from your targets, or `chmod +x` them once. Then edit '
+                       'each file\'s `project config` header: the files are '
+                       'yours now.',
 }
 
 
