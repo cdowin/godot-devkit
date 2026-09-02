@@ -1,9 +1,10 @@
 """test_runners_installable.py — the shell runners, RUN rather than read.
 
 `gdk_runners.sh` is the library every Godot-booting gate in a consumer routes
-through. It is not Python and it cannot boot an engine here, so the contract is
-proven the way the hook corpus is: the script carries a `--self-test`, and this
-file drives it through a subprocess and holds it to its published shape.
+through, and `import_cache.sh` is the one runner that ships with it. Neither is
+Python and neither can boot an engine here, so the contract is proven the way
+the hook corpus is: each script carries a `--self-test`, and this file drives
+it through a subprocess and holds it to its published shape.
 
 Two things this file adds on top of firing the corpus:
 
@@ -15,8 +16,11 @@ Two things this file adds on top of firing the corpus:
     gate_log -> gate_capture -> gate_verdict. That line shape is grepped by
     consumer Makefiles, so it is contract (CLAUDE.md rule 6), not cosmetics.
 
-No engine is ever booted: this package never starts one (rule 2), so every
-case here is either the library's own shell logic or a fake gate command.
+The runner's own boot path is deliberately NOT exercised: it needs Godot, and
+this package never boots one (rule 2). What is exercised is everything the
+runner owns around the boot — its argument surface and its outcome check,
+which is written as a pure function over the filesystem exactly so it can be
+fired at fake files.
 """
 from __future__ import annotations
 
@@ -35,6 +39,7 @@ pytestmark = pytest.mark.skipif(shutil.which('bash') is None,
 
 INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
 LIBRARY = INSTALLABLES / 'gdk_runners.sh'
+RUNNER = INSTALLABLES / 'import_cache.sh'
 
 # The one line shape a consumer greps. Changing it is a minor bump at least.
 VERDICT = '[PARSE] PASS (2 files) — full log: .gate-reports/parse.log'
@@ -46,8 +51,8 @@ def run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
 
 
 # --- the corpora, fired ------------------------------------------------------
-def test_the_self_test_corpus_passes_and_reports_its_case_count():
-    script = LIBRARY
+@pytest.mark.parametrize('script', [LIBRARY, RUNNER], ids=['library', 'runner'])
+def test_the_self_test_corpus_passes_and_reports_its_case_count(script):
     done = run(str(script), '--self-test')
     assert done.returncode == 0, done.stdout + done.stderr
     assert 'SELF-TEST OK' in done.stdout, done.stdout
@@ -111,7 +116,8 @@ def test_verbose_streams_the_same_transcript_the_log_holds(tmp_path):
         encoding='utf-8') == 'boot line\n'
 
 
-# --- the argument surface: what the library REFUSES ---------------------------
+# --- the argument surface: what each script REFUSES --------------------------
+@pytest.mark.parametrize('script', [LIBRARY, RUNNER], ids=['library', 'runner'])
 @pytest.mark.parametrize('argv', [
     ('--nope',),                 # an unknown verb
     ('-x',),                     # an unknown short flag
@@ -119,8 +125,7 @@ def test_verbose_streams_the_same_transcript_the_log_holds(tmp_path):
     ('--help', '--self-test'),   # two verbs
     ('',),                       # an empty argument is not "no argument"
 ], ids=['unknown', 'short', 'verb-plus-extra', 'two-verbs', 'empty'])
-def test_an_argument_the_library_does_not_take_is_refused_as_a_usage_error(argv):
-    script = LIBRARY
+def test_an_argument_neither_script_takes_is_refused_as_a_usage_error(script, argv):
     done = run(str(script), *argv)
     assert done.returncode == 2, (
         f'{script.name} {argv} -> {done.returncode}\n{done.stdout}{done.stderr}')
@@ -130,8 +135,22 @@ def test_an_argument_the_library_does_not_take_is_refused_as_a_usage_error(argv)
     assert '--help' in done.stdout + done.stderr, done.stdout + done.stderr
 
 
-def test_help_exits_zero_and_names_the_script():
-    script = LIBRARY
+@pytest.mark.parametrize('script', [LIBRARY, RUNNER], ids=['library', 'runner'])
+def test_help_exits_zero_and_names_the_script(script):
     done = run(str(script), '--help')
     assert done.returncode == 0, done.stdout + done.stderr
     assert script.name in done.stdout, done.stdout
+
+
+def test_the_runner_refuses_when_the_library_is_not_where_it_was_installed(tmp_path):
+    """The runner sources the library by a configured relative path. A repo
+    that moved one and not the other must be told, not left to run a rebuild
+    with no sandbox — that is the incident the runner exists to prevent."""
+    runner = tmp_path / 'import_cache.sh'
+    shutil.copy2(RUNNER, runner)
+    done = subprocess.run(['bash', str(runner)], cwd=tmp_path, text=True,
+                          capture_output=True,
+                          env={'PATH': '/usr/bin:/bin',
+                               'GDK_RUNNERS_LIB': 'nowhere/gdk_runners.sh'})
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert 'gdk_runners.sh not found' in done.stderr, done.stderr
