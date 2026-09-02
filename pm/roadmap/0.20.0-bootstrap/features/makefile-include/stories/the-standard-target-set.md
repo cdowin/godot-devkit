@@ -3,8 +3,8 @@ id: 0.20.0/makefile-include/the-standard-target-set
 feature: 0.20.0/makefile-include
 milestone: "0.20.0"
 name: Makefile.devkit carries the standard targets and the quiet-by-default convention
-status: todo
-owner:
+status: review
+owner: developer
 depends_on: []
 ---
 
@@ -20,3 +20,13 @@ Targets delegate to the installed runners and the devkit CLI exactly as both con
 `feat(0.20.0/makefile-include/S1):`
 ## Size
 m
+
+## Done
+
+done: c4731f5, c7dce25 — 26 targets, on `install-runners` (neither half is
+usable alone: the runners have no callers, the include has nothing to call).
+`[gates] extra` is read once per `check` by a new `gates-extra` verb (29-case
+refusal matrix; re-entry caught by a sub-make marker) — make never parses TOML.
+DEVIATION: the four opt-in scans adopt through `[checks] all`, the CLI's own
+documented path, not section-presence — a second mechanism would double-run.
+52 include cases + 44 gates-extra; suite 973 passed.
