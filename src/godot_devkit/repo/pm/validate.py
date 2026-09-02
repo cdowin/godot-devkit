@@ -27,14 +27,9 @@ counted and reported in the summary.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from godot_devkit.repo.pm import model
-
-# A story FILE may carry an ordering prefix (`01-slug.md`) that its ID does not:
-# the number sequences the build, it is not identity.
-_ORDINAL = re.compile(r'^\d\d-')
 
 _REF_KEYS = ('depends_on', 'consumed_by')
 
@@ -183,10 +178,7 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                 # never switch the check off. Skipping instead of stripping
                 # left every story in such a tree unchecked while the gate
                 # printed VALID — under the configuration the docs mandate.
-                stem = sfile.stem
-                if cfg.story_ordinal_prefix:
-                    stem = _ORDINAL.sub('', stem)
-                s_expect = f'{expect}/{stem}'
+                s_expect = f'{expect}/{model.story_slug_of(cfg, sfile.stem)}'
                 if 'V2' in on and sid and sid != s_expect:
                     bad(f'{cfg.rel(sfile)}: id {sid!r} does not match its path '
                         f'(expected {s_expect!r})')

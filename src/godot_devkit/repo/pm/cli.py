@@ -71,6 +71,9 @@ USAGE = """usage: godot-devkit pm <command>
                                            on first WRITE. Idempotent — re-run to fill)
   new feature <milestone> <slug> [<name...>]
   new story <feature-id> <slug> <name...>
+                                          (under [pm] story_ordinal_prefix
+                                           a slug may lead with `NN-`: the
+                                           FILE keeps it, the id never does)
   new bug <milestone> <slug>
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
@@ -1049,12 +1052,26 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         # The milestone comes from the FEATURE's own frontmatter — single
         # source, never re-derived from the id string.
         mid = model.field_of(fdir / model.FEATURE_DOC, 'milestone')
+        # The FILE may carry an ordering prefix (`01-`); the ID never does.
+        # Stamping the prefix into `id:` scaffolded a story that `pm validate`
+        # V2 rejected against that same file's path — the tool minting the
+        # drift its own gate reports.
+        sid_slug = model.story_slug_of(cfg, slug)
+        if not sid_slug:
+            raise Refused(f'story slug {slug!r} is an ordering prefix and '
+                          f'nothing else — the number sequences the build, the '
+                          f'slug after it is the id')
         sf = fdir / 'stories' / f'{slug}.md'
         if _exists(sf):
             raise Refused(f'story {fid}/{slug!r} already exists')
+        claimed = model.story_file(cfg, f'{fid}/{sid_slug}')
+        if claimed is not None:
+            raise Refused(f'story id {fid}/{sid_slug!r} is already held by '
+                          f'{cfg.rel(claimed)} — two files claiming one id is '
+                          f'addressable by neither')
         body = templates.render(
             templates.load(cfg, 'story'),
-            {'id': f'{fid}/{slug}', 'feature': fid, 'milestone': mid,
+            {'id': f'{fid}/{sid_slug}', 'feature': fid, 'milestone': mid,
              'name': name})
         _mint(cfg, sf, body)
         _ok(f'created {cfg.rel(sf)}')

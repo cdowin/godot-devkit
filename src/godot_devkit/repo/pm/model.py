@@ -528,6 +528,26 @@ def feature_file(cfg: PmConfig, fid: str) -> Path | None:
 _ORDINAL_STEM = re.compile(r'^[0-9][0-9]-(?P<slug>.*)$')
 
 
+def story_slug_of(cfg: PmConfig, stem: str) -> str:
+    """The id segment a story FILE named `stem` must carry.
+
+    One rule, three callers: `story_file` resolves with it, V2 validates with
+    it, and `pm new story` SCAFFOLDS with it. The scaffolder did not, so with
+    `story_ordinal_prefix` on it stamped `id: <feature>/01-<slug>` into a file
+    named `01-<slug>.md` — an id V2 then rejected against the same file's own
+    path. Every story scaffolded in one consumer's tree failed `pm validate`
+    until it was hand-fixed, which is the tool creating the drift its gate
+    reports.
+
+    The prefix SEQUENCES the build; it is not identity. Off, the stem is the
+    slug verbatim — a file really named `01-boots.md` owns that id.
+    """
+    if not cfg.story_ordinal_prefix:
+        return stem
+    match = _ORDINAL_STEM.match(stem)
+    return match.group('slug') if match is not None else stem
+
+
 def story_file(cfg: PmConfig, sid: str) -> Path | None:
     """Resolve <milestone>/<feature-slug>/<story-slug> to its .md.
 
@@ -559,10 +579,8 @@ def story_file(cfg: PmConfig, sid: str) -> Path | None:
         stem = path.name[:-len(path.suffix)]
         if stem == sslug:
             exact.append(path)
-        elif cfg.story_ordinal_prefix:
-            m = _ORDINAL_STEM.match(stem)
-            if m is not None and m.group('slug') == sslug:
-                prefixed.append(path)
+        elif story_slug_of(cfg, stem) == sslug:
+            prefixed.append(path)
     matches = exact or prefixed
     if len(matches) == 1:
         return matches[0]

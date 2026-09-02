@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`pm new story` stops scaffolding a story `pm validate` rejects** — under `[pm] story_ordinal_prefix` the ordering prefix belongs to the FILE, never to `id:`, so `new story <f> 01-slug` now writes `id: <f>/slug` and V2 passes on sight (every story scaffolded in one consumer's tree had to be hand-fixed). One rule, one home: `model.story_slug_of` is what resolution, V2 and the scaffolder all read. A second file whose stripped slug claims a live id refuses instead of minting an id neither file can be addressed by. (repo/pm/cli.py, repo/pm/model.py, repo/pm/validate.py)
+
 ## v0.17.0 — 2026-08-31
 
 - **`pm` id resolution refuses what creation always refused** — dot/empty/separator segments and absolute ids: `0.1/..` no longer writes a milestone's decisions.md, an absolute milestone id exits 2 instead of a `Path.glob` traceback. The fuzz harness's three carve-out pins died with their reasons. (repo/pm/model.py)
