@@ -1,7 +1,7 @@
 ---
 id: "0.18.1"
 name: hook-quoting-upstream
-status: building
+status: done
 depends_on: []
 branch: milestone/0.18.1-hook-quoting-upstream
 ---

@@ -3,7 +3,7 @@ id: 0.18.1/sandbox-hook-quoting/01-quote-aware-tokenizer
 feature: 0.18.1/sandbox-hook-quoting
 milestone: "0.18.1"
 name: Quote-aware segment split plus the self-test corpus
-status: wip
+status: done
 owner:
 depends_on: []
 ---

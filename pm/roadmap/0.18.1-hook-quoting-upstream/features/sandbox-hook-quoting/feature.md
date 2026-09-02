@@ -2,8 +2,8 @@
 id: 0.18.1/sandbox-hook-quoting
 milestone: "0.18.1"
 name: The engine-boot guard stops blocking a quoted godot word
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.18.1-hook-quoting-upstream/features/sandbox-hook-quoting/decisions.md
 phase:
 depends_on: []
 consumed_by: []
