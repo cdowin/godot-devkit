@@ -77,8 +77,18 @@ USAGE = """usage: godot-devkit pm <command>
   new bug <milestone> <slug>
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
-                                           the first; the prose under it is yours)"""
+                                           the first; the prose under it is yours.
+                                           A title containing ; & | must be QUOTED
+                                           all the way through — through `make pm
+                                           ARGS=` too, whose shell cuts an unquoted
+                                           title in half and runs the remainder:
+                                           ARGS='decide <id> "a; b"')"""
 
+
+
+# A heading ENDING in one of these is what a consumer's unquoted `make ARGS`
+# leaves behind when its shell cuts the title in half — see cmd_decide.
+SHELL_SPLITTERS = (';', '&', '|')
 
 
 class Refused(Exception):
@@ -1143,6 +1153,12 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
     consumer's 158 decision logs and 320 hand-written headings, so what it
     actually gated was whether anyone used the verb at all.
 
+    The title is every remaining argv token, joined with one space — so a `;`
+    a caller ESCAPED (`a\\; b`, two tokens) rebuilds intact, and a `;` a caller
+    QUOTED arrives whole and is written verbatim. A `;` a caller left BARE was
+    consumed by their own shell before this process started; what that leaves
+    behind is refused rather than written, as far as it is visible from here.
+
     Refuses WHOLE: every path out of here that is not a write leaves the log
     byte-identical.
     """
@@ -1161,6 +1177,19 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
                     f'none: everything after the grain id is the heading')
     if '\n' in title or '\r' in title:
         raise Refused('a heading is one line — put the reasoning under it')
+    if title[-1] in SHELL_SPLITTERS:
+        # The residue of a shell split. `make pm ARGS="decide <id> a; b"`
+        # expands UNQUOTED, so the consumer's shell cuts at the `;`, hands this
+        # process `a`, and runs `b` as a command of its own — which is how one
+        # consumer's log ended up carrying two half-headings. A cut that lands
+        # BETWEEN words is invisible from in here and always will be; a cut
+        # that leaves the operator dangling on the end is not, and that is the
+        # one shape this can refuse instead of writing a truncated heading.
+        raise Refused(
+            f'the heading ends with {title[-1]!r} — a shell cut it there and '
+            f'the rest never reached this process; nothing was written. Quote '
+            f'the whole title: make pm ARGS=\'decide {gid} "first half; '
+            f'second half"\'')
     log, text = _decision_log(cfg, gid)
     eid = model.next_entry_id(text)
     when = datetime.now(timezone.utc).date().isoformat()

@@ -1216,6 +1216,63 @@ class Decide(unittest.TestCase):
                 (root / 'pm/roadmap/0.1-demo/features/alpha/decisions.md')
                 .exists())
 
+    def test_a_quoted_title_keeps_its_shell_metacharacters(self):
+        # A `;` that SURVIVED the caller's shell is a word, not an operator.
+        # Refusing it would break the only spelling that works.
+        with tree() as root:
+            self._scaffolded(root)
+            for title in ('rng-streams moves to 0.90.5; the MVP base stated',
+                          'A & B, not A | B',
+                          'weights & seeds; one stream per concern'):
+                with self.subTest(title=title):
+                    code, out = run_cli(root, 'decide', '0.1', title)
+                    self.assertEqual(code, 0, out)
+                    self.assertIn(f'— {title}\n', self._log(root))
+
+    def test_a_multi_token_title_rejoins_across_an_escaped_semicolon(self):
+        # `ARGS='decide 0.1 a\; b'` reaches argv as ['a;', 'b'] — the escape
+        # kept the `;` as a word character and the shell split on the SPACE.
+        # Joining argv rebuilds the title intact; it is not a truncation.
+        with tree() as root:
+            self._scaffolded(root)
+            code, out = run_cli(root, 'decide', '0.1', 'a;', 'b')
+            self.assertEqual(code, 0, out)
+            self.assertIn('— a; b\n', self._log(root))
+
+    def test_a_title_left_dangling_on_a_splitter_refuses_without_writing(self):
+        """The residue of an unquoted `make pm ARGS="decide <id> a; b"`: the
+        consumer's shell cuts at the operator, this process gets the first half,
+        and the second half runs as a command of its own. One consumer's log
+        ended up carrying two half-headings that way."""
+        with tree() as root:
+            self._scaffolded(root)
+            self.assertEqual(run_cli(root, 'decide', '0.1', 'a real one')[0], 0)
+            before = self._log(root)
+            for tail in (';', '&', '|'):
+                for title in (f'a world is a named saved thing{tail}',
+                              f'a world is a named saved thing {tail}',
+                              tail):
+                    with self.subTest(title=title):
+                        code, out = run_cli(root, 'decide', '0.1', title)
+                        self.assertEqual(code, 1, out)
+                        self.assertIn('Quote the whole title', out)
+                        self.assertEqual(self._log(root), before)
+
+    def test_the_dangling_splitter_refusal_never_mints_the_log(self):
+        with tree() as root:
+            self._scaffolded(root)
+            log = root / self.MDIR / 'decisions.md'
+            code, out = run_cli(root, 'decide', '0.1', 'half a heading;')
+            self.assertEqual(code, 1, out)
+            self.assertFalse(log.exists(), out)
+
+    def test_the_help_names_the_quoting_fix(self):
+        with tree() as root:
+            code, out = run_cli(root, '--help')
+            self.assertEqual(code, 0, out)
+            self.assertIn('; & |', out)
+            self.assertIn('QUOTED', out)
+
     def test_a_story_or_bug_has_no_decision_log(self):
         with tree() as root:
             self._scaffolded(root)
