@@ -106,13 +106,23 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('setup-hooks.sh', 'tools/setup-hooks.sh'),
     ),
     'install-runners': (
-        # The library first, then the one runner that sources it. The layout
-        # is what import_cache.sh's own defaults assume: the runner reaches
-        # the library at ../gdk_runners.sh and the repo root at ../../..
-        # A repo that wants them elsewhere moves both and sets
-        # GDK_RUNNERS_LIB — after the write the files are its own.
+        # The library first, then the runners that source it. The layout is
+        # what every runner's own defaults assume: a runner reaches the library
+        # at ../gdk_runners.sh and the repo root at ../../.. A repo that wants
+        # them elsewhere moves them all and sets GDK_RUNNERS_LIB — after the
+        # write the files are its own.
         ('gdk_runners.sh', 'tools/dev/gdk_runners.sh'),
         ('import_cache.sh', 'tools/dev/runners/import_cache.sh'),
+        ('parse.sh', 'tools/dev/runners/parse.sh'),
+        # compile_sweep.gd travels WITH parse.sh, beside it rather than in a
+        # checks/ of its own: it is stage 2 of that runner and has no other
+        # caller, and parse.sh addresses it as res://tools/dev/runners/
+        # compile_sweep.gd (GDK_PARSE_SWEEP_SCRIPT). One directory, so moving
+        # the runners moves the pair together and only one variable has to
+        # follow.
+        ('compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd'),
+        ('lint.sh', 'tools/dev/runners/lint.sh'),
+        ('warnings.sh', 'tools/dev/runners/warnings.sh'),
     ),
 }
 
@@ -142,8 +152,10 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
                 Godot-booting make targets source (one verdict line per gate
                 naming .gate-reports/<gate>.log, VERBOSE=1 streams, a per-run
                 self-destroying HOME sandbox, a bounded-run contract, a
-                project.godot restore) — plus tools/dev/runners/import_cache.sh.
-                Both carry --self-test. Nothing calls the library until you
+                project.godot restore) — plus the runners that source it under
+                tools/dev/runners/: import_cache.sh, parse.sh (+ its
+                compile_sweep.gd), lint.sh, warnings.sh. Every one carries
+                --help and --self-test. Nothing calls the library until you
                 point your targets at it.
 
 A destination that already exists and differs is refused, whole.

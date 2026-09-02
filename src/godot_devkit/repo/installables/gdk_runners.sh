@@ -36,6 +36,9 @@
 #                             against the CWD at the moment gdk_sandbox_home
 #                             runs (every wrapper cd's to the repo root first).
 #                             Gitignore it.
+#   GDK_GODOT                 the engine binary every runner invokes. `godot`
+#                             on a PATH that has it; an absolute
+#                             /Applications/Godot.app/… path otherwise.
 #   GDK_HEADLESS_HOME         set BY A CALLER that mints and owns its own HOME
 #                             (a parallel scenario runner giving each job one).
 #                             Honored verbatim: not reaped, not destroyed.
@@ -55,6 +58,7 @@ GDK_GATE_REPORT_DIR="${GDK_GATE_REPORT_DIR:-.gate-reports}"
 GDK_LOG_CAP_BYTES="${GDK_LOG_CAP_BYTES:-52428800}"
 GDK_TIMEOUT_KILL_AFTER="${GDK_TIMEOUT_KILL_AFTER:-5s}"
 GDK_SANDBOX_DIRNAME="${GDK_SANDBOX_DIRNAME:-.headless-userdata}"
+GDK_GODOT="${GDK_GODOT:-godot}"
 
 # The tag every line this library prints on its OWN behalf carries, so a
 # consumer can tell the library's voice from its gate's.
@@ -399,7 +403,7 @@ gdk_rebuild_import_cache() {
 	local secs="${1:-$GDK_REBUILD_IMPORT_CACHE_TIMEOUT}"
 	if [ -n "$GDK_TIMEOUT" ]; then
 		"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-			godot --path . --headless --editor --quit >/dev/null 2>&1 || true
+			"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
 		return 0
 	fi
 	# No timeout binary. This is best-effort recovery, so it still runs — but
@@ -407,7 +411,7 @@ gdk_rebuild_import_cache() {
 	# stating a bound nothing enforces. gdk_run_bounded REFUSES in the same
 	# situation; the difference is deliberate and is why this says it out loud.
 	echo "$GDK_LIB_TAG: no timeout/gtimeout on PATH — the import pass runs UNBOUNDED" >&2
-	godot --path . --headless --editor --quit >/dev/null 2>&1 || true
+	"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
 }
 
 # --- --self-test — the contract, PROVEN rather than claimed ------------------
@@ -489,8 +493,19 @@ second line' "$(cat "$log")"
 		'exit=7 reached-the-verdict' "$body"
 
 	# --- the byte cap is real ------------------------------------------------
+	# `env … bash -c`, never `( GDK_LOG_CAP_BYTES=8; … )`. A subshell
+	# ASSIGNMENT to a name the library also publishes makes `shellcheck -x`
+	# raise SC2031 at every CONSUMER site that reads that name — the consumer's
+	# own lint reddens on a line the library wrote, and the only local repair
+	# is a disable comment in a file whose author did nothing wrong. Scoping
+	# the value to a child process says the same thing with no such shadow.
 	log="$(gdk_gate_log capped)"
-	( GDK_LOG_CAP_BYTES=8; gdk_gate_capture "$log" -- printf '0123456789abcdef' )
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_LOG_CAP_BYTES=8 bash -c '
+		# shellcheck source=/dev/null
+		source "$1"
+		gdk_gate_capture "$2" -- printf "0123456789abcdef"
+	' _ "$lib" "$log"
 	_gdk_st_eq 'the log cap truncates a runaway stream' '8' \
 		"$(wc -c < "$log" | tr -d ' ')"
 
@@ -564,7 +579,7 @@ second line' "$(cat "$log")"
 	mkdir -p "$scratch/stub-bin"
 	printf '#!/bin/sh\nexit 0\n' > "$scratch/stub-bin/godot"
 	chmod +x "$scratch/stub-bin/godot"
-	body="$( PATH="$scratch/stub-bin:$PATH" GDK_TIMEOUT='' \
+	body="$( PATH="$scratch/stub-bin:$PATH" GDK_TIMEOUT='' GDK_GODOT='godot' \
 		gdk_rebuild_import_cache 5 2>&1 )"
 	case "$body" in
 		*UNBOUNDED*) status=0 ;;
@@ -587,75 +602,86 @@ second line' "$(cat "$log")"
 	# this helper is that it can lose formatting churn and never work.
 	printf '; a comment\n\n[application]\nconfig/name="x"\nrun/main_scene="y"\n\n[debug]\nsettings/stdout/verbose=true\n' \
 		> "$scratch/project.godot"
-	( GDK_PROJECT_FILE="$scratch/project.godot"
-	  _GDK_PROJECT_SNAPSHOT=""
-	  HOME="$scratch"
-	  _gdk_snapshot_project_file
-	  body="$(gdk_restore_project_file)"
-	  [ -z "$body" ] || { printf '  MISS — restore spoke about an untouched file: %s\n' "$body" >&2; exit 1; } )
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_PROJECT_FILE="$scratch/project.godot" HOME="$scratch" bash -c '
+		# shellcheck source=/dev/null
+		source "$1"
+		body="$(_gdk_snapshot_project_file; gdk_restore_project_file)"
+		[ -z "$body" ] || { printf "  MISS — restore spoke about an untouched file: %s\n" "$body" >&2; exit 1; }
+	' _ "$lib"
 	_gdk_st_true 'restore is silent when the run left the file alone' "$?"
 
-	( GDK_PROJECT_FILE="$scratch/project.godot"
-	  _GDK_PROJECT_SNAPSHOT=""
-	  HOME="$scratch"
-	  _gdk_snapshot_project_file
-	  # Same keys, same values, same order WITHIN each section: the comment is
-	  # gone, the blank lines are gone and the sections swapped. Pure churn.
-	  printf '[debug]\nsettings/stdout/verbose=true\n[application]\nconfig/name="x"\nrun/main_scene="y"\n' \
-		> "$GDK_PROJECT_FILE"
-	  body="$(gdk_restore_project_file)"
-	  case "$body" in *'restored'*) ;; *) printf '  MISS — churn was not reported as restored: %s\n' "$body" >&2; exit 1 ;; esac
-	  grep -q '^; a comment$' "$GDK_PROJECT_FILE" || { echo '  MISS — the file did not come back' >&2; exit 1; } )
+	# Same keys, same values, same order WITHIN each section: the comment is
+	# gone, the blank lines are gone and the sections swapped. Pure churn.
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_PROJECT_FILE="$scratch/project.godot" HOME="$scratch" bash -c '
+		# shellcheck source=/dev/null
+		source "$1"
+		_gdk_snapshot_project_file
+		printf "[debug]\nsettings/stdout/verbose=true\n[application]\nconfig/name=\"x\"\nrun/main_scene=\"y\"\n" \
+			> "$GDK_PROJECT_FILE"
+		body="$(gdk_restore_project_file)"
+		case "$body" in *restored*) ;; *) printf "  MISS — churn was not reported as restored: %s\n" "$body" >&2; exit 1 ;; esac
+		grep -q "^; a comment$" "$GDK_PROJECT_FILE" || { echo "  MISS — the file did not come back" >&2; exit 1; }
+	' _ "$lib"
 	_gdk_st_true 'restore undoes a pure re-serialization and says so' "$?"
 
-	( GDK_PROJECT_FILE="$scratch/project.godot"
-	  _GDK_PROJECT_SNAPSHOT=""
-	  HOME="$scratch"
-	  _gdk_snapshot_project_file
-	  printf '; a comment\n\n[application]\nconfig/name="CHANGED"\nrun/main_scene="y"\n\n[debug]\nsettings/stdout/verbose=true\n' \
-		> "$GDK_PROJECT_FILE"
-	  body="$(gdk_restore_project_file)"
-	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a real edit was not reported: %s\n' "$body" >&2; exit 1 ;; esac
-	  grep -q 'CHANGED' "$GDK_PROJECT_FILE" || { echo '  MISS — a real edit was CLOBBERED by the restore' >&2; exit 1; } )
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_PROJECT_FILE="$scratch/project.godot" HOME="$scratch" bash -c '
+		# shellcheck source=/dev/null
+		source "$1"
+		_gdk_snapshot_project_file
+		printf "; a comment\n\n[application]\nconfig/name=\"CHANGED\"\nrun/main_scene=\"y\"\n\n[debug]\nsettings/stdout/verbose=true\n" \
+			> "$GDK_PROJECT_FILE"
+		body="$(gdk_restore_project_file)"
+		case "$body" in *"BEYOND re-serialization"*) ;; *) printf "  MISS — a real edit was not reported: %s\n" "$body" >&2; exit 1 ;; esac
+		grep -q CHANGED "$GDK_PROJECT_FILE" || { echo "  MISS — a real edit was CLOBBERED by the restore" >&2; exit 1; }
+	' _ "$lib"
 	_gdk_st_true 'restore leaves a deliberate edit alone and says so' "$?"
 
 	# A REORDER inside one section is not re-serialization: [autoload] order is
 	# load order. A flat sort of the whole file could not tell the two apart.
 	printf '[autoload]\nA="*res://a.gd"\nB="*res://b.gd"\n' > "$scratch/project.godot"
-	( GDK_PROJECT_FILE="$scratch/project.godot"
-	  _GDK_PROJECT_SNAPSHOT=""
-	  HOME="$scratch"
-	  _gdk_snapshot_project_file
-	  printf '[autoload]\nB="*res://b.gd"\nA="*res://a.gd"\n' > "$GDK_PROJECT_FILE"
-	  body="$(gdk_restore_project_file)"
-	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a within-section REORDER was treated as churn: %s\n' "$body" >&2; exit 1 ;; esac
-	  head -2 "$GDK_PROJECT_FILE" | tail -1 | grep -q '^B=' || { echo '  MISS — a within-section reorder was CLOBBERED' >&2; exit 1; } )
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_PROJECT_FILE="$scratch/project.godot" HOME="$scratch" bash -c '
+		# shellcheck source=/dev/null
+		source "$1"
+		_gdk_snapshot_project_file
+		printf "[autoload]\nB=\"*res://b.gd\"\nA=\"*res://a.gd\"\n" > "$GDK_PROJECT_FILE"
+		body="$(gdk_restore_project_file)"
+		case "$body" in *"BEYOND re-serialization"*) ;; *) printf "  MISS — a within-section REORDER was treated as churn: %s\n" "$body" >&2; exit 1 ;; esac
+		head -2 "$GDK_PROJECT_FILE" | tail -1 | grep -q "^B=" || { echo "  MISS — a within-section reorder was CLOBBERED" >&2; exit 1; }
+	' _ "$lib"
 	_gdk_st_true 'restore leaves a reorder inside a section alone' "$?"
 
 	# The same line under a DIFFERENT section is a different fact.
 	printf '[autoload]\nA="*res://a.gd"\n[debug]\n' > "$scratch/project.godot"
-	( GDK_PROJECT_FILE="$scratch/project.godot"
-	  _GDK_PROJECT_SNAPSHOT=""
-	  HOME="$scratch"
-	  _gdk_snapshot_project_file
-	  printf '[autoload]\n[debug]\nA="*res://a.gd"\n' > "$GDK_PROJECT_FILE"
-	  body="$(gdk_restore_project_file)"
-	  case "$body" in *'BEYOND re-serialization'*) ;; *) printf '  MISS — a key moved between sections was treated as churn: %s\n' "$body" >&2; exit 1 ;; esac )
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_PROJECT_FILE="$scratch/project.godot" HOME="$scratch" bash -c '
+		# shellcheck source=/dev/null
+		source "$1"
+		_gdk_snapshot_project_file
+		printf "[autoload]\n[debug]\nA=\"*res://a.gd\"\n" > "$GDK_PROJECT_FILE"
+		body="$(gdk_restore_project_file)"
+		case "$body" in *"BEYOND re-serialization"*) ;; *) printf "  MISS — a key moved between sections was treated as churn: %s\n" "$body" >&2; exit 1 ;; esac
+	' _ "$lib"
 	_gdk_st_true 'restore leaves a key moved between sections alone' "$?"
 
 	# The restore target is pinned ABSOLUTE at snapshot time, so a wrapper that
 	# cd's mid-run still restores rather than silently finding nothing there.
 	printf '; c\nconfig/name="x"\n' > "$scratch/project.godot"
-	( cd "$scratch" || exit 1
-	  GDK_PROJECT_FILE="project.godot"
-	  _GDK_PROJECT_SNAPSHOT=""
-	  HOME="$scratch"
-	  _gdk_snapshot_project_file
-	  printf 'config/name="x"\n; c\n' > "$scratch/project.godot"
-	  cd / || exit 1
-	  body="$(gdk_restore_project_file)"
-	  case "$body" in *'restored'*) ;; *) printf '  MISS — a cd mid-run dropped the restore: %s\n' "$body" >&2; exit 1 ;; esac
-	  head -1 "$scratch/project.godot" | grep -q '^; c$' || { echo '  MISS — the file did not come back after a cd' >&2; exit 1; } )
+	# shellcheck disable=SC2016  # $1/$2 are the CHILD shell's positionals
+	env GDK_PROJECT_FILE="project.godot" HOME="$scratch" bash -c '
+		cd "$2" || exit 1
+		# shellcheck source=/dev/null
+		source "$1"
+		_gdk_snapshot_project_file
+		printf "config/name=\"x\"\n; c\n" > "$2/project.godot"
+		cd / || exit 1
+		body="$(gdk_restore_project_file)"
+		case "$body" in *restored*) ;; *) printf "  MISS — a cd mid-run dropped the restore: %s\n" "$body" >&2; exit 1 ;; esac
+		head -1 "$2/project.godot" | grep -q "^; c$" || { echo "  MISS — the file did not come back after a cd" >&2; exit 1; }
+	' _ "$lib" "$scratch"
 	_gdk_st_true 'restore survives a wrapper that cd s between snapshot and exit' "$?"
 
 	# --- and the two are wired: sandbox_home arms the restore ----------------

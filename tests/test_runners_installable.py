@@ -34,12 +34,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from support import REPO_ROOT  # noqa: E402
 
+from godot_devkit.repo import install  # noqa: E402
+
 pytestmark = pytest.mark.skipif(shutil.which('bash') is None,
                                 reason='needs bash')
 
 INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
 LIBRARY = INSTALLABLES / 'gdk_runners.sh'
 RUNNER = INSTALLABLES / 'import_cache.sh'
+# Every shell runner install-runners ships. Each one carries --help and
+# --self-test, and the argument surface below is fired at all of them: a runner
+# added to the plan and not here would be a runner nothing holds to the shape.
+SCRIPTS = tuple(INSTALLABLES / name
+                for name, _rel in install.PLANS['install-runners']
+                if name.endswith('.sh'))
 
 # The one line shape a consumer greps. Changing it is a minor bump at least.
 VERDICT = '[PARSE] PASS (2 files) — full log: .gate-reports/parse.log'
@@ -51,7 +59,7 @@ def run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
 
 
 # --- the corpora, fired ------------------------------------------------------
-@pytest.mark.parametrize('script', [LIBRARY, RUNNER], ids=['library', 'runner'])
+@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
 def test_the_self_test_corpus_passes_and_reports_its_case_count(script):
     done = run(str(script), '--self-test')
     assert done.returncode == 0, done.stdout + done.stderr
@@ -117,7 +125,7 @@ def test_verbose_streams_the_same_transcript_the_log_holds(tmp_path):
 
 
 # --- the argument surface: what each script REFUSES --------------------------
-@pytest.mark.parametrize('script', [LIBRARY, RUNNER], ids=['library', 'runner'])
+@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
 @pytest.mark.parametrize('argv', [
     ('--nope',),                 # an unknown verb
     ('-x',),                     # an unknown short flag
@@ -135,7 +143,7 @@ def test_an_argument_neither_script_takes_is_refused_as_a_usage_error(script, ar
     assert '--help' in done.stdout + done.stderr, done.stdout + done.stderr
 
 
-@pytest.mark.parametrize('script', [LIBRARY, RUNNER], ids=['library', 'runner'])
+@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
 def test_help_exits_zero_and_names_the_script(script):
     done = run(str(script), '--help')
     assert done.returncode == 0, done.stdout + done.stderr
@@ -205,3 +213,46 @@ def test_a_godot_project_at_the_root_gets_past_that_refusal(tmp_path):
     assert done.returncode == 1, done.stdout + done.stderr
     assert 'not a Godot project' not in done.stderr, done.stderr
     assert 'did not refresh the cache' in done.stdout, done.stdout
+
+
+@pytest.mark.skipif(shutil.which('shellcheck') is None,
+                    reason='needs shellcheck')
+def test_a_consumer_sourcing_the_library_shellchecks_clean(tmp_path):
+    """A consumer's `shellcheck -x` follows the `source` and lints the library
+    INLINE, so anything the library does to a name it also publishes lands as a
+    finding in the consumer's file. The library's own self-test used to assign
+    HOME, GDK_PROJECT_FILE and GDK_LOG_CAP_BYTES inside subshells, and every
+    consumer script that later READ one of the three got SC2031 on a line its
+    author wrote correctly — three sites in one adoption, each repaired with a
+    local disable comment. The self-test scopes those values to a child process
+    instead. This is the fixture that keeps it that way."""
+    dev = tmp_path / 'tools' / 'dev'
+    (dev / 'runners').mkdir(parents=True)
+    shutil.copy2(LIBRARY, dev / 'gdk_runners.sh')
+    consumer = dev / 'runners' / 'consumer.sh'
+    consumer.write_text(
+        '#!/usr/bin/env bash\n'
+        'set -uo pipefail\n'
+        '# shellcheck source=../gdk_runners.sh\n'
+        'source "$(dirname "${BASH_SOURCE[0]}")/../gdk_runners.sh"\n'
+        'gdk_sandbox_home\n'
+        'echo "home $HOME cap $GDK_LOG_CAP_BYTES project $GDK_PROJECT_FILE"\n'
+        'echo "engine $GDK_GODOT timeout $GDK_TIMEOUT"\n',
+        encoding='utf-8')
+
+    # cwd is the script's directory so `source=../gdk_runners.sh` resolves.
+    done = subprocess.run(['shellcheck', '-x', consumer.name],
+                          cwd=consumer.parent, text=True, capture_output=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+@pytest.mark.skipif(shutil.which('shellcheck') is None,
+                    reason='needs shellcheck')
+@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
+def test_every_shipped_runner_shellchecks_clean(script):
+    """`shellcheck -x` on the installables themselves. They land in consumer
+    trees whose own `check shell` gate runs over tools/ — a finding shipped
+    from here reddens somebody else's commit gate."""
+    done = subprocess.run(['shellcheck', '-x', script.name],
+                          cwd=script.parent, text=True, capture_output=True)
+    assert done.returncode == 0, done.stdout + done.stderr

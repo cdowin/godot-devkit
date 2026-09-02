@@ -104,7 +104,11 @@ HOOKS = ('tools/hooks/cc-commit-pathspec.sh',
          'tools/dev/checks/doctor.sh',
          'tools/setup-hooks.sh')
 RUNNERS = ('tools/dev/gdk_runners.sh',
-           'tools/dev/runners/import_cache.sh')
+           'tools/dev/runners/import_cache.sh',
+           'tools/dev/runners/parse.sh',
+           'tools/dev/runners/compile_sweep.gd',
+           'tools/dev/runners/lint.sh',
+           'tools/dev/runners/warnings.sh')
 DESTINATIONS = {'install-ci': (WORKFLOW,),
                 'install-agents': AGENTS,
                 'install-hooks': HOOKS,
