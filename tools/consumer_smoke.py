@@ -19,6 +19,12 @@ WHAT IT ASSERTS, and why each is more than "it did not crash":
   * a consumer that is not checked out is SKIPPED LOUDLY and named in the
     summary. Silence about what was not run is the thing this file's own
     contract forbids.
+  * THE FRESH PROJECT is smoked too, and it is the one probe here that writes:
+    an empty Godot 4 project in a temp dir, `godot-devkit init`, then the REAL
+    `make doctor`. The suite proves the written file set and dry-runs every
+    target; only a real host can run the engine-facing half, so this is where
+    it happens. Never inside a consumer checkout — write verbs do not run
+    against a shipping game repo.
 
 Read-only, no network, no Godot boot. Runs the WORKING TREE build via
 PYTHONPATH — never `uvx --from .`, which caches by version and will happily
@@ -26,9 +32,12 @@ serve pre-fix code from a fix's own verification run.
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 DEVKIT = Path(__file__).resolve().parent.parent
@@ -36,6 +45,19 @@ CONSUMERS = (Path.home() / 'workspace' / 'trail',
              Path.home() / 'workspace' / 'nullbound')
 SCENE_SUFFIXES = ('.tres', '.tscn')
 DEFAULT_EXCLUDES = ('addons/',)
+
+# --- the fresh-project probe --------------------------------------------------
+FRESH = 'fresh project'
+GODOT = 'godot'
+HOOKS_PATH = 'tools/hooks'
+TRACKED_HOOKS = 6
+FRESH_PROJECT_GODOT = ('config_version=5\n\n[application]\n\n'
+                       'config/name="Fresh"\nconfig/version="0.1.0"\n')
+FRESH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>\n'
+# The doctor rows `init` is RESPONSIBLE for. Everything else doctor reports is
+# a fact about the HOST (godot, gdlint, uv on PATH) or about a project that has
+# not added GUT yet — real, worth printing, and not this probe's finding.
+INIT_OWNED = ('core.hooksPath', 'tracked hook')
 
 
 def devkit(root: Path, *argv: str) -> tuple[int, str]:
@@ -197,8 +219,64 @@ def smoke(root: Path, report: Report) -> None:
                       f'{sorted(set(after) - set(before))}')
 
 
+def fresh_project(report: Report) -> None:
+    """init an empty Godot 4 project in scratch, then run the REAL make doctor.
+
+    The ship criterion of the bootstrap milestone, on a real host: `init`, then
+    `make doctor` green with zero hand edits. What this can assert everywhere
+    is the half `init` OWNS — the hooks armed and git pointed at them. Whether
+    doctor is GREEN also depends on the host having godot, gdlint and uv, so
+    the verdict distinguishes the two: an init-owned FAIL is this probe's
+    finding, a missing host tool is named and is not.
+    """
+    if shutil.which('make') is None or shutil.which('git') is None:
+        report.skipped.append(f'{FRESH}: needs make and git')
+        return
+    if shutil.which(GODOT) is None:
+        report.skipped.append(
+            f'{FRESH}: `{GODOT}` is not on PATH — the real `make doctor` was '
+            f'NOT run (the suite still proves the file set and `make -n`)')
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / 'game'
+        root.mkdir()
+        (root / 'project.godot').write_text(FRESH_PROJECT_GODOT, encoding='utf-8')
+        (root / 'icon.svg').write_text(FRESH_ICON, encoding='utf-8')
+        subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+
+        code, out = devkit(root, 'init')
+        if not report.check(FRESH, 'godot-devkit init', code == 0,
+                            f'exit {code}' + ('' if code == 0 else f'\n{out[-2000:]}')):
+            return
+
+        doctor = subprocess.run(['make', 'doctor'], cwd=root, text=True,
+                                capture_output=True, env=dict(os.environ),
+                                timeout=300)
+        rows = doctor.stdout.splitlines()
+        failed = [r.strip() for r in rows if r.strip().startswith('FAIL')]
+        mine = [r for r in failed if any(k in r for k in INIT_OWNED)]
+        report.check(FRESH, 'make doctor: hooks armed', not mine,
+                     'git points at the installed hooks and every one is '
+                     'executable' if not mine else '; '.join(mine))
+        armed = sum(1 for r in rows
+                    if 'tracked hook' in r and 'present + executable' in r)
+        report.check(FRESH, 'make doctor: hook census', armed == TRACKED_HOOKS,
+                     f'{armed} tracked hook(s) armed, {TRACKED_HOOKS} installed')
+        host_gaps = [r for r in failed if r not in mine]
+        report.check(FRESH, 'make doctor verdict',
+                     doctor.returncode == 0 or bool(host_gaps),
+                     f'exit {doctor.returncode}'
+                     + (f'; host gaps, not this install: {"; ".join(host_gaps)}'
+                        if host_gaps else ' — green on a fresh project'))
+        if host_gaps:
+            report.skipped.append(
+                f'{FRESH}: `make doctor` is not green on this host — '
+                f'{"; ".join(host_gaps)}')
+
+
 def main() -> int:
     report = Report()
+    fresh_project(report)
     present = [c for c in CONSUMERS if c.is_dir()]
     for absent in (c for c in CONSUMERS if not c.is_dir()):
         report.skipped.append(f'{absent} is not checked out')
@@ -215,20 +293,20 @@ def main() -> int:
     print()
     for line in report.skipped:
         print(f'[smoke] NOT RUN — {line}')
+    if report.failed:
+        print(f'[smoke] FAIL — {report.failed} check(s) across '
+              f'{len(present)} consumer(s) + the fresh project')
+        return 1
     if not present:
         # Loud, and exit 0: a machine without the consumers checked out has not
         # found a defect, and failing here would make the full gate unrunnable
         # anywhere but one laptop. What it must never do is imply it ran.
         print('[smoke] SKIPPED — no consumer checkout available; NOTHING was '
-              'smoked. This is not a pass.')
+              'smoked against a live consumer. This is not a pass.')
         return 0
-    if report.failed:
-        print(f'[smoke] FAIL — {report.failed} check(s) across '
-              f'{len(present)} consumer(s)')
-        return 1
     print(f'[smoke] PASS — {len(report.rows)} check(s) across '
-          f'{len(present)} consumer(s), every census matched an independent '
-          f'count, both checkouts unchanged')
+          f'{len(present)} consumer(s) + the fresh project, every census '
+          f'matched an independent count, both checkouts unchanged')
     return 0
 
 
