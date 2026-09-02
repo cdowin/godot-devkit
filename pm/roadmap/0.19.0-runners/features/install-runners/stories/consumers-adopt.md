@@ -3,7 +3,7 @@ id: 0.19.0/install-runners/consumers-adopt
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: nullbound and trail install the library and delete their forks
-status: wip
+status: review
 owner: developer
 depends_on: []
 ---
@@ -36,3 +36,12 @@ Anything either consumer's Makefile does beyond calling the library.
 ## Size
 
 m
+
+## Done
+
+done: 597276c — devkit half only: `install-runners` README row + USAGE +
+docstring, both pin sites and both version files at 0.19.0, CHANGELOG's
+untagged v0.18.1 folded into `## v0.19.0 — 2026-09-02`, `pm retire 0.18.1`,
+`pm milestone done 0.18.0`. Steps 2-4 (nullbound + trail install, delete their
+forks, diff verdict lines, `make consumer-smoke`) are PENDING THE TAG — they
+pin `DEVKIT_VERSION`, so they cannot run against an unreleased version.
