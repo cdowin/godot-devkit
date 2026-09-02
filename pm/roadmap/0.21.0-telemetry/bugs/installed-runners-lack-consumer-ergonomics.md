@@ -27,3 +27,5 @@ fail-fast — a missing engine fails late with an unrelated error; (2) `smoke` l
 Port scope stopped at the verdict line. Each is small; (1) and (3) are the ones an agent hits first.
 
 ## Fix
+
+(5) **Concurrent gate runs clobber one log slot.** `.gate-reports/<gate>.log` is per gate, so two agents running `make unit` in one tree overwrite each other's transcript (seen 2026-09-02: a peer's run replaced the orchestrator's `unit.log` mid-read). The slot should carry a run id (PID or timestamp) with `<gate>.log` as a symlink/copy of the latest, and the verdict line names the exact file.
