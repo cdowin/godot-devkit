@@ -38,6 +38,14 @@ NON_DECLARING_EXPORTS = ('@export_group', '@export_subgroup', '@export_category'
 # A script implementing either of these can answer to property names that appear
 # nowhere in its source — we must not call such a name dead.
 DYNAMIC_PROPERTY_HOOKS = ('func _get_property_list', 'func _set')
+# A quoted span, either GDScript quote style. Stripped before a line is
+# pattern-matched: a call NAMED in an assert message or a log string is not a
+# call, and a scanner that cannot tell those apart reports prose as code.
+QUOTED_SPAN_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+TRAILING_COMMENT_RE = re.compile(r'#.*$')
+# What a masked quoted span is filled WITH. Neither an identifier character nor
+# a bracket, quote or comma, so nothing a scanner counts can hide inside it.
+MASK_CHAR = '~'
 
 
 @dataclass
@@ -64,6 +72,24 @@ class Resolution:
     enum_members: dict[str, int] = field(default_factory=dict)
     consts: dict[str, str] = field(default_factory=dict)
     aliases: dict[str, str] = field(default_factory=dict)
+
+
+def code_only(line: str) -> str:
+    """One source line with its quoted spans MASKED and its comment removed.
+
+    What is left is the part a scanner may match against without confusing
+    prose for code. Masked, not deleted, and that is load-bearing twice: column
+    offsets survive, so a caller counting arguments reads the same positions
+    the line has; and a lone string argument stays ONE argument instead of
+    vanishing into an empty call. Strings are masked before the comment is cut,
+    because a `#` inside a string is not a comment.
+
+    Length is preserved up to the comment, so `line[:len(code_only(line))]` is
+    the same line with its comment gone and its strings intact — which is what
+    a caller matching a PATH literal needs.
+    """
+    masked = QUOTED_SPAN_RE.sub(lambda m: MASK_CHAR * len(m.group(0)), line)
+    return TRAILING_COMMENT_RE.sub('', masked)
 
 
 def scan_script(text: str, res_path: str) -> ScriptFacts:

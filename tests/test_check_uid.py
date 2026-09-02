@@ -506,10 +506,10 @@ class CliRouting(unittest.TestCase):
 
 
 class AggregateRoster(unittest.TestCase):
-    """`[checks] all` — which gates apply to THIS repo. Five of the nine read
-    `.tscn`/`.tres`/shell, so a repo holding none of them gets five 0-file
-    censuses and rule 4 correctly reddens every one; that is the roster being
-    wrong for the repo, not a reason to weaken a gate."""
+    """`[checks] all` — which gates apply to THIS repo. Most of the roster
+    reads `.tscn`/`.tres`/`.gd`/shell, so a repo holding none of them gets a
+    handful of 0-file censuses and rule 4 correctly reddens every one; that is
+    the roster being wrong for the repo, not a reason to weaken a gate."""
 
     run_cli = CliRouting.run_cli
 
@@ -529,7 +529,7 @@ class AggregateRoster(unittest.TestCase):
         # other is either unreachable or a silent hole in the typo refusal.
         #
         # A SUBPROCESS per gate, for the reason `check doc` binds its scope and
-        # its repo root at IMPORT: running nine gates in-process leaves that
+        # its repo root at IMPORT: running the roster in-process leaves that
         # module pointing at a deleted temp dir and the next test inherits it.
         # The assertion is routing only — a gate's own verdict is its own test.
         import subprocess
@@ -544,6 +544,31 @@ class AggregateRoster(unittest.TestCase):
                              'PYTHONPATH': str(REPO_ROOT / 'src')})
                     self.assertNotIn('unknown check',
                                      proc.stdout + proc.stderr)
+
+    def test_every_known_gate_answers_help_with_its_own_contract(self) -> None:
+        # `check <gate> --help` prints that gate's MODULE DOCSTRING — the one
+        # copy, so the help and the contract cannot drift apart. A gate whose
+        # docstring never names its config section is a gate whose scope a
+        # consumer has to read the source to discover.
+        import subprocess
+        from godot_devkit import cli
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            for name in cli.KNOWN_GATES:
+                with self.subTest(name):
+                    proc = subprocess.run(
+                        [sys.executable, '-m', 'godot_devkit.cli', 'check',
+                         name, '--help'],
+                        cwd=root, capture_output=True, text=True,
+                        env={**os.environ,
+                             'PYTHONPATH': str(REPO_ROOT / 'src')})
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertIn(name, proc.stdout)
+
+    def test_help_on_an_unknown_gate_is_exit_2_not_an_empty_page(self) -> None:
+        with temp_repo('uid_repo', only=CLEAN):
+            code, out = self.run_cli('check', 'rng!', '--help')
+        self.assertEqual(code, 2, out)
+        self.assertIn('unknown check', out)
 
     def test_a_declared_roster_runs_exactly_what_it_names(self) -> None:
         with temp_repo('uid_repo', only=CLEAN) as root:

@@ -181,6 +181,9 @@ All five take `--force` and `--diff`.
 
 ### Static gates (`godot-devkit check <gate>`)
 
+`check <gate> --help` prints that gate's contract, its `devkit.toml` section and its
+honest scope — the module docstring itself, so the help cannot drift from the code.
+
 Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 
 | Gate | Guards against |
@@ -193,7 +196,11 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 | `check repo-hygiene` | Close-time git cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` |
 | `check shell` | `shellcheck -x` over every script under `tools/`, incl. extension-less hook entry points. Soft-skips if shellcheck isn't installed |
 | `check pm` | PM-tree drift: a `done` feature whose `reviewed:` names no file, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema (milestones, features, stories **and bugs**), a `done` story under a live feature, a `building` milestone with everything closed. Also runs the `pm validate` integrity rules (V1–V5). Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree |
-| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: five of the eight gates read `.tscn`/`.tres` or shell, so a repo holding none gets five 0-file censuses and correctly reddens each. That is the roster being wrong for the repo, not a reason to soften a gate. An unknown name is exit 2, never a quietly narrowed run |
+| `check rng` | Randomness a seeded run cannot reproduce: an UNQUALIFIED `randi()`/`randf()`/`randi_range()`/`randf_range()` — the global generator — and `randomize()` in any spelling, including on an instance RNG (which makes an entropy-seeded result LOOK derived). Scope is `[rng] roots` and is meant to be narrow. `[rng] allowlist` is `"<path>:<enclosing func>" = "the reason"`: function granularity, so a new bare call elsewhere in a listed file still trips, the reason is DATA rather than a comment, and an entry that no longer matches a call is itself a finding |
+| `check tres-comment` | An authored `;` comment in a `.tres`/`.tscn`. Godot's parser accepts one and its writer DROPS it, so any rationale in a resource file survives only until the next editor save, import or headless run — silently, permanently, with no diff to notice |
+| `check unit-disk` | A no-boot test that reaches real persistent state: a `user://` path (stock), a call that touches a live owner (`[unit_disk] forbidden_calls`), or a call whose root/scope parameter DEFAULTS to the real one (`[unit_disk] min_args` — `Save.load(uuid)` is a finding where `Save.load(uuid, throwaway)` is not). A call NAMED in an assert message or a doc comment is not a call |
+| `check test-shape` | The expensive test tier growing into the bulk. A RATCHET: `[test_shape] cap` bounds a new scenario, and every file already over it is recorded in `[test_shape] ledger` at its current size — the gate fails when one GROWS past its ceiling or a new one crosses the cap. Prints the tier balance it exists to move, and the ledger line to paste; read-only, so it never edits the config that governs it |
+| `check all` | The offline fast set — `uid` + `tres` + `props` + `doc` + `shell` by default. **`[checks] all` names the roster for your repo**: most of the roster reads `.tscn`/`.tres`/`.gd` or shell, so a repo holding none gets a 0-file census per gate and correctly reddens each. That is the roster being wrong for the repo, not a reason to soften a gate. The four ported project scans (`rng`, `tres-comment`, `unit-disk`, `test-shape`) are out of the default for the same reason in reverse — none can state a stock scope true of every repo, so each is one `[checks] all` entry away once yours has declared one. An unknown name is exit 2, never a quietly narrowed run |
 
 ### Project management (`godot-devkit pm <command>`)
 
