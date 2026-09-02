@@ -255,11 +255,19 @@ trap 'rm -rf "$TMP"' EXIT
 # writes, reddening heavy scenarios nondeterministically. Per-process isolation
 # is the tier's whole contract, and the per-job HOME is what delivers it.
 # The $1/$2 below are the INNER bash's positionals, expanded by that shell.
+#
+# `bash "$SCENARIO_SH"`, never a bare exec of it. This is the spelling
+# Makefile.devkit and install-runners' own next step tell a consumer to use,
+# and the reason is that a checkout can carry the file without its mode bits —
+# a zip, a `git config core.fileMode false` tree, an older install. Exec'ing it
+# directly returned 126 from every scenario, and `Permission denied` matches
+# nothing in FAILURE_SUMMARY_RE, so the FAILURES block named each scenario and
+# printed nothing under it.
 # shellcheck disable=SC2016
 printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
 	name="$1"; tmp="$2"
 	export GDK_HEADLESS_HOME="$tmp/home-$name"
-	out="$("'"$SCENARIO_SH"'" "$name" 2>&1)"; code=$?
+	out="$(bash "'"$SCENARIO_SH"'" "$name" 2>&1)"; code=$?
 	printf "%s\n" "$out" > "$tmp/$name.log"
 	printf "%s\t%s\n" "$name" "$code" >> "$tmp/results"
 ' _ {} "$TMP"
@@ -287,8 +295,17 @@ if [ "$FAIL" -gt 0 ]; then
 	echo "[$GATE_TAG] FAILURES:"
 	for n in ${FAILED_NAMES[@]+"${FAILED_NAMES[@]}"}; do
 		echo "  --- $n ---"
-		grep -hE "$FAILURE_SUMMARY_RE" "$TMP/$n.log" 2>/dev/null \
-			| head -"$FAILURE_SUMMARY_LINES" | sed 's/^/      /'
+		# A transcript matching NO summary line still has to say something:
+		# the summary patterns describe how a scenario reports its own
+		# failure, and the failures that matter most are the ones that never
+		# got that far. The tail is the fallback, never nothing.
+		if grep -qE "$FAILURE_SUMMARY_RE" "$TMP/$n.log" 2>/dev/null; then
+			grep -hE "$FAILURE_SUMMARY_RE" "$TMP/$n.log" 2>/dev/null \
+				| head -"$FAILURE_SUMMARY_LINES" | sed 's/^/      /'
+		else
+			tail -"$FAILURE_SUMMARY_LINES" "$TMP/$n.log" 2>/dev/null \
+				| sed 's/^/      /'
+		fi
 	done
 fi
 

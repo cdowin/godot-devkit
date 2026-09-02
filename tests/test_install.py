@@ -600,14 +600,82 @@ def test_every_installable_on_disk_is_reachable_through_a_verb():
         f'missing: {sorted(named - on_disk)}')
 
 
-def test_install_runners_tells_the_operator_about_the_exec_bit():
-    """0.19.0 NIT: the runners are written -rw-r--r-- (this package makes no
-    mode changes — `core.apply` has no such act), and the file headers spell
-    their usage as a direct exec. `install-hooks` says so in its next step;
-    `install-runners` did not, so a consumer following the header alone got
-    `permission denied` from a runner the installer had just reported writing."""
+# --- the exec bit: a script is written RUNNABLE -------------------------------
+# 0.20.0 MAJOR-1, and the 0.19.0 NIT it subsumes. The runners used to be
+# written -rw-r--r-- and the next step told the operator to `chmod +x` them.
+# `integration.sh`'s fan-out did not read that paragraph: it exec'd
+# `scenario.sh` directly, so every scenario on every `init`'d project exited
+# 126 and the FAILURES block printed the scenario name with nothing under it.
+# The mode is now part of the write, in `core.apply`, which owns every
+# mutation this package makes.
+def _mode(target: Path) -> int:
+    return target.stat().st_mode & 0o777
+
+
+@pytest.mark.parametrize('command', VERBS)
+def test_every_shell_installable_is_written_executable(command):
+    """Every `.sh` this verb writes is runnable, and nothing else's mode moved.
+
+    Asked of the DESTINATION suffix, per verb, so a `.sh` added to any plan
+    tomorrow is covered the day it lands.
+    """
+    with repo() as root:
+        code, out = run(command)
+        assert code == 0, out
+        scripts = [rel for rel in DESTINATIONS[command] if rel.endswith('.sh')]
+        others = [rel for rel in DESTINATIONS[command] if not rel.endswith('.sh')]
+        not_runnable = [rel for rel in scripts
+                        if not os.access(root / rel, os.X_OK)]
+        runnable = [rel for rel in others if os.access(root / rel, os.X_OK)]
+    assert not not_runnable, (
+        f'{command} wrote {not_runnable} without an execute bit — a caller '
+        f'exec\'ing one gets 126, and `Permission denied` is a diagnosis no '
+        f'gate summary matches')
+    assert not runnable, (
+        f'{command} made {runnable} executable; only `.sh` is a script here')
+
+
+def test_the_exec_bit_does_not_widen_who_may_read_the_file():
+    """`chmod +x`, not `chmod 755`. The execute bit joins the classes that can
+    already read the file — widening a 0600 destination to world-readable is a
+    permission decision no install verb was asked to make."""
+    with repo() as root:
+        target = root / 'tools/dev/runners/parse.sh'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('stale\n', encoding='utf-8')
+        target.chmod(0o600)
+        code, out = run('install-runners', '--force')
+        assert code == 0, out
+        assert _mode(target) == 0o700, oct(_mode(target))
+
+
+def test_a_byte_current_script_missing_the_bit_is_repaired_not_reported_current():
+    """The consumer this fix exists for already ran the old verb: their files
+    are byte-identical and 0644. A re-run that reported them `already current`
+    would leave every one of them broken forever."""
+    with repo() as root:
+        code, out = run('install-runners')
+        assert code == 0, out
+        target = root / 'tools/dev/runners/scenario.sh'
+        target.chmod(0o644)
+
+        code, out = run('install-runners')
+        assert code == 0, out
+        assert os.access(target, os.X_OK), 'the re-run left it unrunnable'
+        assert 'wrote tools/dev/runners/scenario.sh' in out, out
+
+        # …and it converges: the run after that has nothing left to do.
+        code, out = run('install-runners')
+        assert code == 0, out
+        assert 'already current' in out and 'wrote ' not in out, out
+
+
+def test_install_runners_next_step_no_longer_asks_for_a_chmod():
+    """The 0.19.0 NIT was closed by DOCUMENTING the missing bit. It is closed
+    now by writing it, and a paragraph still asking for the chmod would send an
+    operator to repair something the verb just did."""
     with repo():
         code, out = run('install-runners')
     assert code == 0, out
-    assert 'exec bit' in out, out
-    assert 'chmod +x' in out, out
+    assert 'chmod +x' not in out, out
+    assert 'EXECUTABLE' in out, out

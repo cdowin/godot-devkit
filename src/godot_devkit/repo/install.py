@@ -206,9 +206,35 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
 
+# A `.sh` installable is WRITTEN EXECUTABLE. Every one of them is a script a
+# caller runs — a make recipe, a hook dispatcher, another runner's fan-out —
+# and a script that is not executable is a file that looks installed and is
+# not. `integration.sh` exec'd `scenario.sh` directly and got exit 126 from
+# every scenario on every `init`'d project, under a FAILURES block that printed
+# nothing, because `Permission denied` matched no summary pattern.
+#
+# The mode is part of the WRITE, in `core.apply`, which owns every mutation
+# this package makes. It is not a post-pass: a chmod outside the plan is the
+# decide-as-you-go shape that module exists to remove.
+#
+# The extension-less git hooks (`pre-push`, `prepare-commit-msg`) are still
+# armed by `tools/setup-hooks.sh`, because arming one is also pointing
+# `core.hooksPath` at the directory — one act, one owner, and it ships in the
+# same install.
+EXECUTABLE_SUFFIX = '.sh'
+
+
+def _is_executable(target: Path) -> bool:
+    """Whether `target` already carries an execute bit for anyone."""
+    try:
+        return bool(target.stat().st_mode & 0o111)
+    except OSError:
+        return False
+
+
 # Installing tools/hooks/* is not arming them: core.hooksPath silently skips a
-# non-executable hook, and this package cannot chmod (core.apply owns every
-# mutation and has no such act). The script that does it is in the same install.
+# non-executable hook, and pointing git at the directory is the other half of
+# the same act. The script that does both is in the same install.
 _NEXT_STEP = {
     'install-hooks': 'run `bash tools/setup-hooks.sh` to point git at them and '
                      'set the exec bit — an unexecutable hook is skipped in '
@@ -244,12 +270,12 @@ _NEXT_STEP = {
                        '`[gates] extra` in devkit.toml, never a fork of the '
                        'include. Then gitignore '
                        '.gate-reports/, .scenario-reports/, .capture-reports/ '
-                       'and .headless-userdata/. The runners are written '
-                       'without the exec bit (this package makes no mode '
-                       'changes): call them as `bash tools/dev/runners/<x>.sh` '
-                       'from your targets, or `chmod +x` them once. Then edit '
-                       'each file\'s `project config` header: the files are '
-                       'yours now.',
+                       'and .headless-userdata/. Every `.sh` here is written '
+                       'EXECUTABLE, so a target may call it either way — the '
+                       'stock recipes say `bash tools/dev/runners/<x>.sh`, '
+                       'which also works on a checkout that lost the mode '
+                       'bits. Then edit each file\'s `project config` header: '
+                       'the files are yours now.',
 }
 
 
@@ -429,8 +455,16 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
             if unreadable:
                 defects.append(f'{rel} {unreadable}')
                 continue
-            if existing == body:
+            if existing == body and not (rel.endswith(EXECUTABLE_SUFFIX)
+                                         and not _is_executable(target)):
                 kind = 'current'
+            elif existing == body:
+                # Right bytes, missing execute bit. Not `current`: the file a
+                # consumer installed before this package wrote the mode is
+                # exactly the broken one, and reporting it current would leave
+                # it broken forever. Rewritten (same bytes) so the ONE writer
+                # sets the mode, and idempotent — the next run finds it right.
+                pass
             elif not force:
                 collisions.append(rel)
                 continue
@@ -454,7 +488,8 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
     writes = apply.Plan()
     for kind, target, rel, body in plan:
         if kind != 'current':
-            writes.overwrite(target, body, newline=None, label=rel)
+            writes.overwrite(target, body, newline=None, label=rel,
+                             executable=rel.endswith(EXECUTABLE_SUFFIX))
     # Everything answerable was answered above, so a failure here means the
     # filesystem changed under the plan. It is still a refusal that names what
     # it did — never a traceback, and never a silent "nothing was written" over

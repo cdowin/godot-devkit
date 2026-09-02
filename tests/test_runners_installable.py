@@ -216,6 +216,69 @@ def test_a_godot_project_at_the_root_gets_past_that_refusal(tmp_path):
     assert 'did not refresh the cache' in done.stdout, done.stdout
 
 
+# --- the fan-out: integration.sh CALLS scenario.sh --------------------------
+INTEGRATION = INSTALLABLES / 'integration.sh'
+# What the fan-out prints when every job came back 0. Both halves are asserted:
+# the count, and that nothing was quietly dropped.
+SWEEP_SUMMARY = '[INTEGRATION] SUMMARY: 2 passed, 0 failed (of 2)'
+
+
+def _fanout_fixture(tmp_path: Path, mode: int) -> Path:
+    """A repo holding integration.sh at its stock depth and a stand-in
+    scenario runner at `mode`. No engine anywhere: the stand-in IS the
+    scenario, so what is exercised is the one thing the fan-out owns — how it
+    invokes the runner beside it."""
+    runners = tmp_path / 'tools' / 'dev' / 'runners'
+    runners.mkdir(parents=True)
+    (tmp_path / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    shutil.copy2(INTEGRATION, runners / 'integration.sh')
+    stub = runners / 'stub_scenario.sh'
+    stub.write_text('#!/usr/bin/env bash\n'
+                    'echo "[SCENARIO] $1 PASS"\n', encoding='utf-8')
+    stub.chmod(mode)
+    return runners / 'integration.sh'
+
+
+@pytest.mark.parametrize('mode', [0o644, 0o755], ids=['no-exec-bit', 'executable'])
+def test_the_fan_out_runs_a_scenario_runner_that_carries_no_exec_bit(tmp_path,
+                                                                    mode):
+    """MAJOR-1. `install-runners` wrote every runner -rw-r--r--, and this one
+    caller exec'd `$SCENARIO_SH` directly — so every scenario on every
+    `init`'d project came back 126 and `make smoke` / `integration` were red
+    with an EMPTY diagnosis. The runner is invoked as `bash <path>`, which is
+    the spelling Makefile.devkit and the install verb's next step both name,
+    and it is what makes the sweep independent of a checkout's mode bits."""
+    runner = _fanout_fixture(tmp_path, mode)
+    done = subprocess.run(['bash', str(runner), 'alpha', 'beta'],
+                          cwd=tmp_path, text=True, capture_output=True,
+                          env={'PATH': '/usr/bin:/bin', 'GDK_JOBS': '2',
+                               'GDK_SCENARIO_RUNNER': 'stub_scenario.sh'})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert SWEEP_SUMMARY in done.stdout, done.stdout
+    assert 'Permission denied' not in done.stdout + done.stderr
+
+
+def test_a_failing_scenario_with_no_summary_line_still_gets_a_diagnosis(tmp_path):
+    """The other half of MAJOR-1: `Permission denied` matched nothing in
+    FAILURE_SUMMARY_RE, so the FAILURES block printed the scenario name and
+    then nothing at all. A transcript the summary patterns cannot read is the
+    case a reader needs the MOST — the failures that never got far enough to
+    report themselves."""
+    runner = _fanout_fixture(tmp_path, 0o755)
+    stub = runner.parent / 'stub_scenario.sh'
+    stub.write_text('#!/usr/bin/env bash\n'
+                    'echo "some engine noise nothing matches"\n'
+                    'exit 1\n', encoding='utf-8')
+    done = subprocess.run(['bash', str(runner), 'alpha'],
+                          cwd=tmp_path, text=True, capture_output=True,
+                          env={'PATH': '/usr/bin:/bin',
+                               'GDK_SCENARIO_RUNNER': 'stub_scenario.sh'})
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert '--- alpha ---' in done.stdout, done.stdout
+    assert 'some engine noise nothing matches' in done.stdout, (
+        'the FAILURES block named the scenario and said nothing about it')
+
+
 @pytest.mark.skipif(shutil.which('shellcheck') is None,
                     reason='needs shellcheck')
 def test_a_consumer_sourcing_the_library_shellchecks_clean(tmp_path):
