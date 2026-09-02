@@ -26,15 +26,22 @@ the "every Godot project is the same" guarantee without a second name for anythi
 
 ## Ship criterion
 
-**The fresh game.** An empty Godot 4 project: `godot-devkit init`, then `make doctor` and
-`make precommit` are green with zero hand edits. **The existing games.** `godot-devkit install-*
+**The fresh game.** An empty Godot 4 project: `godot-devkit init`, then, with zero hand edits,
+`make doctor` is green, every one of the 26 standard targets resolves against the installed include
+and the runners it names, and `make check` — run, not dry-run — has NO finding about anything the
+install wrote. The only gates that redden on a blank tree are the three reading `.tscn`/`.tres`,
+reporting the 0-file census a project with no scene in it genuinely has: that is the stock roster
+being wrong for the repo, which the seed `devkit.toml` says in those words and narrows in one line,
+never a gate to soften. `make precommit` is the criterion the day the project HAS content — its
+other members each boot the engine over the project's own files, and a blank tree has none. **The existing games.** `godot-devkit install-*
 --diff` on nullbound and trail shows exactly the drift each carries, and adopting deletes it — both
 consumers' Makefiles shrink to the include plus their own targets, their duplicated workflows and
 runners are gone, and `make consumer-smoke` is green on both.
 
 ## Risks
 
-- Godot cannot boot in the devkit's own CI — the fresh-game test asserts the written file set and
-  `make -n` of every standard target; the real boot is `consumer-smoke`.
+- Godot cannot boot in the devkit's own CI — the fresh-game test asserts the written file set,
+  `make -n` of every standard target, and the REAL `make check` (the gate roster is pure parse, so
+  a dry run of it was never the best that test could do); the real boot is `consumer-smoke`.
 - The include must not drag GUT-specific targets into a project without GUT: targets gate on
   `[runners]` config, not on directory presence.

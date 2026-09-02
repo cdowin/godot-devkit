@@ -56,6 +56,7 @@ WRITES = (
     'tools/dev/runners/import_cache.sh',
     'tools/dev/runners/parse.sh',
     'tools/dev/runners/compile_sweep.gd',
+    'tools/dev/runners/compile_sweep.gd.uid',
     'tools/dev/runners/lint.sh',
     'tools/dev/runners/warnings.sh',
     'tools/dev/runners/unit.sh',

@@ -26,6 +26,11 @@ re-implement them.
 
 ## Ship criterion
 
-The fresh-game test: empty project → `init` → `make doctor` + `make precommit` green, zero hand
-edits (asserted in the devkit's CI as the written file set + `make -n` of every standard target;
-the real boot is `consumer-smoke`).
+The fresh-game test: empty project → `init` → `make doctor` green and no `make check` finding
+about anything the install wrote, zero hand edits. Asserted in the devkit's CI as the written file
+set, `make -n` of every standard target, and the REAL `make check` — the gate roster is pure parse,
+and dry-running it is what let a `compile_sweep.gd` ship with no `.uid` sidecar. The three gates
+that read `.tscn`/`.tres` still redden over the 0-file census a scene-less project genuinely has;
+that is narrowed in the `devkit.toml` `init` wrote, not softened here. `make precommit` is the
+criterion once the project has content — its other members boot the engine. The real boot is
+`consumer-smoke`.

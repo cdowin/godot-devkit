@@ -58,6 +58,18 @@ FRESH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>\n
 # a fact about the HOST (godot, gdlint, uv on PATH) or about a project that has
 # not added GUT yet — real, worth printing, and not this probe's finding.
 INIT_OWNED = ('core.hooksPath', 'tracked hook')
+# `make check`'s verdict shape, and the one FAIL that is not this probe's
+# finding. A blank Godot project holds no .tscn/.tres, so the three gates that
+# read them report a 0-file census and correctly redden — the stock roster
+# being wrong for a repo with no scenes yet, which the seed devkit.toml names
+# and narrows in one line. ANY OTHER FAIL is a finding about a file `init`
+# itself wrote, which is exactly how a `compile_sweep.gd` with no `.uid`
+# sidecar shipped: the suite dry-ran `precommit`, and a dry run reaches no
+# verdict to read.
+CHECK_VERDICT_RE = re.compile(r'^\[check:([a-z-]+)\] (PASS|FAIL) — (.*)$',
+                              re.MULTILINE)
+CHECK_EMPTY_CENSUS = 'scanned 0 of 0 tracked'
+CHECK_LOG = '.gate-reports/check.log'
 
 
 def devkit(root: Path, *argv: str) -> tuple[int, str]:
@@ -71,6 +83,15 @@ def devkit(root: Path, *argv: str) -> tuple[int, str]:
 def _env() -> dict:
     import os
     return dict(os.environ)
+
+
+def working_tree_devkit() -> str:
+    """`make check` resolves `DEVKIT` to `uvx --from git+…@<pin>` — the
+    RELEASED tag, over the network. This whole file runs the WORKING TREE, so
+    the override goes on the command line; it is not a hand edit to the
+    project, and without it the probe would grade the last release."""
+    return (f'DEVKIT=env PYTHONPATH={DEVKIT / "src"} '
+            f'{sys.executable} -m godot_devkit.cli')
 
 
 def git(root: Path, *argv: str) -> list[str]:
@@ -220,14 +241,17 @@ def smoke(root: Path, report: Report) -> None:
 
 
 def fresh_project(report: Report) -> None:
-    """init an empty Godot 4 project in scratch, then run the REAL make doctor.
+    """init an empty Godot 4 project in scratch, then run the REAL make doctor
+    and the REAL make check.
 
     The ship criterion of the bootstrap milestone, on a real host: `init`, then
-    `make doctor` green with zero hand edits. What this can assert everywhere
-    is the half `init` OWNS — the hooks armed and git pointed at them. Whether
-    doctor is GREEN also depends on the host having godot, gdlint and uv, so
-    the verdict distinguishes the two: an init-owned FAIL is this probe's
-    finding, a missing host tool is named and is not.
+    `make doctor` green and no `make check` finding about anything the install
+    wrote, with zero hand edits. What this can assert everywhere is the half
+    `init` OWNS — the hooks armed, git pointed at them, and every gate quiet
+    about the files the verb just wrote. Whether doctor is GREEN also depends
+    on the host having godot, gdlint and uv, so the verdict distinguishes the
+    two: an init-owned FAIL is this probe's finding, a missing host tool is
+    named and is not.
     """
     if shutil.which('make') is None or shutil.which('git') is None:
         report.skipped.append(f'{FRESH}: needs make and git')
@@ -272,6 +296,39 @@ def fresh_project(report: Report) -> None:
             report.skipped.append(
                 f'{FRESH}: `make doctor` is not green on this host — '
                 f'{"; ".join(host_gaps)}')
+
+        # …and the REAL `make check`. It boots nothing — the roster is pure
+        # parse — so unlike doctor there is no host to blame and no reason
+        # this was ever a dry run. Committed first: every gate resolves its
+        # scope through `git ls-files`, and an uncommitted tree is a 0-file
+        # census for all of them.
+        subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                       capture_output=True)
+        subprocess.run(['git', '-c', 'user.email=smoke@example.com',
+                        '-c', 'user.name=smoke', 'commit', '-qm',
+                        'godot-devkit init', '--', '.'],
+                       cwd=root, check=True, capture_output=True)
+        subprocess.run(['make', 'check', working_tree_devkit()], cwd=root,
+                       text=True, capture_output=True, env=_env(), timeout=300)
+        transcript = (root / CHECK_LOG)
+        verdicts = CHECK_VERDICT_RE.findall(
+            transcript.read_text(encoding='utf-8') if transcript.is_file()
+            else '')
+        report.check(FRESH, 'make check: gates ran',
+                     bool(verdicts), f'{len(verdicts)} gate verdict(s)')
+        ours = [f'[check:{gate}] {detail}' for gate, outcome, detail in verdicts
+                if outcome == 'FAIL' and CHECK_EMPTY_CENSUS not in detail]
+        report.check(FRESH, 'make check: nothing init wrote is a finding',
+                     not ours,
+                     'no gate has a finding about an installed file'
+                     if not ours else '; '.join(ours))
+        empty = [gate for gate, outcome, detail in verdicts
+                 if outcome == 'FAIL' and CHECK_EMPTY_CENSUS in detail]
+        if empty:
+            report.skipped.append(
+                f'{FRESH}: {", ".join(empty)} report a 0-file census — a blank '
+                f'project holds no .tscn/.tres; the roster is narrowed in '
+                f'devkit.toml, not softened here')
 
 
 def main() -> int:

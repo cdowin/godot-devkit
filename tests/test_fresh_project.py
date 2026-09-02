@@ -6,14 +6,26 @@ runnable — one fixture project, built from a `project.godot` and an icon, and
 every claim below asked of it rather than of a hand-written stand-in.
 
 WHAT IT CAN AND CANNOT PROVE. Godot cannot boot in this package's CI, so the
-engine-backed half is `make -n`: parse the whole Makefile, resolve the target,
+ENGINE-backed half is `make -n`: parse the whole Makefile, resolve the target,
 expand its recipe, run NOTHING. That catches every way the include and the
 installed runners can fail to line up — a target naming a runner the install
 does not write, a variable the include never declares, a recipe that will not
 expand — and it cannot catch a runner that expands fine and fails on contact
 with the engine. The real boot is `make smoke` (tools/consumer_smoke.py), which
-carries the fresh-project probe that runs the real `make doctor` where Godot is
-on PATH, and says so loudly where it is not.
+carries the fresh-project probe that runs the real `make doctor` and the real
+`make check` where Godot is on PATH, and says so loudly where it is not.
+
+`make check` IS run for real here, and that is not a hedge — the gate roster is
+pure parse and boots nothing, so a dry run of it was never the best this file
+could do. Dry-running it is what shipped a `compile_sweep.gd` with no `.uid`
+sidecar: `make -n precommit` expands recipes and reaches no verdict, while
+`check uid` CHECK 3 had a live finding about a real installed file on every
+freshly-`init`'d project. What the run asserts is the honest half of the ship
+criterion — that nothing the INSTALL wrote is a finding. The three Godot-file
+gates still redden over the 0-file census a project with no scene in it
+genuinely has; that is the stock roster being wrong for a blank repo, named in
+the seed devkit.toml and narrowed there in one line, and not something `init`
+can or should fix.
 
 A DRY RUN THAT EXECUTES IS NOT A DRY RUN. `make -n` runs any recipe line
 holding the literal `$(MAKE)`, so `check`'s sub-make is spelled `$${MAKE:-make}`
@@ -129,6 +141,73 @@ def test_the_two_targets_the_ship_criterion_names(target):
     with initialized_project() as root:
         done = make(root, '-n', target)
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+# --- `make check`, RUN --------------------------------------------------------
+# A verdict line reads `[check:<gate>] FAIL — …`, and on a blank project there
+# are exactly two kinds: a finding about a file the INSTALL wrote (this
+# package's problem, and the class that shipped a sidecar-less
+# compile_sweep.gd), and a 0-file census over a file kind a project with no
+# scene in it does not have (the stock roster being wrong for a blank repo —
+# the seed devkit.toml says so in those words and narrows it in one line).
+VERDICT_RE = re.compile(r'^\[check:([a-z-]+)\] (PASS|FAIL) — (.*)$', re.MULTILINE)
+EMPTY_CENSUS = 'scanned 0 of 0 tracked'
+# What a blank Godot project holds nothing of. Spelled out, so a gate JOINING
+# this set is a decision somebody makes here rather than a silent widening.
+GATES_WITH_NOTHING_TO_SCAN = {'uid', 'tres', 'props'}
+
+
+def committed(root: Path) -> None:
+    """Every gate resolves its scope through `git ls-files`, so an uncommitted
+    tree is a 0-file census for ALL of them and the run would prove nothing."""
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                   capture_output=True)
+    subprocess.run(['git', '-c', 'user.email=t@example.com',
+                    '-c', 'user.name=t', 'commit', '-qm', 'init', '--', '.'],
+                   cwd=root, check=True, capture_output=True)
+
+
+def working_tree_devkit() -> str:
+    """`make check` resolves `DEVKIT` to `uvx --from git+…@<pin>` — the
+    RELEASED tag, over the network. Overriding it on the command line is how
+    this package verifies itself against source (CLAUDE.md: never a cached
+    wheel), and it is not a hand edit to the project."""
+    return (f'DEVKIT=env PYTHONPATH={REPO_ROOT / "src"} '
+            f'{sys.executable} -m godot_devkit.cli')
+
+
+def check_verdicts(root: Path) -> list[tuple[str, str, str]]:
+    """(gate, PASS|FAIL, detail) for every gate `make check` actually ran."""
+    committed(root)
+    make(root, 'check', working_tree_devkit())
+    transcript = (root / '.gate-reports' / 'check.log').read_text(
+        encoding='utf-8')
+    verdicts = VERDICT_RE.findall(transcript)
+    assert verdicts, f'no gate verdict in the transcript:\n{transcript}'
+    return verdicts
+
+
+def test_nothing_the_install_wrote_is_a_check_finding():
+    """The ship criterion's real half, run rather than dry-run."""
+    with initialized_project() as root:
+        verdicts = check_verdicts(root)
+    ours = [(gate, detail) for gate, outcome, detail in verdicts
+            if outcome == 'FAIL' and EMPTY_CENSUS not in detail]
+    assert not ours, (
+        'a gate reported a finding about a file `init` wrote:\n'
+        + '\n'.join(f'  [check:{g}] {d}' for g, d in ours))
+
+
+def test_the_gates_that_do_apply_to_a_blank_project_pass():
+    """The other direction: the assertion above must not be satisfiable by a
+    roster on which everything reports an empty census. `doc` and `shell` read
+    what `init` actually wrote, and both have to be green on it."""
+    with initialized_project() as root:
+        verdicts = check_verdicts(root)
+    applicable = {gate: outcome for gate, outcome, _ in verdicts
+                  if gate not in GATES_WITH_NOTHING_TO_SCAN}
+    assert applicable, f'every gate on the roster scanned nothing: {verdicts}'
+    assert set(applicable.values()) == {'PASS'}, applicable
 
 
 def test_help_lists_the_standard_set_on_a_project_that_added_nothing():

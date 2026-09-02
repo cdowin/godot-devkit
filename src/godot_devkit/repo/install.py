@@ -134,6 +134,26 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         # the runners moves the pair together and only one variable has to
         # follow.
         ('compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd'),
+        # …and its `.uid` SIDECAR, the only file in this package carrying a
+        # value the ENGINE would otherwise mint. It ships because the
+        # alternative is worse in both directions: without it, `check uid`
+        # CHECK 3 correctly reports a NEW `.gd` with no sidecar on every
+        # freshly-`init`'d project — a red gate on a file the project did not
+        # write and cannot be asked to explain — and softening the check to
+        # exempt "a devkit-installed .gd under tools/dev/" would put a hole in
+        # the one gate that sees a missing sidecar, keyed on a path prefix any
+        # file can move into.
+        #
+        # A uid is RANDOM, not derived (`ResourceUID.create_id()`), so this one
+        # was minted once, here, and is a constant like any other. That is not
+        # the invention `check uid --fix` refuses: a gate fabricating a uid for
+        # a file it is JUDGING would be guessing at a fact it cannot know,
+        # while an installable declaring the identity of its own shipped script
+        # is stating one. It is canonical under the ported codec
+        # (`id_to_text(text_to_id(x)) == x`), so Godot will not rewrite it, and
+        # it is the same on every consumer — which is what keeps the install
+        # idempotent and the gate quiet on day one.
+        ('compile_sweep.gd.uid', 'tools/dev/runners/compile_sweep.gd.uid'),
         ('lint.sh', 'tools/dev/runners/lint.sh'),
         ('warnings.sh', 'tools/dev/runners/warnings.sh'),
         ('unit.sh', 'tools/dev/runners/unit.sh'),
@@ -192,7 +212,8 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
                 self-destroying HOME sandbox, a bounded-run contract, a
                 project.godot restore) — plus the runners that source it under
                 tools/dev/runners/: import_cache.sh, parse.sh (+ its
-                compile_sweep.gd), lint.sh, warnings.sh, unit.sh (GUT,
+                compile_sweep.gd and the .uid sidecar the engine would
+                otherwise mint), lint.sh, warnings.sh, unit.sh (GUT,
                 sliced, with the coverage gate that fails a test script GUT
                 refused to load), scenario.sh, integration.sh (the same
                 scenarios, one process each, N in parallel), capture.sh
