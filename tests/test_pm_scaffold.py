@@ -383,6 +383,78 @@ class NoDeleter(unittest.TestCase):
             self.assertNotIn(retired, model.KNOWN_CHECKS)
 
 
+class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
+    """`pm new story` under `story_ordinal_prefix` must mint a VALIDATING file.
+
+    It stamped the ordering prefix into `id:` as well as the filename, so V2 —
+    which compares the id to the STRIPPED stem — rejected every story the
+    scaffolder wrote. A consumer hand-fixed each one, which is the tool minting
+    exactly the drift its own gate reports.
+    """
+
+    ORDINAL_ON = '[pm]\nstory_ordinal_prefix = true\n'
+
+    def _enable(self, root: Path) -> None:
+        (root / 'devkit.toml').write_text(self.ORDINAL_ON, encoding='utf-8')
+
+    def test_the_id_drops_the_prefix_and_validate_passes(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._enable(root)
+            code, out = run_cli(root, 'new', 'story', '0.1/alpha',
+                                '01-a-world-is-a-named-saved-thing', 'A world')
+            self.assertEqual(code, 0, out)
+            sf = (root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+                  / '01-a-world-is-a-named-saved-thing.md')
+            self.assertTrue(sf.is_file(), out)
+            self.assertEqual(model.field_of(sf, 'id'),
+                             '0.1/alpha/a-world-is-a-named-saved-thing')
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 0, out)
+            # And the id the file now carries is the one the CLI addresses it by.
+            self.assertEqual(
+                run_cli(root, 'story', 'wip',
+                        '0.1/alpha/a-world-is-a-named-saved-thing')[0], 0)
+
+    def test_an_unprefixed_slug_is_untouched(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._enable(root)
+            self.assertEqual(
+                run_cli(root, 'new', 'story', '0.1/alpha', 'plain', 'Plain')[0], 0)
+            sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/plain.md'
+            self.assertEqual(model.field_of(sf, 'id'), '0.1/alpha/plain')
+
+    def test_the_prefix_stays_in_the_id_when_the_flag_is_off(self):
+        # No devkit.toml: a file really named `01-boots.md` owns that id, and
+        # validate agrees. Defaults-vs-declared equivalence, in both directions.
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(
+                run_cli(root, 'new', 'story', '0.1/alpha', '01-boots', 'B')[0], 0)
+            sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/01-boots.md'
+            self.assertEqual(model.field_of(sf, 'id'), '0.1/alpha/01-boots')
+            self.assertEqual(run_cli(root, 'validate')[0], 0)
+
+    def test_a_second_file_claiming_one_id_refuses_without_writing(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._enable(root)
+            self.assertEqual(
+                run_cli(root, 'new', 'story', '0.1/alpha', '01-boots', 'B')[0], 0)
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            before = sorted(p.name for p in sdir.iterdir())
+            code, out = run_cli(root, 'new', 'story', '0.1/alpha', '02-boots', 'B')
+            self.assertEqual(code, 1, out)
+            self.assertIn('already held by', out)
+            self.assertEqual(sorted(p.name for p in sdir.iterdir()), before)
+
+    def test_a_slug_that_is_only_a_prefix_refuses(self):
+        with tree(story_statuses=('todo',)) as root:
+            self._enable(root)
+            sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
+            before = sorted(p.name for p in sdir.iterdir())
+            code, out = run_cli(root, 'new', 'story', '0.1/alpha', '01-', 'B')
+            self.assertEqual(code, 1, out)
+            self.assertEqual(sorted(p.name for p in sdir.iterdir()), before)
+
+
 class NewRefusesUnsafeSlugs(unittest.TestCase):
     def test_a_slug_is_one_path_component_never_a_path(self):
         with tree() as root:

@@ -71,11 +71,24 @@ USAGE = """usage: godot-devkit pm <command>
                                            on first WRITE. Idempotent — re-run to fill)
   new feature <milestone> <slug> [<name...>]
   new story <feature-id> <slug> <name...>
+                                          (under [pm] story_ordinal_prefix
+                                           a slug may lead with `NN-`: the
+                                           FILE keeps it, the id never does)
   new bug <milestone> <slug>
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
-                                           the first; the prose under it is yours)"""
+                                           the first; the prose under it is yours.
+                                           A title containing ; & | must be QUOTED
+                                           all the way through — through `make pm
+                                           ARGS=` too, whose shell cuts an unquoted
+                                           title in half and runs the remainder:
+                                           ARGS='decide <id> "a; b"')"""
 
+
+
+# A heading ENDING in one of these is what a consumer's unquoted `make ARGS`
+# leaves behind when its shell cuts the title in half — see cmd_decide.
+SHELL_SPLITTERS = (';', '&', '|')
 
 
 class Refused(Exception):
@@ -1049,13 +1062,27 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         # The milestone comes from the FEATURE's own frontmatter — single
         # source, never re-derived from the id string.
         mid = model.field_of(fdir / model.FEATURE_DOC, 'milestone')
+        # The FILE may carry an ordering prefix (`01-`); the ID never does.
+        # Stamping the prefix into `id:` scaffolded a story that `pm validate`
+        # V2 rejected against that same file's path — the tool minting the
+        # drift its own gate reports.
+        sid_slug = model.story_slug_of(cfg, slug)
+        if not sid_slug:
+            raise Refused(f'story slug {slug!r} is an ordering prefix and '
+                          f'nothing else — the number sequences the build, the '
+                          f'slug after it is the id')
         sf = fdir / 'stories' / f'{slug}.md'
         if _exists(sf):
             raise Refused(f'story {fid}/{slug!r} already exists')
+        sid = f'{fid}/{sid_slug}'
+        claimed = model.story_file(cfg, sid)
+        if claimed is not None:
+            raise Refused(f'story id {sid!r} is already held by '
+                          f'{cfg.rel(claimed)} — two files claiming one id is '
+                          f'addressable by neither')
         body = templates.render(
             templates.load(cfg, 'story'),
-            {'id': f'{fid}/{slug}', 'feature': fid, 'milestone': mid,
-             'name': name})
+            {'id': sid, 'feature': fid, 'milestone': mid, 'name': name})
         _mint(cfg, sf, body)
         _ok(f'created {cfg.rel(sf)}')
         return 0
@@ -1126,6 +1153,12 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
     consumer's 158 decision logs and 320 hand-written headings, so what it
     actually gated was whether anyone used the verb at all.
 
+    The title is every remaining argv token, joined with one space — so a `;`
+    a caller ESCAPED (`a\\; b`, two tokens) rebuilds intact, and a `;` a caller
+    QUOTED arrives whole and is written verbatim. A `;` a caller left BARE was
+    consumed by their own shell before this process started; what that leaves
+    behind is refused rather than written, as far as it is visible from here.
+
     Refuses WHOLE: every path out of here that is not a write leaves the log
     byte-identical.
     """
@@ -1144,6 +1177,19 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
                     f'none: everything after the grain id is the heading')
     if '\n' in title or '\r' in title:
         raise Refused('a heading is one line — put the reasoning under it')
+    if title[-1] in SHELL_SPLITTERS:
+        # The residue of a shell split. `make pm ARGS="decide <id> a; b"`
+        # expands UNQUOTED, so the consumer's shell cuts at the `;`, hands this
+        # process `a`, and runs `b` as a command of its own — which is how one
+        # consumer's log ended up carrying two half-headings. A cut that lands
+        # BETWEEN words is invisible from in here and always will be; a cut
+        # that leaves the operator dangling on the end is not, and that is the
+        # one shape this can refuse instead of writing a truncated heading.
+        raise Refused(
+            f'the heading ends with {title[-1]!r} — a shell cut it there and '
+            f'the rest never reached this process; nothing was written. Quote '
+            f'the whole title: make pm ARGS=\'decide {gid} "first half; '
+            f'second half"\'')
     log, text = _decision_log(cfg, gid)
     eid = model.next_entry_id(text)
     when = datetime.now(timezone.utc).date().isoformat()

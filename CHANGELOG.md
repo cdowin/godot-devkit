@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.18.0 — 2026-09-02
+
+- **`pm new story` stops scaffolding a story `pm validate` rejects** — under `[pm] story_ordinal_prefix` the ordering prefix belongs to the FILE, never to `id:`, so `new story <f> 01-slug` now writes `id: <f>/slug` and V2 passes on sight (every story scaffolded in one consumer's tree had to be hand-fixed). One rule, one home: `model.story_slug_of` is what resolution, V2 and the scaffolder all read. A second file whose stripped slug claims a live id refuses instead of minting an id neither file can be addressed by. (repo/pm/cli.py, repo/pm/model.py, repo/pm/validate.py)
+- **`refs` counts a receiverless call** — every call-site alternative required a leading `.`, which is how GDScript spells a call to ANOTHER object; a call to a method of `self` (same file, or a base method called from a subclass) is bare, so those reported ZERO references — the answer that gets a method deleted. Measured against nullbound: **205 of 1,811 public method names read as unused and are not**, call sites 7,075 → 8,074 tree-wide. The declaring line stays a definition and is not double-counted as a call; `_on_name(` and `other.name(` are unaffected. (godot/read/refs.py)
+- **`pm decide` refuses a title a shell cut in half** — `make pm ARGS="decide <id> a; b"` expands UNQUOTED, so the consumer's shell hands this process `a` and runs `b` as a command of its own; one consumer's log took two half-headings that way. A title left DANGLING on `;`, `&` or `|` is now a refusal naming the quoting fix, and nothing is written (the log is not even minted). A metacharacter that survived the caller's shell — quoted, or escaped across two argv tokens — is a word, written verbatim. `pm --help` states the quoting rule. (repo/pm/cli.py)
+- **`refs` refuses an empty or blank symbol** — every pattern is built around the symbol, so an empty one is a match-anything: it claimed 6,831 typed refs and 880 call sites in a consumer at exit 0. Now a one-line usage error, exit 2, no scan. (godot/read/refs.py)
+
 ## v0.17.0 — 2026-08-31
 
 - **`pm` id resolution refuses what creation always refused** — dot/empty/separator segments and absolute ids: `0.1/..` no longer writes a milestone's decisions.md, an absolute milestone id exits 2 instead of a `Path.glob` traceback. The fuzz harness's three carve-out pins died with their reasons. (repo/pm/model.py)
