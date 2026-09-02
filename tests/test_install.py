@@ -103,9 +103,12 @@ HOOKS = ('tools/hooks/cc-commit-pathspec.sh',
          'tools/dev/agent-worktree.sh',
          'tools/dev/checks/doctor.sh',
          'tools/setup-hooks.sh')
+RUNNERS = ('tools/dev/gdk_runners.sh',
+           'tools/dev/runners/import_cache.sh')
 DESTINATIONS = {'install-ci': (WORKFLOW,),
                 'install-agents': AGENTS,
-                'install-hooks': HOOKS}
+                'install-hooks': HOOKS,
+                'install-runners': RUNNERS}
 VERBS = tuple(DESTINATIONS)
 # The table above is spelled out so a test READS as the contract, but it is
 # not allowed to become a second roster: a verb added to PLANS and not here
