@@ -172,6 +172,78 @@ class RefsScope(unittest.TestCase):
             _, declared, _ = run_main(refs, ['Player'])
         self.assertEqual(stock, declared)
 
+    SAME_FILE = (
+        'extends Node\n'
+        '\n'
+        '\n'
+        'func resync_active_variant() -> void:\n'
+        '\tpass\n'
+        '\n'
+        '\n'
+        'func _ready() -> void:\n'
+        '\tresync_active_variant()\n'
+        '\n'
+        '\n'
+        'func on_gear_changed() -> void:\n'
+        '\tresync_active_variant()\n'
+    )
+
+    def test_a_receiverless_same_file_call_counts(self) -> None:
+        """Every call-site alternative required a leading `.`, so a method
+        called only from inside its own script reported ZERO references — and
+        zero references is the answer that gets a method deleted. (Found in
+        nullbound: progression_manager.gd, two same-file callers.)"""
+        with temp_repo('read_repo') as root:
+            (root / 'systems/progression.gd').write_text(self.SAME_FILE,
+                                                         encoding='utf-8')
+            code, out, _ = run_main(refs, ['resync_active_variant'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('## definitions (1)', out)
+        self.assertIn('## call / emit sites (2)', out)
+
+    def test_the_defining_line_is_not_also_a_call(self) -> None:
+        # `func name(` IS `name(`. It is counted once, as a definition.
+        with temp_repo('read_repo') as root:
+            (root / 'systems/solo.gd').write_text(
+                'extends Node\n\n\nfunc lonesome() -> void:\n\tpass\n',
+                encoding='utf-8')
+            code, out, _ = run_main(refs, ['lonesome'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('## definitions (1)', out)
+        self.assertNotIn('## call / emit sites', out)
+
+    def test_a_signal_declaration_with_arguments_is_not_a_call(self) -> None:
+        with temp_repo('read_repo') as root:
+            (root / 'systems/emitter.gd').write_text(
+                'extends Node\n\nsignal shard_taken(id: int)\n\n\n'
+                'func _ready() -> void:\n\tshard_taken.emit(1)\n',
+                encoding='utf-8')
+            code, out, _ = run_main(refs, ['shard_taken'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('## definitions (1)', out)
+        self.assertIn('## call / emit sites (1)', out)
+
+    def test_a_longer_name_ending_in_the_symbol_is_not_a_call(self) -> None:
+        # `_on_hurt(` and `rehurt(` are other names, not this one.
+        with temp_repo('read_repo') as root:
+            (root / 'systems/nearmiss.gd').write_text(
+                'extends Node\n\n\nfunc _ready() -> void:\n'
+                '\t_on_hurt()\n\trehurt()\n',
+                encoding='utf-8')
+            code, out, _ = run_main(refs, ['hurt'])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('nearmiss.gd', out)
+
+    def test_a_commented_out_call_still_does_not_count(self) -> None:
+        with temp_repo('read_repo') as root:
+            (root / 'systems/commented.gd').write_text(
+                'extends Node\n\n\nfunc _ready() -> void:\n'
+                '\t# resync_active_variant()\n\tpass\n',
+                encoding='utf-8')
+            code, out, _ = run_main(refs, ['resync_active_variant'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('(no references found)', out)
+
     def test_a_bare_string_exclude_is_exit_2(self) -> None:
         with temp_repo('read_repo') as root:
             _toml(root, '[refs]\nexclude_prefixes = "systems/"\n')

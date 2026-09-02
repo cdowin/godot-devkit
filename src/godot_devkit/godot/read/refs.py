@@ -100,6 +100,23 @@ def _call_emit_pattern(symbol: str) -> re.Pattern:
     return re.compile('|'.join(alternatives))
 
 
+def _bare_call_pattern(symbol: str) -> re.Pattern:
+    """`name(` with no receiver — the SAME-FILE call, which is how GDScript
+    spells a call to a method of `self`.
+
+    Every call-site alternative required a `.` before the name, so a method
+    called only from within its own script read as zero references — and zero
+    references is the answer that gets a method deleted. The lookbehind keeps
+    `other.name(` out (the dotted arm already owns it, and one line counts
+    once), and `_on_name(` out — `\b` alone would not, since `_` is a word
+    character on the wrong side of the boundary.
+
+    The DEFINITION line matches this too (`func name(` is `name(`), so the
+    caller excludes it — see `scan_gd_files`.
+    """
+    return re.compile(rf'(?<![\w.]){re.escape(symbol)}\s*\(')
+
+
 def _definition_pattern(symbol: str) -> re.Pattern:
     word = re.escape(symbol)
     alternatives = [
@@ -122,6 +139,7 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
     definition_pattern = _definition_pattern(symbol)
     typed_ref_pattern = _typed_ref_pattern(symbol)
     call_emit_pattern = _call_emit_pattern(symbol)
+    bare_call_pattern = _bare_call_pattern(symbol)
     needle = symbol.lower()
 
     hits: dict[str, list[Hit]] = {'definition': [], 'typed_ref': [], 'call_emit': [], 'preload_load': []}
@@ -132,11 +150,19 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
             if not stripped:
                 continue
             text = stripped.strip()
-            if definition_pattern.search(stripped):
+            defines = definition_pattern.search(stripped) is not None
+            if defines:
                 hits['definition'].append(Hit('definition', rel, lineno, text))
             if typed_ref_pattern.search(stripped):
                 hits['typed_ref'].append(Hit('typed_ref', rel, lineno, text))
-            if call_emit_pattern.search(stripped):
+            # A receiverless `name(` is a call unless this line is where the
+            # name is DECLARED — `func name(` and `signal name(` are the
+            # declaration, counted once, in `definitions`. A dotted/emit/
+            # connect site still counts on a declaration line (a one-line
+            # `func f(): return other.f()` is a real call), so only the bare
+            # arm defers.
+            if call_emit_pattern.search(stripped) or (
+                    not defines and bare_call_pattern.search(stripped)):
                 hits['call_emit'].append(Hit('call_emit', rel, lineno, text))
             for match in PRELOAD_LOAD.finditer(stripped):
                 target = match.group(1)
