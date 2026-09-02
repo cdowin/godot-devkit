@@ -25,7 +25,7 @@ Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 Consumed at a **pinned tag** so every machine and CI runs identical gate code:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.18.0" godot-devkit --version   # godot-devkit 0.18.0
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.19.0" godot-devkit --version   # godot-devkit 0.19.0
 ```
 
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
@@ -173,10 +173,11 @@ unwritten.
 |---|---|
 | `install-ci` | `.github/workflows/verify.yml` — checkout, uv, `make milestone`. That `make milestone` is your full gate is a **comment in the file**, not a discovery mechanism |
 | `install-agents` | The review/build contract (`verification-reviewer.md` + `verification-builder.md`) plus the base agent roster — architect, po, developer, reviewer, milestone-reviewer, simplifier, test-writer, tech-writer, changelog-writer, doc-hygiene, pm-operator — under `.claude/agents/`, each with `model:`/`effort:` frontmatter and a Project config section that is yours to edit after install. The SDLC they run is [`SDLC.md`](SDLC.md). Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context; a definition does |
-| `install-hooks` | The agent-workflow guard corpus: `tools/hooks/` gets `cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), `cc-stop-gate.sh` (an agent's stop is blocked while its fast gate is red), `cc-write-confine.sh` (a write outside the session's repo is blocked at the edit, not the commit), `pre-push` (no direct push to a protected branch + a scoped trunk gate) and `prepare-commit-msg` (agent commits get the trailer, the human's never do); `tools/dev/` gets `agent-worktree.sh` (the one sanctioned per-agent worktree create/teardown) and `checks/doctor.sh` (toolchain census that self-heals the hook wiring); plus `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there — and each carries a `project config` header that is yours to edit after install |
+| `install-hooks` | The agent-workflow guard corpus: `tools/hooks/` gets `cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), `cc-stop-gate.sh` (an agent's stop is blocked while its fast gate is red), `cc-write-confine.sh` (a write outside the session's repo is blocked at the edit, not the commit), `pre-push` (no direct push to a protected branch + a scoped trunk gate) and `prepare-commit-msg` (agent commits get the trailer, the human's never do); `tools/dev/` gets `agent-worktree.sh` (the one sanctioned per-agent worktree create/teardown) and `checks/doctor.sh` (toolchain census that self-heals the hook wiring); plus `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there — and each carries a `project config` header that is yours to edit after install. `cc-godot-sandbox.sh` also ships its own block/allow payload corpus: wire `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your static gate (nullbound: a `hooks-self-test` target in `make check`) so an edit to the guard cannot quietly change a verdict |
+| `install-runners` | The sandboxed headless-run shell library — `tools/dev/gdk_runners.sh` (one verdict line per gate naming `.gate-reports/<gate>.log`, `VERBOSE=1` streams; a per-run self-destroying HOME sandbox so a boot can never reach the real `user://`; a bounded-run contract that tells a hang from a failure; a `project.godot` restore that undoes engine re-serialization and leaves a real edit alone) plus `tools/dev/runners/import_cache.sh`, the one runner that sources it. Every function is `gdk_*` and your `make` targets call those — a consumer keeping its own prefix is forking the library and stranding the next fix. Both carry `--self-test`; wire `bash tools/dev/gdk_runners.sh --self-test` into your static gate. Nothing sources the library until you point your Godot-booting targets at it, and `.gate-reports/` + `.headless-userdata/` want gitignoring |
 | `pm install-skills` | `.claude/rules/pm-execution.md` (auto-loads on a `pm/roadmap/**` edit) + `.claude/skills/pm-operations/SKILL.md` (invoked deliberately). Under `pm` because what it writes is the PM tree's own guidance |
 
-All four take `--force` and `--diff`.
+All five take `--force` and `--diff`.
 
 ### Static gates (`godot-devkit check <gate>`)
 
@@ -315,7 +316,7 @@ skipped.
 Pin the tag once; every target routes through it, so a bump is a one-line diff:
 
 ```make
-DEVKIT_VERSION := v0.18.0
+DEVKIT_VERSION := v0.19.0
 DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(DEVKIT_VERSION)" godot-devkit
 
 check:         ; @$(DEVKIT) check all           # per-change gate — offline, no Godot boot

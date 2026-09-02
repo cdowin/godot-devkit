@@ -1,7 +1,7 @@
 ---
 id: "0.18.0"
 name: loose-ends
-status: ready
+status: done
 depends_on: []
 branch: milestone/0.18.0-loose-ends
 ---

@@ -7,9 +7,22 @@
 # cheapest possible fix: the work is written down, it is rerunnable, and nobody
 # has to be told the command.
 #
+# EVERY GATE PRINTS ONE LINE. The default output of a target here is its
+# verdict, naming the full transcript on disk; `VERBOSE=1` streams the whole
+# thing. That is not a local convention — it is `gdk_gate_capture` /
+# `gdk_gate_verdict` out of installables/gdk_runners.sh, the library this
+# package ships to its consumers, sourced straight from the source tree. The
+# devkit is its own first consumer: an agent running `make milestone` here used
+# to pipe it through a hand-invented five-shape grep to find the verdicts, and
+# a toolkit whose own targets need that has not proven the thing it sells.
+#
 # GNU make 3.81 (what macOS ships) is the floor. Nothing here needs more.
 
 .DEFAULT_GOAL := help
+
+# The library is bash: arrays, PIPESTATUS, `local`. macOS bash 3.2 is the floor
+# and the library holds that line.
+SHELL := /bin/bash
 
 # The package is stdlib-only. The TEST run needs one thing it does not ship:
 # pytest. 3.11 is the declared floor and where the fast loop runs; the matrix
@@ -25,8 +38,51 @@ PYTEST_Q  ?= -q
 # the last release tells you nothing about the change in front of you. For the
 # gates alone: no wheel build, no venv, no network — the package imports from
 # src/ with the stdlib. (The test targets above DO use uv, for pytest.)
+# `env` is load-bearing: the gate helper runs an ARGV, not a shell line, so a
+# leading VAR=value assignment needs a command to carry it.
 PY        ?= python3
-DEVKIT    ?= PYTHONPATH=$(CURDIR)/src $(PY) -m godot_devkit.cli
+DEVKIT    ?= env PYTHONPATH=$(CURDIR)/src $(PY) -m godot_devkit.cli
+
+# The shipped library, sourced from source. Self-hosting, the same way
+# .github/workflows/verify.yml is installed rather than hand-written: if the
+# gate helpers regress, this repo's own targets are the first thing to notice.
+RUNNERS_LIB := src/godot_devkit/repo/installables/gdk_runners.sh
+
+# VERBOSE reaches the capture helper as an ENVIRONMENT variable, so exporting
+# it here is what makes `make gates VERBOSE=1` work as well as `VERBOSE=1 make
+# gates`. Both spellings get typed; neither should silently do nothing.
+VERBOSE ?= 0
+export VERBOSE
+
+# What a FAILING run shows on the console before its verdict: the lines that
+# say what broke, in the tools this repo runs. Everything else stays in the log.
+GATE_FAIL_RE   := ^(FAILED|ERROR)|^E +|  DRIFT |\] FAIL|MATRIX FAIL|^  (MISS|FALSE POSITIVE)
+GATE_FAIL_LINES := 20
+
+# Each target's one-line summary, read back out of its own transcript. The
+# leading `[tag]` a tool prints is stripped: the verdict line supplies the tag.
+SUM_PYTEST := grep -aoE '[0-9]+ (passed|failed)[^|]*' "$$log" | tail -1
+SUM_GATES  := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z]+\] PASS' "$$log")"
+SUM_SMOKE  := tail -1 "$$log" | sed -E 's/^\[[a-z:-]+\] //'
+
+# $(call gate,<log slot>,<TAG>,<summary command>,<argv...>)
+# Run a command through the shipped capture helper: quiet by default, the full
+# transcript on disk, one verdict line naming it, and the command's own exit
+# code preserved (the helper reads PIPESTATUS, so `$$?` would be the cap's).
+define gate
+@set -o pipefail; . $(RUNNERS_LIB); \
+log="$$(gdk_gate_log $(1))"; \
+gdk_gate_capture "$$log" -- $(4); \
+status="$$GDK_GATE_EXIT"; \
+summary="$$($(3))"; \
+if [ "$$status" -ne 0 ]; then \
+	grep -aE '$(GATE_FAIL_RE)' "$$log" | head -$(GATE_FAIL_LINES) \
+		|| tail -$(GATE_FAIL_LINES) "$$log"; \
+	summary="FAIL (exit $$status) — $$summary"; \
+fi; \
+gdk_gate_verdict $(2) "$$summary" "$$log"; \
+exit "$$status"
+endef
 
 .PHONY: help test matrix fuzz gates smoke precommit milestone
 
@@ -41,35 +97,50 @@ help:
 	@echo
 	@echo '  make precommit   gates + test           the per-change gate'
 	@echo '  make milestone   gates + matrix + smoke  the full gate, and what CI runs'
+	@echo
+	@echo 'Every gate prints ONE verdict line naming its full log under'
+	@echo '.gate-reports/. VERBOSE=1 streams the transcript as well.'
 
 test:
-	$(PYTEST) $(PYTEST_Q)
-
-# Every interpreter in one target, and it reports which one failed. A matrix
-# that stops at the first failure hides the difference between "3.14 only" and
-# "everywhere", which is the whole question a matrix is asked.
-matrix:
-	@fail=''; for v in $(PY_MATRIX); do \
-	  echo "=== python $$v ==="; \
-	  $(UV) run --python $$v $(TEST_DEPS) python -m pytest $(PYTEST_Q) || fail="$$fail $$v"; \
-	done; \
-	if [ -n "$$fail" ]; then echo "MATRIX FAIL on:$$fail"; exit 1; fi; \
-	echo "MATRIX PASS on $(PY_MATRIX)"
+	$(call gate,test,TEST,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q))
 
 # The seeded harnesses on their own, for when one of them is what you changed.
 # `make test` runs them too — they are tests, not a side quest, and a fuzz that
 # only runs when somebody remembers it is a fuzz that does not run.
 fuzz:
-	$(PYTEST) $(PYTEST_Q) -m fuzz
+	$(call gate,fuzz,FUZZ,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q) -m fuzz)
 
 gates:
-	$(DEVKIT) check all
+	$(call gate,gates,GATES,$(SUM_GATES),$(DEVKIT) check all)
 
 smoke:
-	$(PY) tools/consumer_smoke.py
+	$(call gate,smoke,SMOKE,$(SUM_SMOKE),$(PY) tools/consumer_smoke.py)
+
+# Every interpreter in one target, and it reports which one failed. A matrix
+# that stops at the first failure hides the difference between "3.14 only" and
+# "everywhere", which is the whole question a matrix is asked. It writes its own
+# loop rather than $(call gate,...) because it captures N runs into ONE
+# transcript — but it ends the same way, with one verdict line naming that log.
+matrix:
+	@set -o pipefail; . $(RUNNERS_LIB); \
+	log="$$(gdk_gate_log matrix)"; fail=''; \
+	for v in $(PY_MATRIX); do \
+		echo "=== python $$v ===" >> "$$log"; \
+		[ "$$VERBOSE" = "0" ] || echo "=== python $$v ==="; \
+		gdk_gate_capture "$$log" -- \
+			$(UV) run --python $$v $(TEST_DEPS) python -m pytest $(PYTEST_Q) || true; \
+		[ "$$GDK_GATE_EXIT" -eq 0 ] || fail="$$fail $$v"; \
+	done; \
+	if [ -n "$$fail" ]; then \
+		grep -aE '$(GATE_FAIL_RE)' "$$log" | head -$(GATE_FAIL_LINES) || true; \
+		gdk_gate_verdict MATRIX "FAIL on$$fail" "$$log"; \
+		exit 1; \
+	fi; \
+	gdk_gate_verdict MATRIX "PASS on $(PY_MATRIX)" "$$log"
 
 # The per-change gate. Gates first: they take under a second and they are what
-# catches a doc or a PM-tree edit that the suite has no opinion about.
+# catches a doc or a PM-tree edit that the suite has no opinion about. A
+# composition prints its members' verdicts — one line each, nothing of its own.
 precommit: gates test
 
 # The full gate, and what CI runs. The matrix subsumes `test`, so it is not

@@ -27,6 +27,14 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     STANDALONE — no sourcing of a library the repo may lack —
                     and per-project variation is a small config header the
                     repo edits after install, when the file is its own.
+    install-runners the sandboxed headless-run shell library plus the one
+                    runner that sources it. Not folded into install-hooks: a
+                    hooks-only consumer would carry runners it never calls, and
+                    the library is sourced by the project's own make targets
+                    rather than fired by Claude Code. Every function is `gdk_*`
+                    — the two consumers' `nullbound_*` / `trail_*` forks are
+                    what this replaces, so a consumer keeping its prefix is a
+                    second name for the same fact and is not supported.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -97,11 +105,21 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('doctor.sh', 'tools/dev/checks/doctor.sh'),
         ('setup-hooks.sh', 'tools/setup-hooks.sh'),
     ),
+    'install-runners': (
+        # The library first, then the one runner that sources it. The layout
+        # is what import_cache.sh's own defaults assume: the runner reaches
+        # the library at ../gdk_runners.sh and the repo root at ../../..
+        # A repo that wants them elsewhere moves both and sets
+        # GDK_RUNNERS_LIB — after the write the files are its own.
+        ('gdk_runners.sh', 'tools/dev/gdk_runners.sh'),
+        ('import_cache.sh', 'tools/dev/runners/import_cache.sh'),
+    ),
 }
 
 USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
        godot-devkit install-agents  [--force] [--diff]
        godot-devkit install-hooks   [--force] [--diff]
+       godot-devkit install-runners [--force] [--diff]
 
 install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
                 It ASSUMES that target is your full gate; a project without one
@@ -116,6 +134,17 @@ install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 tools/dev/agent-worktree.sh, tools/dev/checks/doctor.sh, and
                 tools/setup-hooks.sh, which arms them. Each carries a small
                 `project config` header — yours to edit after install.
+                cc-godot-sandbox.sh ships its own block/allow corpus: wire
+                `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your
+                static gate (nullbound: a `hooks-self-test` target in
+                `make check`).
+install-runners tools/dev/gdk_runners.sh — the shell library your
+                Godot-booting make targets source (one verdict line per gate
+                naming .gate-reports/<gate>.log, VERBOSE=1 streams, a per-run
+                self-destroying HOME sandbox, a bounded-run contract, a
+                project.godot restore) — plus tools/dev/runners/import_cache.sh.
+                Both carry --self-test. Nothing calls the library until you
+                point your targets at it.
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
@@ -129,7 +158,12 @@ _NEXT_STEP = {
                      'silence. Then review each file\'s `project config` '
                      'header (gate commands, protected branches, trailer): '
                      'the files are yours now, and the stock values assume '
-                     'the standard consumer Makefile.',
+                     'the standard consumer Makefile. Then wire `bash '
+                     'tools/hooks/cc-godot-sandbox.sh --self-test` into your '
+                     'static gate (nullbound: a `hooks-self-test` target in '
+                     '`make check`) — it replays the hook\'s own block/allow '
+                     'corpus, so an edit to the guard cannot quietly change '
+                     'a verdict.',
     'install-agents': 'the verification pair carries the review and build '
                       'contract; the rest are the base roster. Each roster '
                       'file opens with a `Project config` section — edit its '
@@ -140,6 +174,13 @@ _NEXT_STEP = {
                       'SDLC.md at the godot-devkit repo root.',
     'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
                   'target exists and is your full gate.',
+    'install-runners': 'nothing sources the library yet — point your '
+                       'Godot-booting `make` targets at it '
+                       '(`source tools/dev/gdk_runners.sh`), wire '
+                       '`make import-cache` to tools/dev/runners/import_cache.sh, '
+                       'and gitignore .gate-reports/ and .headless-userdata/. '
+                       'Then edit each file\'s `project config` header: the '
+                       'files are yours now.',
 }
 
 
