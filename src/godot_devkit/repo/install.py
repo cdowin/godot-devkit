@@ -27,6 +27,14 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     STANDALONE — no sourcing of a library the repo may lack —
                     and per-project variation is a small config header the
                     repo edits after install, when the file is its own.
+    install-runners the sandboxed headless-run shell library plus the one
+                    runner that sources it. Not folded into install-hooks: a
+                    hooks-only consumer would carry runners it never calls, and
+                    the library is sourced by the project's own make targets
+                    rather than fired by Claude Code. Every function is `gdk_*`
+                    — the two consumers' `nullbound_*` / `trail_*` forks are
+                    what this replaces, so a consumer keeping its prefix is a
+                    second name for the same fact and is not supported.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -111,6 +119,7 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
 USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
        godot-devkit install-agents  [--force] [--diff]
        godot-devkit install-hooks   [--force] [--diff]
+       godot-devkit install-runners [--force] [--diff]
 
 install-ci      .github/workflows/verify.yml — checkout, uv, `make milestone`.
                 It ASSUMES that target is your full gate; a project without one
@@ -129,6 +138,13 @@ install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your
                 static gate (nullbound: a `hooks-self-test` target in
                 `make check`).
+install-runners tools/dev/gdk_runners.sh — the shell library your
+                Godot-booting make targets source (one verdict line per gate
+                naming .gate-reports/<gate>.log, VERBOSE=1 streams, a per-run
+                self-destroying HOME sandbox, a bounded-run contract, a
+                project.godot restore) — plus tools/dev/runners/import_cache.sh.
+                Both carry --self-test. Nothing calls the library until you
+                point your targets at it.
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""

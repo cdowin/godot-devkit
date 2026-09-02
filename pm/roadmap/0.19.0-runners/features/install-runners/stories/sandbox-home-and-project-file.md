@@ -3,8 +3,8 @@ id: 0.19.0/install-runners/sandbox-home-and-project-file
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: A headless run gets a self-destroying HOME and project.godot comes back
-status: todo
-owner:
+status: review
+owner: developer
 depends_on: []
 ---
 
@@ -42,3 +42,12 @@ gone — update the hook's admit list and its corpus in the same story.
 ## Size
 
 m
+
+## Done
+
+done: 1b3ee28 — `_gdk_reap_stale_run_homes`, `_gdk_snapshot_project_file`,
+`_gdk_normalize_project_file`, `gdk_restore_project_file`, `gdk_timeout_is_hang`;
+hook roster defaults to `gdk_rebuild_import_cache` (blocked) with
+`gdk_sandbox_home` as the named door (allowed), `SANDBOX_FUNCTION` kept as the
+prefixed-name escape hatch. Corpus 13/13 stock, 15/15 armed; library self-test
+29 cases, 3 mutants proven red; 741 passed, gates PASS.
