@@ -97,6 +97,15 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('doctor.sh', 'tools/dev/checks/doctor.sh'),
         ('setup-hooks.sh', 'tools/setup-hooks.sh'),
     ),
+    'install-runners': (
+        # The library first, then the one runner that sources it. The layout
+        # is what import_cache.sh's own defaults assume: the runner reaches
+        # the library at ../gdk_runners.sh and the repo root at ../../..
+        # A repo that wants them elsewhere moves both and sets
+        # GDK_RUNNERS_LIB — after the write the files are its own.
+        ('gdk_runners.sh', 'tools/dev/gdk_runners.sh'),
+        ('import_cache.sh', 'tools/dev/runners/import_cache.sh'),
+    ),
 }
 
 USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
@@ -140,6 +149,13 @@ _NEXT_STEP = {
                       'SDLC.md at the godot-devkit repo root.',
     'install-ci': 'the job runs `make milestone` and nothing else. Confirm that '
                   'target exists and is your full gate.',
+    'install-runners': 'nothing sources the library yet — point your '
+                       'Godot-booting `make` targets at it '
+                       '(`source tools/dev/gdk_runners.sh`), wire '
+                       '`make import-cache` to tools/dev/runners/import_cache.sh, '
+                       'and gitignore .gate-reports/ and .headless-userdata/. '
+                       'Then edit each file\'s `project config` header: the '
+                       'files are yours now.',
 }
 
 
