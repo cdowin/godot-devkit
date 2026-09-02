@@ -30,3 +30,17 @@ is an unanchored substring; the sandbox root is `$PWD`-relative. The record is t
 Each is its own; fix them as `generic-runners` touches the library (S1/S2) and close this bug in the same feature, one test per finding.
 
 ## Fix
+
+11 of 12 fixed in `bac4eb1` (generic-runners S1), one test per finding, each watched red on the
+unfixed code: MINOR-1 (section-aware, order-preserving project-file normalization), MINOR-2
+(`gdk_gate_capture` suspends errexit around the pipeline), MINOR-3 (an in-quote newline is data),
+MINOR-4 (`find -newer`, not bash 3.2's whole-second `[ -nt ]`), MINOR-5 (an unbounded rebuild says
+so), MINOR-6 (a root with no `project.godot` is exit 2), and all four NITs (`_NEXT_STEP` names the
+exec bit; `gdk_pid_is_live` falls back to `ps -p` so EPERM is not death; the uid-sidecar split is
+anchored; the restore target is pinned absolute at snapshot time). MINOR-7 landed before the
+v0.19.0 tag.
+
+REMAINING: **MINOR-8** — `CHANGELOG.md`'s `## v0.19.0` armed-corpus figure ("13 / 11") is stale;
+shipped was 13 / 13, and after generic-runners S1 the stock corpus is 13 block / 16 allow and the
+armed one 15 / 18. The changelog is rendered by the release story, so the correction belongs
+there rather than in a feature commit. This bug closes when that lands.
