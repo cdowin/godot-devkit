@@ -2,7 +2,7 @@
 id: 0.20.0/init-verb
 milestone: "0.20.0"
 name: godot-devkit init — a blank Godot 4 project gets everything in one command
-status: planning
+status: building
 reviewed:
 phase: 3
 depends_on: ["0.20.0/makefile-include", "0.20.0/ci-set"]
