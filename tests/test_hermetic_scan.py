@@ -18,6 +18,7 @@ boots an engine, and its child probe is a shell.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -104,3 +105,67 @@ def test_the_corpus_leaves_no_sandbox_spool_in_the_cwd(tmp_path):
                           cwd=workdir, text=True, capture_output=True)
     assert done.returncode == 0, done.stdout + done.stderr
     assert list(workdir.iterdir()) == [], sorted(p.name for p in workdir.iterdir())
+
+
+# --- the leak note, on a repo that has a run home ----------------------------
+# MINOR-3. The gate proper (not `--self-test`) walks the runs/ spool and counts
+# a home whose owning pid is DEAD as a leak. It called `_gdk_pid_is_live`,
+# which nothing defines — the library exports `gdk_pid_is_live` — so every
+# home printed `command not found` on stderr and was counted orphaned. The note
+# said the opposite of what was true, and `shellcheck -x` cannot see an
+# undefined function.
+SANDBOX_DIRNAME = '.headless-userdata'
+RUNS_SUBDIR = 'runs'
+RUN_PREFIX = 'run-'
+LEAK_NOTE = 'orphaned run home(s)'
+
+
+def _repo_with_run_home(tmp_path: Path, pid: int) -> Path:
+    """A repo at the stock layout carrying one run home owned by `pid`."""
+    root = tmp_path / 'repo'
+    runners = root / 'tools' / 'dev' / 'runners'
+    runners.mkdir(parents=True)
+    shutil.copy2(LIBRARY, root / 'tools' / 'dev' / LIBRARY.name)
+    shutil.copy2(SCAN, runners / SCAN.name)
+    (root / SANDBOX_DIRNAME / RUNS_SUBDIR / f'{RUN_PREFIX}{pid}-live').mkdir(
+        parents=True)
+    return runners / SCAN.name
+
+
+def _scan(runner: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(['bash', str(runner)], cwd=runner.parents[2],
+                          text=True, capture_output=True)
+
+
+def test_a_live_run_home_is_not_counted_as_a_leak(tmp_path):
+    """A concurrent run's home belongs to a process that is still alive. The
+    liveness test is the LIBRARY's, deliberately — a bare `kill -0` reads
+    another user's live process as dead — and calling it by a name nothing
+    defines made every home dead by default."""
+    runner = _repo_with_run_home(tmp_path, os.getpid())
+    done = _scan(runner)
+    assert 'command not found' not in done.stderr, done.stderr
+    assert LEAK_NOTE not in done.stdout, done.stdout
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_the_broken_liveness_call_is_exactly_what_that_case_catches(tmp_path):
+    """The case above must not be able to pass vacuously. Put the shipped
+    spelling back — one underscore — and BOTH symptoms return: the shell says
+    `command not found` and the live home is counted orphaned.
+
+    Note what is NOT asserted here: a home whose pid is genuinely dead. The
+    library reaps one from `gdk_sandbox_home`, which this gate's own C2 probe
+    calls before the leak loop runs, so a dead home is already gone by then.
+    The note exists for what survives that reap; a live home misjudged dead was
+    the only way it ever fired.
+    """
+    runner = _repo_with_run_home(tmp_path, os.getpid())
+    runner.write_text(
+        runner.read_text(encoding='utf-8')
+        .replace('\tgdk_pid_is_live "$pid" || leaked',
+                 '\t_gdk_pid_is_live "$pid" || leaked'),
+        encoding='utf-8')
+    done = _scan(runner)
+    assert 'command not found' in done.stderr, done.stderr
+    assert f'1 {LEAK_NOTE}' in done.stdout, done.stdout

@@ -404,7 +404,7 @@ for dir in "$RUNS_ROOT/$GDK_SANDBOX_RUN_PREFIX"*; do
 	[ -d "$dir" ] || continue
 	pid="${dir##*/"$GDK_SANDBOX_RUN_PREFIX"}"; pid="${pid%%-*}"
 	case "$pid" in ''|*[!0-9]*) continue ;; esac
-	_gdk_pid_is_live "$pid" || leaked=$((leaked + 1))
+	gdk_pid_is_live "$pid" || leaked=$((leaked + 1))
 done
 [ "$leaked" -gt 0 ] && echo "  note: $leaked orphaned run home(s) from killed runs — the next run reaps them"
 
