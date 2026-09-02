@@ -376,7 +376,16 @@ def _defect_refusal(command: str, defects: list[str], wrote: list[str]) -> str:
             f'command is idempotent.')
 
 
-def main(command: str, argv: list[str]) -> int:
+def main(command: str, argv: list[str], next_step: bool = True) -> int:
+    """One install verb. `next_step=False` silences the closing paragraph.
+
+    `init` composes all four of these and then DOES most of what those
+    paragraphs ask for — writes the two-line Makefile, gitignores the run
+    artifacts, runs setup-hooks.sh. Printed there, they would send an operator
+    to wire what the same command just wired, and a report whose instructions
+    are already stale is a report nobody finishes reading. Init prints its own,
+    covering the residue that still applies.
+    """
     force = False
     diff = False
     for arg in argv:
@@ -468,6 +477,6 @@ def main(command: str, argv: list[str]) -> int:
                                f'({result.error})'], written),
               file=sys.stderr)
         return 1
-    if written:
+    if written and next_step:
         print(f'[install] {_NEXT_STEP[command]}')
     return 0

@@ -63,6 +63,13 @@ Project management (engine-agnostic; the PM tree is markdown + frontmatter):
      tree whose statuses contradict each other, off the SAME predicates)
 
 Installers (write the file once; after that it is the repo's):
+    godot-devkit init               # a blank Godot 4 project, wired: every
+                                    # installer below in order, plus the two
+                                    # files nothing else writes (devkit.toml
+                                    # and your two-line Makefile), the PM tree,
+                                    # the .gitignore entries and a CLAUDE.md
+                                    # skeleton. Idempotent; --force touches the
+                                    # devkit-owned files only
     godot-devkit install-ci         # the workflow that runs `make milestone`
     godot-devkit install-agents     # the review + build contract, as agent
                                     # definitions (a rules file never reaches
@@ -324,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'pm':
         from godot_devkit.repo.pm import cli as pm_cli
         return pm_cli.main(rest)
+    if cmd == 'init':
+        from godot_devkit.repo import init
+        return init.main(rest)
     if cmd == 'gates-extra':
         from godot_devkit.repo import gates_extra
         return gates_extra.main(rest)

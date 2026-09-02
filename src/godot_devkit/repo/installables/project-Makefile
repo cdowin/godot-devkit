@@ -1,0 +1,25 @@
+# Makefile — the scripted path for this project.
+#
+# YOURS. `godot-devkit init` wrote it once and never overwrites it, not even
+# with --force. Two lines are the whole standard set: the pinned tag, and the
+# include that defines every target (`make help` lists them).
+#
+# BUMPING THE PIN is a one-line diff here. Read the CHANGELOG, run
+# `godot-devkit pm vocabulary` for what the closed state/rule sets became, and
+# `godot-devkit install-* --diff` for what the shipped files would change
+# before you let them.
+DEVKIT_VERSION := {version}
+
+include Makefile.devkit
+
+# Your own targets go below, and they are listed by `make help` beside the
+# standard ones as long as each carries a `## description` comment:
+#
+#     my-scan: ## a gate this project owns
+#     	@bash tools/dev/checks/my_scan.sh
+#
+# A gate of your own joins `make check` through devkit.toml — never a fork of
+# Makefile.devkit:
+#
+#     [gates]
+#     extra = ["my-scan"]

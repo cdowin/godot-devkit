@@ -582,14 +582,19 @@ def test_this_repo_carries_the_roles_it_runs_byte_current():
 
 def test_every_installable_on_disk_is_reachable_through_a_verb():
     """A payload no verb names is a file that ships in the wheel, drifts, and
-    is discovered by nobody. Asked of the directory, not of a second list."""
+    is discovered by nobody. Asked of the directory, not of a second list.
+
+    `init` names three of them — the project-owned seeds — and it is a verb
+    like the rest, so its table joins the union rather than being carved out.
+    """
     from godot_devkit.core import walk
     from godot_devkit.core.walk import Kind
+    from godot_devkit.repo import init
     found = walk.children(REPO_ROOT / 'src/godot_devkit/repo/installables',
                           Kind.FILE)
     on_disk = {p.name for p in found.kept}
     named = {name for entries in install.PLANS.values()
-             for name, _ in entries}
+             for name, _ in entries} | {name for name, _ in init.SEEDS}
     assert on_disk == named, (
         f'unreachable: {sorted(on_disk - named)}; '
         f'missing: {sorted(named - on_disk)}')
