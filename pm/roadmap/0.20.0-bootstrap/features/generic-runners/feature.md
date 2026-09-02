@@ -2,7 +2,7 @@
 id: 0.20.0/generic-runners
 milestone: "0.20.0"
 name: The six Godot/GUT runners every consumer re-invents become installables
-status: planning
+status: building
 reviewed:
 phase: 1
 depends_on: ["0.19.0/install-runners"]

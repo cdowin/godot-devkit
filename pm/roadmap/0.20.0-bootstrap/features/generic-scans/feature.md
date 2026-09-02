@@ -2,7 +2,7 @@
 id: 0.20.0/generic-scans
 milestone: "0.20.0"
 name: The project-agnostic scans move into the devkit
-status: planning
+status: building
 reviewed:
 phase: 1
 depends_on: ["0.19.0/install-runners"]
