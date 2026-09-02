@@ -3,7 +3,7 @@ id: 0.19.0/install-runners/devkit-make-targets-are-quiet
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: The devkit's own make targets print one verdict line and name their log
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

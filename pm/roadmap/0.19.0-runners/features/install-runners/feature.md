@@ -2,8 +2,8 @@
 id: 0.19.0/install-runners
 milestone: "0.19.0"
 name: The sandboxed headless-run shell library becomes an installable
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.19.0-runners/review.md
 phase:
 depends_on: []
 consumed_by: []

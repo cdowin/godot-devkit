@@ -3,7 +3,7 @@ id: 0.19.0/install-runners/import-cache-runner
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: The import-cache rebuild is a bounded runner with an outcome check
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

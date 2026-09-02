@@ -3,7 +3,7 @@ id: 0.19.0/install-runners/gate-log-and-verdict
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: Every gate prints one verdict line and names its full log
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

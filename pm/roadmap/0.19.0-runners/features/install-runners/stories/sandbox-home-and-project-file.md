@@ -3,7 +3,7 @@ id: 0.19.0/install-runners/sandbox-home-and-project-file
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: A headless run gets a self-destroying HOME and project.godot comes back
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

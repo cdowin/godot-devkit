@@ -3,7 +3,7 @@ id: 0.19.0/install-runners/consumers-adopt
 feature: 0.19.0/install-runners
 milestone: "0.19.0"
 name: nullbound and trail install the library and delete their forks
-status: review
+status: done
 owner: developer
 depends_on: []
 ---
