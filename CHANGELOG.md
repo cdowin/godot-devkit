@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.18.1 — 2026-09-02
+
+- **`cc-godot-sandbox.sh` stops blocking a quoted `godot` word** — the segment split ran a `tr` over the whole typed line, cutting at `;` `|` `&` `(` `)` and brace/backtick, quotes and all, so a quoted word that happened to follow one of those characters became the next segment's COMMAND word: `echo "foo; godot --headless"`, `git commit -m "block (godot --headless) in command position"` and five more everyday commands were BLOCKED (measured against the shipped guard; a consumer forked the file 183 lines to fix it). The split now tracks quote state and breaks only on an operator OUTSIDE quotes, while a quoted COMMAND word (`"$GODOT" --headless`) still is one; an unbalanced quote or a line past 8192 characters falls back to the naive split, which is the STRICT direction, never looser (36KB with 4,000 operators: 12s → 0.28s). New `--self-test` replays the whole block/allow corpus through the real hook — 11 block / 9 allow stock, 13 / 11 once the optional, empty-by-default `SANDBOX_FUNCTION` names a sourced boot function — and consumers wire it into their static gate (`install-hooks` and the README say so). (repo/installables/cc-godot-sandbox.sh, repo/install.py)
+
 ## v0.18.0 — 2026-09-02
 
 - **`pm new story` stops scaffolding a story `pm validate` rejects** — under `[pm] story_ordinal_prefix` the ordering prefix belongs to the FILE, never to `id:`, so `new story <f> 01-slug` now writes `id: <f>/slug` and V2 passes on sight (every story scaffolded in one consumer's tree had to be hand-fixed). One rule, one home: `model.story_slug_of` is what resolution, V2 and the scaffolder all read. A second file whose stripped slug claims a live id refuses instead of minting an id neither file can be addressed by. (repo/pm/cli.py, repo/pm/model.py, repo/pm/validate.py)

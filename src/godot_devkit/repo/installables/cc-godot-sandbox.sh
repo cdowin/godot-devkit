@@ -29,7 +29,8 @@
 # Protocol: Claude Code feeds the PreToolUse event as JSON on stdin (tool_name,
 # tool_input.command). Exit 0 = allow, exit 2 = BLOCK with stderr returned to
 # the agent. Any internal failure exits 0 (fail open) — a broken hook must never
-# wedge the session.
+# wedge the session. `--self-test` replays the corpus below through this same
+# file and is meant to be a member of your static gate.
 set -eu
 trap 'exit 0' ERR
 
@@ -44,7 +45,114 @@ WRAPPER_ROSTER='    make parse | make lint | make check      # static gates
     make integration ARGS="--system <x>"     # a scenario slice
     make smoke                               # the boot smoke test
     make help                                # every target, authoritative'
+# OPTIONAL, empty by default. The name of a shell FUNCTION in your sandbox
+# library that boots the engine itself. Typing it (after sourcing the library)
+# is a raw boot the godot-in-command-position guard below cannot see — there is
+# no `godot` token on the line — and such a function typically sandboxes NOTHING
+# by itself: it relies on the typist having set the sandbox HOME first. One
+# consumer's did, one typist did not, and an editor pass ran against the live
+# player data. Set this to that function's name and the guard blocks it in
+# COMMAND POSITION too; set SANDBOX_FUNCTION_TARGET to the wrapper that owns the
+# job. Left EMPTY (the stock value) this whole branch is inert — including the
+# fast path, which never widens to match every command.
+SANDBOX_FUNCTION=''
+SANDBOX_FUNCTION_TARGET=''
 # -----------------------------------------------------------------------------
+
+# --- --self-test — the payload corpus, PROVEN rather than claimed ------------
+# `bash tools/hooks/cc-godot-sandbox.sh --self-test` replays every payload
+# through the real hook and checks the verdict; exit 0 means every case landed
+# where it should. Wire it into your static gate (in the stock consumer
+# Makefile: a `hooks-self-test` target listed in `check`) — a corpus that is
+# re-run is the only reason to trust "every case verified" six months later.
+# The two SANDBOX_FUNCTION cases in each list appear only when you have set
+# that variable, so the corpus always tests the guard you actually run.
+# shellcheck disable=SC2016  # these are literal PAYLOADS — expansion is the
+# thing under test, and it must not happen here.
+SELF_TEST_BLOCK=(
+	'godot --headless --quit'
+	'godot --path . --headless -s tools/dev/checks/compile_sweep.gd'
+	'godot'                                       # bare: the project manager IS a boot
+	'godot --headless --help'                     # a query flag buried in a boot
+	'make lint && godot --headless --editor --quit'
+	'$GODOT --headless --quit'
+	'"${GODOT}" --headless'
+	'/Applications/Godot.app/Contents/MacOS/Godot --headless --quit'
+	'env HOME=/tmp godot --headless --quit'
+	'timeout 60 godot --headless --quit'
+	# An UNBALANCED quote is unparseable, and unparseable input stays STRICT:
+	# the quote-aware split refuses and the naive fallback still sees the boot.
+	'echo "foo; godot --headless'
+)
+# The two `git commit` cases and the `echo` case are the quoting false positives
+# this guard used to fire on: a word inside quotes is data, never a command word.
+SELF_TEST_ALLOW=(
+	'make parse'
+	'godot --version'
+	'command -v godot'
+	'godot-devkit refs GameRunner'
+	'grep -n "godot --" file'
+	'git commit -m "tools(dev): godot --headless is wrapper-only"'
+	'git commit -m "hooks: block (godot --headless) in command position"'
+	'echo "foo; godot --headless"'
+	$'cat <<EOF\ngodot --headless --quit\nEOF'
+)
+if [ -n "$SANDBOX_FUNCTION" ]; then
+	SELF_TEST_BLOCK+=(
+		"$SANDBOX_FUNCTION"
+		# the realistic spelling: sourced, then typed, in a later segment. The
+		# library path is a stand-in — a payload is tokenized, never executed.
+		"source ./sandbox-lib.sh && $SANDBOX_FUNCTION"
+	)
+	SELF_TEST_ALLOW+=(
+		"grep -rn $SANDBOX_FUNCTION docs/"
+		"echo \"run it: ($SANDBOX_FUNCTION) by hand\""
+	)
+fi
+
+# json_payload <command> — the PreToolUse event this hook reads on stdin.
+json_payload() {
+	local cmd="$1"
+	cmd="${cmd//\\/\\\\}"
+	cmd="${cmd//\"/\\\"}"
+	cmd="${cmd//$'\n'/\\n}"
+	printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$cmd"
+}
+
+self_test() {
+	local rc=0 payload verdict
+	for payload in "${SELF_TEST_BLOCK[@]}"; do
+		verdict=0
+		json_payload "$payload" | bash "$0" >/dev/null 2>&1 || verdict=$?
+		if [ "$verdict" -ne 2 ]; then
+			echo "  MISS — expected BLOCK, got exit $verdict: $payload" >&2
+			rc=1
+		fi
+	done
+	for payload in "${SELF_TEST_ALLOW[@]}"; do
+		verdict=0
+		json_payload "$payload" | bash "$0" >/dev/null 2>&1 || verdict=$?
+		if [ "$verdict" -ne 0 ]; then
+			echo "  FALSE POSITIVE — expected ALLOW, got exit $verdict: $payload" >&2
+			rc=1
+		fi
+	done
+	if [ "$rc" -eq 0 ]; then
+		echo "[cc-godot-sandbox] SELF-TEST OK — ${#SELF_TEST_BLOCK[@]} block / ${#SELF_TEST_ALLOW[@]} allow case(s)"
+	else
+		echo "[cc-godot-sandbox] SELF-TEST FAIL — see the case(s) above" >&2
+	fi
+	return "$rc"
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+	# `set -e` plus the fail-open ERR trap above would turn a self-test FAILURE
+	# into exit 0 — the exact false green this corpus exists to prevent. So the
+	# result is captured through `||`, which never trips the trap.
+	self_test_rc=0
+	self_test || self_test_rc=$?
+	exit "$self_test_rc"
+fi
 
 # hook_json_field <payload> <dotted.key>
 # Echo a STRING field out of a Claude Code hook event, or nothing.
@@ -87,10 +195,20 @@ INPUT="$(cat)"
 # Fast path: the overwhelming majority of Bash calls never mention the engine.
 # Pure shell, no fork, no JSON decode. `*GODOT*` is for the named-variable
 # spelling (`$GODOT --headless`) with no lowercase mention beside it.
+# A SANDBOX_FUNCTION mention is the other way in — and the test is written as
+# two steps rather than an extra `case` arm because an EMPTY SANDBOX_FUNCTION
+# would make `*"$SANDBOX_FUNCTION"*` match every command on earth, quietly
+# retiring the fast path for every consumer that left the stock value alone.
+mentions_engine=0
 case "$INPUT" in
-	*godot*|*Godot*|*GODOT*) ;;
-	*) exit 0 ;;
+	*godot*|*Godot*|*GODOT*) mentions_engine=1 ;;
 esac
+if [ "$mentions_engine" -eq 0 ] && [ -n "$SANDBOX_FUNCTION" ]; then
+	case "$INPUT" in
+		*"$SANDBOX_FUNCTION"*) mentions_engine=1 ;;
+	esac
+fi
+[ "$mentions_engine" -eq 1 ] || exit 0
 
 [ "$(hook_json_field "$INPUT" tool_name)" = "Bash" ] || exit 0
 
@@ -107,6 +225,60 @@ CMD="$(hook_json_field "$INPUT" tool_input.command)"
 ANALYZE="${CMD//<<</ __NBHSTR__}"
 ANALYZE="${ANALYZE%%<<*}"
 
+# split_command_segments <line>
+# Emit one line per shell segment, cutting at the operator characters that start
+# a fresh command word — but ONLY where they lie outside quotes.
+#
+# WHY THE QUOTE STATE MATTERS. The naive `tr ';|&()\`{}' '\n…'` split cut inside
+# quoted text too, so a quoted word that HAPPENS to follow an operator character
+# became the next segment's command word. Real, everyday commands were blocked:
+#
+#   echo "foo; godot --headless"
+#   git commit -m "hooks: block (godot --headless) in command position"
+#
+# Quoted text is preserved verbatim INSIDE its segment instead, so a word in
+# quotes can never be a command word — while a quoted COMMAND word
+# (`"$GODOT" --headless`, the named-variable spelling the header documents)
+# still is one, because it is genuinely first in its segment.
+#
+# Returns 1 on an unbalanced quote. The caller then falls back to the naive
+# split: unparseable input stays STRICT rather than sliding open.
+split_command_segments() {
+	local rest="$1" out="" head quote="" ch
+	while [ -n "$rest" ]; do
+		if [ "$quote" = "'" ]; then
+			head="${rest%%\'*}"                      # single quotes: no escapes
+		elif [ "$quote" = '"' ]; then
+			head="${rest%%[\"\\]*}"                  # double quotes: \ escapes
+		else
+			head="${rest%%[;\|\&\(\)\`\{\}\'\"\\]*}"
+		fi
+		if [ "$head" = "$rest" ]; then
+			[ -z "$quote" ] || return 1              # unterminated quote
+			out+="$rest"
+			break
+		fi
+		out+="$head"
+		rest="${rest#"$head"}"
+		ch="${rest:0:1}"
+		rest="${rest:1}"
+		if [ -n "$quote" ]; then
+			if [ "$ch" = "\\" ]; then
+				out+="$ch${rest:0:1}"; rest="${rest:1}"   # escaped char, still inside
+			else
+				quote=""; out+="$ch"                      # the closing quote
+			fi
+			continue
+		fi
+		case "$ch" in
+			\'|\") quote="$ch"; out+="$ch" ;;
+			\\)    out+="$ch${rest:0:1}"; rest="${rest:1}" ;;
+			*)     out+=$'\n' ;;                          # an operator, outside quotes
+		esac
+	done
+	printf '%s\n' "$out"
+}
+
 # Wrapper words that legitimately precede a real command word.
 is_wrapper() {
 	case "$1" in
@@ -117,9 +289,26 @@ is_wrapper() {
 }
 
 offender=""
+offender_kind="engine"
 # Split at shell operators so each segment starts at a command word. `$(`, a
 # backtick and a brace group all start a fresh command too.
-# shellcheck disable=SC2020  # the tr below maps a char SET to newline — exactly the intent
+# The quote-aware walk is pure shell and BEATS the `tr` fork at every size a
+# person actually types (measured: 4.3KB → 0.35s, against 0.48s for the fork).
+# It degrades on a pathological line — 36KB carrying 4,000 operators took 12s —
+# and a hook that stalls the session is its own kind of broken. So past this
+# bound the naive split is used instead, which is the STRICT direction: over the
+# bound the guard is exactly as strict as it was before the quoting fix, never
+# looser. Same fallback an unbalanced quote takes.
+SPLIT_MAX_CHARS=8192
+SEGMENTS=''
+if [ "${#ANALYZE}" -le "$SPLIT_MAX_CHARS" ]; then
+	SEGMENTS="$(split_command_segments "$ANALYZE")" || SEGMENTS=''
+fi
+if [ -z "$SEGMENTS" ]; then
+	# shellcheck disable=SC2020  # the fallback tr maps a char SET to newline — exactly the intent
+	SEGMENTS="$(printf '%s' "$ANALYZE" | tr ';|&()`{}' '\n\n\n\n\n\n\n\n')"
+fi
+
 while IFS= read -r segment; do
 	[ -n "$segment" ] || continue
 	# shellcheck disable=SC2206  # deliberate word-split; read -ra avoids globbing
@@ -160,6 +349,16 @@ while IFS= read -r segment; do
 	# is this toolkit's own CLI in command position — never a boot.
 	command_word="${toks[$idx]//[\$\{\}\"\']/}"
 	command_word="${command_word##*/}"
+
+	# The sandbox library's boot-in-a-function, in COMMAND position (only when
+	# the consumer named one). Position is what keeps this honest: `grep -rn
+	# <fn> docs/` has `grep` as its command word and is never flagged.
+	if [ -n "$SANDBOX_FUNCTION" ] && [ "$command_word" = "$SANDBOX_FUNCTION" ]; then
+		offender="$segment"
+		offender_kind="function"
+		break
+	fi
+
 	case "$(printf '%s' "$command_word" | tr '[:upper:]' '[:lower:]')" in
 		godot-devkit) continue ;;
 		godot*) ;;
@@ -191,9 +390,29 @@ while IFS= read -r segment; do
 
 	offender="$segment"
 	break
-done <<<"$(printf '%s' "$ANALYZE" | tr ';|&()`{}' '\n\n\n\n\n\n\n\n')"
+done <<<"$SEGMENTS"
 
 [ -n "$offender" ] || exit 0
+
+if [ "$offender_kind" = "function" ]; then
+	{
+		echo "BLOCKED (user:// sandbox): never call \`$SANDBOX_FUNCTION\` by hand."
+		echo "  offending segment: ${offender# }"
+		echo ""
+		echo "  That function boots the engine against whatever user:// resolves"
+		echo "  to, and it sandboxes NOTHING by itself — it relies on the caller"
+		echo "  having set the sandbox HOME first ($SANDBOX_OWNER)."
+		echo ""
+		if [ -n "$SANDBOX_FUNCTION_TARGET" ]; then
+			echo "  Use the target that owns the job (sandbox + outcome check):"
+			echo "    $SANDBOX_FUNCTION_TARGET"
+		else
+			echo "  Use the wrapper that owns the job:"
+			echo "$WRAPPER_ROSTER"
+		fi
+	} >&2
+	exit 2
+fi
 
 {
 	echo "BLOCKED (user:// sandbox): never invoke \`godot\` directly."

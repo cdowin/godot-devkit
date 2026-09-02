@@ -125,6 +125,10 @@ install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 tools/dev/agent-worktree.sh, tools/dev/checks/doctor.sh, and
                 tools/setup-hooks.sh, which arms them. Each carries a small
                 `project config` header — yours to edit after install.
+                cc-godot-sandbox.sh ships its own block/allow corpus: wire
+                `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your
+                static gate (nullbound: a `hooks-self-test` target in
+                `make check`).
 
 A destination that already exists and differs is refused, whole.
 --force overwrites it. --diff prints what would change and writes nothing."""
@@ -138,7 +142,12 @@ _NEXT_STEP = {
                      'silence. Then review each file\'s `project config` '
                      'header (gate commands, protected branches, trailer): '
                      'the files are yours now, and the stock values assume '
-                     'the standard consumer Makefile.',
+                     'the standard consumer Makefile. Then wire `bash '
+                     'tools/hooks/cc-godot-sandbox.sh --self-test` into your '
+                     'static gate (nullbound: a `hooks-self-test` target in '
+                     '`make check`) — it replays the hook\'s own block/allow '
+                     'corpus, so an edit to the guard cannot quietly change '
+                     'a verdict.',
     'install-agents': 'the verification pair carries the review and build '
                       'contract; the rest are the base roster. Each roster '
                       'file opens with a `Project config` section — edit its '
