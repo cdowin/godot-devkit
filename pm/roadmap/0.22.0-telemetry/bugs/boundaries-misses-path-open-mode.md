@@ -2,7 +2,7 @@
 id: 0.22.0/bugs/boundaries-misses-path-open-mode
 milestone: "0.22.0"
 name: test_boundaries reads the open() mode from the wrong argument for Path.open, so any p.open('w') in src/ passes the one-writer gate
-status: open
+status: fixed
 caught_in: "0.22.0"
 fix_milestone:
 severity: medium
