@@ -11,3 +11,5 @@
 {"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture/the-grain-is-the-trees-live-state","from":"wip","to":"review"}
 {"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/review-record-shape/bugs-name-their-cause","from":"todo","to":"wip"}
 {"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture/subagent-stop-hook-records-usage","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:29:02Z","kind":"status","grain":"0.22.0/review-record-shape/bugs-name-their-cause","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:29:02Z","kind":"decision","grain":"0.22.0/review-record-shape","entry":"D1","title":"check pm sees a dangling caused_by the way it sees a dangling depends_on"}

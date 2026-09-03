@@ -3,7 +3,7 @@ id: 0.22.0/review-record-shape/bugs-name-their-cause
 feature: 0.22.0/review-record-shape
 milestone: "0.22.0"
 name: a bug can name the closed feature that caused it so escapes count
-status: wip
+status: review
 owner:
 depends_on: []
 ---
