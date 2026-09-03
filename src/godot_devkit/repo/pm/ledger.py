@@ -27,8 +27,10 @@ the verbs write theirs only after their own write to the tree has landed.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 # Beside `decisions.md`, inside the milestone directory that owns it — so
 # `retire` removes it with the directory and git is the archive (D6).
@@ -112,3 +114,339 @@ def append_row(milestone_dir: Path, row: dict) -> None:
                                          newline='\n') as handle:
         handle.write(line)
 
+
+
+# --- the usage rows (D3/D4/D5) ------------------------------------------------
+# A `dispatch` row is one subagent's whole life; a `session` row is the
+# orchestrator's own totals at one stop. Both are minted from a Claude Code
+# transcript by `pm ledger record`, and everything below obeys ONE rule:
+#
+#   COPY WHAT THE TRANSCRIPT HOLDS, OMIT WHAT IT LACKS, INVENT NOTHING.
+#
+# No sentinel, no label, no zero standing in for a field that was absent, no
+# guess at which grain a dispatch was "really" about (D3 puts every candidate
+# on the row and leaves attribution to the report). The only thing this module
+# refuses is a transcript it cannot READ — a line that is not JSON, a timestamp
+# that is not a timestamp, a token count that is not a number, a file with no
+# assistant record at all. Those are loud (exit 2 at the CLI) because the
+# alternative is a row of zeros that reads exactly like a cheap dispatch, and a
+# ledger cannot tell the two apart afterwards (hard rule 4).
+KIND_DISPATCH = 'dispatch'
+KIND_SESSION = 'session'
+
+# The hook events that mint them. `SubagentStop` fires once per dispatch and
+# `Stop` once per orchestrator turn — the kind is the EVENT's, never inferred
+# from the transcript's shape (a sidechain flag is the transcript's opinion;
+# which hook fired is a fact the caller has).
+EVENT_KINDS = {'SubagentStop': KIND_DISPATCH, 'Stop': KIND_SESSION}
+
+# The tools whose use means the agent started WRITING. `tool_calls_before_first
+# _write` is the milestone's "overhead shape" question — how much looking a
+# dispatch does before it touches the tree — and it is a raw count, never a
+# ratio and never a verdict.
+WRITE_TOOLS = ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')
+
+# Our row key ← the transcript's `message.usage` key. Four sums, named for what
+# they are rather than for what the API calls them, because the row outlives the
+# API's spelling; the OTHER keys `usage` carries are ignored, not copied, so a
+# new one appearing upstream changes nothing here.
+USAGE_FIELDS = (('input', 'input_tokens'),
+                ('output', 'output_tokens'),
+                ('cache_creation', 'cache_creation_input_tokens'),
+                ('cache_read', 'cache_read_input_tokens'))
+
+# Record and block types this reads. Named so the coupling D4 accepted is
+# greppable in one place rather than spelled as literals down the file.
+TYPE_ASSISTANT = 'assistant'
+TYPE_TOOL_USE = 'tool_use'
+
+# Every key a usage row may carry, in the order feature.md writes them. A row
+# omits the ones it has no value for — `usage_row` never emits a key with None
+# behind it — so this is a key ORDER, not a schema with required fields.
+ROW_KEYS = ('ts', 'kind', 'grain', 'session_id', 'agent_id', 'agent_type',
+            'model', 'started_at', 'ended_at', 'duration_s', 'messages',
+            'tool_calls', 'tools', 'tool_calls_before_first_write', 'usage',
+            'tree')
+
+
+class TranscriptError(Exception):
+    """A transcript this module cannot READ. Never a judgement about content."""
+
+
+class LedgerError(Exception):
+    """A line already in the ledger that will not parse. Names the line."""
+
+
+class Row(NamedTuple):
+    """One ledger line, three ways: where it is, what it says, what it IS.
+
+    `line` is kept because `--json` prints the bytes on disk rather than a
+    re-serialisation — a row written by a future version of this package, with
+    keys this one has never heard of, must come back out unchanged.
+    """
+    lineno: int
+    data: dict
+    line: str
+
+
+def normalise_ts(raw: object, where: str) -> str:
+    """A transcript timestamp as this ledger spells one: full UTC, seconds, `Z`.
+
+    The transcript writes milliseconds and this log does not (D8's format is
+    one instant, one spelling), so the fractional part is TRUNCATED rather than
+    rounded — a rounded `ended_at` can land after the stop that recorded it,
+    and a duration is a subtraction over these two strings.
+
+    A timestamp that will not parse RAISES. It is the one field the report
+    cannot do without, and a dropped one would leave a row that looks complete
+    and answers "how long" with silence.
+    """
+    if not isinstance(raw, str) or not raw:
+        raise TranscriptError(f'{where} has no timestamp ({raw!r})')
+    try:
+        when = datetime.fromisoformat(raw)
+    except ValueError as err:
+        raise TranscriptError(f'{where} timestamp {raw!r} is not ISO-8601 '
+                              f'({err})') from err
+    if when.tzinfo is None:
+        # A naive stamp is UTC by the transcript's own convention; reading it as
+        # LOCAL would silently shift every duration by the machine's offset.
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc).strftime(TS_FORMAT)
+
+
+def parse_ts(value: object) -> datetime | None:
+    """A `ts` string back to an instant, or None when it is not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value, TS_FORMAT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _number(value: object, where: str) -> int:
+    """A count from the transcript, or a loud refusal. Absent is 0.
+
+    Absent and zero are the same statement about a SUM (adding nothing adds
+    nothing), which is why a record without `usage` contributes 0 rather than
+    refusing. A key that is PRESENT and not an integer is a different fact: the
+    shape this package reads has changed, and D4's cost note says that fails
+    loudly. `bool` is excluded on purpose — `True` is an `int` in Python and
+    would sum as 1.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TranscriptError(f'{where} is {value!r}, which is not a number')
+    return value
+
+
+def records_of(path: Path) -> Iterator[tuple[int, dict]]:
+    """(line number, record) for every line of a transcript, in file order.
+
+    A GENERATOR, and the whole file is never held: a `Stop` hook fires on every
+    orchestrator turn against a transcript that grows all day, and the summary
+    below is one pass of sums. Lines are read through the file handle rather
+    than `splitlines()`, which treats U+2028/U+2029 as terminators and would
+    tear one legitimate row into two invalid ones.
+
+    A line that is not a JSON object raises `TranscriptError` naming the line
+    number — the transcript is an interface we READ and do not own (D4), so a
+    shape we cannot parse is reported, never skipped.
+    """
+    try:
+        handle = path.open(encoding='utf-8')
+    except OSError as err:
+        raise TranscriptError(f'{path} could not be read ({err})') from err
+    with handle:
+        for lineno, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError as err:
+                raise TranscriptError(f'line {lineno} of {path} is not JSON '
+                                      f'({err})') from err
+            if not isinstance(record, dict):
+                raise TranscriptError(f'line {lineno} of {path} is a '
+                                      f'{type(record).__name__}, not a record')
+            yield lineno, record
+
+
+def transcript_summary(records: Iterable[tuple[int, dict]]) -> dict:
+    """Sum one transcript into the fields a usage row carries. One pass, no judgement.
+
+    What it counts, and nothing else:
+
+      * `usage` — the four `message.usage` numbers summed over the ASSISTANT
+        records. A record without `usage` counts as a message and adds 0.
+      * `messages` — assistant records. `tool_calls` — `tool_use` blocks.
+        `tools` — those blocks by `name`, in first-seen order.
+      * `tool_calls_before_first_write` — the blocks before the first
+        `WRITE_TOOLS` one; the TOTAL when the dispatch never wrote, because
+        "it looked N times and never wrote" is the same number either way and
+        a sentinel would be this module inventing a value.
+      * `started_at`/`ended_at` — the first and last timestamp of ANY record,
+        in file order. The bounds of the whole transcript, not of the model's
+        half of it: a dispatch's wall-clock starts at the prompt.
+      * `model` — the assistant records' `message.model`, first-seen order; a
+        string when there is one, the LIST when a session switched models. Raw
+        either way, because "which model" is the report's question to ask.
+
+    A file with NO assistant record raises: there is nothing to sum, and a row
+    of zeros is indistinguishable afterwards from a dispatch that really cost
+    nothing (hard rule 4).
+    """
+    usage = {name: 0 for name, _ in USAGE_FIELDS}
+    tools: dict[str, int] = {}
+    models: list[str] = []
+    messages = tool_calls = before_write = 0
+    wrote = False
+    first_ts = last_ts = ''
+    for lineno, record in records:
+        where = f'line {lineno}'
+        stamp = record.get('timestamp')
+        if stamp is not None:
+            last_ts = normalise_ts(stamp, where)
+            first_ts = first_ts or last_ts
+        if record.get('type') != TYPE_ASSISTANT:
+            continue
+        messages += 1
+        message = record.get('message')
+        message = message if isinstance(message, dict) else {}
+        model = message.get('model')
+        if isinstance(model, str) and model and model not in models:
+            models.append(model)
+        seen = message.get('usage')
+        seen = seen if isinstance(seen, dict) else {}
+        for name, key in USAGE_FIELDS:
+            usage[name] += _number(seen.get(key), f'{where} usage.{key}')
+        content = message.get('content')
+        for block in content if isinstance(content, list) else ():
+            if not isinstance(block, dict) or block.get(
+                    'type') != TYPE_TOOL_USE:
+                continue
+            tool_calls += 1
+            name = block.get('name')
+            if isinstance(name, str) and name:
+                # A block with no `name` still counts as a CALL — it happened —
+                # but it is not attributed to a tool, because `tools[None]` would
+                # be this module naming something the transcript did not.
+                tools[name] = tools.get(name, 0) + 1
+            if not wrote:
+                if name in WRITE_TOOLS:
+                    wrote = True
+                else:
+                    before_write += 1
+    if not messages:
+        raise TranscriptError('no assistant record — nothing to sum')
+    summary = {
+        'model': models[0] if len(models) == 1 else (models or None),
+        'messages': messages,
+        'tool_calls': tool_calls,
+        'tools': tools,
+        'tool_calls_before_first_write': before_write if wrote else tool_calls,
+        'usage': usage,
+    }
+    if first_ts:
+        start, end = parse_ts(first_ts), parse_ts(last_ts)
+        summary['started_at'] = first_ts
+        summary['ended_at'] = last_ts
+        summary['duration_s'] = int((end - start).total_seconds())
+    return summary
+
+
+def id_from_records(records: Iterable[tuple[int, dict]], key: str) -> str:
+    """The first non-empty `sessionId`/`agentId` a transcript states, or ''.
+
+    Second to the caller's flag, always: the hook payload names the ids
+    authoritatively and the transcript is a fallback for a hand run. Absent in
+    both is '' — the row simply has no such key (a main-session transcript
+    carries no `agentId`, and stamping one would be an invention).
+    """
+    for _, record in records:
+        value = record.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ''
+
+
+def usage_row(kind: str, **fields: object) -> dict:
+    """One `dispatch`/`session` row, keys in `ROW_KEYS` order, absences omitted.
+
+    The omission rule is the contract, not a convenience: `None` and `''` mean
+    "the source did not say", and a key that is not on the row is the only
+    honest way to write that. A ZERO, an empty dict and an empty list all mean
+    "the source said none", so all three are KEPT — `tools: {}` is a dispatch
+    that called no tool, and `tree.stories_wip: []` is D3's true statement that
+    nothing was `wip` when the hook fired.
+    """
+    fields['kind'] = kind
+    fields.setdefault('ts', utc_now())
+    unknown = set(fields) - set(ROW_KEYS)
+    if unknown:
+        raise ValueError(f'not usage-row keys: {" ".join(sorted(unknown))}')
+    return {key: fields[key] for key in ROW_KEYS
+            if fields.get(key) is not None and fields.get(key) != ''}
+
+
+# --- where a grain ENDS (D8) --------------------------------------------------
+# D8 calls a grain's end its row into its terminal state, and `pm ledger show`
+# prints a first-row-to-terminal-row total only once that row exists.
+#
+# `done` is NAMED here rather than read as `cfg.<kind>_states[-1]`, and that is
+# the whole point of this constant: the stock story vocabulary is
+# `todo wip review done blocked`, so `[-1]` is `blocked` — a story that finished
+# would have printed no total and a story that stalled would have printed one.
+# The vocabulary is a closed SET with no ordering contract (there is no
+# transition graph in this package, on purpose), and its ORDER is `pm
+# vocabulary`'s output, which consumers read — so the fix is to name the state,
+# not to reorder the tuple. `done` is also the state every drift rule in
+# model.py already treats as terminal (D2, D3, D5), so this agrees with the
+# gate rather than inventing a second opinion about what "finished" means.
+TERMINAL_STATE = 'done'
+
+# Bugs are the exception, and they are configured rather than named: their
+# machine is `open -> fixed -> closed` and the last entry of `[pm] bug_states`
+# is the one a project can legitimately rename (D8 says so in as many words).
+GRAIN_BUG = 'bug'
+
+
+def terminal_state(cfg, grain_kind: str) -> str:
+    """The state whose row ENDS this grain kind. `done`, except for bugs.
+
+    One home for the rule, because a report that disagreed with `show` about
+    where a grain finished would produce two different durations for one grain
+    and no way to tell which was meant.
+    """
+    return cfg.bug_states[-1] if grain_kind == GRAIN_BUG else TERMINAL_STATE
+
+def read_rows(path: Path) -> list[Row]:
+    """Every row in one ledger, oldest first. An absent ledger is no rows.
+
+    Absent is not an error: a milestone nothing has happened in yet has no
+    file, and "no rows" is the same fact the reader wanted. A line that will
+    not parse IS an error, named by line number — a reader that skipped it
+    would print a timeline with a hole in it and no way to know.
+    """
+    try:
+        raw = path.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeDecodeError) as err:
+        raise LedgerError(f'{path} could not be read ({err})') from err
+    rows = []
+    for lineno, line in enumerate(raw.split('\n'), 1):
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError as err:
+            raise LedgerError(f'line {lineno} of {path} is not JSON '
+                              f'({err})') from err
+        if not isinstance(data, dict):
+            raise LedgerError(f'line {lineno} of {path} is a '
+                              f'{type(data).__name__}, not a row')
+        rows.append(Row(lineno, data, line))
+    return rows

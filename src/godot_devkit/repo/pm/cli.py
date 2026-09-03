@@ -80,6 +80,20 @@ USAGE = """usage: godot-devkit pm <command>
                                            a slug may lead with `NN-`: the
                                            FILE keeps it, the id never does)
   new bug <milestone> <slug>
+  ledger record --from-transcript <path> --event SubagentStop|Stop
+                [--agent-id X] [--agent-type Y] [--session-id Z]
+                                          (sum one Claude Code transcript and
+                                           append a dispatch (SubagentStop) or
+                                           session (Stop) row to the BUILDING
+                                           milestone's ledger.jsonl)
+  ledger record --grain <id> [--agent-type T] [--tokens-in N] [--tokens-out N]
+                [--tool-calls N] [--duration-s N] [--event E]
+                                          (hand entry for a dispatch no hook
+                                           saw; a number not given is a key the
+                                           row does not carry, never a zero)
+  ledger show <grain-id> [--json]         (that grain's rows oldest first, with
+                                           the seconds since the previous status
+                                           row; --json prints the raw lines)
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
                                            the first; the prose under it is yours.
@@ -1292,6 +1306,348 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+# --- ledger -------------------------------------------------------------------
+# `pm ledger record` is the ONE way a dispatch's cost reaches the tree (D4): the
+# installed SubagentStop/Stop hooks call it with the transcript path, and a hand
+# run files the row for a dispatch no hook saw. Chris, 2026-09-03: *"the ledger
+# is actually very very simple. It shouldn't judge or infer or even guard really
+# anything … It just timestamps transitions and stamps whatever hook data.
+# Judgement/inference is left to the caller."*
+#
+# So this verb copies what the transcript holds, omits what it lacks, and labels
+# nothing. What it DOES refuse is input hygiene on its own surface (SDLC § 5) —
+# a path that is not a file, a line that is not JSON, a number that is not a
+# number, an unknown `--event`, a `--grain` that resolves to nothing — plus the
+# one question it genuinely cannot answer: WHICH milestone ledger, when two are
+# building. It says so and stops rather than picking.
+LEDGER_FLAGS = ('--from-transcript', '--event', '--agent-id', '--agent-type',
+                '--session-id', '--grain', '--tokens-in', '--tokens-out',
+                '--tool-calls', '--duration-s')
+
+# The statuses D3's snapshot buckets by. Literals rather than `cfg.*_states[i]`:
+# the BUCKET NAMES on the row are `features_building` / `stories_wip`, so the
+# state each names is part of the row's shape, not a per-project setting. A tree
+# with a renamed vocabulary records empty lists — a true statement about a tree
+# whose states this row shape cannot name — rather than a mislabelled one.
+TREE_BUILDING, TREE_REVIEW, TREE_WIP = 'building', 'review', 'wip'
+
+DIGITS = frozenset('0123456789')
+
+# `--json` is the one ledger flag that takes no value, so it never reaches
+# `_take_flags` (which would eat the id after it).
+JSON_FLAG = '--json'
+
+
+def _count_flag(flag: str, raw: str) -> int:
+    """A non-negative integer, or exit 2. `int()` is not the test.
+
+    `int()` accepts `-3`, ` 7 `, `1_0` and Unicode digits like `٣`, and a token
+    count is a decimal integer written by a machine. A number this verb cannot
+    read is a refusal and never a zero: zero is a MEASUREMENT, and the row it
+    would land in is indistinguishable afterwards from a real one (hard rule 4).
+    """
+    if not raw or not DIGITS.issuperset(raw):
+        raise Usage(f'{flag} takes a non-negative integer, not {raw!r}')
+    return int(raw)
+
+
+def _event_kind(raw: str) -> str:
+    """`SubagentStop` -> dispatch, `Stop` -> session. Nothing else is an event."""
+    kind = ledger.EVENT_KINDS.get(raw)
+    if kind is None:
+        raise Usage(f'{raw!r} is not a hook event '
+                    f'({" ".join(ledger.EVENT_KINDS)})')
+    return kind
+
+
+def _building_ledger_dir(cfg: model.PmConfig) -> Path:
+    """The milestone directory whose ledger this row belongs in (D6).
+
+    The one thing `record` cannot work out for itself. Exactly one milestone
+    `building` is the answer; none and several are both refusals that NAME the
+    situation, because a verb that picked would attribute a real dispatch's cost
+    to whichever milestone sorted first and nothing downstream could detect it.
+    """
+    building = model.building_milestones(cfg)
+    if not building:
+        raise Usage(f'no milestone in {cfg.roadmap_dir} is `building`, so there '
+                    f'is no ledger this row belongs to — flip one with '
+                    f'`pm milestone building <id>` and re-run')
+    if len(building) > 1:
+        ids = ' '.join(sorted(model.unquote(mid) for mid, _, _ in building))
+        raise Usage(f'{len(building)} milestones are building ({ids}) — which '
+                    f'one owns this row is the one thing this verb cannot know, '
+                    f'so it is not guessing; run it where exactly one milestone '
+                    f'is building')
+    return building[0][2].parent
+
+
+def _tree_snapshot(cfg: model.PmConfig) -> dict:
+    """The ACTIVE tree's live state, verbatim, at the instant of the row (D3).
+
+    Every id the frontmatter carries, sorted, empty lists when empty — no
+    ranking, no single "most likely" grain, no `?`. Attribution is the report's
+    job and every candidate is on the row, which is what makes a report's rule
+    re-derivable later when the question changes.
+
+    The walkers are the ones `check pm` and `pm status` use, so `zz_archive/` is
+    excluded here for the same reason it is there: an archived milestone is not
+    something a dispatch can have been working on. A grain whose frontmatter
+    carries no `id:` is left out — an unnamed grain cannot be named.
+    """
+    snap: dict[str, list[str]] = {
+        'milestones_building': [], 'features_building': [], 'features_review': [],
+        'stories_wip': [], 'stories_review': [],
+    }
+
+    def add(bucket: str, path: Path) -> None:
+        gid = model.unquote(model.field_of(path, 'id'))
+        if gid:
+            snap[bucket].append(gid)
+
+    for mdir in model.milestone_dirs(cfg):
+        mfile = mdir / model.MILESTONE_DOC
+        if model.field_of(mfile, 'status') == TREE_BUILDING:
+            add('milestones_building', mfile)
+        for ffile in model.feature_files(mdir):
+            fstat = model.field_of(ffile, 'status')
+            if fstat == TREE_BUILDING:
+                add('features_building', ffile)
+            elif fstat == TREE_REVIEW:
+                add('features_review', ffile)
+            for sfile in model.story_files(ffile):
+                sstat = model.field_of(sfile, 'status')
+                if sstat == TREE_WIP:
+                    add('stories_wip', sfile)
+                elif sstat == TREE_REVIEW:
+                    add('stories_review', sfile)
+    return {bucket: sorted(ids) for bucket, ids in snap.items()}
+
+
+def cmd_ledger(cfg: model.PmConfig, args: list[str]) -> int:
+    if not args:
+        raise Usage(USAGE)
+    sub, rest = args[0], args[1:]
+    if sub == 'record':
+        return cmd_ledger_record(cfg, rest)
+    if sub == 'show':
+        return cmd_ledger_show(cfg, rest)
+    raise Usage(f'unknown ledger subcommand {sub!r} (record, show)')
+
+
+def cmd_ledger_record(cfg: model.PmConfig, args: list[str]) -> int:
+    """Append one `dispatch`/`session` row — from a transcript, or by hand.
+
+    The two forms are exclusive because they answer the same question from
+    different sources, and a run naming both would leave which one won as an
+    implementation detail sitting in a durable log.
+
+    Every number in the hand form is OPTIONAL and an omitted one is an omitted
+    KEY, never a zero — `--tool-calls` unset means nobody counted, and a `0` in
+    that slot would read forever after as a dispatch that called no tool.
+    """
+    pairs, rest = _take_flags(args, LEDGER_FLAGS, noun='a value')
+    if rest:
+        raise Usage(f'ledger record takes flags only, not {" ".join(rest)!r}')
+    flags = dict(pairs)
+    source, grain = flags.get('--from-transcript'), flags.get('--grain')
+    if source and grain:
+        raise Usage('--from-transcript and --grain are exclusive: one row has '
+                    'one source, and a transcript already carries what --grain '
+                    'would be guessing at')
+    if not source and not grain:
+        raise Usage('ledger record needs --from-transcript <path> (a hook run) '
+                    'or --grain <id> (a hand entry)')
+    fields: dict[str, object] = {
+        'session_id': flags.get('--session-id', ''),
+        'agent_id': flags.get('--agent-id', ''),
+        # Only ever the flag. The transcript does not carry the agent TYPE, so
+        # reading one out of it would be inference wearing a field's name.
+        'agent_type': flags.get('--agent-type', ''),
+        'tree': _tree_snapshot(cfg),
+    }
+    if source:
+        kind = _event_kind(_required(flags, '--event'))
+        fields.update(_from_transcript(source, flags))
+    else:
+        kind = _event_kind(flags.get('--event', 'SubagentStop'))
+        fields.update(_by_hand(cfg, grain, flags))
+    row = ledger.usage_row(kind, **fields)
+    mdir = _building_ledger_dir(cfg)
+    try:
+        ledger.append_row(mdir, row)
+    except OSError as err:
+        raise Usage(f'{cfg.rel(ledger.ledger_path(mdir))} could not be appended '
+                    f'to ({err}); no row was written') from err
+    _ok(f'ledger {kind} row appended to '
+        f'{cfg.rel(ledger.ledger_path(mdir))}')
+    return 0
+
+
+def _required(flags: dict[str, str], name: str) -> str:
+    value = flags.get(name)
+    if not value:
+        raise Usage(f'{name} is required here')
+    return value
+
+
+def _from_transcript(source: str, flags: dict[str, str]) -> dict:
+    """Sum the transcript at `source`, and take its ids only where a flag is silent.
+
+    The path is used as given — the hook hands over an absolute one under
+    `~/.claude/projects/`, outside the repo entirely, so there is no tree to
+    contain it to. It must be an existing FILE; a directory or a missing path is
+    a refusal rather than an empty summary.
+    """
+    path = Path(source).expanduser()
+    if not path.is_file():
+        raise Usage(f'--from-transcript {source!r} is not a file')
+    try:
+        summary = ledger.transcript_summary(ledger.records_of(path))
+        # A second pass rather than a second copy: the summary streams, and the
+        # ids are only wanted when the caller did not state them.
+        for name, key in (('session_id', 'sessionId'), ('agent_id', 'agentId')):
+            if not flags.get(f'--{name.replace("_", "-")}'):
+                summary[name] = ledger.id_from_records(
+                    ledger.records_of(path), key)
+    except ledger.TranscriptError as err:
+        raise Usage(f'{err}') from err
+    return {k: v for k, v in summary.items() if v is not None}
+
+
+def _by_hand(cfg: model.PmConfig, grain: str, flags: dict[str, str]) -> dict:
+    """The hand form's fields. `--grain` must RESOLVE; a typo would be a lie.
+
+    Every other verb here resolves an id before it writes, and a ledger row is
+    the one write whose subject nothing downstream can check — a report joining
+    on `grain` would carry the typo forever and read it as a grain that cost
+    something. `_grain_file` is the same resolver `pm get`/`pm set` use, so
+    traversal, globs, absolute paths and empty segments refuse here exactly as
+    they refuse there.
+    """
+    path = _grain_file(cfg, grain)
+    usage = {}
+    for key, flag in (('input', '--tokens-in'), ('output', '--tokens-out')):
+        if flag in flags:
+            usage[key] = _count_flag(flag, flags[flag])
+    fields: dict[str, object] = {'grain': _ledger_id(path, grain)}
+    if usage:
+        # Only the keys the caller gave. `cache_creation`/`cache_read` are
+        # ABSENT rather than 0: nobody counted them, and a 0 would say they were
+        # counted and were none.
+        fields['usage'] = usage
+    for key, flag in (('tool_calls', '--tool-calls'),
+                      ('duration_s', '--duration-s')):
+        if flag in flags:
+            fields[key] = _count_flag(flag, flags[flag])
+    return fields
+
+
+def _row_names(row: dict, names: set[str]) -> bool:
+    """True when this row names the grain — in `grain`, or anywhere in `tree`.
+
+    Both, because the two row families name a grain differently: a status row
+    IS about one grain, and a dispatch row (D3) carries every grain that was
+    live when the hook fired. A report's attribution rule lives above this; the
+    question here is only "does this row mention it".
+    """
+    if row.get('grain') in names:
+        return True
+    tree = row.get('tree')
+    if not isinstance(tree, dict):
+        return False
+    return any(value in names for ids in tree.values()
+               if isinstance(ids, list) for value in ids)
+
+
+def _grain_kind(gid: str) -> str:
+    """Which vocabulary an id answers to, by the shape `_grain_file` resolves by.
+
+    The kind, not the state: `ledger.terminal_state` owns WHICH state ends a
+    grain, so a report and this verb cannot come to different answers about
+    where one finished.
+    """
+    if '/bugs/' in gid:
+        return ledger.GRAIN_BUG
+    depth = gid.count('/')
+    return 'milestone' if depth == 0 else 'feature' if depth == 1 else 'story'
+
+
+def cmd_ledger_show(cfg: model.PmConfig, args: list[str]) -> int:
+    """One grain's rows, oldest first, with the seconds between status rows.
+
+    The human form is one line per row and nothing else: `ts`, `kind`, and for a
+    status row `from -> to` plus the seconds since that grain's PREVIOUS status
+    row — which is D8's "time in each state", by subtraction over raw rows. The
+    total line prints only when the grain actually reached its vocabulary's last
+    state; a grain still in flight gets no total, because a running clock is not
+    a duration.
+
+    No rows is exit 0. "This grain has no rows" is a FACT about the tree — a
+    grain nothing has happened to yet — and answering a true question with an
+    error code would make every caller treat silence as breakage.
+    """
+    rest = [a for a in args if a != JSON_FLAG]
+    as_json = JSON_FLAG in args
+    if len(rest) != 1:
+        raise Usage(USAGE)
+    gid = rest[0]
+    path = _grain_file(cfg, gid)
+    mdir = model.milestone_dir_of(cfg, path)
+    if mdir is None:
+        raise Usage(f'{cfg.rel(path)} is not inside a milestone directory, so '
+                    f'no ledger owns {gid!r}')
+    # Both spellings: the id the caller typed, and the id the FILE claims —
+    # which is the one `_stamp` wrote into every row.
+    names = {gid, _ledger_id(path, gid)}
+    try:
+        rows = [r for r in ledger.read_rows(ledger.ledger_path(mdir))
+                if _row_names(r.data, names)]
+    except ledger.LedgerError as err:
+        raise Usage(f'{err}') from err
+    if not rows:
+        print(f'[pm] no rows for {gid}',
+              file=sys.stderr if as_json else sys.stdout)
+        return 0
+    if as_json:
+        for row in rows:
+            print(row.line)
+        return 0
+    previous = None
+    for row in rows:
+        line = f'{row.data.get("ts", "")}  {row.data.get("kind", ""):<8}'
+        if row.data.get('kind') == ledger.KIND_STATUS:
+            line += f'  {row.data.get("from")} -> {row.data.get("to")}'
+            gap = _gap(previous, row)
+            if previous is not None and gap is not None:
+                line += f'  +{gap}s'
+            previous = row
+        print(line.rstrip())
+    status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
+    if status and status[-1].data.get('to') == ledger.terminal_state(
+            cfg, _grain_kind(gid)):
+        total = _gap(rows[0], status[-1])
+        if total is not None:
+            print(f'first row → terminal row: {total}s')
+    return 0
+
+
+def _gap(earlier, later) -> int | None:
+    """Whole seconds between two rows' stamps, or None when either will not parse.
+
+    A row whose `ts` is not a timestamp still PRINTS — it is a fact somebody
+    wrote — but it contributes no arithmetic, because a fabricated interval is
+    worse than a missing one.
+    """
+    if earlier is None:
+        return None
+    start = ledger.parse_ts(earlier.data.get('ts'))
+    end = ledger.parse_ts(later.data.get('ts'))
+    if start is None or end is None:
+        return None
+    return int((end - start).total_seconds())
+
+
 # --- dispatch -----------------------------------------------------------------
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ('-h', '--help', 'help'):
@@ -1315,6 +1671,7 @@ def main(argv: list[str]) -> int:
         'init': skills.cmd_init, 'set': cmd_set, 'get': cmd_get,
         'templates': skills.cmd_templates, 'sync': cmd_sync,
         'vocabulary': cmd_vocabulary, 'decide': cmd_decide,
+        'ledger': cmd_ledger,
     }
     fn = table.get(cmd)
     if fn is None:
