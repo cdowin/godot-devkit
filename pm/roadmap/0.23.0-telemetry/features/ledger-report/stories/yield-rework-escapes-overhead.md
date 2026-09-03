@@ -3,7 +3,7 @@ id: 0.23.0/ledger-report/yield-rework-escapes-overhead
 feature: 0.23.0/ledger-report
 milestone: "0.23.0"
 name: report prints review yield, rework, escapes and overhead shape per feature and milestone
-status: todo
+status: review
 owner:
 depends_on: []
 ---
