@@ -12,8 +12,10 @@ consumed_by: ["0.22.0/consumers-adopt"]
 # pm ledger report answers the five questions from raw rows in one table
 
 What it makes true: `pm ledger report [<milestone>] [--json]` prints the five questions as one quiet
-table (a heading, the table, one summary line) from `pm/ledger/<ms>.jsonl`, the review records and
-the bug frontmatter — and from nothing else: no git, no `.gate-reports/`, no weights (D5). Spend per
+table (a heading, the table, one summary line) from `pm/roadmap/<ms>/ledger.jsonl`, the grains'
+`started_at`/`ended_at`, the review records and the bug frontmatter — and, for a retired milestone,
+the same files out of git at the prune-log anchor (`--from <anchor>`, D6). No `.gate-reports/`, no
+weights (D5). Spend per
 grain by agent type with `size:` as a column; yield per review pass; rework from `review → wip` rows
 and dispatches after a story's `review` row; escapes from `caused_by:`; overhead shape from dispatch
 counts, `tool_calls_before_first_write`, and decision rows against the next status row. Rows whose
@@ -24,7 +26,7 @@ malformed ledger row.
 
 `pm status` is the scoreboard of WHAT is done; the report is the scoreboard of what it COST in
 tokens, tool calls and time. Neither hand-copies the other. Trend lines come from running it per
-milestone; the files under `pm/ledger/` are the cache.
+milestone, live or `--from` an anchor; git is the archive.
 
 ## Ship criterion
 

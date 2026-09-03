@@ -17,7 +17,8 @@ over `type == "assistant"` records (`input_tokens`, `output_tokens`, `cache_crea
 `cache_read_input_tokens`), counts `tool_use` content blocks by `name`, counts tool calls before the
 first `Edit|Write|MultiEdit|NotebookEdit`, takes the first and last `timestamp` as
 `started_at`/`ended_at` (+ `duration_s`), reads `message.model`, snapshots the tree (D3), and appends
-a `dispatch` (SubagentStop) or `session` (Stop) row to the building milestone's ledger. A field the
+a `dispatch` (SubagentStop) or `session` (Stop) row to the building milestone's
+`ledger.jsonl` (D6). A field the
 transcript lacks is omitted, never invented. Hand entry stays possible: `pm ledger record --grain <id>
 --agent-type <t> --tokens-in N --tokens-out N --tool-calls N --duration-s N` for a dispatch no hook
 saw. `pm ledger show <grain-id>` prints that grain's rows oldest first, `--json` for the raw lines.

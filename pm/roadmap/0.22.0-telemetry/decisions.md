@@ -90,3 +90,38 @@ where possible". A weighted or estimated number cannot be re-derived later when 
 a raw one can.
 **Rejected:** s/m/l/xl weights; a price table; `notes: baseline (pre-hook, self-reported)` rows.
 **Costs:** no before/after against 0.19.0/0.20.0. Comparisons start at the first captured milestone.
+
+## D6 — 2026-09-03 — SUPERSEDES D1 — the milestone owns its ledger at pm/roadmap/<ms>/ledger.jsonl; history is git
+
+**Decision:** the ledger is `pm/roadmap/<milestone>/ledger.jsonl`, beside `decisions.md` — the
+2026-09-02 placement, restored. `retire` removes it with the directory; a retired milestone's rows
+are read from git (`git show <prune-anchor>:pm/roadmap/<ms>/ledger.jsonl`, the anchors `ROADMAP.md`'s
+prune log already records). No `[pm] ledger_dir` key. `.gitattributes` marks
+`pm/roadmap/*/ledger.jsonl merge=union`.
+**Because:** Chris, 2026-09-03: a tree-level `pm/ledger/` is "such an easy place to drift" — a
+second home beside the milestone that nothing else in the tree reads or retires, and that every
+milestone branch appends to. Inside the directory it is one more slot the existing walkers,
+templates and `retire` already own, and when the milestone is cleaned it is out of mind. History is
+git's job, and the prune log already carries the anchor for exactly this read.
+**Rejected:** D1's `pm/ledger/<ms>.jsonl` (survives the prune, but a parallel home nothing else
+maintains). One tree-wide file (same objection, worse).
+**Costs:** cross-milestone trends need `git show` for retired milestones — `pm ledger report
+--from <anchor>` (a ledger-report story) rather than a directory listing.
+
+## D7 — 2026-09-03 — SUPERSEDES D2 — started_at and ended_at live on frontmatter, stamped by the verbs, cascading, warn never refuse
+
+**Decision:** every grain that does work carries two frontmatter timestamps, full UTC ISO-8601 at
+second resolution: `started_at:` written on FIRST entry into its working state (milestone
+`building`, feature `building`, story `wip`) and `ended_at:` written on `done` (and rewritten on a
+later `done` after a reopen). `pm feature done --cascade` stamps the stories it closes. A `done`
+with no `started_at` stamps `ended_at` and prints a warning; nothing refuses and `check pm` does not
+fail on a missing stamp. The ledger still gets every flip (`review` included), so the frontmatter
+tells the simple story and the ledger the whole one.
+**Because:** Chris, 2026-09-03: "a simple cascade … easy to tell the whole story by a simple
+walk/yaml parse". A start and an end on the grain is what a reader opening the file wants, and it is
+what a cross-milestone walk over git can read without parsing JSON lines.
+**Rejected:** D2's ledger-only timestamps (right about one home, wrong about which home a person
+reads). A stamp per status (`wip_at`, `review_at`, …): the ledger is that.
+**Costs:** two fields the resolvers do not read; `pm set` can edit them (a hand edit is a fact about
+a team, as with `reviewed:`). Bugs are NOT stamped in this milestone — their machine is
+`open → fixed → closed` and nobody asked; add later if wanted.
