@@ -124,12 +124,18 @@ def project(config: str = '', makefile: str = PROJECT_MAKEFILE):
 
 
 def make(root: Path, *args: str, **env_extra: str) -> subprocess.CompletedProcess:
-    env = dict(os.environ, **env_extra)
+    env = dict(os.environ)
     # Under `make test` the recipe's shell carries MAKELEVEL/MAKEFLAGS, and a
     # sub-make that inherits them announces 'Entering directory' ahead of the
     # one verdict line these tests read. The make under test is a top-level one.
-    for leaked in ('MAKELEVEL', 'MAKEFLAGS', 'MFLAGS'):
+    # VERBOSE is the same shape one layer up: the installed CI exports it for
+    # the whole `make milestone` step, so under it every "quiet by default"
+    # run below streamed — green under bare pytest, red where CI runs it. The
+    # default these tests speak of is VERBOSE UNSET; a case that wants the
+    # stream passes VERBOSE='1' explicitly.
+    for leaked in ('MAKELEVEL', 'MAKEFLAGS', 'MFLAGS', 'VERBOSE'):
         env.pop(leaked, None)
+    env.update(env_extra)
     return subprocess.run(['make', *args], cwd=root, text=True,
                           capture_output=True, env=env, timeout=120)
 
@@ -226,6 +232,15 @@ def test_check_with_no_extras_is_just_the_devkit_gates():
         assert done.returncode == 0, done.stdout + done.stderr
         assert not (root / '.my-scan-ran').exists()
     assert done.stdout.startswith('[CHECK]'), done.stdout
+
+
+def test_an_ambient_verbose_does_not_turn_the_quiet_run_loud(monkeypatch):
+    """The installed CI exports VERBOSE=1 for the whole `make milestone` step,
+    and this suite runs inside it: every quiet-by-default case in this file
+    streamed there and read as loud. The default is VERBOSE UNSET, whatever
+    the environment the suite was started from says."""
+    monkeypatch.setenv('VERBOSE', '1')
+    test_check_with_no_extras_is_just_the_devkit_gates()
 
 
 def test_verbose_streams_the_transcript_and_still_ends_with_the_verdict():

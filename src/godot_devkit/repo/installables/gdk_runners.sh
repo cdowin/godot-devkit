@@ -498,6 +498,12 @@ _gdk_self_test() {
 	lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-runners-selftest.XXXXXX")" || return 1
 	cd "$scratch" || return 1
+	# The corpus proves BOTH settings, each pinned on its own case; the value
+	# the caller happens to export is not part of it. Left to inherit, a
+	# `make runners-self-test VERBOSE=1` — what the installed CI exports for
+	# the whole run — streamed the cap case's eight bytes straight into this
+	# corpus's own verdict line (`01234567[gdk-runners] SELF-TEST OK …`).
+	VERBOSE=0
 	# Re-read it from the shell: a TMPDIR with a trailing slash yields `//` in
 	# the mktemp path, and every prefix comparison below would silently miss.
 	scratch="$PWD"
