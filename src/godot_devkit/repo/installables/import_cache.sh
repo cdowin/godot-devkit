@@ -110,13 +110,16 @@ USAGE_EOF
 # nanoseconds, on GNU (`stat -c`) and BSD/macOS (`stat -f`) alike. Empty when
 # neither stat answers, so the caller can fall back rather than misread.
 mtime_ns() {
-	local raw
+	local raw ns
 	raw="$(stat -c '%.9Y' "$1" 2>/dev/null)" || raw="$(stat -f '%Fm' "$1" 2>/dev/null)" || raw=''
 	case "$raw" in
-		*.*) printf '%s%s\n' "${raw%%.*}" "$(printf '%-9s' "${raw#*.}" | tr ' ' 0)" ;;
-		?*)  printf '%s000000000\n' "$raw" ;;
-		*)   printf '\n' ;;
+		*.*) ns="${raw%%.*}$(printf '%-9s' "${raw#*.}" | tr ' ' 0)" ;;
+		*)   ns="${raw}000000000" ;;
 	esac
+	# A stat that echoed its format string, or anything else non-numeric,
+	# answers nothing rather than a number the caller would compare.
+	case "$ns" in *[!0-9]*|"") ns='' ;; esac
+	printf '%s\n' "$ns"
 }
 
 # An artifact is fresh when it was written AT OR AFTER the stamp, compared at

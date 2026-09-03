@@ -125,6 +125,11 @@ def project(config: str = '', makefile: str = PROJECT_MAKEFILE):
 
 def make(root: Path, *args: str, **env_extra: str) -> subprocess.CompletedProcess:
     env = dict(os.environ, **env_extra)
+    # Under `make test` the recipe's shell carries MAKELEVEL/MAKEFLAGS, and a
+    # sub-make that inherits them announces 'Entering directory' ahead of the
+    # one verdict line these tests read. The make under test is a top-level one.
+    for leaked in ('MAKELEVEL', 'MAKEFLAGS', 'MFLAGS'):
+        env.pop(leaked, None)
     return subprocess.run(['make', *args], cwd=root, text=True,
                           capture_output=True, env=env, timeout=120)
 

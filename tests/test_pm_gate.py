@@ -607,6 +607,43 @@ class FlowRuleEdges(unittest.TestCase):
             self.assertIn('milestones are building', out)
 
 
+    def _d8_tree_with_version(self, version: str, released: str = '0.0.9'):
+        # 0.1 is building; `released` is the DONE milestone retire's lag-by-one
+        # keeps in the tree — the only id a hotfix may extend.
+        ctx = tree(milestone_status='building', story_statuses=('todo',))
+        root = ctx.__enter__()
+        model.set_field(root / 'pm/roadmap/0.1-demo/milestone.md', 'branch', 'staging')
+        write(root / f'pm/roadmap/{released}-old/milestone.md',
+              {'id': f'"{released}"', 'name': 'Old', 'status': 'done'})
+        (root / 'project.godot').write_text(
+            f'[application]\nconfig/version="{version}"\n', encoding='utf-8')
+        (root / 'devkit.toml').write_text('[pm]\nchecks = ["D8"]\n', encoding='utf-8')
+        return ctx, root
+
+    def test_d8_admits_a_hotfix_of_the_released_milestone(self):
+        # 0.0.9 shipped; 0.0.9.1 is a hotfix cut from the mainline that carries
+        # no milestone of its own — the release branch must pass the gate.
+        ctx, root = self._d8_tree_with_version('0.0.9.1')
+        try:
+            code, out = run_gate(root)
+            self.assertNotIn('(D8)', out)
+            self.assertEqual(code, 0, out)
+        finally:
+            ctx.__exit__(None, None, None)
+
+    def test_d8_refuses_a_hotfix_of_anything_but_a_released_milestone(self):
+        # 0.1.1 extends the BUILDING id — not a hotfix of anything shipped.
+        for bad in ('0.1.1', '0.9.1', '0.0.9.1a', '0.0.9.01', '0.0.9.', '0.10', '0.0.9.\u0663'):
+            with self.subTest(version=bad):
+                ctx, root = self._d8_tree_with_version(bad)
+                try:
+                    code, out = run_gate(root)
+                    self.assertEqual(code, 1, out)
+                    self.assertIn('(D8)', out)
+                finally:
+                    ctx.__exit__(None, None, None)
+
+
 class ConfigValueErrors(unittest.TestCase):
     def test_a_bad_version_pattern_is_exit_2_not_a_finding(self):
         for bad in ('version_pattern = "config/version=\\"(.*\\""',
