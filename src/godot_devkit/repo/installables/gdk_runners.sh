@@ -438,6 +438,35 @@ gdk_gate_verdict() {
 		"${1:?usage: gdk_gate_verdict <TAG> <message> <log>}" "${2-}" "${3-}"
 }
 
+# --- the compile-sweep transcript --------------------------------------------
+# compile_sweep.gd's output contract is two line shapes in a stream that also
+# carries every engine warning the boot produced. TWO runners read it — parse
+# (does every .gd compile?) and warnings (does every .gd analyze clean under
+# the promotion?) — so the readers live here, once. They read that contract
+# and nothing else, which is what lets a self-test fire them at a fixture
+# transcript where no engine exists.
+GDK_SWEEP_FAIL_PREFIX="SWEEP_FAIL "
+GDK_SWEEP_RESULT_PREFIX="SWEEP_RESULT "
+
+# gdk_sweep_result_line <log> — the LAST SWEEP_RESULT line, or empty when the
+# sweep produced none. Empty is a HARNESS failure, never a pass: a sweep that
+# printed no result proves nothing compiled.
+gdk_sweep_result_line() {
+	grep -F "$GDK_SWEEP_RESULT_PREFIX" "${1:?usage: gdk_sweep_result_line <log>}" 2>/dev/null | tail -n 1
+}
+
+# gdk_sweep_result_field <result line> <1|2> — compiled count, then total.
+gdk_sweep_result_field() {
+	printf '%s' "${1-}" | awk -v n="${2:?usage: gdk_sweep_result_field <line> <1|2>}" '{print $(n + 1)}'
+}
+
+# gdk_sweep_failed_paths <log> — every script the sweep could not compile,
+# one res:// path per line, with the marker stripped.
+gdk_sweep_failed_paths() {
+	grep -F "$GDK_SWEEP_FAIL_PREFIX" "${1:?usage: gdk_sweep_failed_paths <log>}" 2>/dev/null \
+		| sed "s/^${GDK_SWEEP_FAIL_PREFIX}//"
+}
+
 # --- the import-cache rebuild ------------------------------------------------
 # Regenerate `.godot` (the uid map + the `class_name` global registry) via a
 # headless EDITOR import pass, bounded by the shared timeout. Output is
@@ -778,6 +807,28 @@ second line' "$(cat "$log")"
 	  exit 0 )
 	_gdk_st_true 'report_dir_defect refuses a directory git tracks files in' "$?"
 
+	# --- the compile-sweep transcript readers --------------------------------
+	# A clean sweep buried in engine chatter; a failing one whose count and
+	# named paths agree; the LAST result line winning (a two-stage gate
+	# appends both stages to one transcript); and the cardinal case — no
+	# result line at all, which must read as EMPTY, never as 0/0.
+	printf 'Godot Engine v4.6.stable\nWARNING: importer chatter\nSWEEP_RESULT 412 412\n' > "$scratch/sweep.log"
+	body="$(gdk_sweep_result_line "$scratch/sweep.log")"
+	_gdk_st_eq 'sweep_result_line finds the result under engine chatter' \
+		'412/412' "$(gdk_sweep_result_field "$body" 1)/$(gdk_sweep_result_field "$body" 2)"
+	_gdk_st_eq 'sweep_failed_paths names nothing on a clean sweep' \
+		'' "$(gdk_sweep_failed_paths "$scratch/sweep.log")"
+	printf 'SWEEP_FAIL res://tests/broken.gd\nSWEEP_FAIL res://addons/tool.gd\nSWEEP_RESULT 410 412\n' > "$scratch/sweep.log"
+	_gdk_st_eq 'sweep_failed_paths strips the marker and keeps the order' \
+		'res://tests/broken.gd
+res://addons/tool.gd' "$(gdk_sweep_failed_paths "$scratch/sweep.log")"
+	printf 'SWEEP_RESULT 1 2\nSWEEP_RESULT 412 412\n' > "$scratch/sweep.log"
+	_gdk_st_eq 'sweep_result_line takes the LAST result line' \
+		'412' "$(gdk_sweep_result_field "$(gdk_sweep_result_line "$scratch/sweep.log")" 1)"
+	printf 'Godot Engine v4.6.stable\nERROR: the editor died\n' > "$scratch/sweep.log"
+	_gdk_st_eq 'a transcript with no SWEEP_RESULT reads as EMPTY, never 0/0' \
+		'' "$(gdk_sweep_result_line "$scratch/sweep.log")"
+
 	cd / || return 1
 	rm -rf "$scratch"
 	return 0
@@ -792,7 +843,8 @@ usage: source gdk_runners.sh            the normal use — a shell library
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded, gdk_timeout_is_hang,
 gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
-gdk_gate_verdict, gdk_rebuild_import_cache.
+gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
+gdk_sweep_failed_paths, gdk_rebuild_import_cache.
 USAGE_EOF
 }
 

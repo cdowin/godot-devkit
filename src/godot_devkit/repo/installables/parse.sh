@@ -59,11 +59,10 @@ GATE_SLOT="parse"
 # shapes: a GDScript parse error, and an engine ERROR naming a .gd.
 BOOT_ERROR_PATTERN='SCRIPT ERROR: Parse Error|^ERROR: .*\.gd'
 
-# Stage-2 vocabulary — compile_sweep.gd's machine-readable output contract.
-SWEEP_FAIL_PREFIX="SWEEP_FAIL "
-SWEEP_RESULT_PREFIX="SWEEP_RESULT "
-# The engine lines that say WHY a script would not compile — the actionable
-# diagnosis behind each SWEEP_FAIL path.
+# Stage 2's transcript is compile_sweep.gd's output contract, read through the
+# library's gdk_sweep_* readers — shared with warnings.sh, which sweeps the
+# same script under the analyzer promotion. The engine lines that say WHY a
+# script would not compile — the actionable diagnosis behind each failed path:
 SWEEP_DIAGNOSTIC_PATTERN='SCRIPT ERROR: Parse Error|Failed to load script|Compile Error|at: GDScript::reload'
 
 BOOT_TIMEOUT_SECONDS="${GDK_PARSE_BOOT_TIMEOUT:-120}"
@@ -77,8 +76,8 @@ The parse gate: boot the project headless and read the stream for parse
 errors, then load EVERY .gd through compile_sweep.gd and report N/N.
 
   (no argument)  run both stages
-  --self-test    prove the argument handling and the sweep-output parser
-                 without booting anything
+  --self-test    prove the argument handling without booting anything (the
+                 sweep-transcript readers are gdk_runners.sh's, proven there)
   --help         this message
 
 Env: GDK_PARSE_BOOT_TIMEOUT   seconds bounding stage 1 (default 120)
@@ -91,37 +90,14 @@ Exit: 0 clean | 1 findings | 2 harness/usage error
 USAGE_EOF
 }
 
-# --- the sweep-output parser -------------------------------------------------
-# compile_sweep.gd's contract is two line shapes in a stream that also carries
-# every engine warning the boot produced. These read that contract and nothing
-# else, so the self-test can fire them at a fixture transcript in CI — which is
-# the only way this runner's own logic is provable where no engine exists.
-
-# sweep_result_line <log> — the LAST SWEEP_RESULT line, or empty when the sweep
-# produced none. Empty is a HARNESS failure, never a pass: a sweep that printed
-# no result proves nothing compiled.
-sweep_result_line() {
-	grep -F "$SWEEP_RESULT_PREFIX" "$1" 2>/dev/null | tail -n 1
-}
-
-# sweep_result_field <result line> <1|2> — compiled count, then total.
-sweep_result_field() {
-	printf '%s' "$1" | awk -v n="$2" '{print $(n + 1)}'
-}
-
-# sweep_failed_paths <log> — every script the sweep could not compile, one
-# res:// path per line, with the marker stripped.
-sweep_failed_paths() {
-	grep -F "$SWEEP_FAIL_PREFIX" "$1" 2>/dev/null | sed "s/^${SWEEP_FAIL_PREFIX}//"
-}
-
 # --- --self-test -------------------------------------------------------------
 # Two stages of this runner boot an engine, and this package never does (and a
 # consumer's CI may have none). So the corpus covers what the runner OWNS: how
-# it reads its arguments, and whether it reads a sweep transcript correctly —
-# including the transcript shape that must NOT be read as a pass.
+# it reads its arguments. How it reads a sweep transcript — including the
+# shape that must NOT be read as a pass — is the library's contract, and the
+# library's own corpus fires those readers at fixture transcripts.
 self_test() {
-	local scratch log line rc failures=0 cases=0
+	local rc failures=0 cases=0
 
 	cases=$((cases + 1))
 	rc=0; bash "$0" --help >/dev/null 2>&1 || rc=$?
@@ -138,61 +114,6 @@ self_test() {
 	cases=$((cases + 1))
 	rc=0; bash "$0" '' >/dev/null 2>&1 || rc=$?
 	[ "$rc" -eq 2 ] || { echo "  MISS — an EMPTY argument should exit 2, got $rc" >&2; failures=$((failures + 1)); }
-
-	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-parse-selftest.XXXXXX")" || return 1
-	log="$scratch/sweep.log"
-
-	# A clean sweep, buried in the engine chatter a real transcript carries.
-	cat > "$log" <<'FIXTURE_EOF'
-Godot Engine v4.6.stable - https://godotengine.org
-WARNING: something the importer says
-SWEEP_RESULT 412 412
-FIXTURE_EOF
-	cases=$((cases + 1))
-	line="$(sweep_result_line "$log")"
-	[ "$(sweep_result_field "$line" 1)/$(sweep_result_field "$line" 2)" = "412/412" ] \
-		|| { echo "  MISS — a clean sweep must parse as 412/412, got '$line'" >&2; failures=$((failures + 1)); }
-
-	cases=$((cases + 1))
-	[ -z "$(sweep_failed_paths "$log")" ] \
-		|| { echo "  MISS — a clean sweep must name no failures" >&2; failures=$((failures + 1)); }
-
-	# A sweep with failures. The count and the named paths must agree, and the
-	# marker must be stripped so the report reads as paths.
-	cat > "$log" <<'FIXTURE_EOF'
-SCRIPT ERROR: Parse Error: Identifier "nope" not declared in the current scope.
-   at: GDScript::reload (res://tests/integration/broken.gd:12)
-SWEEP_FAIL res://tests/integration/broken.gd
-SWEEP_FAIL res://addons/thing/tool.gd
-SWEEP_RESULT 410 412
-FIXTURE_EOF
-	cases=$((cases + 1))
-	line="$(sweep_result_line "$log")"
-	[ "$(sweep_result_field "$line" 1)/$(sweep_result_field "$line" 2)" = "410/412" ] \
-		|| { echo "  MISS — a failing sweep must parse as 410/412, got '$line'" >&2; failures=$((failures + 1)); }
-
-	cases=$((cases + 1))
-	[ "$(sweep_failed_paths "$log")" = "res://tests/integration/broken.gd
-res://addons/thing/tool.gd" ] \
-		|| { echo "  MISS — the failed paths did not come back stripped, got '$(sweep_failed_paths "$log")'" >&2; failures=$((failures + 1)); }
-
-	# The cardinal case: a transcript with NO result line. A parser that
-	# defaulted to 0/0 here would report a clean sweep over a sweep that never
-	# ran — the false PASS this whole gate exists to make impossible.
-	cases=$((cases + 1))
-	printf 'Godot Engine v4.6.stable\nERROR: the editor died\n' > "$log"
-	[ -z "$(sweep_result_line "$log")" ] \
-		|| { echo "  MISS — a transcript with no SWEEP_RESULT must parse as empty" >&2; failures=$((failures + 1)); }
-
-	# A LATER result line wins: the wrapper appends both stages to one
-	# transcript, and a cold-cache retry can leave two.
-	cases=$((cases + 1))
-	printf '%s\n' "${SWEEP_RESULT_PREFIX}1 2" "${SWEEP_RESULT_PREFIX}412 412" > "$log"
-	line="$(sweep_result_line "$log")"
-	[ "$(sweep_result_field "$line" 1)" = "412" ] \
-		|| { echo "  MISS — the LAST result line must win, got '$line'" >&2; failures=$((failures + 1)); }
-
-	rm -rf "$scratch"
 
 	if [ "$failures" -eq 0 ]; then
 		echo "[$GATE_TAG] SELF-TEST OK — $cases case(s)"
@@ -280,7 +201,7 @@ if gdk_timeout_is_hang "$SWEEP_EXIT"; then
 	exit 1
 fi
 
-RESULT_LINE="$(sweep_result_line "$LOG")"
+RESULT_LINE="$(gdk_sweep_result_line "$LOG")"
 if [ -z "$RESULT_LINE" ]; then
 	echo "[$GATE_TAG] FAIL — the compile sweep produced no result line; it cannot prove anything compiled."
 	echo "    Is $GDK_PARSE_SWEEP_SCRIPT where GDK_PARSE_SWEEP_SCRIPT says it is?"
@@ -289,9 +210,9 @@ if [ -z "$RESULT_LINE" ]; then
 	exit 1
 fi
 
-COMPILED="$(sweep_result_field "$RESULT_LINE" 1)"
-TOTAL="$(sweep_result_field "$RESULT_LINE" 2)"
-FAILED_PATHS="$(sweep_failed_paths "$LOG")"
+COMPILED="$(gdk_sweep_result_field "$RESULT_LINE" 1)"
+TOTAL="$(gdk_sweep_result_field "$RESULT_LINE" 2)"
+FAILED_PATHS="$(gdk_sweep_failed_paths "$LOG")"
 
 if [ -n "$FAILED_PATHS" ]; then
 	echo "[$GATE_TAG] FAIL — ${COMPILED}/${TOTAL} scripts compiled; these did not:"

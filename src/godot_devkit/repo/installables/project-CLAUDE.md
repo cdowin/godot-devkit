@@ -32,7 +32,7 @@ target, add the target.
 | When | Run |
 |---|---|
 | first thing on a cold machine | `make doctor` — the toolchain census, with a fix for anything missing |
-| per change | `make precommit` — `check` + `parse` + `lint` + `unit` + `smoke` |
+| per change | `make precommit` — `check` + `parse` + `lint` + `unit` + `integration-diff` (the scenarios whose `## covers:` header names what the change touched, plus smoke) |
 | slicing while you work | `make unit SYS="<system>"`, `make scenario NAME=<name>`, `make parse` |
 | before a release | `make milestone` — the full gate, and what CI runs |
 
@@ -40,7 +40,7 @@ The static gates are `make check` (the devkit roster plus this project's own,
 named in `devkit.toml` under `[gates] extra`), `make pm-scan`, `make uid-scan`,
 `make hermetic-scan`, `make hooks-self-test` and `make runners-self-test`. The
 Godot-booting ones are `make parse`, `make lint`, `make warnings`, `make unit`,
-`make integration`, `make scenario`, `make smoke` and `make capture` — each
+`make integration`, `make integration-diff`, `make scenario`, `make smoke` and `make capture` — each
 runs sandboxed through `tools/dev/gdk_runners.sh`, which gives every headless
 run its own self-destroying HOME so a boot can never reach the real `user://`.
 
