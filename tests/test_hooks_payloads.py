@@ -812,3 +812,257 @@ def test_a_hook_fed_garbage_or_another_tool_fails_open(hooks_repo, hook):
     other = subprocess.run(['bash', str(hooks_repo / hook)], input=event,
                            text=True, capture_output=True)
     assert other.returncode == 0
+
+
+# =============================================================================
+# The 0.22.0 corpus: cc-ledger-subagent (SubagentStop) and cc-ledger-session
+# (Stop) — the two couriers, installed into a temp repo that has a REAL PM
+# tree and a Makefile whose `pm` target runs this source tree's CLI, then fired
+# at the exact JSON Claude Code delivers.
+#
+# The assertion is always the same pair, because it is the whole contract: what
+# landed in the milestone's ledger.jsonl, and that the hook exited 0 either
+# way. A hook that blocks a stop is broken even when it is right, and a hook
+# that invents a row is broken even when it exits 0.
+# =============================================================================
+
+LEDGER_SUBAGENT = 'tools/hooks/cc-ledger-subagent.sh'
+LEDGER_SESSION = 'tools/hooks/cc-ledger-session.sh'
+TRANSCRIPTS = Path(__file__).parent / 'fixtures' / 'transcripts'
+DISPATCH_JSONL = TRANSCRIPTS / 'subagent-dispatch.jsonl'
+SESSION_JSONL = TRANSCRIPTS / 'main-session.jsonl'
+LEDGER_REL = 'pm/roadmap/0.1-demo/ledger.jsonl'
+
+# The ids the payloads below carry. Spelled once so a test asserting they were
+# COPIED cannot accidentally assert against a value the verb derived.
+PAYLOAD_SESSION_ID = '11111111-2222-3333-4444-555555555555'
+PAYLOAD_AGENT_ID = 'ag-0c097f0217026051'
+PAYLOAD_AGENT_TYPE = 'developer'
+
+# `.PHONY: pm` is load-bearing, not decoration: a PM tree IS a `pm/` directory
+# at the repo root, so an un-phony `pm` target is one make calls up to date —
+# the vehicle would exit 0, print nothing, and write no row. Both hooks say so
+# in their config header; this Makefile is the proof it matters.
+PM_MAKEFILE = ('.PHONY: pm\n'
+               'pm:\n'
+               '\t@PYTHONPATH={src} {python} -m godot_devkit.cli pm $(ARGS)\n')
+
+FRONTMATTER = {
+    'pm/roadmap/0.1-demo/milestone.md':
+        {'id': '"0.1"', 'name': 'Demo', 'status': 'building'},
+    'pm/roadmap/0.1-demo/features/alpha/feature.md':
+        {'id': '0.1/alpha', 'milestone': '"0.1"', 'name': 'Alpha',
+         'status': 'building', 'reviewed': ''},
+    'pm/roadmap/0.1-demo/features/alpha/stories/s0.md':
+        {'id': '0.1/alpha/s0', 'feature': '0.1/alpha', 'milestone': '"0.1"',
+         'name': 'S0', 'status': 'wip'},
+}
+
+
+def ledger_repo(tmp_path: Path, name: str = 'repo',
+                with_makefile: bool = True) -> Path:
+    """The corpus installed into a repo with one `building` milestone.
+
+    Deliberately built by hand rather than through `pm new`: the hooks are the
+    thing under test, and a scaffolder failure here would read as a hook
+    failure.
+    """
+    root = corpus_repo(tmp_path, name)
+    for rel, front in FRONTMATTER.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = ['---'] + [f'{k}: {v}' for k, v in front.items()] + ['---', '', 'x', '']
+        path.write_text('\n'.join(body), encoding='utf-8')
+    if with_makefile:
+        (root / 'Makefile').write_text(
+            PM_MAKEFILE.format(src=REPO_ROOT / 'src', python=sys.executable),
+            encoding='utf-8')
+    return root
+
+
+def subagent_event(root: Path, transcript: Path | str | None = DISPATCH_JSONL,
+                   **over) -> dict:
+    """The SubagentStop payload, every documented key present."""
+    event = {
+        'session_id': PAYLOAD_SESSION_ID,
+        'transcript_path': str(SESSION_JSONL),
+        'cwd': str(root),
+        'permission_mode': 'acceptEdits',
+        'hook_event_name': 'SubagentStop',
+        'stop_hook_active': False,
+        'agent_id': PAYLOAD_AGENT_ID,
+        'agent_type': PAYLOAD_AGENT_TYPE,
+        'agent_transcript_path': str(transcript) if transcript else None,
+        # Never read — the agent's narration, the one source this SDLC refuses
+        # to trust. It is on the payload so a test can prove it is ignored.
+        'last_assistant_message': 'I used about 12000 tokens and 4 tools.',
+        'background_tasks': [],
+        'session_crons': [],
+    }
+    event.update(over)
+    return {k: v for k, v in event.items() if v is not None}
+
+
+def session_event(root: Path, transcript: Path | str | None = SESSION_JSONL,
+                  **over) -> dict:
+    """The Stop payload — no agent_id, no agent_type, no agent transcript."""
+    event = {
+        'session_id': PAYLOAD_SESSION_ID,
+        'transcript_path': str(transcript) if transcript else None,
+        'cwd': str(root),
+        'permission_mode': 'acceptEdits',
+        'hook_event_name': 'Stop',
+        'stop_hook_active': False,
+        'last_assistant_message': 'Done.',
+        'background_tasks': [],
+        'session_crons': [],
+    }
+    event.update(over)
+    return {k: v for k, v in event.items() if v is not None}
+
+
+def fire_ledger(root: Path, hook: str, event: dict | str,
+                env: dict | None = None) -> subprocess.CompletedProcess:
+    payload = event if isinstance(event, str) else json.dumps(event)
+    return subprocess.run(['bash', str(root / hook)], input=payload, text=True,
+                          capture_output=True, cwd=root, env=env or CLEAN_ENV)
+
+
+def ledger_rows(root: Path) -> list[dict]:
+    path = root / LEDGER_REL
+    if not path.is_file():
+        return []
+    return [json.loads(line)
+            for line in path.read_text(encoding='utf-8').splitlines() if line]
+
+
+# --- cc-ledger-subagent: the dispatch row -------------------------------------
+def test_a_subagent_stop_payload_records_exactly_one_dispatch_row(tmp_path):
+    """The ship criterion, end to end: the event Claude Code delivers goes in,
+    one `dispatch` row comes out, and every id on it was COPIED from the
+    payload rather than derived from the transcript."""
+    root = ledger_repo(tmp_path)
+    done = fire_ledger(root, LEDGER_SUBAGENT, subagent_event(root))
+    assert done.returncode == 0, done.stderr
+    rows = ledger_rows(root)
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row['kind'] == 'dispatch'
+    assert row['agent_type'] == PAYLOAD_AGENT_TYPE
+    assert row['agent_id'] == PAYLOAD_AGENT_ID
+    assert row['session_id'] == PAYLOAD_SESSION_ID
+    # The transcript it was handed is the AGENT's, not the session's: the two
+    # differ, and a hook reading `transcript_path` here would file the
+    # orchestrator's totals as a dispatch.
+    assert row['tools'] == {'Bash': 22, 'Write': 1}, row
+    # D3: the tree's live state, verbatim, at the instant of the row.
+    assert row['tree']['stories_wip'] == ['0.1/alpha/s0'], row
+
+
+def test_the_subagent_hook_never_reads_the_agents_own_narration(tmp_path):
+    """`last_assistant_message` claims 12000 tokens and 4 tools; the row must
+    carry the transcript's numbers and none of the agent's."""
+    root = ledger_repo(tmp_path)
+    assert fire_ledger(root, LEDGER_SUBAGENT,
+                       subagent_event(root)).returncode == 0
+    row = ledger_rows(root)[0]
+    assert row['tool_calls'] == 23, row
+    assert row['usage']['output'] == 5829, row
+
+
+# --- cc-ledger-session: the session row ---------------------------------------
+def test_a_stop_payload_records_exactly_one_session_row(tmp_path):
+    root = ledger_repo(tmp_path)
+    done = fire_ledger(root, LEDGER_SESSION, session_event(root))
+    assert done.returncode == 0, done.stderr
+    rows = ledger_rows(root)
+    assert len(rows) == 1, rows
+    assert rows[0]['kind'] == 'session'
+    assert rows[0]['session_id'] == PAYLOAD_SESSION_ID
+    # A Stop event has no agent, so the row carries neither agent field —
+    # absent, never an empty string standing in for one.
+    assert 'agent_id' not in rows[0], rows[0]
+    assert 'agent_type' not in rows[0], rows[0]
+
+
+# --- the fail-open matrix: no row, exit 0, and it SAYS SO ----------------------
+@pytest.mark.parametrize('hook,event', [
+    (LEDGER_SUBAGENT, 'agent_transcript_path'),
+    (LEDGER_SESSION, 'transcript_path'),
+])
+def test_a_payload_with_no_transcript_path_writes_no_row_and_says_why(
+        tmp_path, hook, event):
+    """An older Claude Code, or an event shape that carries no path. No row —
+    and never an invented one — but the operator must be able to find out why
+    the ledger is empty."""
+    root = ledger_repo(tmp_path)
+    build = subagent_event if hook == LEDGER_SUBAGENT else session_event
+    done = fire_ledger(root, hook, build(root, transcript=None))
+    assert done.returncode == 0
+    assert ledger_rows(root) == []
+    assert f'carries no {event}' in done.stderr, done.stderr
+    assert len(done.stderr.strip().splitlines()) == 1, done.stderr
+
+
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+def test_a_payload_that_is_not_json_writes_no_row_and_says_why(tmp_path, hook):
+    root = ledger_repo(tmp_path)
+    done = fire_ledger(root, hook, 'not json {{{')
+    assert done.returncode == 0
+    assert ledger_rows(root) == []
+    assert 'not JSON this hook can read' in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+def test_a_repo_with_no_makefile_writes_no_row_and_says_why(tmp_path, hook):
+    """Installed ahead of the dev loop there is no vehicle to reach the verb
+    through. Fail OPEN, out loud — and never pretend a row was written."""
+    root = ledger_repo(tmp_path, with_makefile=False)
+    build = subagent_event if hook == LEDGER_SUBAGENT else session_event
+    done = fire_ledger(root, hook, build(root))
+    assert done.returncode == 0
+    assert ledger_rows(root) == []
+    assert 'has no Makefile' in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+def test_a_tilde_prefixed_transcript_path_is_expanded(tmp_path, hook):
+    """Claude Code may deliver `~/.claude/projects/…`. The shell does not
+    expand a tilde that arrives inside a variable, so the hook must — an
+    unexpanded one reaches the verb as a relative path that is not a file, and
+    the row is silently lost."""
+    home = tmp_path / 'home'
+    home.mkdir()
+    source = DISPATCH_JSONL if hook == LEDGER_SUBAGENT else SESSION_JSONL
+    shutil.copy(source, home / 'transcript.jsonl')
+    root = ledger_repo(tmp_path)
+    build = subagent_event if hook == LEDGER_SUBAGENT else session_event
+    done = fire_ledger(root, hook, build(root, transcript='~/transcript.jsonl'),
+                       env={**CLEAN_ENV, 'HOME': str(home)})
+    assert done.returncode == 0, done.stderr
+    assert len(ledger_rows(root)) == 1, done.stderr
+
+
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+def test_a_refusal_from_the_verb_is_passed_through_and_still_exits_0(
+        tmp_path, hook):
+    """`--from-transcript <not a file>` is a refusal the VERB owns. The hook
+    neither pre-empts it nor swallows it: the sentence reaches the hook log
+    and the stop is not blocked."""
+    root = ledger_repo(tmp_path)
+    build = subagent_event if hook == LEDGER_SUBAGENT else session_event
+    done = fire_ledger(root, hook, build(root, transcript='/nope/absent.jsonl'))
+    assert done.returncode == 0
+    assert ledger_rows(root) == []
+    assert 'is not a file' in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+def test_the_ledger_hooks_replay_their_own_corpus(tmp_path, hook):
+    """`--self-test` is the shipped proof, and it must pass as INSTALLED."""
+    root = ledger_repo(tmp_path)
+    done = subprocess.run(['bash', str(root / hook), '--self-test'],
+                          capture_output=True, text=True, cwd=root,
+                          env=CLEAN_ENV)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert 'SELF-TEST OK' in done.stdout, done.stdout

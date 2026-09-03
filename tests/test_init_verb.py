@@ -68,6 +68,8 @@ WRITES = (
     'tools/hooks/cc-godot-sandbox.sh',
     'tools/hooks/cc-stop-gate.sh',
     'tools/hooks/cc-write-confine.sh',
+    'tools/hooks/cc-ledger-subagent.sh',
+    'tools/hooks/cc-ledger-session.sh',
     'tools/hooks/pre-push',
     'tools/hooks/prepare-commit-msg',
     'tools/dev/agent-worktree.sh',
