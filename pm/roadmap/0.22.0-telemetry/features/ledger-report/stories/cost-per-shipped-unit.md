@@ -3,7 +3,7 @@ id: 0.22.0/ledger-report/cost-per-shipped-unit
 feature: 0.22.0/ledger-report
 milestone: "0.22.0"
 name: report prints raw tokens, tool calls, dispatches and wall-clock per story, feature and bug, by agent type
-status: wip
+status: review
 owner:
 depends_on: []
 ---

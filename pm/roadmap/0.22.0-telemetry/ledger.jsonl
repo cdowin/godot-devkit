@@ -20,3 +20,4 @@
 {"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.22.0/ledger","from":"building","to":"review"}
 {"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.22.0/review-record-shape","from":"building","to":"review"}
 {"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.22.0/usage-capture","from":"building","to":"review"}
+{"ts":"2026-09-03T22:59:57Z","kind":"status","grain":"0.22.0/ledger-report/cost-per-shipped-unit","from":"wip","to":"review"}
