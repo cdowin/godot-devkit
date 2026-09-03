@@ -3,7 +3,7 @@ id: 0.22.0/review-record-shape/the-verdict-block
 feature: 0.22.0/review-record-shape
 milestone: "0.22.0"
 name: reviewer and simplifier records carry one parseable verdict block with findings by severity and disposition
-status: todo
+status: review
 owner:
 depends_on: []
 ---
