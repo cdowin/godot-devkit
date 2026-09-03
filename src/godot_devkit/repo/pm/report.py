@@ -32,26 +32,38 @@ THREE RULES THE TABLE KEEPS:
     labelled beyond the heading that says what is true of it: it names no
     grain.
 
-Exit codes are the CLI's; the only failure this module can produce is a
-`ledger.LedgerError` from a line that will not parse, and nothing here ever
-fails on a NUMBER.
+Exit codes are the CLI's, and this module can fail in exactly two ways, both
+of them about a document that will not PARSE and neither of them about a
+number: a `ledger.LedgerError` from a ledger line, and a `RecordError` from a
+review record whose verdict block exists and cannot be read correctly. A
+record with no block at all is neither — it is listed, by name, as a pass
+nobody wrote a block for.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import NamedTuple
 
-from godot_devkit.repo.pm import ledger, model
+from godot_devkit.repo.pm import ledger, model, verdict
 
 # The two line shapes a consumer greps (hard rule 6): the heading and the
 # summary. Both carry the milestone id, so a report of two milestones
 # concatenated is still attributable line by line.
 HEADING_PREFIX = '[ledger:report]'
 
-# What a section calls itself in `--json` and in its own heading.
+# What a section calls itself in `--json` and in its own heading. The five
+# questions of `pm/roadmap/<ms>/milestone.md`, in the order it asks them.
 SECTION_SPEND = 'spend'
 SPEND_TITLE = 'spend per grain'
+SECTION_YIELD = 'yield'
+YIELD_TITLE = 'yield per review pass'
+SECTION_REWORK = 'rework'
+REWORK_TITLE = 'rework'
+SECTION_ESCAPES = 'escapes'
+ESCAPES_TITLE = 'escapes'
+SECTION_OVERHEAD = 'overhead'
+OVERHEAD_TITLE = 'overhead shape'
 
 # Printed for a NUMBER nobody recorded. A blank cell would read as zero at a
 # glance and a `0` would BE a lie; `-` is the third thing, and it is the same
@@ -61,6 +73,11 @@ DASH = '-'
 # The milestone has no `ledger.jsonl` at all — no rows have ever been written
 # for it. A fact, not a failure: exit 0, one line, no table of dashes.
 NO_LEDGER = 'no ledger'
+
+# A section that found nothing to count. One line, never a table of zeros: a
+# `0` in a column is a measurement, and a grid of them under a heading reads
+# as one — which is the same lie an empty census printing PASS tells.
+NO_DATA = 'no data'
 
 # Two spaces between columns, `--` before a block heading — the shape
 # `pm status` already uses for its phase buckets.
@@ -107,6 +124,65 @@ SIZE_COLUMN = 'size'
 TOTAL_COLUMN = 'total_s'
 NO_GRAIN_TITLE = 'rows naming no grain'
 
+# Section 2's columns and block titles. `verdict.DISPOSITION_KINDS` supplies
+# the three disposition columns, so a fourth kind added there appears here
+# rather than being counted into nothing.
+FEATURE_COLUMN = 'feature'
+RECORD_COLUMN = 'record'
+VERDICT_COLUMN = 'verdict'
+FINDINGS_COLUMN = 'findings'
+SEVERITY_COLUMN = 'severity'
+TARGET_COLUMN = 'target'
+VERDICT_TITLE = 'verdict'
+SEVERITY_TITLE = 'findings by severity'
+DEFERRED_TITLE = 'deferred to'
+
+# Section 3's. The two story states a reopen is made of are NAMED, and checked
+# against the configured vocabulary before the column is filled: a project that
+# renamed either gets `-`, because a `0` would say "nothing was reopened" about
+# a transition this rule cannot see.
+REVIEW_STATE = 'review'
+WIP_STATE = 'wip'
+STORY_COLUMN = 'story'
+REOPENS_COLUMN = 'reopens'
+AFTER_REVIEW_COLUMN = 'after_review'
+RECORDS_COLUMN = 'records'
+REOPEN_TITLE = 'story'
+DISTRIBUTION_TITLE = 'verdict distribution'
+
+# Section 4's. `caused_by:` is the bug frontmatter field the review-record
+# feature added; `caught_in:` is a different fact and is not read here.
+CAUSED_BY_FIELD = 'caused_by'
+CAUSE_COLUMN = 'caused_by'
+BUG_COLUMN = 'bug'
+STATUS_COLUMN = 'status'
+FEATURE_STATUS_COLUMN = 'feature_status'
+ESCAPE_TITLE = 'bugs naming a cause'
+
+# Section 5's. The three row keys it reads by name, and the separator that
+# turns the per-dispatch list into one cell.
+BEFORE_WRITE_KEY = 'tool_calls_before_first_write'
+TOOL_CALLS_KEY = 'tool_calls'
+OUTPUT_KEY = 'output'
+LIST_SEPARATOR = ','
+DISPATCHES_COLUMN = 'dispatches'
+BEFORE_WRITE_COLUMN = 'before_first_write'
+CALLS_COLUMN = 'calls'
+DECISIONS_COLUMN = 'decisions'
+ENTRY_COLUMN = 'entry'
+TS_COLUMN = 'ts'
+NEXT_STATUS_COLUMN = 'next_status_s'
+SESSION_COLUMN = 'session_id'
+# The delta columns are HEADED by the keys they diff — `out` is section 1's
+# spelling of `usage.output`, taken from its table rather than respelled, so a
+# reader comparing the two sections is reading one word.
+OUT_DELTA_COLUMN = USAGE_LABELS[OUTPUT_KEY]
+TOOL_CALLS_COLUMN = TOOL_CALLS_KEY
+BEFORE_WRITE_TITLE = 'story'
+DECISION_COUNT_TITLE = 'decisions per grain'
+DECISION_GAP_TITLE = 'decision to next status row'
+SESSION_TITLE = 'session deltas'
+
 LEFT, RIGHT = 'left', 'right'
 
 
@@ -120,10 +196,13 @@ class Grain(NamedTuple):
 class Section(NamedTuple):
     """One of the milestone's five questions: its data, and its lines.
 
-    The registry below holds one entry per section and `build`/`render` walk
-    it, so section 2 (yield), 3 (rework), 4 (escapes) and 5 (overhead shape)
-    are each ONE pair of functions and one row here — never another branch
-    inside this one. Section 1 is all that ships in this story.
+    The registry at the foot of this file holds one entry per section and
+    `build`/`render` walk it, so section 1 (spend), 2 (yield), 3 (rework), 4
+    (escapes) and 5 (overhead shape) are each ONE pair of functions and one row
+    there — never another branch inside one of them. `data` returns the
+    section's own keys and `lines` reads the WHOLE object back, so a section
+    may print a number another section computed and none of them may recompute
+    one.
     """
     name: str
     data: Callable[[model.PmConfig, str, Path, list], dict]
@@ -435,16 +514,487 @@ def spend_lines(cfg: model.PmConfig, data: dict) -> list[str]:
     return out
 
 
-# The registry section 2 extends: one row per question, one pair of functions.
-SECTIONS = (Section(SECTION_SPEND, spend_data, spend_lines),)
+# --- the review records (sections 2 and 3) ------------------------------------
+# Where one feature's record is, in the order this looks: the `reviewed:`
+# pointer `model.review_record_for` resolves — the mechanism `check pm` and
+# `pm validate` already own, including the slug fallback a project may turn on
+# — and then `features/<slug>/review.md` beside the feature document, the slot
+# `pm new` scaffolds and `model.FEATURE_OPTIONAL_SLOTS` names. Not a guess and
+# not a search: two named slots, tried in one order, and the table PRINTS the
+# path it read, so a reader never has to ask which of the two answered.
+NO_VERDICT = 'no verdict block'
+
+
+class RecordError(Exception):
+    """A review record whose verdict block will not parse. Names record + line.
+
+    The one refusal sections 2-5 make on content, and it is not a number. A
+    block that EXISTS and cannot be read correctly (`verdict.MalformedVerdict`)
+    reported as a yield of nothing would be hard rule 4's read-side sin with a
+    column header on it — a pass that raised five findings printed as a pass
+    that raised none. A record with NO block is the other thing entirely: that
+    is `verdict.NoVerdict`, it is a fact about the pass, and it is listed.
+    """
+
+
+def review_records(cfg: model.PmConfig, mid: str,
+                   mdir: Path) -> list[tuple[str, str, Path]]:
+    """(feature id, the path as the report prints it, the path) per record."""
+    out: list[tuple[str, str, Path]] = []
+    for ffile in model.feature_files(mdir):
+        fid = (model.unquote(model.field_of(ffile, 'id'))
+               or f'{mid}/{ffile.parent.name}')
+        rel = model.review_record_for(cfg, fid)
+        path = (cfg.root / rel) if rel else None
+        if path is None:
+            beside = ffile.parent / model.REVIEW_FILE_NAME
+            if beside.is_file():
+                path, rel = beside, cfg.rel(beside)
+        if path is not None and rel is not None:
+            out.append((fid, rel, path))
+    # By feature id, not by the order the walker returned: the table's order
+    # is a contract of this file, and a walker's is a fact about a filesystem.
+    out.sort(key=lambda found: found[0])
+    return out
+
+
+def parsed_records(cfg: model.PmConfig, mid: str,
+                   mdir: Path) -> list[tuple[str, str, object]]:
+    """Every record, parsed: `None` in the third slot when it carries no block.
+
+    Sections 2 and 3 both call this and both parse the same handful of files.
+    That is the registry's shape holding — one section is one pair of functions
+    over the tree and the rows, never a pipeline stage that has to run first —
+    and re-reading a record cannot produce two answers, because `verdict.parse`
+    is the only reader either of them has.
+    """
+    out: list[tuple[str, str, object]] = []
+    for fid, rel, path in review_records(cfg, mid, mdir):
+        try:
+            text = model.read_raw(path)
+        except (OSError, UnicodeDecodeError) as err:
+            raise RecordError(f'{rel} could not be read ({err})') from err
+        try:
+            out.append((fid, rel, verdict.parse(text)))
+        except verdict.NoVerdict:
+            out.append((fid, rel, None))
+        except verdict.MalformedVerdict as err:
+            raise RecordError(f'{rel}: line {err.lineno}: {err.why}\n'
+                              f'    {err.line}') from err
+    return out
+
+
+def _tally(values: Iterable) -> dict:
+    """Count per distinct value. The only thing this module does to a label."""
+    counts: dict = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _section(mid: str, title: str, census: str,
+             blocks: list[tuple[str, tuple, tuple, list]]) -> list[str]:
+    """One section: its heading, then its blocks — or ONE line when it has none.
+
+    `no data` rather than a table of zeros is the story's gotcha, and it is the
+    same distinction the columns keep: a section with nothing in it has not
+    measured zero of anything, and a grid of `0`s would read as if it had.
+    Inside a section that DID find rows, an empty block still prints its
+    `-- <title> (0)` heading, exactly as section 1's do — there the census is
+    beside the blocks that have content, so it says "and none of these".
+    """
+    out = ['', f'{HEADING_PREFIX} {mid} — {title} — {census}']
+    if not any(rows for _, _, _, rows in blocks):
+        out.append(NO_DATA)
+        return out
+    for btitle, headers, aligns, rows in blocks:
+        out.append('')
+        out.extend(_table(btitle, headers, aligns, rows))
+    return out
+
+
+# --- section 2: yield per review pass -----------------------------------------
+def yield_data(cfg: model.PmConfig, mid: str, mdir: Path,
+               rows: list) -> dict:
+    """Section 2 as data: one entry per review record under the milestone.
+
+    Counting only, over the block's own closed sets: findings per severity,
+    dispositions per kind, deferrals per target grain. The disposition is read
+    as `disposition_kind` and NEVER as the shape of its value — `landed <hash>`
+    and `landed in-place` are one column, because a reviewer in this SDLC fixes
+    in place and never commits (SDLC § 2), so counting only the hash form would
+    under-count exactly the findings that were acted on.
+
+    Spend is NOT joined in here. Section 1 already splits every grain's tokens
+    by `agent_type`, and picking the types that are "reviewer-shaped" out of
+    that split would be a LABEL over an open set of agent names (D5) — the one
+    thing this module may not do. The reviewer's spend is in section 1, under
+    the feature, beside its own agent type.
+    """
+    records = []
+    for fid, rel, parsed in parsed_records(cfg, mid, mdir):
+        entry = {'feature': fid, 'record': rel, 'verdict': None,
+                 'findings': None, 'severities': {}, 'deferred': [],
+                 'dispositions': {kind: None
+                                  for kind in verdict.DISPOSITION_KINDS}}
+        if parsed is not None:
+            found = parsed.findings
+            entry['verdict'] = parsed.verdict
+            entry['findings'] = len(found)
+            entry['severities'] = {
+                sev: n for sev, n in
+                sorted(_tally(f.severity for f in found).items(),
+                       key=lambda kv: verdict.SEVERITIES.index(kv[0]))}
+            entry['dispositions'] = {
+                kind: sum(1 for f in found if f.disposition_kind == kind)
+                for kind in verdict.DISPOSITION_KINDS}
+            entry['deferred'] = [
+                {'target': target, 'findings': n} for target, n in
+                sorted(_tally(f.disposition_value for f in found
+                              if f.disposition_kind == verdict.DEFERRED
+                              ).items())]
+        records.append(entry)
+    return {SECTION_YIELD: {
+        'records': records,
+        'totals': {'records': len(records),
+                   'findings': sum(r['findings'] or 0 for r in records)}}}
+
+
+def yield_lines(cfg: model.PmConfig, data: dict) -> list[str]:
+    """Section 2 as lines: the pass, its severities, and where it deferred."""
+    section = data[SECTION_YIELD]
+    records = section['records']
+    passes = [(r['feature'], r['record'], r['verdict'] or NO_VERDICT,
+               _cell(r['findings']),
+               *(_cell(r['dispositions'][kind])
+                 for kind in verdict.DISPOSITION_KINDS))
+              for r in records]
+    severities = [(r['feature'], sev, str(n))
+                  for r in records for sev, n in r['severities'].items()]
+    deferred = sorted((d['target'], r['feature'], str(d['findings']))
+                      for r in records for d in r['deferred'])
+    totals = section['totals']
+    return _section(
+        data['milestone'], YIELD_TITLE,
+        f'{totals["records"]} record(s), {totals["findings"]} finding(s)',
+        [(f'{VERDICT_TITLE} ({len(passes)})',
+          (FEATURE_COLUMN, RECORD_COLUMN, VERDICT_COLUMN, FINDINGS_COLUMN,
+           *verdict.DISPOSITION_KINDS),
+          (LEFT, LEFT, LEFT) + (RIGHT,) * (1 + len(verdict.DISPOSITION_KINDS)),
+          passes),
+         (f'{SEVERITY_TITLE} ({len(severities)})',
+          (FEATURE_COLUMN, SEVERITY_COLUMN, FINDINGS_COLUMN),
+          (LEFT, LEFT, RIGHT), severities),
+         (f'{DEFERRED_TITLE} ({len(deferred)})',
+          (TARGET_COLUMN, FEATURE_COLUMN, FINDINGS_COLUMN),
+          (LEFT, LEFT, RIGHT), deferred)])
+
+
+# --- section 3: rework --------------------------------------------------------
+def _after(row, moment) -> bool:
+    """True when this row's stamp is later than `moment`, and it parses."""
+    ts = ledger.parse_ts(row.data.get('ts'))
+    return ts is not None and ts > moment
+
+
+def rework_data(cfg: model.PmConfig, mid: str, mdir: Path,
+                rows: list) -> dict:
+    """Section 3 as data: reopens, dispatches after review, verdict spread.
+
+    A reopen is one status row: `from` the review state, `to` the working one.
+    Both names are read out of the story vocabulary rather than assumed — a
+    project that renamed either gets `-` in that column and never a `0`, since
+    a zero there would say "nothing was reopened" about a machine this rule
+    cannot see (hard rule 4).
+
+    "After review" counts DISPATCH rows, by D3's snapshot and the same
+    `named_grains` rule section 1 attributes by — so the two sections cannot
+    disagree about which dispatches were a story's. The moment compared against
+    is the story's FIRST row into the review state; a story that never reached
+    it has no such moment, and `-` is the honest column.
+    """
+    grains, owned = walk_grains(cfg, mid, mdir)
+    kinds = {g.gid: g.kind for g in grains}
+    status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
+    dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
+    reopenable = (REVIEW_STATE in cfg.story_states
+                  and WIP_STATE in cfg.story_states)
+    feature_of = {sid: fid for fid, sids in owned.items() for sid in sids}
+    out = []
+    for grain in sorted((g for g in grains if g.kind == KIND_STORY),
+                        key=lambda g: g.gid):
+        mine = [r for r in status if r.data.get('grain') == grain.gid]
+        reopens = None
+        if mine and reopenable:
+            reopens = sum(1 for r in mine
+                          if r.data.get('from') == REVIEW_STATE
+                          and r.data.get('to') == WIP_STATE)
+        moment = next((ts for ts in
+                       (ledger.parse_ts(r.data.get('ts')) for r in mine
+                        if r.data.get('to') == REVIEW_STATE)
+                       if ts is not None), None)
+        after = None if moment is None else sum(
+            1 for r in dispatch
+            if grain.gid in named_grains(r.data, kinds, owned)
+            and _after(r, moment))
+        out.append({'grain': grain.gid, 'feature': feature_of.get(grain.gid),
+                    'reopens': reopens, 'after_review': after})
+    spread = _tally(parsed.verdict
+                    for _, _, parsed in parsed_records(cfg, mid, mdir)
+                    if parsed is not None)
+    reopened = [e['reopens'] for e in out if e['reopens'] is not None]
+    return {SECTION_REWORK: {
+        'stories': out,
+        'verdicts': [{'verdict': name, 'records': spread[name]}
+                     for name in verdict.VERDICTS if name in spread],
+        'totals': {'stories': len(out),
+                   'reopens': sum(reopened) if reopened else None,
+                   'records': sum(spread.values())}}}
+
+
+def rework_lines(cfg: model.PmConfig, data: dict) -> list[str]:
+    """Section 3 as lines: one row per story, one per verdict that was given."""
+    section = data[SECTION_REWORK]
+    stories = [(e['feature'] or DASH, e['grain'], _cell(e['reopens']),
+                _cell(e['after_review'])) for e in section['stories']]
+    spread = [(v['verdict'], str(v['records'])) for v in section['verdicts']]
+    totals = section['totals']
+    return _section(
+        data['milestone'], REWORK_TITLE,
+        f'{totals["stories"]} story(s), {_cell(totals["reopens"])} reopen(s), '
+        f'{totals["records"]} record(s) with a verdict',
+        [(f'{REOPEN_TITLE} ({len(stories)})',
+          (FEATURE_COLUMN, STORY_COLUMN, REOPENS_COLUMN, AFTER_REVIEW_COLUMN),
+          (LEFT, LEFT, RIGHT, RIGHT), stories),
+         (f'{DISTRIBUTION_TITLE} ({len(spread)})',
+          (VERDICT_COLUMN, RECORDS_COLUMN), (LEFT, RIGHT), spread)])
+
+
+# --- section 4: escapes -------------------------------------------------------
+def escapes_data(cfg: model.PmConfig, mid: str, mdir: Path,
+                 rows: list) -> dict:
+    """Section 4 as data: every bug here whose `caused_by:` names a feature.
+
+    Grouped by the id the bug NAMES, resolved wherever it lives — an escape's
+    cause is usually a feature of an earlier milestone, and a cause that
+    resolves to nothing (retired, or a typo `pm validate` reports) still gets
+    its row with `-` in the feature's column. The feature's own `status:` is
+    copied verbatim from the tree at report time; whether that word is the
+    terminal one is the reader's question, and `feature_done` answers it in
+    `--json` as the equality it is. Neither is a judgement about the bug.
+    """
+    out = []
+    for bfile in model.bug_files(mdir):
+        cause = model.field_of(bfile, CAUSED_BY_FIELD)
+        if not cause:
+            continue
+        gid = (model.unquote(model.field_of(bfile, 'id'))
+               or f'{mid}/bugs/{_bug_slug(mdir, bfile)}')
+        ffile = model.feature_file(cfg, cause)
+        fstatus = model.field_of(ffile, 'status') if ffile is not None else ''
+        out.append({
+            'caused_by': cause, 'bug': gid,
+            'status': model.field_of(bfile, 'status') or None,
+            'feature_status': fstatus or None,
+            'feature_done': (None if not fstatus
+                             else fstatus == ledger.TERMINAL_STATE)})
+    out.sort(key=lambda e: (e['caused_by'], e['bug']))
+    return {SECTION_ESCAPES: {
+        'bugs': out,
+        'totals': {'bugs': len(out),
+                   'features': len({e['caused_by'] for e in out})}}}
+
+
+def escapes_lines(cfg: model.PmConfig, data: dict) -> list[str]:
+    """Section 4 as lines: cause, bug, the bug's state, the feature's."""
+    section = data[SECTION_ESCAPES]
+    bugs = [(e['caused_by'], e['bug'], _cell(e['status']),
+             _cell(e['feature_status'])) for e in section['bugs']]
+    totals = section['totals']
+    return _section(
+        data['milestone'], ESCAPES_TITLE,
+        f'{totals["bugs"]} bug(s) naming a cause, '
+        f'{totals["features"]} feature(s)',
+        [(f'{ESCAPE_TITLE} ({len(bugs)})',
+          (CAUSE_COLUMN, BUG_COLUMN, STATUS_COLUMN, FEATURE_STATUS_COLUMN),
+          (LEFT, LEFT, LEFT, LEFT), bugs)])
+
+
+# --- section 5: overhead shape ------------------------------------------------
+def _int(value: object) -> int | None:
+    """The integer on the row, or None for anything that is not one."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _delta(earlier: object, later: object) -> int | None:
+    """`later - earlier`, or None unless BOTH ends are integers.
+
+    A delta over one measured end and one absent one would be the absent end
+    read as zero — the whole reading of a cumulative session row inverted.
+    """
+    a, b = _int(earlier), _int(later)
+    return None if a is None or b is None else b - a
+
+
+def _usage_of(row: dict, key: str) -> object:
+    usage = row.get('usage')
+    return usage.get(key) if isinstance(usage, dict) else None
+
+
+def overhead_data(cfg: model.PmConfig, mid: str, mdir: Path,
+                  rows: list) -> dict:
+    """Section 5 as data: looking before writing, deciding, and stopping.
+
+    Three counts and one subtraction, and the attribution of each is named:
+
+      * a story's dispatches are D3's snapshot, `named_grains`, section 1's
+        rule — and `tool_calls_before_first_write` is SUMMED and also LISTED,
+        because one dispatch that looked at 90 files and nine that looked at
+        ten are the same sum and not the same shape;
+      * a decision row counts against the grain its own `grain` field names.
+        `pm decide` writes a FEATURE id for a feature's `decisions.md` and the
+        MILESTONE id for the milestone's, so those are the two rows the block
+        holds — a milestone-grained decision is never divided among features
+        (that would be a weight) and never attributed to one (that would be a
+        guess);
+      * the seconds after a decision are the gap to the next status row of any
+        grain in that decision's scope — the feature and its stories for a
+        feature-grained row, every grain under the milestone for a
+        milestone-grained one. `-` when no status row follows it.
+
+    Session rows are diffed per `session_id` and nothing else: consecutive
+    stops carry cumulative totals (D4), so the delta is what the turn cost, and
+    which grain it was about is a question this row cannot answer.
+    """
+    grains, owned = walk_grains(cfg, mid, mdir)
+    kinds = {g.gid: g.kind for g in grains}
+    dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
+    status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS
+              and isinstance(r.data.get('grain'), str)]
+    decisions = [r for r in rows if r.data.get('kind') == ledger.KIND_DECISION]
+    sessions = [r for r in rows if r.data.get('kind') == ledger.KIND_SESSION]
+
+    stories = []
+    for grain in sorted((g for g in grains if g.kind == KIND_STORY),
+                        key=lambda g: g.gid):
+        mine = [r for r in dispatch
+                if grain.gid in named_grains(r.data, kinds, owned)]
+        calls = [n for n in (_int(r.data.get(BEFORE_WRITE_KEY)) for r in mine)
+                 if n is not None]
+        stories.append({'grain': grain.gid, 'dispatches': len(mine),
+                        'before_first_write': sum(calls) if calls else None,
+                        'calls': calls})
+
+    scopes = {mid: {g.gid for g in grains} | {mid}}
+    for fid, sids in owned.items():
+        scopes[fid] = {fid} | sids
+    # Every feature under the milestone, and the milestone itself — but only
+    # once SOMETHING has been decided. A column of zeros under a ledger with no
+    # decision row in it says nothing the census (`0 decision row(s)`) does not
+    # already say, and it says it in the shape of a measurement.
+    per_grain = ([{'grain': gid,
+                   'decisions': sum(1 for r in decisions
+                                    if r.data.get('grain') == gid)}
+                  for gid in [mid, *sorted(owned)]] if decisions else [])
+    events = []
+    for row in decisions:
+        gid = row.data.get('grain')
+        gid = gid if isinstance(gid, str) else None
+        scope = scopes.get(gid, {gid} if gid else set())
+        moment = ledger.parse_ts(row.data.get('ts'))
+        seconds = None
+        if moment is not None:
+            later = [ts for ts in (ledger.parse_ts(r.data.get('ts'))
+                                   for r in status
+                                   if r.data['grain'] in scope)
+                     if ts is not None and ts > moment]
+            if later:
+                seconds = int((min(later) - moment).total_seconds())
+        entry = row.data.get('entry')
+        title = row.data.get('title')
+        stamp = row.data.get('ts')
+        events.append({'grain': gid,
+                       'entry': entry if isinstance(entry, str) else None,
+                       'title': title if isinstance(title, str) else None,
+                       'ts': stamp if isinstance(stamp, str) else None,
+                       'next_status_s': seconds})
+
+    grouped: dict = {}
+    for row in sessions:
+        sid = row.data.get('session_id')
+        grouped.setdefault(sid if isinstance(sid, str) and sid else None,
+                           []).append(row)
+    deltas = []
+    for sid in sorted(grouped, key=lambda s: (s is None, s or '')):
+        for earlier, later in zip(grouped[sid], grouped[sid][1:]):
+            stamp = later.data.get('ts')
+            deltas.append({
+                'session_id': sid,
+                'ts': stamp if isinstance(stamp, str) else None,
+                'output': _delta(_usage_of(earlier.data, OUTPUT_KEY),
+                                 _usage_of(later.data, OUTPUT_KEY)),
+                'tool_calls': _delta(earlier.data.get(TOOL_CALLS_KEY),
+                                     later.data.get(TOOL_CALLS_KEY))})
+    return {SECTION_OVERHEAD: {
+        'stories': stories, 'decisions': per_grain, 'gaps': events,
+        'sessions': deltas,
+        'totals': {'dispatch_rows': len(dispatch),
+                   'decision_rows': len(decisions),
+                   'session_rows': len(sessions)}}}
+
+
+def overhead_lines(cfg: model.PmConfig, data: dict) -> list[str]:
+    """Section 5 as lines: four blocks, one per thing the shape is made of."""
+    section = data[SECTION_OVERHEAD]
+    stories = [(e['grain'], str(e['dispatches']),
+                _cell(e['before_first_write']),
+                LIST_SEPARATOR.join(str(n) for n in e['calls']) or DASH)
+               for e in section['stories']]
+    decisions = [(e['grain'], str(e['decisions']))
+                 for e in section['decisions']]
+    gaps = [(_cell(e['grain']), _cell(e['entry']), _cell(e['ts']),
+             _cell(e['next_status_s'])) for e in section['gaps']]
+    deltas = [(_cell(e['session_id']), _cell(e['ts']), _cell(e['output']),
+               _cell(e['tool_calls'])) for e in section['sessions']]
+    totals = section['totals']
+    return _section(
+        data['milestone'], OVERHEAD_TITLE,
+        f'{totals["dispatch_rows"]} dispatch row(s), '
+        f'{totals["decision_rows"]} decision row(s), '
+        f'{totals["session_rows"]} session row(s)',
+        [(f'{BEFORE_WRITE_TITLE} ({len(stories)})',
+          (STORY_COLUMN, DISPATCHES_COLUMN, BEFORE_WRITE_COLUMN, CALLS_COLUMN),
+          (LEFT, RIGHT, RIGHT, LEFT), stories),
+         (f'{DECISION_COUNT_TITLE} ({len(decisions)})',
+          (GRAIN_COLUMN, DECISIONS_COLUMN), (LEFT, RIGHT), decisions),
+         (f'{DECISION_GAP_TITLE} ({len(gaps)})',
+          (GRAIN_COLUMN, ENTRY_COLUMN, TS_COLUMN, NEXT_STATUS_COLUMN),
+          (LEFT, LEFT, LEFT, RIGHT), gaps),
+         (f'{SESSION_TITLE} ({len(deltas)})',
+          (SESSION_COLUMN, TS_COLUMN, OUT_DELTA_COLUMN, TOOL_CALLS_COLUMN),
+          (LEFT, LEFT, RIGHT, RIGHT), deltas)])
+
+
+# The registry: one row per question, one pair of functions each. A section is
+# added HERE and nowhere else — never as another branch inside one of them.
+SECTIONS = (Section(SECTION_SPEND, spend_data, spend_lines),
+            Section(SECTION_YIELD, yield_data, yield_lines),
+            Section(SECTION_REWORK, rework_data, rework_lines),
+            Section(SECTION_ESCAPES, escapes_data, escapes_lines),
+            Section(SECTION_OVERHEAD, overhead_data, overhead_lines))
 
 
 def build(cfg: model.PmConfig, mid: str, mdir: Path, rows: list) -> dict:
     """The whole report as ONE object — what `--json` prints, verbatim.
 
-    Every section contributes its own keys; `section` names the one this
-    release ships. Adding sections 2-5 changes that key to a list, and that is
-    an output-format change — a minor bump, hard rule 6 — not a patch.
+    Every section contributes its own keys: section 1's sit at the top level
+    (`section`, `grains`, `unattributed`, `totals` — the shape it shipped, kept
+    byte-for-byte because a consumer already reads it), and sections 2-5 each
+    add ONE key named for the question (`yield`, `rework`, `escapes`,
+    `overhead`). Adding a key is an output-format change and so a minor bump
+    (hard rule 6); removing or renaming one is not a thing this file does.
     """
     out: dict = {'milestone': mid}
     for section in SECTIONS:

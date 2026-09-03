@@ -1758,7 +1758,14 @@ def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
         # The table would be a screen of dashes saying one thing; say it once.
         print(f'{report.HEADING_PREFIX} {mid} — {report.NO_LEDGER}')
         return 0
-    data = report.build(cfg, mid, mdir, rows)
+    try:
+        data = report.build(cfg, mid, mdir, rows)
+    except report.RecordError as err:
+        # The second document this verb parses, and the same refusal shape as
+        # the first: a review record whose verdict block EXISTS and cannot be
+        # read correctly, named by record and by line. A record with no block
+        # is not this — it is a row in the yield table saying so.
+        raise Usage(f'{err}') from err
     if as_json:
         print(json.dumps(data, ensure_ascii=False))
         return 0

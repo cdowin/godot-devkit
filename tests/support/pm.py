@@ -176,3 +176,75 @@ def run_gate(root: Path) -> tuple[int, str]:
     with contextlib.redirect_stdout(buf):
         code = pm_check.run()
     return code, buf.getvalue()
+
+
+# --- ledger fixtures ----------------------------------------------------------
+# One home for the LINE builders, because two report tests seeding two
+# differently-shaped ledgers must still write the row shape `pm ledger record`
+# and the status verbs write — a fixture that drifted from the writer would
+# test a file this package never produces. Every builder goes through
+# `ledger.dumps`, the serialisation contract itself.
+MILESTONE_ID = '0.1'
+
+# D3's snapshot as the hook writes it: every bucket present, empty lists when
+# empty. A row naming no grain has all five empty.
+EMPTY_TREE = {'milestones_building': [MILESTONE_ID], 'features_building': [],
+              'features_review': [], 'stories_wip': [], 'stories_review': []}
+
+
+def snapshot(**over: list) -> dict:
+    snap = dict(EMPTY_TREE)
+    snap.update(over)
+    return snap
+
+
+def status_line(ts: str, grain: str, frm: str, to: str) -> str:
+    from godot_devkit.repo.pm import ledger
+    return ledger.dumps(ledger.status_row(grain, frm, to, ts=ts))
+
+
+def decision_line(ts: str, grain: str, entry: str, title: str = 'why') -> str:
+    from godot_devkit.repo.pm import ledger
+    return ledger.dumps(ledger.decision_row(grain, entry, title, ts=ts))
+
+
+def dispatch_line(ts: str, **fields: object) -> str:
+    from godot_devkit.repo.pm import ledger
+    fields.setdefault('tree', snapshot())
+    return ledger.dumps(ledger.usage_row(ledger.KIND_DISPATCH, ts=ts,
+                                         **fields))
+
+
+def session_line(ts: str, **fields: object) -> str:
+    from godot_devkit.repo.pm import ledger
+    return ledger.dumps(ledger.usage_row(ledger.KIND_SESSION, ts=ts, **fields))
+
+
+def put_ledger(root: Path, *lines: str, rel: str = LEDGER_REL) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(line + '\n' for line in lines), encoding='utf-8')
+
+
+SECTION_SEPARATOR = ' — '
+
+
+def section_of(out: str, title: str) -> str:
+    """One `pm ledger report` section, heading included, from the whole report.
+
+    The report is five sections and each one is a separate contract, so a case
+    that pins section 4's table must fail when section 4 changes and NOT when
+    section 2 grows a column. The slice runs from the section's own heading to
+    the next one — `<prefix> <milestone> — <name> — <census>`, the three-part
+    shape only a section heading has. Section 1's SUMMARY line carries one
+    separator, not two, so it belongs to the section it closes rather than
+    opening a new one.
+    """
+    from godot_devkit.repo.pm import report
+    lines = out.rstrip('\n').split('\n')
+    heads = [i for i, line in enumerate(lines)
+             if line.startswith(report.HEADING_PREFIX)
+             and line.count(SECTION_SEPARATOR) >= 2]
+    start = next(i for i in heads if f'— {title} —' in lines[i])
+    end = next((i for i in heads if i > start), len(lines))
+    return '\n'.join(lines[start:end]).rstrip('\n')

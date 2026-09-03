@@ -33,7 +33,9 @@ from __future__ import annotations
 import json
 import unittest
 
-from support.pm import bug, ledger_lines, run_cli, tree, write
+from support.pm import (LEDGER_REL, bug, dispatch_line, ledger_lines,
+                        put_ledger, run_cli, section_of, snapshot, status_line,
+                        tree, write)
 
 from godot_devkit.repo.pm import ledger
 
@@ -41,34 +43,6 @@ STORY = '0.1/alpha/s0'
 QUIET = '0.1/alpha/s1'
 FEATURE = '0.1/alpha'
 BUG = '0.1/bugs/crash'
-LEDGER_REL = 'pm/roadmap/0.1-demo/ledger.jsonl'
-
-# D3's snapshot, as `_tree_snapshot` writes it: every bucket present, empty
-# lists when empty. A row naming nothing has all five empty.
-EMPTY_TREE = {'milestones_building': ['0.1'], 'features_building': [],
-              'features_review': [], 'stories_wip': [], 'stories_review': []}
-
-
-def snapshot(**over) -> dict:
-    snap = dict(EMPTY_TREE)
-    snap.update(over)
-    return snap
-
-
-def status_line(ts: str, grain: str, frm: str, to: str) -> str:
-    return ledger.dumps(ledger.status_row(grain, frm, to, ts=ts))
-
-
-def dispatch_line(ts: str, **fields) -> str:
-    fields.setdefault('tree', snapshot())
-    return ledger.dumps(ledger.usage_row(ledger.KIND_DISPATCH, ts=ts,
-                                         **fields))
-
-
-def put_ledger(root, *lines: str) -> None:
-    path = root / LEDGER_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(''.join(line + '\n' for line in lines), encoding='utf-8')
 
 
 def report(root, *argv) -> tuple[int, str]:
@@ -133,6 +107,11 @@ dispatches  in  out  cache_create  cache_read  tool_calls  duration_s
 
 [ledger:report] 0.1 — 38500 out / 39 tool calls / 812 s across 3 dispatch row(s)"""
 
+SPEND_TITLE = 'spend per grain'
+# Section 1's keys in `--json`, and the one key each later section adds.
+SPEND_KEYS = ('milestone', 'section', 'grains', 'unattributed', 'totals')
+SECTION_KEYS = ('yield', 'rework', 'escapes', 'overhead')
+
 
 def blank_usage() -> dict:
     return {key: None for key, _ in ledger.USAGE_FIELDS}
@@ -146,7 +125,22 @@ class Table(unittest.TestCase):
             seeded(root)
             code, out = report(root, '0.1')
         self.assertEqual(code, 0, out)
-        self.assertEqual(out.rstrip('\n'), TABLE)
+        # Section 1 alone, byte for byte. Sections 2-5 follow it and are pinned
+        # in test_pm_ledger_report_sections.py; the summary line below is the
+        # end of this one, and it is what the slice stops at.
+        self.assertEqual(section_of(out, SPEND_TITLE), TABLE)
+
+    def test_the_report_prints_the_five_sections_in_the_milestones_order(self):
+        """The five questions of milestone.md, once each, in its order."""
+        with tree(story_statuses=('done', 'todo')) as root:
+            seeded(root)
+            out = report(root, '0.1')[1]
+        heads = [line for line in out.splitlines()
+                 if line.startswith('[ledger:report] 0.1 — ')
+                 and line.count(' — ') >= 2]
+        self.assertEqual([h.split(' — ')[1] for h in heads],
+                         [SPEND_TITLE, 'yield per review pass', 'rework',
+                          'escapes', 'overhead shape'])
 
     def test_the_report_never_writes(self):
         with tree(story_statuses=('done', 'todo')) as root:
@@ -266,7 +260,11 @@ class Json(unittest.TestCase):
         with tree(story_statuses=('done', 'todo')) as root:
             seeded(root)
             data = self.payload(root)
-        self.assertEqual(data, {
+        # Section 1's own keys, exactly — sections 2-5 add one key each and are
+        # pinned in test_pm_ledger_report_sections.py. Compared as a SLICE
+        # rather than by deleting keys, so a key section 1 stopped emitting
+        # still fails here.
+        self.assertEqual({k: data[k] for k in SPEND_KEYS if k in data}, {
             'milestone': '0.1',
             'section': 'spend',
             'grains': [
@@ -300,6 +298,7 @@ class Json(unittest.TestCase):
                        'usage': dict(full, input=1205), 'tool_calls': 39,
                        'duration_s': 812},
         })
+        self.assertEqual(sorted(data), sorted(SPEND_KEYS + SECTION_KEYS))
 
     def test_json_prints_an_object_even_with_no_ledger_at_all(self):
         with tree(story_statuses=('done', 'todo')) as root:
@@ -319,7 +318,7 @@ class Resolution(unittest.TestCase):
             named = report(root, '0.1')
             default = report(root)
         self.assertEqual(default[0], 0, default[1])
-        self.assertEqual(default[1].rstrip('\n'), TABLE)
+        self.assertEqual(section_of(default[1], SPEND_TITLE), TABLE)
         self.assertEqual(default, named)
 
     def test_an_explicit_id_reads_that_milestone_not_the_building_one(self):
