@@ -376,8 +376,14 @@ class Refusals(unittest.TestCase):
             self.refuses(root, needle='is `building`')
 
     def test_a_flag_that_is_not_json(self):
+        # `--from` left this list when it became a flag this verb HAS; its own
+        # refusals (a rev that will not resolve, a rev that is a flag, a rev
+        # with whitespace in it, `--from` with no milestone id) are the matrix
+        # in test_pm_ledger_report_git.py. `--json=1` and `-j` stay: neither
+        # spelling is a flag here, and a verb that quietly accepted one would
+        # be inventing a grammar its own --help does not print.
         with tree() as root:
-            for flag in ('--wombat', '--from', '-j', '--json=1', '-'):
+            for flag in ('--wombat', '-j', '--json=1', '-'):
                 self.refuses(root, flag, needle='unknown flag')
 
     def test_two_positional_arguments(self):

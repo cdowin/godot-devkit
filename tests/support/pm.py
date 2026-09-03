@@ -248,3 +248,41 @@ def section_of(out: str, title: str) -> str:
     start = next(i for i in heads if f'— {title} —' in lines[i])
     end = next((i for i in heads if i > start), len(lines))
     return '\n'.join(lines[start:end]).rstrip('\n')
+
+
+# --- git fixtures -------------------------------------------------------------
+# `tree()` already `git init`s, because `check pm`'s flow rules read the branch.
+# These three add the rest of what a `--from <rev>` case needs: a commit, a tag,
+# and a way to assert that a read verb left the tree exactly as it found it.
+#
+# Identity and signing are supplied per INVOCATION rather than written into the
+# scratch repo's config. A test that inherited the developer's `user.email`, a
+# global `commit.gpgsign`, or a `gpg.program` that prompts would pass on one
+# machine and hang or fail on the next, for a reason having nothing to do with
+# the verb under test.
+GIT_IDENTITY = ('-c', 'user.name=pm tests', '-c', 'user.email=pm@tests.invalid',
+                '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false')
+
+
+def git(root: Path, *args: str) -> str:
+    """One git command in a scratch repo. A failure is an ASSERTION, not a
+    return code: a fixture that half-built itself and carried on would test a
+    tree nobody described, which is the one failure mode a fixture cannot
+    report on its own."""
+    done = subprocess.run(['git', *GIT_IDENTITY, *args], cwd=root,
+                          capture_output=True, text=True)
+    assert done.returncode == 0, (
+        f'git {" ".join(args)} failed in {root}:\n{done.stderr}{done.stdout}')
+    return done.stdout
+
+
+def commit(root: Path, message: str = 'seed') -> str:
+    """Stage everything and commit it; return the commit's full hash."""
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '--allow-empty', '-m', message)
+    return git(root, 'rev-parse', 'HEAD').strip()
+
+
+def porcelain(root: Path) -> str:
+    """`git status --porcelain` — '' for a tree a read verb did not touch."""
+    return git(root, 'status', '--porcelain')

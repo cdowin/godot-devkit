@@ -99,12 +99,21 @@ USAGE = """usage: godot-devkit pm <command>
   ledger show <grain-id> [--json]         (that grain's rows oldest first, with
                                            the seconds since the previous status
                                            row; --json prints the raw lines)
-  ledger report [<milestone-id>] [--json] (spend per grain from that milestone's
+  ledger report [<milestone-id>] [--json] [--from <rev>]
+                                          (spend per grain from that milestone's
                                            rows: dispatches, tokens, tool calls,
                                            wall-clock and seconds in each state,
                                            per story/feature/bug. Defaults to the
                                            building milestone. Never exits
-                                           non-zero on a number)
+                                           non-zero on a number.
+                                           --from <rev> reads the ledger and the
+                                           grain docs out of git at that rev
+                                           instead of the tree, for a milestone
+                                           already retired — name the rev, it is
+                                           never inferred (D6), and the release
+                                           tag vX.Y.Z is the usual anchor
+                                           because a milestone is still in the
+                                           tree at its own release)
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
                                            the first; the prose under it is yours.
@@ -237,15 +246,22 @@ def _set_status(cfg: model.PmConfig, path: Path, value: str, note: str = '') -> 
 #     A ledger that cannot be written is said out loud on stderr and does not
 #     turn a landed status write into a failure — the flip is what the caller
 #     asked for and it is already on disk.
-def _ledger_id(path: Path, fallback: str) -> str:
+def _ledger_id(path: Path, fallback: str,
+               src: report.Source | None = None) -> str:
     """The id a row names: the grain's OWN `id:`, the caller's when absent.
 
     The frontmatter id is the file's own claim about itself, which is what a
     report joins rows on. A grain missing the key at all (the drift V2 and D4
     report) still gets a row, under the id the caller resolved it by — an
     unnamed row would be worse than an imperfectly-named one.
+
+    `src` is where the document is READ from — the working tree for every
+    writer here, and `report.GitSource` for `ledger report --from <rev>`, whose
+    milestone document is not in the tree at all. One definition either way: a
+    report of a retired milestone must name it the same id its rows do.
     """
-    return model.unquote(model.field_of(path, 'id')) or fallback
+    reader = report.DiskSource() if src is None else src
+    return model.unquote(reader.field_of(path, 'id')) or fallback
 
 
 def _stamp(cfg: model.PmConfig, path: Path, row: dict) -> None:
@@ -1727,6 +1743,12 @@ def _gap(earlier, later) -> int | None:
 REPORT_SUBJECT = 'this report'
 REPORT_HINT = ', or name one: `pm ledger report <milestone-id>`'
 
+# `--from <rev>` reads the milestone out of git instead of off disk (D6). The
+# rev is always the CALLER's: `ROADMAP.md`'s prune log is where a reader finds
+# the anchor in projects that keep one, and this verb never searches history
+# for it — nothing is inferred.
+FROM_FLAG = '--from'
+
 
 def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
     """One milestone's rows, added up per grain. See report.py for the rules.
@@ -1736,35 +1758,91 @@ def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
     traversal, globs, absolute paths and empty segments refuse identically. A
     milestone with no `ledger.jsonl` prints one line and exits 0: nothing has
     been recorded for it yet, which is a fact about the tree and not an error.
+
+    `--from <rev>` reads the same files out of GIT at that rev instead of off
+    disk (D6: a retired milestone's history is git's job) — the ledger, the
+    milestone document, every feature, story and bug under it, and the review
+    records the features point at, each through `git show <rev>:<path>`.
+    Nothing is written, nothing is checked out and the index is never touched;
+    the rev is the caller's and is never searched for. The report itself is the
+    SAME `report.build` the live path runs, over `report.GitSource` instead of
+    `report.DiskSource` — the heading says `— at <rev>` and `--json` carries a
+    `rev` key so the two cannot be mistaken for one another, and nothing else
+    about the output differs, because nothing else about it is computed
+    differently.
     """
     as_json = JSON_FLAG in args
     rest = [a for a in args if a != JSON_FLAG]
+    # WHETHER `--from` was given and WHAT it was given are two questions, and
+    # collapsing them is how `pm ledger report 0.23.0 --from` printed a live
+    # report and exited 0: the value came back empty, the empty read as "no
+    # rev", and the verb answered a question about the working tree that the
+    # caller had asked about history. `given` is the switch; `rev` is only the
+    # value, and an empty one is refused by `check_rev` rather than defaulted.
+    given = FROM_FLAG in rest
+    rev = ''
+    if given:
+        if rest.count(FROM_FLAG) > 1:
+            raise Usage(f'{FROM_FLAG} was given {rest.count(FROM_FLAG)} times '
+                        f'— a report reads ONE rev, and which of two it should '
+                        f'have been is not a thing this verb may pick')
+        # The value is whatever sits in the NEXT position, taken positionally
+        # and never searched for: `--from` at the end of the line is a missing
+        # value, not a licence to adopt the milestone id as a rev.
+        at = rest.index(FROM_FLAG)
+        rev = rest[at + 1] if at + 1 < len(rest) else ''
+        rest = rest[:at] + rest[at + 2:]
     for arg in rest:
         if arg.startswith('-'):
             raise Usage(f'unknown flag {arg!r} (ledger report takes '
-                        f'{JSON_FLAG} and a milestone id)')
+                        f'{JSON_FLAG}, {FROM_FLAG} <rev> and a milestone id)')
     if len(rest) > 1:
         raise Usage(f'ledger report takes one milestone id, not '
                     f'{" ".join(rest)!r}')
-    mdir = (_report_milestone_dir(cfg, rest[0]) if rest
-            else _building_ledger_dir(cfg, REPORT_SUBJECT, REPORT_HINT))
-    mid = _ledger_id(mdir / model.MILESTONE_DOC, mdir.name)
-    path = ledger.ledger_path(mdir)
+    if given and not rest:
+        # "The building milestone" is a fact about TODAY's tree, and a report
+        # at a rev that resolved its subject from today would be reading two
+        # trees at once and saying so nowhere.
+        raise Usage(f'{FROM_FLAG} needs a milestone id: which milestone is '
+                    f'`building` is a fact about the tree NOW, and a report at '
+                    f'a rev may not take its subject from one tree and its '
+                    f'rows from another — `pm ledger report <milestone-id> '
+                    f'{FROM_FLAG} <rev>`')
     try:
-        rows = ledger.read_rows(path)
-    except ledger.LedgerError as err:
-        raise Usage(f'{err}') from err
-    if not path.is_file() and not as_json:
-        # The table would be a screen of dashes saying one thing; say it once.
-        print(f'{report.HEADING_PREFIX} {mid} — {report.NO_LEDGER}')
-        return 0
-    try:
-        data = report.build(cfg, mid, mdir, rows)
-    except report.RecordError as err:
-        # The second document this verb parses, and the same refusal shape as
-        # the first: a review record whose verdict block EXISTS and cannot be
-        # read correctly, named by record and by line. A record with no block
-        # is not this — it is a row in the yield table saying so.
+        src: report.Source = (report.GitSource(cfg.root, rev) if given
+                              else report.DiskSource())
+        if given:
+            mdir = _report_milestone_dir_at(cfg, src, rest[0])
+        else:
+            mdir = (_report_milestone_dir(cfg, rest[0]) if rest
+                    else _building_ledger_dir(cfg, REPORT_SUBJECT, REPORT_HINT))
+        mid = _ledger_id(mdir / model.MILESTONE_DOC, mdir.name, src)
+        path = ledger.ledger_path(mdir)
+        try:
+            rows = src.ledger_rows(path)
+        except ledger.LedgerError as err:
+            raise Usage(f'{err}') from err
+        if not src.is_file(path) and not as_json:
+            # The table would be a screen of dashes saying one thing; say it
+            # once — and still say WHICH tree it is one thing about.
+            head = report.heading_id({'milestone': mid, 'rev': rev})
+            print(f'{report.HEADING_PREFIX} {head} — {report.NO_LEDGER}')
+            return 0
+        try:
+            data = report.build(cfg, mid, mdir, rows, src)
+        except report.RecordError as err:
+            # The second document this verb parses, and the same refusal shape
+            # as the first: a review record whose verdict block EXISTS and
+            # cannot be read correctly, named by record and by line. A record
+            # with no block is not this — it is a row in the yield table saying
+            # so. A record git does not hold at the rev arrives here too, since
+            # "could not be read" is one fact however the read was attempted.
+            raise Usage(f'{err}') from err
+    except report.GitError as err:
+        # Every git refusal, one exit code and one shape: a rev that does not
+        # resolve carries git's own words verbatim, and a path the report needs
+        # and cannot get names the path. Nothing was written either way,
+        # because this verb has nothing to write with.
         raise Usage(f'{err}') from err
     if as_json:
         print(json.dumps(data, ensure_ascii=False))
@@ -1772,6 +1850,39 @@ def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
     for line in report.render(cfg, data):
         print(line)
     return 0
+
+
+def _report_milestone_dir_at(cfg: model.PmConfig, src: report.Source,
+                             mid: str) -> Path:
+    """The milestone directory at a rev, or exit 2 naming what is not there.
+
+    Resolved by the version PREFIX over `git ls-tree`, exactly as
+    `model.milestone_dir` globs `<mid>-*` on disk and for the same reason: the
+    human suffix (`0.23.0-telemetry`) is not part of the id, and the suffix at
+    the rev may not be the suffix today. The active roadmap first, then the
+    archive — the same two places, in the same order.
+
+    Two refusals, and both name what was looked for: an id that is not a
+    milestone id at all, and a milestone that is not in the tree at that rev.
+    The second is the ordinary mistake — a rev from AFTER the close that
+    retired the directory — so the message says which rev to reach for.
+    """
+    if not model.segment_is_literal(mid):
+        raise Usage(f'no milestone resolves from id {mid!r} — the ledger is '
+                    f'per milestone (D6), so {FROM_FLAG} reports a milestone '
+                    f'id (`0.23.0`) and never a feature, story or bug')
+    mdir = src.milestone_dir(cfg, mid)
+    if mdir is None:
+        raise Usage(f'no milestone directory {mid}-* under {cfg.roadmap_dir}/ '
+                    f'or {cfg.roadmap_dir}/{model.ARCHIVE_DIR_NAME}/ at '
+                    f'{src.rev} — a milestone is retired at the close AFTER '
+                    f'its own, so name the rev it was still in the tree at '
+                    f'(usually its release tag)')
+    doc = mdir / model.MILESTONE_DOC
+    if not src.is_file(doc):
+        raise Usage(f'{src.spec(doc)} is not there, so {mid!r} is a directory '
+                    f'at {src.rev} and not a milestone')
+    return mdir
 
 
 def _report_milestone_dir(cfg: model.PmConfig, mid: str) -> Path:

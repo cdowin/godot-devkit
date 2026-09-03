@@ -41,6 +41,9 @@ nobody wrote a block for.
 """
 from __future__ import annotations
 
+import fnmatch
+import io
+import subprocess
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import NamedTuple
@@ -186,6 +189,486 @@ SESSION_TITLE = 'session deltas'
 LEFT, RIGHT = 'left', 'right'
 
 
+# --- WHERE the report reads from ----------------------------------------------
+# Every file this module opens goes through one of these objects, and the two
+# implementations are the whole difference between `pm ledger report <ms>` and
+# `pm ledger report <ms> --from <rev>`. Nothing below this section knows which
+# one it is holding: `build` is ONE function over one tree, so a report read out
+# of history is the same report by construction rather than by a second
+# renderer somebody keeps in step by hand.
+#
+# `DiskSource` is delegation and nothing else — every method hands straight to
+# the `model` walker the GATE uses. That is what keeps `walk_grains`'s promise
+# ("the walkers are `check pm`'s and `pm status`'s") true after this seam
+# exists: the live path did not get a second census, it got a name.
+#
+# `GitSource` runs four git verbs and no others — `rev-parse`, `ls-tree`,
+# `cat-file` and `show`. None of them writes, none touches the index, and none
+# checks anything out. It reads a milestone that is no longer in the tree,
+# which is D6's answer to where a retired milestone's rows live: history is
+# git's job.
+FEATURES_DIR = 'features'
+STORIES_DIR = 'stories'
+BUGS_DIR = 'bugs'
+MD_SUFFIX = '.md'
+
+GIT = 'git'
+GIT_MISSING = (f'{GIT} is not on PATH, so a report `--from` a rev cannot be '
+               f'read — a retired milestone is only in history')
+# `<rev>:<path>`, git's own spelling, used verbatim in every message this
+# module raises: a reader who wants to see the file for themselves can paste
+# the string after `git show`.
+REV_SEPARATOR = ':'
+
+# The two object types `git ls-tree` names for the things a PM tree is made of.
+TREE = 'tree'
+BLOB = 'blob'
+
+
+class GitError(OSError):
+    """A git invocation that failed, carrying git's OWN message, verbatim.
+
+    An `OSError` deliberately. `parsed_records` already turns "this document
+    could not be read" into a `RecordError` that names the record, and a blob
+    absent at the rev is that same fact about that same file — so it lands in
+    the handler that already exists, with the message shape that already ships,
+    and no reader of this module has to learn a second exception to stay
+    correct.
+
+    The text is git's stderr unedited. A rev that does not resolve is a thing
+    git already explains better than a paraphrase would, and a paraphrase is
+    one more place for the two to drift.
+    """
+
+
+def check_rev(rev: str) -> None:
+    """The `--from` grammar. Three refusals, each a shape that is not a rev.
+
+    Position in `argv` is the only thing between `--from --upload-pack=…` and
+    git running it, so a leading `-` is refused HERE rather than trusted to
+    stay a value; whitespace and NUL are one argument that spells two (and a
+    NUL truncates at the exec boundary, past anything this code could see); and
+    an empty rev makes `<rev>:<path>` name the INDEX, a different file from any
+    commit's. Whether the rev EXISTS is git's answer, not this function's.
+    """
+    if not rev:
+        raise GitError('--from needs a rev — a tag, a hash or a ref '
+                       '(the release tag `vX.Y.Z` is the usual anchor: a '
+                       'milestone directory is still in the tree at its own '
+                       'release and is retired at the next close)')
+    if rev.startswith('-'):
+        raise GitError(f'--from {rev!r} starts with `-`, so it is a flag and '
+                       f'not a rev — name a tag, a hash or a ref')
+    if any(c.isspace() or c == '\0' for c in rev):
+        raise GitError(f'--from {rev!r} holds whitespace or NUL — a rev is one '
+                       f'word, and two would be two arguments')
+
+
+def _universal(text: str) -> str:
+    """`Path.read_text`'s universal-newline translation, applied by hand.
+
+    `git show` hands over the bytes as they are and `Path.read_text` does not,
+    so a CRLF ledger would read back as one row shape from disk and another
+    from history. The translation belongs to the LEDGER read alone —
+    `Source.read_raw` mirrors `model.read_raw`'s `newline=''` and preserves the
+    terminators, because a grain document's are the file's own convention.
+    """
+    return text.replace('\r\n', '\n').replace('\r', '\n')
+
+
+class _Blob:
+    """One file AT A REV, shaped as the two things this package's file readers
+    ask of a path: `open(mode, encoding=…, newline=…)` and `read_text(…)`.
+
+    A shim, so that there is still exactly ONE reader of each format.
+    `model.read_raw` owns what a grain document is (`newline=''`, terminators
+    intact); `model.field_of` owns where a frontmatter field lives;
+    `model._is_grain_doc` owns whether a `.md` is a grain at all; and
+    `ledger.read_rows` owns what a ledger line is — one JSON object per line,
+    refused by LINE NUMBER when it is not. A `--from` read that re-implemented
+    any of them would be two readers of one format, free to disagree, and the
+    disagreement would surface as a report that is quietly not the report the
+    live path prints.
+
+    `str()` is git's own `<rev>:<path>`, so a line number arrives attached to
+    something a reader can paste after `git show`. The text is produced LAZILY,
+    so a blob that is absent or will not decode raises inside the reader that
+    already handles it, under the message that reader already writes.
+    """
+
+    def __init__(self, display: str, read: Callable[[], str]) -> None:
+        self._display, self._read = display, read
+
+    def open(self, mode: str = 'r', encoding: str | None = None,
+             newline: str | None = None) -> io.StringIO:
+        # `newline=''` on a StringIO is the same disabled translation
+        # `model.read_raw` asks of `open()`: the terminators come back as the
+        # blob spells them.
+        return io.StringIO(self._read(), newline='')
+
+    def read_text(self, encoding: str = 'utf-8') -> str:
+        return _universal(self._read())
+
+    def __str__(self) -> str:
+        return self._display
+
+
+class Source:
+    """The tree the report reads, as the ten reads it actually makes.
+
+    Ten and no more, and none of them writes. Adding an eleventh means both
+    implementations answer it or one of them lies about the tree, which is hard
+    rule 4 with a column header on it — so the list is stated here and the
+    subclasses below are checked against it rather than against each other.
+    """
+
+    #: The rev this source reads, or `''` for the working tree. `build` puts it
+    #: on the object and `render` puts it in the heading; nothing else reads it.
+    rev = ''
+
+    def milestone_dir(self, cfg: model.PmConfig, mid: str) -> Path | None:
+        raise NotImplementedError
+
+    def feature_file(self, cfg: model.PmConfig, fid: str) -> Path | None:
+        raise NotImplementedError
+
+    def feature_files(self, mdir: Path) -> list[Path]:
+        raise NotImplementedError
+
+    def story_files(self, ffile: Path) -> list[Path]:
+        raise NotImplementedError
+
+    def bug_files(self, mdir: Path) -> list[Path]:
+        raise NotImplementedError
+
+    def review_record_for(self, cfg: model.PmConfig, fid: str) -> str | None:
+        raise NotImplementedError
+
+    def field_of(self, path: Path, key: str) -> str:
+        raise NotImplementedError
+
+    def read_raw(self, path: Path) -> str:
+        raise NotImplementedError
+
+    def is_file(self, path: Path) -> bool:
+        raise NotImplementedError
+
+    def ledger_rows(self, path: Path) -> list:
+        raise NotImplementedError
+
+
+class DiskSource(Source):
+    """The working tree — today's behaviour, delegated and not re-derived.
+
+    Every method is one call into `model` (or into `ledger`, for the rows), so
+    the live report's census is still the GATE's census: `check pm` and this
+    table cannot come to different answers about what the tree holds, because
+    they are running the same walk.
+    """
+
+    def milestone_dir(self, cfg: model.PmConfig, mid: str) -> Path | None:
+        return model.milestone_dir(cfg, mid)
+
+    def feature_file(self, cfg: model.PmConfig, fid: str) -> Path | None:
+        return model.feature_file(cfg, fid)
+
+    def feature_files(self, mdir: Path) -> list[Path]:
+        return model.feature_files(mdir)
+
+    def story_files(self, ffile: Path) -> list[Path]:
+        return model.story_files(ffile)
+
+    def bug_files(self, mdir: Path) -> list[Path]:
+        return model.bug_files(mdir)
+
+    def review_record_for(self, cfg: model.PmConfig, fid: str) -> str | None:
+        return model.review_record_for(cfg, fid)
+
+    def field_of(self, path: Path, key: str) -> str:
+        return model.field_of(path, key)
+
+    def read_raw(self, path: Path) -> str:
+        return model.read_raw(path)
+
+    def is_file(self, path: Path) -> bool:
+        return path.is_file()
+
+    def ledger_rows(self, path: Path) -> list:
+        return ledger.read_rows(path)
+
+
+class GitSource(Source):
+    """The same tree AT A REV, through `git show` — read-only, by construction.
+
+    A milestone is retired at the close AFTER its own, so `vX.Y.Z` is the
+    natural anchor: the directory is still in the tree at its own release. The
+    rev is the CALLER's, always — this class never searches history for one
+    (D6: the anchor is recorded, nothing is inferred).
+
+    The directory name is resolved by the version PREFIX exactly as
+    `model.milestone_dir` globs it on disk, because the human suffix
+    (`0.23.0-telemetry`) is not part of the id and a milestone may have been
+    renamed since.
+
+    Paths are the currency here as they are everywhere else in this module —
+    the same `<root>/<relative>` shapes `model` produces, so `cfg.rel`,
+    `Path.parent`, `Path.stem` and `_bug_slug`'s `relative_to` all keep
+    working. They simply never reach the filesystem: every one is turned back
+    into a repo-relative posix path and handed to git.
+
+    Blobs and object types are MEMOISED. A rev is immutable, so a second read
+    of one path cannot produce a second answer, and without the cache one
+    report of a real milestone re-runs `git show` over the same few dozen
+    documents once per section.
+    """
+
+    def __init__(self, root: Path, rev: str) -> None:
+        check_rev(rev)
+        self.root = root
+        self.rev = rev
+        self._blobs: dict[str, bytes] = {}
+        self._types: dict[str, str] = {}
+        self._trees: dict[tuple[str, bool], list[tuple[str, str]]] = {}
+        # `rev-parse --verify` first, so "there is no such rev" is answered
+        # once, by git, in git's words — rather than N times as N absent files.
+        self._git(['rev-parse', '--verify', rev])
+
+    # --- the four verbs -------------------------------------------------------
+    def _git(self, args: list[str]) -> bytes:
+        """One git run in the repo root, stdout as BYTES.
+
+        Bytes, not `text=True`: `subprocess` would apply universal-newline
+        translation and the locale's encoding to a file whose terminators and
+        UTF-8-ness are exactly what this module is trying to reproduce.
+        """
+        try:
+            done = subprocess.run([GIT, '-C', str(self.root), *args],
+                                  capture_output=True, check=False)
+        except FileNotFoundError as err:
+            raise GitError(GIT_MISSING) from err
+        if done.returncode != 0:
+            why = done.stderr.decode('utf-8', 'replace').strip()
+            raise GitError(why or f'`{GIT} {" ".join(args)}` failed '
+                                  f'(exit {done.returncode})')
+        return done.stdout
+
+    def spec(self, path: Path) -> str:
+        """`<rev>:<path>` — what a reader would type to see this file."""
+        return f'{self.rev}{REV_SEPARATOR}{self._rel(path) or path}'
+
+    def _rel(self, path: Path) -> str | None:
+        """The repo-relative posix path git addresses, or None when there is
+        none: a path outside the repo root is in no rev at all, and answering
+        it from the filesystem instead would be the live tree leaking into a
+        historical read."""
+        try:
+            return path.relative_to(self.root).as_posix()
+        except ValueError:
+            return None
+
+    def _ls(self, path: Path, recursive: bool) -> list[tuple[str, str]]:
+        """`(object type, name)` for one directory at the rev, git's order.
+
+        A tree that is not there comes back EMPTY rather than raising, which is
+        `walk.children`'s own answer ("a missing directory is an empty walk"):
+        the callers here all read "no such tree" as "no such entries", and the
+        paths a report genuinely requires are refused by name in `cli.py`.
+        """
+        rel = self._rel(path)
+        if rel is None:
+            return []
+        key = (rel, recursive)
+        if key in self._trees:
+            return self._trees[key]
+        args = ['ls-tree', '-z']
+        if recursive:
+            args.append('-r')
+        args.append(f'{self.rev}{REV_SEPARATOR}{rel}')
+        try:
+            raw = self._git(args)
+        except GitError:
+            self._trees[key] = []
+            return []
+        out: list[tuple[str, str]] = []
+        # `-z` turns off path quoting, so a name arrives as its own bytes;
+        # `surrogateescape` carries one that is not UTF-8 through `Path`
+        # losslessly rather than replacing it with a name that matches nothing.
+        for record in raw.decode('utf-8', 'surrogateescape').split('\0'):
+            if not record:
+                continue
+            meta, _, name = record.partition('\t')
+            fields = meta.split(' ')
+            if len(fields) >= 2 and name:
+                out.append((fields[1], name))
+        self._trees[key] = out
+        return out
+
+    def _dirs(self, path: Path, pattern: str = '') -> list[Path]:
+        """This directory's immediate subdirectories at the rev, sorted.
+
+        `walk.children(..., Kind.DIR)` / `walk.matching(..., Kind.DIR)` over a
+        tree object. `fnmatchcase` is `Path.glob`'s own matcher on this
+        platform — case-SENSITIVE, which is what pathlib does even where the
+        filesystem does not, and what git's tree always is.
+        """
+        return sorted(path / name for kind, name in self._ls(path, False)
+                      if kind == TREE
+                      and (not pattern or fnmatch.fnmatchcase(name, pattern)))
+
+    def _grain_docs(self, gdir: Path) -> list[Path]:
+        """`model.grain_docs` at the rev: the same walk, the same narrowings.
+
+        Recursive, `.md` compared case-INSENSITIVELY, dot-prefixed components
+        dropped, and a `.md` that opens no frontmatter block dropped as a note
+        — the four decisions `model.slot_walk` documents, in the same order, so
+        a milestone read out of history has the same census it had on disk.
+        """
+        out: list[Path] = []
+        for kind, name in self._ls(gdir, True):
+            if kind != BLOB:
+                continue
+            parts = name.split('/')
+            if not name.lower().endswith(MD_SUFFIX):
+                continue
+            if any(part.startswith('.') for part in parts):
+                continue
+            path = gdir.joinpath(*parts)
+            if self._is_grain_doc(path):
+                out.append(path)
+        return sorted(out)
+
+    def _is_grain_doc(self, path: Path) -> bool:
+        """`model._is_grain_doc` at the rev — the predicate, not a copy of it.
+
+        "Is this a grain" is ONE definition (model.py's, the one every rule in
+        `check pm` asks through the same walk), and a second spelling of it
+        here would be a census that disagrees with the gate about what the tree
+        holds — the defect `core/walk.py` exists to make impossible. The
+        leading underscore says "not part of model's public surface"; it does
+        not say "write it twice".
+
+        A blob that cannot be READ stays in scope, exactly as on disk: "this is
+        not a grain" and "this cannot be opened" are different facts, and the
+        second is a finding for the rules rather than a silent absence.
+        """
+        return model._is_grain_doc(self._doc(path))
+
+    def _doc(self, path: Path) -> _Blob:
+        """This path at the rev, handed to a reader that expects a `Path`."""
+        return _Blob(self.spec(path), lambda: self._text(path))
+
+    def _text(self, path: Path) -> str:
+        """One blob, decoded, terminators intact. The one read under them all.
+
+        `UnicodeDecodeError` propagates rather than being wrapped: every reader
+        that opens a grain document already catches it beside `OSError`, and
+        renaming it here would need each of them taught a new name to stay as
+        correct as it is.
+        """
+        rel = self._rel(path)
+        if rel is None:
+            raise GitError(f'{path} is outside {self.root}, so no rev holds it')
+        if rel not in self._blobs:
+            self._blobs[rel] = self._git(
+                ['show', f'{self.rev}{REV_SEPARATOR}{rel}'])
+        return self._blobs[rel].decode('utf-8')
+
+    # --- the ten reads --------------------------------------------------------
+    def milestone_dir(self, cfg: model.PmConfig, mid: str) -> Path | None:
+        if not model.segment_is_literal(mid):
+            return None
+        for base in (cfg.roadmap, cfg.roadmap / model.ARCHIVE_DIR_NAME):
+            for found in self._dirs(base, f'{mid}-*'):
+                return found
+        return None
+
+    def feature_file(self, cfg: model.PmConfig, fid: str) -> Path | None:
+        mid, _, slug = fid.partition('/')
+        if not model.segment_is_literal(slug):
+            return None
+        mdir = self.milestone_dir(cfg, mid)
+        if mdir is None:
+            return None
+        ffile = mdir / FEATURES_DIR / slug / model.FEATURE_DOC
+        return ffile if self.is_file(ffile) else None
+
+    def feature_files(self, mdir: Path) -> list[Path]:
+        features = mdir / FEATURES_DIR
+        return [d / model.FEATURE_DOC for d in self._dirs(features)
+                if self.is_file(d / model.FEATURE_DOC)]
+
+    def story_files(self, ffile: Path) -> list[Path]:
+        return self._grain_docs(ffile.parent / STORIES_DIR)
+
+    def bug_files(self, mdir: Path) -> list[Path]:
+        return self._grain_docs(mdir / BUGS_DIR)
+
+    def review_record_for(self, cfg: model.PmConfig, fid: str) -> str | None:
+        """`model.review_record_for` at the rev: the pointer, then the fallback.
+
+        A pointer spelled ABSOLUTE resolves to nothing here and its record is
+        listed as absent rather than read off today's disk — an absolute path
+        is in no rev, and answering it from the working tree would put a file
+        the milestone never shipped with into a report about history.
+        """
+        ffile = self.feature_file(cfg, fid)
+        if ffile is None:
+            return None
+        pointer = model.unquote(self.field_of(ffile, 'reviewed'))
+        if pointer and pointer != 'null':
+            target = (Path(pointer) if pointer.startswith('/')
+                      else cfg.root / pointer)
+            if self.is_file(target):
+                return pointer
+        if cfg.review_slug_fallback:
+            slug = fid.partition('/')[2]
+            rdir = cfg.root / cfg.review_dir
+            pattern = f'{slug}*{MD_SUFFIX}'
+            for name in sorted(n for kind, n in self._ls(rdir, False)
+                               if kind == BLOB and slug
+                               and fnmatch.fnmatchcase(n, pattern)):
+                return cfg.rel(rdir / name)
+        return None
+
+    def field_of(self, path: Path, key: str) -> str:
+        return model.field_of(self._doc(path), key)
+
+    def read_raw(self, path: Path) -> str:
+        return model.read_raw(self._doc(path))
+
+    def is_file(self, path: Path) -> bool:
+        """Is there a BLOB at this path at the rev? A tree is not a file.
+
+        `Path.is_file()`'s question, asked of history — and the distinction
+        matters here for the same reason it does on disk: `git show
+        <rev>:<a-directory>` succeeds and hands back a LISTING, which a reader
+        expecting a document would happily parse as one.
+        """
+        rel = self._rel(path)
+        if rel is None:
+            return False
+        if rel not in self._types:
+            try:
+                found = self._git(
+                    ['cat-file', '-t', f'{self.rev}{REV_SEPARATOR}{rel}'])
+            except GitError:
+                found = b''
+            self._types[rel] = found.decode('utf-8', 'replace').strip()
+        return self._types[rel] == BLOB
+
+    def ledger_rows(self, path: Path) -> list:
+        """The milestone's rows at the rev. An absent ledger is no rows.
+
+        The same fact it is on disk: a milestone nothing was recorded for has
+        no file, and the report prints its `no ledger` line rather than
+        refusing. A ledger that IS there and will not parse is still
+        `ledger.LedgerError`, by line number, naming `<rev>:<path>`.
+        """
+        if not self.is_file(path):
+            return []
+        return ledger.read_rows(self._doc(path))
+
+
 class Grain(NamedTuple):
     """One story, feature or bug under the milestone, as the TREE holds it."""
     gid: str
@@ -205,7 +688,7 @@ class Section(NamedTuple):
     one.
     """
     name: str
-    data: Callable[[model.PmConfig, str, Path, list], dict]
+    data: Callable[[Source, model.PmConfig, str, Path, list], dict]
     lines: Callable[[model.PmConfig, dict], list[str]]
 
 
@@ -243,7 +726,7 @@ def _add(acc: dict, row: dict) -> None:
 
 
 # --- the tree -----------------------------------------------------------------
-def _grain(path: Path, kind: str, fallback: str) -> Grain:
+def _grain(src: Source, path: Path, kind: str, fallback: str) -> Grain:
     """One grain document as a row: its own id, its kind, its `size:`.
 
     The id is the file's OWN claim, the same one `_ledger_id` writes into every
@@ -251,16 +734,16 @@ def _grain(path: Path, kind: str, fallback: str) -> Grain:
     `id:` (the drift V2 reports) still gets a row, under the id its PATH spells,
     because a grain missing from the table reads as a grain that never existed.
     """
-    gid = model.unquote(model.field_of(path, 'id')) or fallback
-    return Grain(gid, kind, model.field_of(path, SIZE_FIELD))
+    gid = model.unquote(src.field_of(path, 'id')) or fallback
+    return Grain(gid, kind, src.field_of(path, SIZE_FIELD))
 
 
 def _bug_slug(mdir: Path, path: Path) -> str:
     """`bugs/` is walked recursively, so a bug's slug may carry a directory."""
-    return path.relative_to(mdir / 'bugs').with_suffix('').as_posix()
+    return path.relative_to(mdir / BUGS_DIR).with_suffix('').as_posix()
 
 
-def walk_grains(cfg: model.PmConfig, mid: str,
+def walk_grains(src: Source, cfg: model.PmConfig, mid: str,
                 mdir: Path) -> tuple[list[Grain], dict[str, set[str]]]:
     """Every grain under the milestone, and which stories each feature owns.
 
@@ -269,19 +752,19 @@ def walk_grains(cfg: model.PmConfig, mid: str,
     """
     grains: list[Grain] = []
     owned: dict[str, set[str]] = {}
-    for ffile in model.feature_files(mdir):
-        feature = _grain(ffile, KIND_FEATURE, f'{mid}/{ffile.parent.name}')
+    for ffile in src.feature_files(mdir):
+        feature = _grain(src, ffile, KIND_FEATURE, f'{mid}/{ffile.parent.name}')
         grains.append(feature)
         stories = set()
-        for sfile in model.story_files(ffile):
+        for sfile in src.story_files(ffile):
             slug = model.story_slug_of(cfg, sfile.stem)
-            story = _grain(sfile, KIND_STORY, f'{feature.gid}/{slug}')
+            story = _grain(src, sfile, KIND_STORY, f'{feature.gid}/{slug}')
             grains.append(story)
             stories.add(story.gid)
         owned[feature.gid] = stories
-    for bfile in model.bug_files(mdir):
-        grains.append(_grain(bfile, KIND_BUG,
-                             f'{mid}/bugs/{_bug_slug(mdir, bfile)}'))
+    for bfile in src.bug_files(mdir):
+        grains.append(_grain(src, bfile, KIND_BUG,
+                             f'{mid}/{BUGS_DIR}/{_bug_slug(mdir, bfile)}'))
     return grains, owned
 
 
@@ -390,10 +873,10 @@ def total_seconds(cfg: model.PmConfig, kind: str, rows: list,
 
 
 # --- section 1: spend per grain -----------------------------------------------
-def spend_data(cfg: model.PmConfig, mid: str, mdir: Path,
+def spend_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                rows: list) -> dict:
     """Section 1 as data: one entry per grain, the strays, and the totals."""
-    grains, owned = walk_grains(cfg, mid, mdir)
+    grains, owned = walk_grains(src, cfg, mid, mdir)
     kinds = {g.gid: g.kind for g in grains}
     dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
     status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
@@ -440,6 +923,23 @@ def spend_data(cfg: model.PmConfig, mid: str, mdir: Path,
                           if k != 'dispatches'}}}
 
 
+AT_REV = ' — at {rev}'
+
+
+def heading_id(data: dict) -> str:
+    """The milestone id as a HEADING names it — plus ` — at <rev>` from git.
+
+    Every `[ledger:report] <id> — …` heading carries it, so a section lifted
+    out of the report on its own still says which tree it is a report OF. The
+    summary line does not: it is a statement of totals rather than a heading,
+    and `pm ledger report`'s section-heading shape (three ` — ` parts) is what
+    a reader — and `tests/support/pm.py`'s `section_of` — slices the report by.
+    """
+    rev = data.get('rev')
+    return f'{data["milestone"]}{AT_REV.format(rev=rev)}' if rev else str(
+        data['milestone'])
+
+
 def _cell(value: object) -> str:
     """One number as a cell: the integer, or `-` when nobody recorded it."""
     return DASH if value is None else str(value)
@@ -475,7 +975,7 @@ def _spend_cells(entry: dict) -> tuple[str, ...]:
 def spend_lines(cfg: model.PmConfig, data: dict) -> list[str]:
     """Section 1 as lines: a heading, one table per kind, the strays, a total."""
     totals = data['totals']
-    out = [f'{HEADING_PREFIX} {data["milestone"]} — {SPEND_TITLE} — '
+    out = [f'{HEADING_PREFIX} {heading_id(data)} — {SPEND_TITLE} — '
            f'{totals["dispatch_rows"]} dispatch row(s), '
            f'{totals["status_rows"]} status row(s), '
            f'{totals["grains"]} grain(s)']
@@ -537,18 +1037,18 @@ class RecordError(Exception):
     """
 
 
-def review_records(cfg: model.PmConfig, mid: str,
+def review_records(src: Source, cfg: model.PmConfig, mid: str,
                    mdir: Path) -> list[tuple[str, str, Path]]:
     """(feature id, the path as the report prints it, the path) per record."""
     out: list[tuple[str, str, Path]] = []
-    for ffile in model.feature_files(mdir):
-        fid = (model.unquote(model.field_of(ffile, 'id'))
+    for ffile in src.feature_files(mdir):
+        fid = (model.unquote(src.field_of(ffile, 'id'))
                or f'{mid}/{ffile.parent.name}')
-        rel = model.review_record_for(cfg, fid)
+        rel = src.review_record_for(cfg, fid)
         path = (cfg.root / rel) if rel else None
         if path is None:
             beside = ffile.parent / model.REVIEW_FILE_NAME
-            if beside.is_file():
+            if src.is_file(beside):
                 path, rel = beside, cfg.rel(beside)
         if path is not None and rel is not None:
             out.append((fid, rel, path))
@@ -558,7 +1058,7 @@ def review_records(cfg: model.PmConfig, mid: str,
     return out
 
 
-def parsed_records(cfg: model.PmConfig, mid: str,
+def parsed_records(src: Source, cfg: model.PmConfig, mid: str,
                    mdir: Path) -> list[tuple[str, str, object]]:
     """Every record, parsed: `None` in the third slot when it carries no block.
 
@@ -569,9 +1069,9 @@ def parsed_records(cfg: model.PmConfig, mid: str,
     is the only reader either of them has.
     """
     out: list[tuple[str, str, object]] = []
-    for fid, rel, path in review_records(cfg, mid, mdir):
+    for fid, rel, path in review_records(src, cfg, mid, mdir):
         try:
-            text = model.read_raw(path)
+            text = src.read_raw(path)
         except (OSError, UnicodeDecodeError) as err:
             raise RecordError(f'{rel} could not be read ({err})') from err
         try:
@@ -614,7 +1114,7 @@ def _section(mid: str, title: str, census: str,
 
 
 # --- section 2: yield per review pass -----------------------------------------
-def yield_data(cfg: model.PmConfig, mid: str, mdir: Path,
+def yield_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                rows: list) -> dict:
     """Section 2 as data: one entry per review record under the milestone.
 
@@ -632,7 +1132,7 @@ def yield_data(cfg: model.PmConfig, mid: str, mdir: Path,
     the feature, beside its own agent type.
     """
     records = []
-    for fid, rel, parsed in parsed_records(cfg, mid, mdir):
+    for fid, rel, parsed in parsed_records(src, cfg, mid, mdir):
         entry = {'feature': fid, 'record': rel, 'verdict': None,
                  'findings': None, 'severities': {}, 'deferred': [],
                  'dispositions': {kind: None
@@ -675,7 +1175,7 @@ def yield_lines(cfg: model.PmConfig, data: dict) -> list[str]:
                       for r in records for d in r['deferred'])
     totals = section['totals']
     return _section(
-        data['milestone'], YIELD_TITLE,
+        heading_id(data), YIELD_TITLE,
         f'{totals["records"]} record(s), {totals["findings"]} finding(s)',
         [(f'{VERDICT_TITLE} ({len(passes)})',
           (FEATURE_COLUMN, RECORD_COLUMN, VERDICT_COLUMN, FINDINGS_COLUMN,
@@ -697,7 +1197,7 @@ def _after(row, moment) -> bool:
     return ts is not None and ts > moment
 
 
-def rework_data(cfg: model.PmConfig, mid: str, mdir: Path,
+def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                 rows: list) -> dict:
     """Section 3 as data: reopens, dispatches after review, verdict spread.
 
@@ -713,7 +1213,7 @@ def rework_data(cfg: model.PmConfig, mid: str, mdir: Path,
     is the story's FIRST row into the review state; a story that never reached
     it has no such moment, and `-` is the honest column.
     """
-    grains, owned = walk_grains(cfg, mid, mdir)
+    grains, owned = walk_grains(src, cfg, mid, mdir)
     kinds = {g.gid: g.kind for g in grains}
     status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
     dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
@@ -740,7 +1240,7 @@ def rework_data(cfg: model.PmConfig, mid: str, mdir: Path,
         out.append({'grain': grain.gid, 'feature': feature_of.get(grain.gid),
                     'reopens': reopens, 'after_review': after})
     spread = _tally(parsed.verdict
-                    for _, _, parsed in parsed_records(cfg, mid, mdir)
+                    for _, _, parsed in parsed_records(src, cfg, mid, mdir)
                     if parsed is not None)
     reopened = [e['reopens'] for e in out if e['reopens'] is not None]
     return {SECTION_REWORK: {
@@ -760,7 +1260,7 @@ def rework_lines(cfg: model.PmConfig, data: dict) -> list[str]:
     spread = [(v['verdict'], str(v['records'])) for v in section['verdicts']]
     totals = section['totals']
     return _section(
-        data['milestone'], REWORK_TITLE,
+        heading_id(data), REWORK_TITLE,
         f'{totals["stories"]} story(s), {_cell(totals["reopens"])} reopen(s), '
         f'{totals["records"]} record(s) with a verdict',
         [(f'{REOPEN_TITLE} ({len(stories)})',
@@ -771,7 +1271,7 @@ def rework_lines(cfg: model.PmConfig, data: dict) -> list[str]:
 
 
 # --- section 4: escapes -------------------------------------------------------
-def escapes_data(cfg: model.PmConfig, mid: str, mdir: Path,
+def escapes_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                  rows: list) -> dict:
     """Section 4 as data: every bug here whose `caused_by:` names a feature.
 
@@ -784,17 +1284,17 @@ def escapes_data(cfg: model.PmConfig, mid: str, mdir: Path,
     `--json` as the equality it is. Neither is a judgement about the bug.
     """
     out = []
-    for bfile in model.bug_files(mdir):
-        cause = model.field_of(bfile, CAUSED_BY_FIELD)
+    for bfile in src.bug_files(mdir):
+        cause = src.field_of(bfile, CAUSED_BY_FIELD)
         if not cause:
             continue
-        gid = (model.unquote(model.field_of(bfile, 'id'))
-               or f'{mid}/bugs/{_bug_slug(mdir, bfile)}')
-        ffile = model.feature_file(cfg, cause)
-        fstatus = model.field_of(ffile, 'status') if ffile is not None else ''
+        gid = (model.unquote(src.field_of(bfile, 'id'))
+               or f'{mid}/{BUGS_DIR}/{_bug_slug(mdir, bfile)}')
+        ffile = src.feature_file(cfg, cause)
+        fstatus = src.field_of(ffile, 'status') if ffile is not None else ''
         out.append({
             'caused_by': cause, 'bug': gid,
-            'status': model.field_of(bfile, 'status') or None,
+            'status': src.field_of(bfile, 'status') or None,
             'feature_status': fstatus or None,
             'feature_done': (None if not fstatus
                              else fstatus == ledger.TERMINAL_STATE)})
@@ -812,7 +1312,7 @@ def escapes_lines(cfg: model.PmConfig, data: dict) -> list[str]:
              _cell(e['feature_status'])) for e in section['bugs']]
     totals = section['totals']
     return _section(
-        data['milestone'], ESCAPES_TITLE,
+        heading_id(data), ESCAPES_TITLE,
         f'{totals["bugs"]} bug(s) naming a cause, '
         f'{totals["features"]} feature(s)',
         [(f'{ESCAPE_TITLE} ({len(bugs)})',
@@ -843,7 +1343,7 @@ def _usage_of(row: dict, key: str) -> object:
     return usage.get(key) if isinstance(usage, dict) else None
 
 
-def overhead_data(cfg: model.PmConfig, mid: str, mdir: Path,
+def overhead_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                   rows: list) -> dict:
     """Section 5 as data: looking before writing, deciding, and stopping.
 
@@ -868,7 +1368,7 @@ def overhead_data(cfg: model.PmConfig, mid: str, mdir: Path,
     stops carry cumulative totals (D4), so the delta is what the turn cost, and
     which grain it was about is a question this row cannot answer.
     """
-    grains, owned = walk_grains(cfg, mid, mdir)
+    grains, owned = walk_grains(src, cfg, mid, mdir)
     kinds = {g.gid: g.kind for g in grains}
     dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
     status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS
@@ -960,7 +1460,7 @@ def overhead_lines(cfg: model.PmConfig, data: dict) -> list[str]:
                _cell(e['tool_calls'])) for e in section['sessions']]
     totals = section['totals']
     return _section(
-        data['milestone'], OVERHEAD_TITLE,
+        heading_id(data), OVERHEAD_TITLE,
         f'{totals["dispatch_rows"]} dispatch row(s), '
         f'{totals["decision_rows"]} decision row(s), '
         f'{totals["session_rows"]} session row(s)',
@@ -986,7 +1486,8 @@ SECTIONS = (Section(SECTION_SPEND, spend_data, spend_lines),
             Section(SECTION_OVERHEAD, overhead_data, overhead_lines))
 
 
-def build(cfg: model.PmConfig, mid: str, mdir: Path, rows: list) -> dict:
+def build(cfg: model.PmConfig, mid: str, mdir: Path, rows: list,
+          src: Source | None = None) -> dict:
     """The whole report as ONE object — what `--json` prints, verbatim.
 
     Every section contributes its own keys: section 1's sit at the top level
@@ -995,10 +1496,20 @@ def build(cfg: model.PmConfig, mid: str, mdir: Path, rows: list) -> dict:
     add ONE key named for the question (`yield`, `rework`, `escapes`,
     `overhead`). Adding a key is an output-format change and so a minor bump
     (hard rule 6); removing or renaming one is not a thing this file does.
+
+    ONE `build`, both paths. `src` is where the files come from — the working
+    tree by default, `GitSource(root, rev)` for `--from <rev>` — and the only
+    trace of the difference in the object is a `rev` key, present ONLY when
+    there was a rev. A live report gains no key, because a `"rev": null` in
+    every payload would be this file answering a question nobody asked and a
+    consumer would have to learn it to keep reading.
     """
+    src = DiskSource() if src is None else src
     out: dict = {'milestone': mid}
+    if src.rev:
+        out['rev'] = src.rev
     for section in SECTIONS:
-        out.update(section.data(cfg, mid, mdir, rows))
+        out.update(section.data(src, cfg, mid, mdir, rows))
     return out
 
 
