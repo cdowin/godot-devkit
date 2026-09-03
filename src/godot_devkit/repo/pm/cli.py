@@ -79,7 +79,11 @@ USAGE = """usage: godot-devkit pm <command>
                                           (under [pm] story_ordinal_prefix
                                            a slug may lead with `NN-`: the
                                            FILE keeps it, the id never does)
-  new bug <milestone> <slug>
+  new bug <milestone> <slug> [--caused-by <feature-id>]
+                                          (--caused-by stamps caused_by: — the
+                                           feature whose change produced the
+                                           bug, any status; it must resolve, and
+                                           an unresolvable one writes nothing)
   ledger record --from-transcript <path> --event SubagentStop|Stop
                 [--agent-id X] [--agent-type Y] [--session-id Z]
                                           (sum one Claude Code transcript and
@@ -1086,6 +1090,57 @@ def cmd_validate(cfg: model.PmConfig, args: list[str]) -> int:
 
 
 # --- new ----------------------------------------------------------------------
+# `caused_by:` — the feature whose change produced a bug. The FIELD name and
+# the FLAG that sets it, spelled once each: `caught_in:` says which milestone
+# found the bug, this says which feature made it, and an escape needs both.
+CAUSED_BY = 'caused_by'
+CAUSED_BY_FLAG = '--caused-by'
+
+
+def _caused_by(cfg: model.PmConfig, pairs: list[tuple[str, str]]) -> str:
+    """The `--caused-by` value, proven to name a feature that EXISTS. Or ''.
+
+    RESOLUTION is the whole gate, and it runs before anything is written. A
+    traversal, an absolute path, a glob, a backslash, a whitespace segment, a
+    name longer than the filesystem takes, a story id and a milestone id all
+    name no feature, so all of them exit 2 with the value in the message —
+    `feature_file` refuses the first four through `segment_is_literal` and the
+    filesystem answers the rest. There is no second grammar to keep in sync
+    with the resolver, which is the only way the two cannot disagree.
+
+    ANY status resolves: `done`, `building`, `planning` alike. What counts as
+    an ESCAPE is the report's question (a bug caused by a CLOSED feature); this
+    verb records which change produced the bug and holds no opinion about it.
+    Refusing a non-`done` feature here would make the record unwritable in the
+    one case it is most often known — during the build that caused it.
+
+    An OSError is False, never a traceback: a value the filesystem itself
+    refuses names no feature either, and `pm new bug` came out as a traceback
+    or as a refusal depending on the interpreter before `_exists` settled the
+    same question for paths (see it).
+    """
+    value = ''
+    for _, raw in pairs:
+        # Both spellings refuse an empty value the same way: `--caused-by=`
+        # storing '' would file the bug with the field silently unset, at
+        # exit 0, after the caller asked for it.
+        if not raw:
+            raise Usage(f'{CAUSED_BY_FLAG} needs a feature id')
+        value = raw
+    if not value:
+        return ''
+    try:
+        found = model.feature_file(cfg, value)
+    except OSError:
+        found = None
+    if found is None:
+        raise Usage(f'{CAUSED_BY_FLAG} {value!r} resolves to no feature in '
+                    f'this tree — {CAUSED_BY} names the FEATURE whose change '
+                    f'produced the bug (a milestone id or a story id is not '
+                    f'one), and nothing was written')
+    return value
+
+
 def _scaffold(cfg: model.PmConfig, kind: str, gdir: Path,
               values: dict[str, str]) -> int:
     """Fill a grain's canonical slots and report only what CHANGED."""
@@ -1188,8 +1243,13 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
         _ok(f'created {cfg.rel(sf)}')
         return 0
     if grain == 'bug':
+        pairs, rest = _take_flags(rest, (CAUSED_BY_FLAG,), noun='a feature id')
         if len(rest) != 2:
             raise Usage(USAGE)
+        # Resolved BEFORE the slug guard and before any write: a bug filed with
+        # an unresolvable cause is a bug filed with a lie in it, and the file
+        # that would carry it is not created at all.
+        cause = _caused_by(cfg, pairs)
         mid, slug = rest[0], _check_slug('bug slug', rest[1])
         mdir = model.milestone_dir(cfg, mid)
         if mdir is None:
@@ -1204,6 +1264,20 @@ def cmd_new(cfg: model.PmConfig, args: list[str]) -> int:
             {'id': f'{mid}/bugs/{slug}', 'milestone': mid, 'slug': slug})
         _mint(cfg, bf, body)
         _ok(f'created {cfg.rel(bf)}')
+        if cause:
+            # Stamped through `set_field` rather than a template placeholder,
+            # so a project that overrides bug.md still gets the field it asked
+            # for: `set_fields` rewrites the key in place if the template
+            # carries it and inserts it before the closing fence if not. A
+            # template with no frontmatter at all can hold no field, and that
+            # is said out loud rather than dropped at exit 0.
+            if not model.set_field(bf, CAUSED_BY, cause):
+                raise Refused(
+                    f'{cfg.rel(bf)} was created, but {CAUSED_BY}: could not be '
+                    f'written into it (the bug template has no frontmatter '
+                    f'block) — set it with `pm set {mid}/bugs/{slug} '
+                    f'{CAUSED_BY} {cause}`')
+            _ok(f'{mid}/bugs/{slug}: {CAUSED_BY} {cause!r}')
         return 0
     raise Usage(USAGE)
 

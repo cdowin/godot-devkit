@@ -9,7 +9,7 @@ undrifted and still depend on a feature that does not exist.
     V2  the id matches the path (the id==path convention the resolvers rely on)
     V3  parentage is consistent — a story's `feature:`/`milestone:` and a
         feature's `milestone:` name the grains that actually own them
-    V4  `depends_on` / `consumed_by` refs resolve
+    V4  `depends_on` / `consumed_by` refs resolve — and, on a bug, `caused_by:`
     V5  the feature dependency graph is ACYCLIC — a cycle means no build order
         exists at all
     V6  a generated execution-list block, WHERE ONE EXISTS, matches the tree it
@@ -24,6 +24,21 @@ resolves only refs whose MILESTONE is present and censuses the rest as
 UNVERIFIABLE — the same discipline `check props` uses. Failing them would
 punish the prune model; ignoring them silently would hide a typo, so they are
 counted and reported in the summary.
+
+**A bug is walked for its ONE ref, by both readers.** `caused_by:` is a ref like
+any other, so V4 resolves it and `pm validate` and `check pm` report it in the
+same line — one definition, two readers, which is the property the whole
+`test_pm_*` quartet exists to hold. A ref naming nothing is an INTEGRITY fact,
+the class this package keeps as a gate; whether a given cause counts as an
+escape is a judgement, and that belongs to `pm ledger report`. There is no
+switch here to run one reader narrower than the other: that would be a second
+answer to one question, which is how the two ever diverge.
+
+**A bug is NOT counted in `census['grains']`.** The walk reaches it for
+`caused_by:` alone, so `census['refs']` moves and the grain count does not —
+V1/V2/V3 are still stated over milestones, features and stories exactly as
+they always were, and `check pm` remains the one home of the bug census
+(`N bug(s)`, from `model.bug_status_findings`).
 """
 from __future__ import annotations
 
@@ -32,6 +47,11 @@ from pathlib import Path
 from godot_devkit.repo.pm import model
 
 _REF_KEYS = ('depends_on', 'consumed_by')
+
+# The bug field that names the feature whose change produced the bug. A SCALAR,
+# not a list: one bug has one cause, and `caught_in:` already holds the other
+# half of the provenance (which milestone FOUND it).
+CAUSED_BY = 'caused_by'
 
 
 class Unparseable(Exception):
@@ -84,6 +104,38 @@ def _safe_refs(path: Path, key: str, bad, rel: str) -> list[str]:
         return []
 
 
+def _scalar_ref(path: Path, key: str) -> list[str]:
+    """The ONE id inside a `key: <id>` frontmatter scalar, as a 0-or-1 list.
+
+    The scalar twin of `_refs`, and it returns a list for the same reason: the
+    census / UNVERIFIABLE / V4 block downstream is one home, not two.
+
+    Narrow on purpose, and for `_refs`'s reason inverted: a value wearing a
+    LIST's clothes (`["0.1/a"]`) would reach the resolver as a milestone id
+    that no `milestone_dir` glob matches, and be censused UNVERIFIABLE — a
+    hand-written list quietly reported as "its milestone was pruned". An id
+    holds no bracket, comma, quote or space, so a value that does is a finding.
+    """
+    raw = model.field_of(path, key).strip()
+    if not raw or raw in ('[]', 'null', '~'):
+        return []
+    if raw[0] in '[{' or raw[-1] in ']}':
+        raise Unparseable(f'{key}: {raw!r} is a list or a mapping — {key} is '
+                          f'one id, written bare ({key}: 0.1/some-feature)')
+    if any(c in raw for c in ',\'" \t'):
+        raise Unparseable(f'{key}: {raw!r} is not a single id — ids hold no '
+                          f'commas, quotes or whitespace')
+    return [raw]
+
+
+def _safe_scalar_ref(path: Path, key: str, bad, rel: str) -> list[str]:
+    try:
+        return _scalar_ref(path, key)
+    except Unparseable as err:
+        bad(f'{rel}: {err}')
+        return []
+
+
 def _grain_exists(cfg: model.PmConfig, ref: str) -> bool | None:
     """True/False if resolvable, None when the owning milestone is not present.
 
@@ -101,18 +153,43 @@ def _grain_exists(cfg: model.PmConfig, ref: str) -> bool | None:
     return model.story_file(cfg, ref) is not None
 
 
-def _check_refs(cfg: model.PmConfig, path, key: str, on: set[str], bad,
-                census: dict) -> list[str]:
-    """The census / unverifiable / V4 block for one grain's ref key.
+def _feature_exists(cfg: model.PmConfig, ref: str) -> bool | None:
+    """`_grain_exists` for a ref that must name a FEATURE — `caused_by:`'s shape.
+
+    The same three answers, including None for a ref into a pruned milestone.
+    A milestone id or a story id is False here rather than True: `caused_by:`
+    records the CHANGE that produced a bug, and a milestone is a container of
+    changes, not one. Accepting either would make the escape count in
+    `pm ledger report` attribute a bug to something that cannot own it.
+
+    An OSError is False, never a traceback: `Path.is_dir()` RAISES on a
+    component longer than the filesystem's NAME_MAX up to 3.13 and answers
+    False from 3.14 on, so a hand-typed over-long id would fail `pm validate`
+    with a stack trace on one interpreter and a finding on another. A value the
+    filesystem itself refuses names no feature — the same answer `cli._exists`
+    settled for paths.
+    """
+    try:
+        if model.milestone_dir(cfg, ref.partition('/')[0]) is None:
+            return None
+        return model.feature_file(cfg, ref) is not None
+    except OSError:
+        return False
+
+
+def _check_ref_ids(cfg: model.PmConfig, path, key: str, refs: list[str],
+                   on: set[str], bad, census: dict, exists=_grain_exists) -> list[str]:
+    """The census / unverifiable / V4 block for a ref key's already-parsed ids.
 
     One home for the shape every grain kind runs (a V7 author touches this
-    block, not three pastes of it). Returns the refs that RESOLVED, so the
+    block, not three pastes of it) — over a LIST key or a scalar one, because
+    the parser hands both in as ids. Returns the refs that RESOLVED, so the
     feature site can build its graph edges from them.
     """
     resolved: list[str] = []
-    for ref in _safe_refs(path, key, bad, cfg.rel(path)):
+    for ref in refs:
         census['refs'] += 1
-        got = _grain_exists(cfg, ref)
+        got = exists(cfg, ref)
         if got is None:
             census['unverifiable'] += 1
         elif not got:
@@ -122,6 +199,21 @@ def _check_refs(cfg: model.PmConfig, path, key: str, on: set[str], bad,
         else:
             resolved.append(ref)
     return resolved
+
+
+def _check_refs(cfg: model.PmConfig, path, key: str, on: set[str], bad,
+                census: dict) -> list[str]:
+    """`_check_ref_ids` over an inline-list ref key."""
+    return _check_ref_ids(cfg, path, key, _safe_refs(path, key, bad, cfg.rel(path)),
+                          on, bad, census)
+
+
+def _check_caused_by(cfg: model.PmConfig, path, on: set[str], bad,
+                     census: dict) -> None:
+    """`_check_ref_ids` over a bug's scalar `caused_by:`, resolved as a feature."""
+    _check_ref_ids(cfg, path, CAUSED_BY,
+                   _safe_scalar_ref(path, CAUSED_BY, bad, cfg.rel(path)),
+                   on, bad, census, exists=_feature_exists)
 
 
 def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str], dict]:
@@ -200,6 +292,13 @@ def run(cfg: model.PmConfig, enabled: set[str] | None = None) -> tuple[list[str]
                                       if ref.count('/') == 1)
 
         _check_refs(cfg, mfile, 'depends_on', on, bad, census)
+
+        # Bugs are walked for their ONE ref and nothing else: `census['grains']`
+        # still counts milestones, features and stories, so V1/V2/V3 keep the
+        # grain set they have always been stated over and this walk adds refs
+        # alone. `check pm` stays the one home of the bug census itself.
+        for bfile in model.bug_files(mdir):
+            _check_caused_by(cfg, bfile, on, bad, census)
 
     if 'V5' in on:
         findings.extend(_graph_findings(graph))

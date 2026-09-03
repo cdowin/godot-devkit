@@ -101,6 +101,32 @@ def tree(milestone_status='building', feature_status='building',
             os.chdir(previous)
 
 
+def bug(root: Path, slug: str = 'crash', status: str = 'open',
+        **extra: str) -> Path:
+    """One bug document under `tree()`'s milestone, and its path.
+
+    The canonical frontmatter a scaffolded bug carries, so a test that cares
+    about ONE field (`caused_by:`) names that field and nothing else.
+    """
+    path = root / 'pm/roadmap/0.1-demo/bugs' / f'{slug}.md'
+    front = {'id': f'0.1/bugs/{slug}', 'milestone': '"0.1"', 'name': '',
+             'status': status, 'caught_in': '"0.1"', 'fix_milestone': ''}
+    front.update(extra)
+    write(path, front)
+    return path
+
+
+def frontmatter(path: Path) -> list[str]:
+    """The lines INSIDE the leading `---` fence, verbatim.
+
+    The bytes, not a parse: field order and an empty field's exact spelling
+    (`caused_by:`, no trailing space) are half of what a template promises.
+    """
+    lines = path.read_text(encoding='utf-8').split('\n')
+    assert lines[0] == '---', f'{path} does not open a frontmatter block'
+    return lines[1:lines.index('---', 1)]
+
+
 LEDGER_REL = 'pm/roadmap/0.1-demo/ledger.jsonl'
 
 

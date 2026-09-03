@@ -18,6 +18,7 @@ from pathlib import Path
 from support.pm import (
     DAMAGE_FORMS,
     STORY_REL,
+    bug,
     cfg_for,
     damage,
     run_cli,
@@ -544,6 +545,203 @@ class Validate(unittest.TestCase):
             code, out = run_gate(root)
             self.assertEqual(code, 1)
             self.assertIn('resolves to nothing', out)
+
+
+class CausedBy(unittest.TestCase):
+    """V4 over a bug's `caused_by:` — one definition, BOTH readers.
+
+    A ref is a ref: a `caused_by:` naming no feature reports in exactly the
+    shape a dangling `depends_on` does, at exactly its exit code, counted in
+    the same census, and it does so out of `pm validate` AND out of `check pm`.
+    A ref that names nothing is an integrity FACT, which is the class this
+    package keeps as a gate; whether a given cause counts as an escape is a
+    judgement, and that belongs to the report.
+    """
+
+    def _validate(self, root: Path, **kw):
+        from godot_devkit.repo.pm import validate
+        return validate.run(model.PmConfig(root=root), **kw)
+
+    def test_a_resolving_cause_is_clean_and_counted(self):
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.1/alpha')
+            findings, census = self._validate(root)
+            self.assertEqual(findings, [])
+            self.assertEqual(census['refs'], 1)
+            self.assertEqual(census['unverifiable'], 0)
+
+    def test_a_dangling_cause_reports_like_a_dangling_depends_on(self):
+        # The SAME line, word for word, but for the key and the path — one
+        # finding shape, so a consumer grepping `resolves to nothing` sees
+        # both without learning a second spelling.
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.1/no-such-feature')
+            findings, census = self._validate(root)
+            self.assertEqual(findings, [
+                "pm/roadmap/0.1-demo/bugs/seed-is-zero.md: caused_by "
+                "'0.1/no-such-feature' resolves to nothing "
+                "(its milestone IS in the tree)"])
+            self.assertEqual(census['refs'], 1)
+
+            ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
+            model.set_field(ff, 'depends_on', '["0.1/no-such-feature"]')
+            dep = [f for f in self._validate(root)[0] if 'depends_on' in f]
+            self.assertEqual(len(dep), 1)
+            self.assertEqual(dep[0].split(': ', 1)[1].replace('depends_on', 'X'),
+                             findings[0].split(': ', 1)[1].replace('caused_by', 'X'))
+
+    def test_the_verb_exits_1_and_prints_the_finding(self):
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.1/no-such-feature')
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 1, out)
+            self.assertIn('INVALID', out)
+            self.assertIn("caused_by '0.1/no-such-feature' resolves to nothing",
+                          out)
+
+    def test_the_census_line_counts_it(self):
+        with tree(story_statuses=('todo',)) as root:
+            self.assertIn('3 grain(s), 0 ref(s)', run_cli(root, 'validate')[1])
+            bug(root, 'seed-is-zero', caused_by='0.1/alpha')
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 0, out)
+            # Bugs are walked for their ONE ref, not censused as grains: V1-V3
+            # are still stated over milestones, features and stories.
+            self.assertIn('3 grain(s), 1 ref(s)', out)
+
+    def test_an_empty_or_absent_cause_is_not_a_ref_at_all(self):
+        for value in ('', 'null', '~'):
+            with self.subTest(value=value), tree(story_statuses=('todo',)) as root:
+                bug(root, 'seed-is-zero', caused_by=value)
+                findings, census = self._validate(root)
+                self.assertEqual(findings, [])
+                self.assertEqual(census['refs'], 0)
+        with tree(story_statuses=('todo',)) as root:
+            path = bug(root, 'seed-is-zero')
+            self.assertEqual(model.field_of(path, 'caused_by'), '')
+            self.assertEqual(self._validate(root), ([], {
+                'grains': 3, 'refs': 0, 'unverifiable': 0}))
+
+    def test_a_bug_is_walked_for_its_ref_and_NOT_counted_as_a_grain(self):
+        # The walk reaches a bug for `caused_by:` alone. V1/V2/V3 are still
+        # stated over milestones, features and stories, and `check pm` stays
+        # the one home of the bug census (`N bug(s)`).
+        with tree(story_statuses=('todo',)) as root:
+            before = self._validate(root)[1]['grains']
+            for i in range(3):
+                bug(root, f'b{i}', caused_by='0.1/alpha')
+            _, census = self._validate(root)
+            self.assertEqual(census['grains'], before)
+            self.assertEqual(census['refs'], 3)
+            self.assertIn(f'{before} grain(s), 3 ref(s)',
+                          run_cli(root, 'validate')[1])
+            self.assertIn('3 bug(s)', run_gate(root)[1])
+
+    def test_a_cause_naming_a_MILESTONE_or_a_STORY_resolves_to_nothing(self):
+        # `caused_by:` records the CHANGE that produced the bug. A milestone is
+        # a container of changes, not one, and a story is a slice of one — if
+        # either passed here, the escape count would attribute a bug to
+        # something that cannot own it.
+        for value in ('0.1', '0.1/alpha/s0'):
+            with self.subTest(value=value), tree(story_statuses=('todo',)) as root:
+                bug(root, 'seed-is-zero', caused_by=value)
+                findings, census = self._validate(root)
+                self.assertTrue(any('resolves to nothing' in f for f in findings),
+                                findings)
+                self.assertEqual(census['refs'], 1)
+
+    def test_a_cause_into_a_pruned_milestone_is_unverifiable_not_a_finding(self):
+        # Git history is the archive — the same discipline V4 already applies
+        # to a `depends_on` naming a milestone that has been retired.
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.0.9/long-gone')
+            findings, census = self._validate(root)
+            self.assertEqual(findings, [])
+            self.assertEqual(census['unverifiable'], 1)
+            self.assertIn('UNVERIFIABLE', run_cli(root, 'validate')[1])
+
+    def test_a_LIST_shaped_cause_is_a_finding_not_a_silent_unverifiable(self):
+        # `["0.1/alpha"]` reaches the resolver as a milestone id no glob
+        # matches, so the generic path would census it UNVERIFIABLE — a
+        # hand-written list quietly reported as "its milestone was pruned".
+        for raw in ('["0.1/alpha"]', '0.1/alpha, 0.1/beta', '0.1/a 0.1/b',
+                    '{a: b}'):
+            with self.subTest(raw=raw), tree(story_statuses=('todo',)) as root:
+                path = bug(root, 'seed-is-zero')
+                self.assertTrue(model.set_field(path, 'caused_by', raw))
+                findings, census = self._validate(root)
+                self.assertTrue(findings, f'{raw!r} vanished silently')
+                self.assertEqual(census['unverifiable'], 0)
+
+    def test_an_over_long_cause_is_a_finding_not_a_traceback(self):
+        # `Path.is_dir()` RAISES on a component past NAME_MAX up to 3.13 and
+        # answers False from 3.14 on, so the same hand-typed id would fail
+        # `pm validate` with a stack trace on one interpreter and a finding on
+        # another. A tool whose behaviour depends on that is not a tool.
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.1/' + 'a' * 300)
+            findings, census = self._validate(root)
+            self.assertTrue(any('resolves to nothing' in f for f in findings),
+                            findings)
+            self.assertEqual(census['refs'], 1)
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 1, out)
+            self.assertNotIn('Traceback', out)
+
+    def test_a_QUOTED_id_is_the_same_id(self):
+        # `milestone: "0.1"` is the convention this tree already writes, so a
+        # hand-quoted cause is an id, not a shape to complain about.
+        with tree(story_statuses=('todo',)) as root:
+            path = bug(root, 'seed-is-zero')
+            self.assertTrue(model.set_field(path, 'caused_by', '"0.1/alpha"'))
+            findings, census = self._validate(root)
+            self.assertEqual(findings, [])
+            self.assertEqual(census['refs'], 1)
+
+    def test_the_gate_reports_it_too_and_its_ref_census_moves(self):
+        # One definition, two readers — the property the whole test_pm_*
+        # quartet exists to hold. A dangling `depends_on` fails `check pm`, so
+        # a dangling `caused_by:` fails it in the same line and at the same
+        # exit code, and the ref it added is in the gate's census.
+        with tree(story_statuses=('todo',)) as root:
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('0 bug(s), 0 ref(s)', out)
+
+            bug(root, 'seed-is-zero', caused_by='0.1/no-such-feature')
+            code, out = run_gate(root)
+            self.assertEqual(code, 1, out)
+            self.assertIn("  DRIFT  pm/roadmap/0.1-demo/bugs/seed-is-zero.md: "
+                          "caused_by '0.1/no-such-feature' resolves to nothing "
+                          "(its milestone IS in the tree)", out)
+            self.assertIn('1 bug(s), 1 ref(s)', out)
+            self.assertIn('integrity violation(s)', out)
+            # And `pm validate`, on the same tree, says the same thing.
+            self.assertEqual(run_cli(root, 'validate')[0], 1)
+
+    def test_a_RESOLVING_cause_leaves_the_gate_green_and_still_counts(self):
+        # The other half of the census claim: the ref is counted whether or
+        # not it is a finding, so `1 ref(s)` is not a synonym for `1 problem`.
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.1/alpha')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn('1 bug(s), 1 ref(s)', out)
+
+    def test_the_two_readers_agree_with_no_switch_between_them(self):
+        # There is no parameter that runs one reader narrower than the other —
+        # a second answer to one question is how the two ever diverge.
+        import inspect
+
+        from godot_devkit.repo.pm import validate
+        self.assertEqual(list(inspect.signature(validate.run).parameters),
+                         ['cfg', 'enabled'])
+        with tree(story_statuses=('todo',)) as root:
+            bug(root, 'seed-is-zero', caused_by='0.1/no-such-feature')
+            findings, _ = validate.run(model.PmConfig(root=root))
+            self.assertEqual(len(findings), 1)
+            gate_out = run_gate(root)[1]
+            self.assertIn(findings[0], gate_out)
 
 
 class RefParsing(unittest.TestCase):
