@@ -13,12 +13,24 @@
 #       at: GDScript::reload (res://path/to/file.gd:NN)
 #
 # This runner builds a THROWAWAY project root (symlinks back to the repo plus a
-# patched copy of project.godot and a seeded .godot cache), runs the import pass
-# against THAT, and reads the output for the promotion marker. The working tree
-# is never written to, so concurrent runs cannot collide — the earlier design
-# appended the promotion block to the REAL project.godot and restored it from a
-# snapshot, and with two agents in one tree the [debug] blocks stacked and the
-# blind restore reverted a legitimate concurrent edit.
+# patched copy of project.godot and a seeded .godot cache) and runs TWO stages
+# against THAT, reading one transcript for the promotion marker. The working
+# tree is never written to, so concurrent runs cannot collide — the earlier
+# design appended the promotion block to the REAL project.godot and restored it
+# from a snapshot, and with two agents in one tree the [debug] blocks stacked
+# and the blind restore reverted a legitimate concurrent edit.
+#
+#   1. IMPORT  — the editor import pass: every script the boot graph, a scene
+#                or a .tres reaches gets its full semantic reload, and a
+#                built-in script inside a .tscn is analyzed here or nowhere.
+#   2. SWEEP   — compile_sweep.gd, the same full-project pass parse.sh runs,
+#                under the SAME promoted project file. A `class_name` script
+#                nothing instantiates — reached only by another script's
+#                `extends` — gets the lightweight class-registry pass in stage
+#                1 and never the reload that emits warnings; a consumer found
+#                two shadowed-global sites this way that the editor console
+#                printed on every F5 and the gate never saw. The sweep loads
+#                every .gd, so every one is analyzed, reported N/N.
 #
 # THE CATEGORY LIST IS DELIBERATELY NARROW. The broad analyzer set
 # (untyped_declaration, unsafe_*, …) trips thousands of pre-existing lines in
@@ -41,7 +53,10 @@ REPO_ROOT_FROM_HERE="../../.."
 # the four that a playtest proved escape parse + lint, plus each one's
 # same-bug-class sibling.
 GDK_WARNING_CATEGORIES="${GDK_WARNING_CATEGORIES:-shadowed_variable shadowed_variable_base_class unused_signal integer_division standalone_expression standalone_ternary}"
-# Env: GDK_WARNINGS_TIMEOUT  seconds bounding the editor import pass (default 300)
+# The sweep script — parse.sh's stage 2, addressed the way parse.sh addresses
+# it, so one variable moves both runners' reference when the runners move.
+GDK_PARSE_SWEEP_SCRIPT="${GDK_PARSE_SWEEP_SCRIPT:-res://tools/dev/runners/compile_sweep.gd}"
+# Env: GDK_WARNINGS_TIMEOUT  seconds bounding EACH stage (default 300)
 #      GDK_GODOT             the engine binary (default `godot`)
 # -----------------------------------------------------------------------------
 
@@ -67,16 +82,18 @@ usage() {
 usage: warnings.sh [--help] [--self-test]
 
 Promotes a narrow set of GDScript analyzer warnings to errors in a throwaway
-mirror of the project and runs one headless editor import pass against it.
+mirror of the project, then runs a headless editor import pass and a
+full-project compile sweep against it — every .gd analyzed, reported N/N.
 The working tree is never written to.
 
-  (no argument)  run the pass
+  (no argument)  run both stages
   --self-test    prove the argument handling and the promotion block without
                  booting anything
   --help         this message
 
 Env: GDK_WARNING_CATEGORIES  space-separated warning classes to promote
-     GDK_WARNINGS_TIMEOUT    seconds bounding the import pass (default 300)
+     GDK_WARNINGS_TIMEOUT    seconds bounding each stage (default 300)
+     GDK_PARSE_SWEEP_SCRIPT  res:// path to compile_sweep.gd
      GDK_RUNNERS_LIB         path to gdk_runners.sh, relative to this file
      GDK_GODOT               the engine binary (default `godot`)
      VERBOSE=1               stream the transcript to the console too
@@ -248,8 +265,10 @@ done
 	promotion_block
 } > "$RUN_DIR/$GDK_PROJECT_FILE"
 
-# A full editor import pass is the only headless path that runs the analyzer
-# over every script. --quit exits once the import completes.
+# --- Stage 1: the editor import pass -----------------------------------------
+# The only headless path that analyzes what a scene or a .tres reaches, and
+# the only one that sees a built-in script. --quit exits once the import
+# completes.
 gdk_gate_capture "$LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
 	"$GDK_GODOT" --path "$RUN_DIR" --headless --editor --quit
 IMPORT_EXIT="$GDK_GATE_EXIT"
@@ -260,14 +279,44 @@ if gdk_timeout_is_hang "$IMPORT_EXIT"; then
 	exit 1
 fi
 
+# --- Stage 2: the full-project compile sweep ---------------------------------
+# Same mirror, same promoted project file, every .gd loaded — so a script the
+# import pass never reloaded is analyzed here. Under the promotion a warning IS
+# a parse error, so a script carrying one fails to compile: it lands in the
+# sweep's failed paths AND prints the promotion marker this gate reads.
+gdk_gate_capture "$LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
+	"$GDK_GODOT" --path "$RUN_DIR" --headless -s "$GDK_PARSE_SWEEP_SCRIPT"
+SWEEP_EXIT="$GDK_GATE_EXIT"
+
+if gdk_timeout_is_hang "$SWEEP_EXIT"; then
+	gdk_gate_verdict "$GATE_TAG" \
+		"FAIL — the compile sweep exceeded ${TIMEOUT_SECONDS}s, killed" "$LOG"
+	exit 1
+fi
+
 if grep -qF "$PROMOTION_MARKER" "$LOG"; then
 	echo "[$GATE_TAG] FAIL — GDScript analyzer warnings detected:"
 	grep -A1 -F "$PROMOTION_MARKER" "$LOG" \
-		| grep -E "$PROMOTION_MARKER|res://.*\.gd:" | sed 's/^/    /' || true
+		| grep -E "$PROMOTION_MARKER|res://.*\.gd:" | sed 's/^/    /' | sort -u || true
 	gdk_gate_verdict "$GATE_TAG" "FAIL" "$LOG"
 	exit 1
 fi
 
+# No marker anywhere — but a sweep that never reported cannot prove the
+# scripts the import pass skipped were analyzed at all. Rule 4: FAIL, not PASS.
+RESULT_LINE="$(gdk_sweep_result_line "$LOG")"
+if [ -z "$RESULT_LINE" ]; then
+	echo "[$GATE_TAG] FAIL — the compile sweep produced no result line; the scripts the import pass"
+	echo "    never reloaded were not analyzed. Is $GDK_PARSE_SWEEP_SCRIPT where GDK_PARSE_SWEEP_SCRIPT says it is?"
+	tail -n 20 "$LOG" | sed 's/^/    /'
+	gdk_gate_verdict "$GATE_TAG" "FAIL (no sweep result)" "$LOG"
+	exit 1
+fi
+ANALYZED="$(gdk_sweep_result_field "$RESULT_LINE" 1)"
+TOTAL="$(gdk_sweep_result_field "$RESULT_LINE" 2)"
+# A script the sweep could not compile for a reason OTHER than a promoted
+# warning is parse.sh's finding, not this gate's — but it is not a script this
+# gate analyzed either, so the count says so rather than claiming N/N.
 gdk_gate_verdict "$GATE_TAG" \
-	"PASS (promoted: ${GDK_WARNING_CATEGORIES})" "$LOG"
+	"PASS (promoted: ${GDK_WARNING_CATEGORIES}; ${ANALYZED}/${TOTAL} scripts analyzed)" "$LOG"
 exit 0
