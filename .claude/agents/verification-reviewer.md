@@ -85,3 +85,27 @@ produced. Then the verdict. Then what you did not run.
 
 **Report your token cost** at the end of the review. Over-budget is only
 actionable while the session is still running.
+
+### The verdict block — exactly one, at the END of the record
+
+The last thing you write is ONE fenced block, and there is never a second. The
+devkit parses it to compute review yield — findings by severity and disposition,
+across passes — so a malformed block exits 2 rather than being guessed at, and a
+record carrying none is reported as carrying none. Copy the shape:
+
+```text
+verdict: SHIP-WITH-FIXES
+| id | severity | disposition |
+| W1 | WARNING | landed 3a42f19ad |
+| S3 | SUGGESTION | rejected: pause regression |
+| D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |
+```
+
+`verdict:` is exactly one of SHIP, SHIP-WITH-FIXES, HOLD, RELEASE-SAFE,
+RELEASE-WITH-FIXES or NOT-RELEASE-SAFE. Then the header row, then one row per
+finding you raised: `id` is the label it carries in the prose above, `severity`
+the grade you gave it, and `disposition` exactly one of `landed <commit-hash>`,
+`rejected: <why>` or `deferred: <grain-id>`. A pass that raised nothing writes
+the verdict line and the header row alone — that is a complete block, and it is
+how the report tells a clean pass from a record nobody finished. No separator
+row, no fourth column, no second block.

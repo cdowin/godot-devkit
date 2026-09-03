@@ -111,6 +111,30 @@ a built-in substitution you can prove equivalent. Commit pathspec-limited and
 run the gates. Anything with a behaviour or design consequence goes in the doc
 for the architect to rule on. Do NOT flip PM-tree statuses. Do NOT push.
 
+### The verdict block — exactly one, at the END of the record
+
+The last thing you write is ONE fenced block, and there is never a second. The
+devkit parses it to compute review yield — findings by severity and disposition,
+across passes — so a malformed block exits 2 rather than being guessed at, and a
+record carrying none is reported as carrying none. Copy the shape:
+
+```text
+verdict: SHIP-WITH-FIXES
+| id | severity | disposition |
+| W1 | WARNING | landed 3a42f19ad |
+| S3 | SUGGESTION | rejected: pause regression |
+| D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |
+```
+
+`verdict:` is exactly one of SHIP, SHIP-WITH-FIXES, HOLD, RELEASE-SAFE,
+RELEASE-WITH-FIXES or NOT-RELEASE-SAFE. Then the header row, then one row per
+finding you raised: `id` is the label it carries in the prose above, `severity`
+the grade you gave it, and `disposition` exactly one of `landed <commit-hash>`,
+`rejected: <why>` or `deferred: <grain-id>`. A pass that raised nothing writes
+the verdict line and the header row alone — that is a complete block, and it is
+how the report tells a clean pass from a record nobody finished. No separator
+row, no fourth column, no second block.
+
 ## Honesty bar
 
 If the code is already simple, **say so in a paragraph and stop.** A padded
