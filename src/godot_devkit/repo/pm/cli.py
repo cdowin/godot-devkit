@@ -28,12 +28,13 @@ ships) · 2 usage / resolution error.
 """
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from godot_devkit.core import apply
-from godot_devkit.repo.pm import ledger, model, templates
+from godot_devkit.repo.pm import ledger, model, report, templates
 
 PROG = 'godot-devkit pm'
 
@@ -98,6 +99,12 @@ USAGE = """usage: godot-devkit pm <command>
   ledger show <grain-id> [--json]         (that grain's rows oldest first, with
                                            the seconds since the previous status
                                            row; --json prints the raw lines)
+  ledger report [<milestone-id>] [--json] (spend per grain from that milestone's
+                                           rows: dispatches, tokens, tool calls,
+                                           wall-clock and seconds in each state,
+                                           per story/feature/bug. Defaults to the
+                                           building milestone. Never exits
+                                           non-zero on a number)
   decide <grain-id> <title...>            (append one dated, ordinal-stamped
                                            heading, minting decisions.md if this is
                                            the first; the prose under it is yours.
@@ -1434,25 +1441,27 @@ def _event_kind(raw: str) -> str:
     return kind
 
 
-def _building_ledger_dir(cfg: model.PmConfig) -> Path:
-    """The milestone directory whose ledger this row belongs in (D6).
+def _building_ledger_dir(cfg: model.PmConfig, subject: str = 'this row',
+                        hint: str = '') -> Path:
+    """The milestone directory whose ledger `subject` belongs to (D6).
 
-    The one thing `record` cannot work out for itself. Exactly one milestone
-    `building` is the answer; none and several are both refusals that NAME the
-    situation, because a verb that picked would attribute a real dispatch's cost
-    to whichever milestone sorted first and nothing downstream could detect it.
+    The one thing `record` cannot work out for itself, and the default for
+    `report`. Exactly one milestone `building` is the answer; none and several
+    are both refusals that NAME the situation, because a verb that picked would
+    attribute a real dispatch's cost to whichever milestone sorted first and
+    nothing downstream could detect it.
     """
     building = model.building_milestones(cfg)
     if not building:
         raise Usage(f'no milestone in {cfg.roadmap_dir} is `building`, so there '
-                    f'is no ledger this row belongs to — flip one with '
-                    f'`pm milestone building <id>` and re-run')
+                    f'is no ledger {subject} belongs to — flip one with '
+                    f'`pm milestone building <id>`{hint} and re-run')
     if len(building) > 1:
         ids = ' '.join(sorted(model.unquote(mid) for mid, _, _ in building))
         raise Usage(f'{len(building)} milestones are building ({ids}) — which '
-                    f'one owns this row is the one thing this verb cannot know, '
-                    f'so it is not guessing; run it where exactly one milestone '
-                    f'is building')
+                    f'one owns {subject} is the one thing this verb cannot '
+                    f'know, so it is not guessing; run it where exactly one '
+                    f'milestone is building{hint}')
     return building[0][2].parent
 
 
@@ -1506,7 +1515,9 @@ def cmd_ledger(cfg: model.PmConfig, args: list[str]) -> int:
         return cmd_ledger_record(cfg, rest)
     if sub == 'show':
         return cmd_ledger_show(cfg, rest)
-    raise Usage(f'unknown ledger subcommand {sub!r} (record, show)')
+    if sub == 'report':
+        return cmd_ledger_report(cfg, rest)
+    raise Usage(f'unknown ledger subcommand {sub!r} (record, show, report)')
 
 
 def cmd_ledger_record(cfg: model.PmConfig, args: list[str]) -> int:
@@ -1617,23 +1628,6 @@ def _by_hand(cfg: model.PmConfig, grain: str, flags: dict[str, str]) -> dict:
     return fields
 
 
-def _row_names(row: dict, names: set[str]) -> bool:
-    """True when this row names the grain — in `grain`, or anywhere in `tree`.
-
-    Both, because the two row families name a grain differently: a status row
-    IS about one grain, and a dispatch row (D3) carries every grain that was
-    live when the hook fired. A report's attribution rule lives above this; the
-    question here is only "does this row mention it".
-    """
-    if row.get('grain') in names:
-        return True
-    tree = row.get('tree')
-    if not isinstance(tree, dict):
-        return False
-    return any(value in names for ids in tree.values()
-               if isinstance(ids, list) for value in ids)
-
-
 def _grain_kind(gid: str) -> str:
     """Which vocabulary an id answers to, by the shape `_grain_file` resolves by.
 
@@ -1676,7 +1670,7 @@ def cmd_ledger_show(cfg: model.PmConfig, args: list[str]) -> int:
     names = {gid, _ledger_id(path, gid)}
     try:
         rows = [r for r in ledger.read_rows(ledger.ledger_path(mdir))
-                if _row_names(r.data, names)]
+                if ledger.row_names(r.data, names)]
     except ledger.LedgerError as err:
         raise Usage(f'{err}') from err
     if not rows:
@@ -1720,6 +1714,76 @@ def _gap(earlier, later) -> int | None:
     if start is None or end is None:
         return None
     return int((end - start).total_seconds())
+
+
+# --- ledger report ------------------------------------------------------------
+# The ledger records and never judges; the REPORT is the caller D3 and D4 left
+# the judgement to, and everything it may do is arithmetic over rows that are
+# already on disk — sum, count, subtract, group. What it may not do is D5: no
+# size weight (`size:` is a column, never a divisor), no dollar figure, no
+# score, no label. It reads and never writes, and nothing in it exits non-zero
+# on a NUMBER: the one refusal on content is a ledger line that will not parse,
+# which is the same refusal `show` already makes, by line number.
+REPORT_SUBJECT = 'this report'
+REPORT_HINT = ', or name one: `pm ledger report <milestone-id>`'
+
+
+def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
+    """One milestone's rows, added up per grain. See report.py for the rules.
+
+    The milestone is the building one by default and an explicit id otherwise,
+    resolved by `_grain_file` — the resolver every other verb here uses, so
+    traversal, globs, absolute paths and empty segments refuse identically. A
+    milestone with no `ledger.jsonl` prints one line and exits 0: nothing has
+    been recorded for it yet, which is a fact about the tree and not an error.
+    """
+    as_json = JSON_FLAG in args
+    rest = [a for a in args if a != JSON_FLAG]
+    for arg in rest:
+        if arg.startswith('-'):
+            raise Usage(f'unknown flag {arg!r} (ledger report takes '
+                        f'{JSON_FLAG} and a milestone id)')
+    if len(rest) > 1:
+        raise Usage(f'ledger report takes one milestone id, not '
+                    f'{" ".join(rest)!r}')
+    mdir = (_report_milestone_dir(cfg, rest[0]) if rest
+            else _building_ledger_dir(cfg, REPORT_SUBJECT, REPORT_HINT))
+    mid = _ledger_id(mdir / model.MILESTONE_DOC, mdir.name)
+    path = ledger.ledger_path(mdir)
+    try:
+        rows = ledger.read_rows(path)
+    except ledger.LedgerError as err:
+        raise Usage(f'{err}') from err
+    if not path.is_file() and not as_json:
+        # The table would be a screen of dashes saying one thing; say it once.
+        print(f'{report.HEADING_PREFIX} {mid} — {report.NO_LEDGER}')
+        return 0
+    data = report.build(cfg, mid, mdir, rows)
+    if as_json:
+        print(json.dumps(data, ensure_ascii=False))
+        return 0
+    for line in report.render(cfg, data):
+        print(line)
+    return 0
+
+
+def _report_milestone_dir(cfg: model.PmConfig, mid: str) -> Path:
+    """The directory of an explicitly named milestone, or exit 2.
+
+    A feature or story id resolves to a real file and is still the wrong noun:
+    the ledger is per MILESTONE (D6), and reporting the milestone somebody's
+    story happens to live in would answer a question nobody asked.
+    """
+    path = _grain_file(cfg, mid)
+    if path.name != model.MILESTONE_DOC:
+        raise Usage(f'{mid!r} is a {_grain_kind(mid)}, not a milestone — the '
+                    f'ledger is per milestone (D6), so name one (or run it '
+                    f'with no id where exactly one milestone is building)')
+    mdir = model.milestone_dir_of(cfg, path)
+    if mdir is None:
+        raise Usage(f'{cfg.rel(path)} is not inside a milestone directory, so '
+                    f'no ledger owns {mid!r}')
+    return mdir
 
 
 # --- dispatch -----------------------------------------------------------------

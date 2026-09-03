@@ -422,6 +422,36 @@ def terminal_state(cfg, grain_kind: str) -> str:
     """
     return cfg.bug_states[-1] if grain_kind == GRAIN_BUG else TERMINAL_STATE
 
+def row_names(row: dict, names: set[str]) -> bool:
+    """True when this row names the grain — in `grain`, or anywhere in `tree`.
+
+    Both, because the two row families name a grain differently: a status row
+    IS about one grain, and a dispatch row (D3) carries every grain that was
+    live when the hook fired. An attribution POLICY lives above this — the
+    report decides which snapshot bucket attributes a dispatch to which kind of
+    grain — and the question here is only "does this row mention it". One home,
+    because `pm ledger show` and `pm ledger report` both answer "which rows are
+    this grain's" and two answers would give one grain two timelines.
+
+    Every value is TYPE-CHECKED before it is matched, and that is not fussiness:
+    a grain id is a string, `names` is a set, and `{} in names` raises
+    `TypeError` rather than answering False. This file is `merge=union` — rows
+    arrive from another branch, another version of this package, and a hand
+    edit — so the reader meets shapes it has never emitted. A row this module
+    cannot recognise is a row that does not NAME the grain, which is the honest
+    answer; a traceback here would take out the whole timeline over one line
+    read has already accepted as a JSON object.
+    """
+    if isinstance(row.get('grain'), str) and row['grain'] in names:
+        return True
+    tree = row.get('tree')
+    if not isinstance(tree, dict):
+        return False
+    return any(value in names for ids in tree.values()
+               if isinstance(ids, list) for value in ids
+               if isinstance(value, str))
+
+
 def read_rows(path: Path) -> list[Row]:
     """Every row in one ledger, oldest first. An absent ledger is no rows.
 
