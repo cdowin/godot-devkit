@@ -1,7 +1,7 @@
 ---
 id: "0.22.0"
 name: telemetry
-status: planning
+status: building
 depends_on: ["0.20.0"]
 branch: milestone/0.22.0-telemetry
 risk: medium

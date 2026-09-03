@@ -2,7 +2,7 @@
 id: 0.22.0/ledger
 milestone: "0.22.0"
 name: The ledger — every status flip and every dispatch leaves a timestamped row
-status: planning
+status: building
 reviewed:
 phase: 1
 depends_on: []
