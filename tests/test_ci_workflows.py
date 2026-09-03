@@ -261,7 +261,7 @@ def _milestone(root: Path, mid: str, status: str, quote: str = '"',
     # The finding that made the first cut of this rule NOT RELEASE-SAFE: a
     # BUILDING milestone whose id is main + one integer read as a hotfix.
     ('0.90.3',   '0.90.3.2',   (),          ('0.90.3.2',), False, "whose status is 'building', not done"),
-    ('0.90.3',   '0.90.3.01',  (),          (),           False, 'neither the id of a done milestone'),
+    ('0.90.3',   '0.90.3.01',  ('0.90.2',),  (),           False, 'neither the id of a done milestone'),
 ])
 def test_the_compare_step_admits_a_done_milestone_or_a_hotfix_and_nothing_else(
         tmp_path, main, pr, done, building, ok, why):
@@ -300,3 +300,38 @@ def test_the_compare_step_reads_only_the_frontmatter_and_either_quote_style(tmp_
     assert refused.returncode == 1 and "whose status is 'planning'" in refused.stdout, refused.stdout
     admitted = run('0.98')
     assert admitted.returncode == 0 and 'done milestone 0.98' in admitted.stdout, admitted.stdout
+
+
+@pytest.mark.parametrize('roadmap, why', [
+    ('nope', 'is not a directory'),
+    ('pm/roadmap', 'scanned nothing'),
+])
+def test_the_compare_step_refuses_when_it_scanned_no_milestone(tmp_path, roadmap, why):
+    """Rule 4: a hotfix-shaped PR over an absent or empty roadmap is not OK —
+    the building-milestone refusal only exists if the tree was read."""
+    import subprocess
+    (tmp_path / 'pm/roadmap').mkdir(parents=True)
+    script = tmp_path / 'compare.sh'
+    script.write_text(_compare_step_script(), encoding='utf-8')
+    proc = subprocess.run(['bash', str(script)], cwd=tmp_path, capture_output=True,
+                          text=True, env={'PATH': '/usr/bin:/bin', 'PR': '0.8.1',
+                                          'MAIN': '0.8', 'PM_ROADMAP': roadmap})
+    assert proc.returncode == 1 and why in proc.stdout, proc.stdout + proc.stderr
+
+
+def test_the_compare_step_ignores_an_unclosed_fence_and_strips_trailing_space(tmp_path):
+    import subprocess
+    mdir = tmp_path / 'pm/roadmap/0.9-m'; mdir.mkdir(parents=True)
+    (mdir / 'milestone.md').write_text('---\nid: "0.9"\nname: x\nfoo\n\nstatus: done\n',
+                                       encoding='utf-8')
+    _milestone(tmp_path, '0.8', 'done   ', quote='')
+    script = tmp_path / 'compare.sh'
+    script.write_text(_compare_step_script(), encoding='utf-8')
+    def run(pr):
+        return subprocess.run(['bash', str(script)], cwd=tmp_path, capture_output=True,
+                              text=True, env={'PATH': '/usr/bin:/bin', 'PR': pr,
+                                              'MAIN': '0.7', 'PM_ROADMAP': 'pm/roadmap'})
+    unclosed = run('0.9')
+    assert unclosed.returncode == 1 and 'neither the id of a done milestone' in unclosed.stdout, unclosed.stdout
+    padded = run('0.8')
+    assert padded.returncode == 0 and 'done milestone 0.8' in padded.stdout, padded.stdout

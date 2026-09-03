@@ -106,9 +106,17 @@ jobs:
           # and status are read from the frontmatter fence only, anchored,
           # with either quote style, so a schema example in the body cannot
           # vouch for the file.
-          fm() { tr -d '\r' < "$1" | sed -n '2,/^---$/p' | sed -n "s/^$2: *[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\} *$/\1/p" | head -1; }
+          # The front block is the lines between the opening fence and the
+          # CLOSING one; a file that never closes its fence yields nothing.
+          fm() { tr -d '\r' < "$1" | awk 'NR==1{if($0!="---")exit;next} $0=="---"{printf "%s",buf;exit} {buf=buf $0 "\n"}' | sed -n "s/^$2:[[:space:]]*[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*$/\1/p" | sed 's/[[:space:]]*$//' | head -1; }
+          if [ ! -d "$PM_ROADMAP" ]; then
+            echo "::error::PM_ROADMAP='$PM_ROADMAP' is not a directory — set the step env to this project's [pm] roadmap_dir. A gate that scanned nothing cannot say OK."
+            exit 1
+          fi
+          scanned=0
           for m in "$PM_ROADMAP"/*/milestone.md; do
             [ -f "$m" ] || continue
+            scanned=$((scanned + 1))
             id="$(fm "$m" id)"
             [ "$id" = "$PR" ] || continue
             status="$(fm "$m" status)"
@@ -119,6 +127,10 @@ jobs:
               exit 1
             fi
           done
+          if [ "$scanned" -eq 0 ]; then
+            echo "::error::no milestone.md under $PM_ROADMAP/*/ — the gate scanned nothing and cannot say OK. Set PM_ROADMAP to this project's [pm] roadmap_dir."
+            exit 1
+          fi
           if [ -z "$legit" ]; then
             echo "::error::$PR is neither the id of a done milestone under $PM_ROADMAP nor main's version ($MAIN) plus one hotfix component. A release is a closed milestone or a hotfix; the NEXT milestone's bump-at-start waits until this merge has landed."
             exit 1

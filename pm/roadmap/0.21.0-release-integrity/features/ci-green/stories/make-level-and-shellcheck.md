@@ -3,7 +3,7 @@ id: 0.21.0/ci-green/make-level-and-shellcheck
 feature: 0.21.0/ci-green
 milestone: "0.21.0"
 name: drop the recursion variables in the makefile tests and clear the six shellcheck findings
-status: review
+status: done
 owner:
 depends_on: []
 ---

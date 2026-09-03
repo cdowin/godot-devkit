@@ -1,7 +1,7 @@
 ---
 id: "0.21.0"
 name: release-integrity
-status: building
+status: done
 depends_on: []
 branch: claude/godot-headless-sandbox-297qpr
 ---

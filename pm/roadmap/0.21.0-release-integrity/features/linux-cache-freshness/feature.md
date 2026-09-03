@@ -2,8 +2,8 @@
 id: 0.21.0/linux-cache-freshness
 milestone: "0.21.0"
 name: import_cache.sh reads at-or-after freshness on Linux
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.21.0-release-integrity/features/linux-cache-freshness/decisions.md
 phase:
 depends_on: []
 consumed_by: []

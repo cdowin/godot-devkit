@@ -3,7 +3,7 @@ id: 0.21.0/release-gates/d8-hotfix-tolerance
 feature: 0.21.0/release-gates
 milestone: "0.21.0"
 name: check pm D8 accepts a hotfix id.N for an id in the tree
-status: review
+status: done
 owner:
 depends_on: []
 ---

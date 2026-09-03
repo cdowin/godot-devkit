@@ -28,7 +28,8 @@ DRIFT RULES (each FAILs, naming the offending path):
   D8  the shipped version equals the `building` milestone's id (bump-at-START:
       the version names what is being built, so every crash report, save file
       and dev build carries that fact for free). EXACT string equality — the
-      milestone id IS the version.
+      milestone id IS the version — or a hotfix of a RELEASED milestone: a
+      `done` id in the tree plus one positive integer (0.90.3 -> 0.90.3.1).
   D9  a `building` milestone declares the `branch:` its work lives on. A fresh
       checkout of the trunk sees the PM records but not the code; without the
       stamp the only recourse is guessing at `git branch -a`.

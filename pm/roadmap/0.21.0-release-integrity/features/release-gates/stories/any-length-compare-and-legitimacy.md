@@ -3,7 +3,7 @@ id: 0.21.0/release-gates/any-length-compare-and-legitimacy
 feature: 0.21.0/release-gates
 milestone: "0.21.0"
 name: n-component compare, done-or-hotfix rule, run under bash in the suite
-status: review
+status: done
 owner:
 depends_on: []
 ---

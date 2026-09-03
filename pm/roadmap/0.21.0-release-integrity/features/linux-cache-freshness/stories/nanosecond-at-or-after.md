@@ -3,7 +3,7 @@ id: 0.21.0/linux-cache-freshness/nanosecond-at-or-after
 feature: 0.21.0/linux-cache-freshness
 milestone: "0.21.0"
 name: mtime_ns and an equal-timestamp corpus case
-status: review
+status: done
 owner:
 depends_on: []
 ---

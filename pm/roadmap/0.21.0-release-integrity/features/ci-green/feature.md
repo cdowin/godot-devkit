@@ -2,8 +2,8 @@
 id: 0.21.0/ci-green
 milestone: "0.21.0"
 name: make milestone is green where CI runs it
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.21.0-release-integrity/features/ci-green/decisions.md
 phase:
 depends_on: []
 consumed_by: []

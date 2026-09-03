@@ -2,8 +2,8 @@
 id: 0.21.0/release-gates
 milestone: "0.21.0"
 name: the semver gate admits a closed milestone or a hotfix, and D8 admits a hotfix
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.21.0-release-integrity/features/release-gates/decisions.md
 phase:
 depends_on: []
 consumed_by: []
