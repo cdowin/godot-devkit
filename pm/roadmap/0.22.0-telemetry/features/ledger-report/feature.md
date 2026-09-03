@@ -2,7 +2,7 @@
 id: 0.22.0/ledger-report
 milestone: "0.22.0"
 name: pm ledger report answers the five questions from raw rows in one table
-status: planning
+status: building
 reviewed:
 phase: 3
 depends_on: ["0.22.0/ledger", "0.22.0/usage-capture", "0.22.0/review-record-shape"]
