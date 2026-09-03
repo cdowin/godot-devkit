@@ -287,9 +287,10 @@ self_test() {
 	# needed it. A corpus whose green run narrates every planted hit buries its
 	# own verdict, and that verdict line is what a caller parses.
 	detected=""
-	# shellcheck disable=SC2329  # invoked indirectly, by name
+	# shellcheck disable=SC2329,SC2317  # invoked indirectly, by name (SC2317 is the same finding on shellcheck < 0.10)
 	detect() { scored=$((scored + 1)); detected="$detected
       $1"; }
+	# shellcheck disable=SC2329,SC2317  # invoked indirectly, by name
 	miss() { echo "  MISS — $1${detected}" >&2; failures=$((failures + 1)); }
 	# score — open a scored block: baseline the counter and drop the held
 	# detections, so a miss renders THIS block's hits rather than the run's.

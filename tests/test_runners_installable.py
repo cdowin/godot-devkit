@@ -24,6 +24,7 @@ fired at fake files.
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -55,8 +56,12 @@ VERDICT = '[PARSE] PASS (2 files) — full log: .gate-reports/parse.log'
 
 
 def run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    # The installed CI exports VERBOSE=1 for the whole `make milestone` step,
+    # and the quiet-by-default cases below are asked of the DEFAULT — VERBOSE
+    # unset. A case that wants the stream sets it in its own env.
+    env = {k: v for k, v in os.environ.items() if k != 'VERBOSE'}
     return subprocess.run(['bash', *argv], cwd=cwd, text=True,
-                          capture_output=True)
+                          capture_output=True, env=env)
 
 
 # --- the corpora, fired ------------------------------------------------------
@@ -102,6 +107,33 @@ def test_a_gate_prints_one_verdict_line_naming_a_log_that_holds_the_stream(tmp_p
     log = tmp_path / '.gate-reports' / 'parse.log'
     assert log.exists(), 'the verdict named a log that was never written'
     assert log.read_text(encoding='utf-8') == 'boot line\nsweep line\n'
+
+
+def test_an_ambient_verbose_does_not_turn_the_quiet_case_loud(tmp_path, monkeypatch):
+    """The installed CI (`ci-verify.yml`) exports VERBOSE=1 for the whole
+    `make milestone` step, and this suite runs inside it. The quiet case
+    above is asked of the DEFAULT, so it must hold whatever the caller's
+    environment happens to say — red on every CI run before the helper
+    dropped the variable, green under bare pytest on a Mac."""
+    monkeypatch.setenv('VERBOSE', '1')
+    test_a_gate_prints_one_verdict_line_naming_a_log_that_holds_the_stream(tmp_path)
+
+
+@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
+def test_a_self_test_verdict_is_one_line_whatever_the_ambient_verbose_says(script):
+    """A corpus proves both settings on its own pinned cases; the value the
+    caller exports is not one of them. The library's cap case inherited it and
+    streamed its eight bytes INTO the verdict line — `01234567[gdk-runners]
+    SELF-TEST OK …` — which is what `make runners-self-test VERBOSE=1`, and so
+    the installed CI, then read as the verdict."""
+    done = subprocess.run(['bash', str(script), '--self-test'], text=True,
+                          capture_output=True,
+                          env=dict(os.environ, VERBOSE='1'))
+    assert done.returncode == 0, done.stdout + done.stderr
+    lines = done.stdout.splitlines()
+    assert len(lines) == 1, done.stdout
+    assert re.match(r'^\[[A-Za-z][A-Za-z-]*\] SELF-TEST OK — \d+ case\(s\)$',
+                    lines[0]), lines[0]
 
 
 def test_verbose_streams_the_same_transcript_the_log_holds(tmp_path):

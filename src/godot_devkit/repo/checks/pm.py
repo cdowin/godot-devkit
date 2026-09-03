@@ -28,7 +28,8 @@ DRIFT RULES (each FAILs, naming the offending path):
   D8  the shipped version equals the `building` milestone's id (bump-at-START:
       the version names what is being built, so every crash report, save file
       and dev build carries that fact for free). EXACT string equality — the
-      milestone id IS the version.
+      milestone id IS the version — or a hotfix of a RELEASED milestone: a
+      `done` id in the tree plus one positive integer (0.90.3 -> 0.90.3.1).
   D9  a `building` milestone declares the `branch:` its work lives on. A fresh
       checkout of the trunk sees the PM records but not the code; without the
       stamp the only recourse is guessing at `git branch -a`.
@@ -52,6 +53,8 @@ children, and a feature at `review` with its stories at their `review` terminal
 opt-in, so a closed feature over `review` stories is a state a team chooses).
 """
 from __future__ import annotations
+
+import re
 
 import sys
 
@@ -190,6 +193,29 @@ def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
     return n_features, n_stories
 
 
+_HOTFIX_N = re.compile(r'[1-9][0-9]*')
+
+
+def _is_hotfix_of_released(cfg: model.PmConfig, version: str) -> bool:
+    """`<id>.N` for a DONE milestone in the tree — a hotfix cut from the mainline.
+
+    A hotfix (0.90.3 -> 0.90.3.1) is the RELEASED milestone plus one positive
+    integer, on a release branch off main, while the next milestone keeps
+    building under its own id; retire's lag-by-one keeps that released
+    milestone in the tree. Only `done` qualifies: a `.N` on a planning or
+    building id is not a hotfix of anything, and D8's equality would refuse the
+    release branch's version for no reason it can act on.
+    """
+    for mdir, mid in model.known_milestones(cfg):
+        if not mid or not version.startswith(mid + '.'):
+            continue
+        if model.field_of(mdir / model.MILESTONE_DOC, 'status') != 'done':
+            continue
+        if _HOTFIX_N.fullmatch(version[len(mid) + 1:]):
+            return True
+    return False
+
+
 def _flow_findings(cfg: model.PmConfig, enabled: set[str], report) -> None:
     """D8/D9/D10 — the branch-per-milestone / bump-at-start flow, opt-in."""
     building = model.building_milestones(cfg) if enabled & set(model.FLOW_CHECKS) else []
@@ -206,10 +232,11 @@ def _flow_findings(cfg: model.PmConfig, enabled: set[str], report) -> None:
             # milestone left at `building` when the next one started.
             report(f'{len(ids)} milestones are building ({", ".join(ids)}) — the '
                    f'version can only name one; close the finished one (D8)')
-        elif version != ids[0]:
+        elif version != ids[0] and not _is_hotfix_of_released(cfg, version):
             report(f'{cfg.version_file} version {version!r} does not match the '
                    f'building milestone {ids[0]!r} — bump at milestone START, '
-                   f'and the id IS the version (D8)')
+                   f'and the id IS the version; a hotfix is a done milestone id in '
+                   f'this tree plus one positive integer (D8)')
 
     mainline = model.mainline_branch() if 'D10' in enabled and building else ''
 

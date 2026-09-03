@@ -212,3 +212,126 @@ def test_every_make_target_a_workflow_runs_is_one_the_include_defines():
     assert called <= declared, (
         f'CI runs {sorted(called - declared)}, which Makefile.devkit does not '
         f'define')
+
+
+# --- semver-gate: the compare step, RUN ---------------------------------------
+# The structural reader above cannot say what a `run:` body does, so this runs
+# it: the "Compare versions" step's script, under bash, against a scratch PM
+# tree, with the same env the workflow gives it. Every claim the gate makes —
+# any-length compare, a non-numeric refusal, a done milestone's id or a hotfix
+# and NOTHING else — is one row here, and a false PASS is the row that fails.
+
+def _compare_step_script() -> str:
+    text = body('ci-semver-gate.yml')
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.strip() == '- name: Compare versions')
+    run_at = next(i for i in range(start, len(lines))
+                  if lines[i].strip() == 'run: |')
+    indent = len(lines[run_at]) - len(lines[run_at].lstrip(' '))
+    out = []
+    for line in lines[run_at + 1:]:
+        if line.strip() and (len(line) - len(line.lstrip(' '))) <= indent:
+            break
+        out.append(line[indent + 2:] if line.strip() else '')
+    return '\n'.join(out) + '\n'
+
+
+def _milestone(root: Path, mid: str, status: str, quote: str = '"',
+               body: str = '') -> None:
+    mdir = root / 'pm/roadmap' / f'{mid}-m'
+    mdir.mkdir(parents=True)
+    (mdir / 'milestone.md').write_text(
+        f'---\nid: {quote}{mid}{quote}\nname: M\nstatus: {status}\n---\n{body}',
+        encoding='utf-8')
+
+
+@pytest.mark.parametrize('main, pr, done, building, ok, why', [
+    ('0.90.3',   '0.90.3.1',   (),          ('0.90.3.2',), True,  'hotfix 1 on main'),
+    ('0.90.3.1', '0.90.3.2',   ('0.90.3.2',), (),          True,  'done milestone 0.90.3.2'),
+    ('0.16',     '0.16.1',     ('0.16.1',),  (),           True,  'done milestone 0.16.1'),
+    ('0.90.3.1', '0.90.3.1.1', (),          ('0.90.4',),  True,  'hotfix 1 on main'),
+    ('0.90.2',   '0.90.3',     ('0.90.2',),  ('0.90.3',),  False, "whose status is 'building', not done"),
+    ('0.90.3',   '0.90.4',     (),          ('0.90.4',),  False, "whose status is 'building', not done"),
+    ('0.90.3',   '0.90.3',     (),          (),           False, 'Version must increase'),
+    ('0.90.3',   '0.90.2',     ('0.90.2',),  (),           False, 'Version must increase'),
+    ('0.90.3',   '0.90.3a',    (),          (),           False, 'Non-numeric version component'),
+    ('0.90.3',   '0.90.3.1a',  (),          (),           False, 'Non-numeric version component'),
+    ('1.0',      '1.0.0',      ('1.0.0',),   (),           False, 'Version must increase'),
+    # The finding that made the first cut of this rule NOT RELEASE-SAFE: a
+    # BUILDING milestone whose id is main + one integer read as a hotfix.
+    ('0.90.3',   '0.90.3.2',   (),          ('0.90.3.2',), False, "whose status is 'building', not done"),
+    ('0.90.3',   '0.90.3.01',  ('0.90.2',),  (),           False, 'neither the id of a done milestone'),
+])
+def test_the_compare_step_admits_a_done_milestone_or_a_hotfix_and_nothing_else(
+        tmp_path, main, pr, done, building, ok, why):
+    """PR #56 on the consumer that motivated this: the 0.90.2 release reached
+    main wearing 0.90.3 — the NEXT milestone's bump-at-start had landed before
+    the close merged — and the three-field gate waved it through. Row 5 is
+    that PR, and it is refused."""
+    import subprocess
+    for mid in done:
+        _milestone(tmp_path, mid, 'done')
+    for mid in building:
+        _milestone(tmp_path, mid, 'building')
+    (tmp_path / 'pm/roadmap').mkdir(parents=True, exist_ok=True)
+    script = tmp_path / 'compare.sh'
+    script.write_text(_compare_step_script(), encoding='utf-8')
+    proc = subprocess.run(['bash', str(script)], cwd=tmp_path, capture_output=True,
+                          text=True, env={'PATH': '/usr/bin:/bin', 'PR': pr,
+                                          'MAIN': main, 'PM_ROADMAP': 'pm/roadmap'})
+    assert (proc.returncode == 0) is ok, proc.stdout + proc.stderr
+    assert why in proc.stdout + proc.stderr, proc.stdout + proc.stderr
+
+
+def test_the_compare_step_reads_only_the_frontmatter_and_either_quote_style(tmp_path):
+    """A `status: done` line in a milestone's BODY (a schema example) must not
+    vouch for the file, and a single-quoted id is the same id."""
+    import subprocess
+    _milestone(tmp_path, '0.93', 'planning', body='\nSchema example:\n\nstatus: done\n')
+    _milestone(tmp_path, '0.98', 'done', quote="'")
+    script = tmp_path / 'compare.sh'
+    script.write_text(_compare_step_script(), encoding='utf-8')
+    def run(pr):
+        return subprocess.run(['bash', str(script)], cwd=tmp_path, capture_output=True,
+                              text=True, env={'PATH': '/usr/bin:/bin', 'PR': pr,
+                                              'MAIN': '0.90', 'PM_ROADMAP': 'pm/roadmap'})
+    refused = run('0.93')
+    assert refused.returncode == 1 and "whose status is 'planning'" in refused.stdout, refused.stdout
+    admitted = run('0.98')
+    assert admitted.returncode == 0 and 'done milestone 0.98' in admitted.stdout, admitted.stdout
+
+
+@pytest.mark.parametrize('roadmap, why', [
+    ('nope', 'is not a directory'),
+    ('pm/roadmap', 'scanned nothing'),
+])
+def test_the_compare_step_refuses_when_it_scanned_no_milestone(tmp_path, roadmap, why):
+    """Rule 4: a hotfix-shaped PR over an absent or empty roadmap is not OK —
+    the building-milestone refusal only exists if the tree was read."""
+    import subprocess
+    (tmp_path / 'pm/roadmap').mkdir(parents=True)
+    script = tmp_path / 'compare.sh'
+    script.write_text(_compare_step_script(), encoding='utf-8')
+    proc = subprocess.run(['bash', str(script)], cwd=tmp_path, capture_output=True,
+                          text=True, env={'PATH': '/usr/bin:/bin', 'PR': '0.8.1',
+                                          'MAIN': '0.8', 'PM_ROADMAP': roadmap})
+    assert proc.returncode == 1 and why in proc.stdout, proc.stdout + proc.stderr
+
+
+def test_the_compare_step_ignores_an_unclosed_fence_and_strips_trailing_space(tmp_path):
+    import subprocess
+    mdir = tmp_path / 'pm/roadmap/0.9-m'; mdir.mkdir(parents=True)
+    (mdir / 'milestone.md').write_text('---\nid: "0.9"\nname: x\nfoo\n\nstatus: done\n',
+                                       encoding='utf-8')
+    _milestone(tmp_path, '0.8', 'done   ', quote='')
+    script = tmp_path / 'compare.sh'
+    script.write_text(_compare_step_script(), encoding='utf-8')
+    def run(pr):
+        return subprocess.run(['bash', str(script)], cwd=tmp_path, capture_output=True,
+                              text=True, env={'PATH': '/usr/bin:/bin', 'PR': pr,
+                                              'MAIN': '0.7', 'PM_ROADMAP': 'pm/roadmap'})
+    unclosed = run('0.9')
+    assert unclosed.returncode == 1 and 'neither the id of a done milestone' in unclosed.stdout, unclosed.stdout
+    padded = run('0.8')
+    assert padded.returncode == 0 and 'done milestone 0.8' in padded.stdout, padded.stdout
