@@ -656,6 +656,39 @@ def milestone_dirs(cfg: PmConfig) -> list[Path]:
     return list(milestone_walk(cfg).kept)
 
 
+def milestone_dir_of(cfg: PmConfig, path: Path) -> Path | None:
+    """The milestone directory that CONTAINS this grain document, or None.
+
+    The twin of `milestone_dir`, asked from the other end: that one resolves an
+    ID to a directory, this one asks which milestone a RESOLVED PATH belongs
+    to. Every per-milestone shared file — `decisions.md`, `ledger.jsonl` —
+    needs the second question, and re-deriving it by re-parsing the id string
+    would be a second resolver with its own opinion about which milestone
+    `0.1/alpha/s0` lives in. The path already went through `story_file` /
+    `feature_file` / `_grain_file`; where it landed is the answer.
+
+    Structural, not documentary: the milestone directory is the first component
+    under `roadmap/` (or under `roadmap/zz_archive/`), whether or not it still
+    holds a `milestone.md`. A path outside the roadmap gets None rather than a
+    guess, and a path directly IN the roadmap (`ROADMAP.md`) is not inside a
+    milestone at all.
+    """
+    base = cfg.roadmap
+    try:
+        here = path.resolve()
+        base = base.resolve()
+    except OSError:
+        return None
+    if not here.is_relative_to(base):
+        return None
+    parts = here.relative_to(base).parts
+    if parts[:1] == (ARCHIVE_DIR_NAME,):
+        base, parts = base / ARCHIVE_DIR_NAME, parts[1:]
+    if len(parts) < 2:
+        return None
+    return base / parts[0]
+
+
 def known_milestones(cfg: PmConfig) -> list[tuple[Path, str]]:
     """Every milestone dir with its declared id (unquoted; '' when absent).
 

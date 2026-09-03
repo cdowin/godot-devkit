@@ -17,6 +17,11 @@ the tree. Every run reports the stories it did not touch, closed feature or not.
 Its companion is `godot-devkit check pm`, which imports the same predicates
 from model.py and makes an inconsistent END STATE loud.
 
+Every verb here that CHANGES a grain also appends one timestamped row to that
+milestone's `ledger.jsonl` (D6/D8), after its own write lands and never before
+— see `_stamp` below. The row is a side effect on disk: no verb's output line
+or exit code depends on it.
+
 Exit codes: 0 ok (incl. idempotent no-op) · 1 a refusal — a precondition said
 no and nothing was written (`--review-record` naming no file is the one that
 ships) · 2 usage / resolution error.
@@ -28,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from godot_devkit.core import apply
-from godot_devkit.repo.pm import model, templates
+from godot_devkit.repo.pm import ledger, model, templates
 
 PROG = 'godot-devkit pm'
 
@@ -193,6 +198,61 @@ def _set_status(cfg: model.PmConfig, path: Path, value: str, note: str = '') -> 
                     + (f'. {note}' if note else ''))
 
 
+# --- the ledger ---------------------------------------------------------------
+# Every verb below that CHANGES the tree appends one row to the milestone's
+# `ledger.jsonl` (D6/D8). Three rules hold everywhere, and the tests pin all
+# three:
+#
+#   * AFTER the write, never before. A row is the record of a write that
+#     landed; a row for a refused flip is rule 4's cardinal sin with a
+#     timestamp on it.
+#   * A NO-OP still appends. Somebody ran the verb at that instant, and the
+#     ledger records what happened, not what changed.
+#   * The row never changes the verb's OUTPUT or its EXIT CODE (hard rule 6).
+#     A ledger that cannot be written is said out loud on stderr and does not
+#     turn a landed status write into a failure — the flip is what the caller
+#     asked for and it is already on disk.
+def _ledger_id(path: Path, fallback: str) -> str:
+    """The id a row names: the grain's OWN `id:`, the caller's when absent.
+
+    The frontmatter id is the file's own claim about itself, which is what a
+    report joins rows on. A grain missing the key at all (the drift V2 and D4
+    report) still gets a row, under the id the caller resolved it by — an
+    unnamed row would be worse than an imperfectly-named one.
+    """
+    return model.unquote(model.field_of(path, 'id')) or fallback
+
+
+def _stamp(cfg: model.PmConfig, path: Path, row: dict) -> None:
+    """Append one row to the ledger of the milestone that owns `path`.
+
+    Never raises, and never changes an exit code: by the time this runs the
+    tree has already been changed and the verb has already reported it. The
+    two ways it can come up empty — a grain that resolves outside any
+    milestone directory, and a ledger that cannot be written — are both
+    printed on stderr naming the path, because a missing row is a fact the
+    next report needs and silence here is the one thing that would hide it.
+    """
+    mdir = model.milestone_dir_of(cfg, path)
+    if mdir is None:
+        print(f'[pm] WARNING — no milestone directory owns {cfg.rel(path)}, so '
+              f'no {ledger.LEDGER_FILE_NAME} row was appended for it; the '
+              f'write itself landed', file=sys.stderr)
+        return
+    try:
+        ledger.append_row(mdir, row)
+    except OSError as err:
+        print(f'[pm] WARNING — {cfg.rel(ledger.ledger_path(mdir))} could not be '
+              f'appended to ({err}); the write itself landed, but this '
+              f'transition is NOT in the ledger', file=sys.stderr)
+
+
+def _stamp_status(cfg: model.PmConfig, path: Path, frm: str, to: str,
+                  gid: str) -> None:
+    """One status row for a flip that has already landed on disk."""
+    _stamp(cfg, path, ledger.status_row(_ledger_id(path, gid), frm, to))
+
+
 # --- story --------------------------------------------------------------------
 def cmd_story(cfg: model.PmConfig, args: list[str]) -> int:
     if len(args) != 2:
@@ -207,9 +267,11 @@ def cmd_story(cfg: model.PmConfig, args: list[str]) -> int:
     cur = _was(sf)
     if cur == to:
         _ok(f'story {sid} already {to} (no-op)')
+        _stamp_status(cfg, sf, cur, to, sid)
         return 0
     _set_status(cfg, sf, to)
     _ok(f'story {sid}: {cur} -> {to}')
+    _stamp_status(cfg, sf, cur, to, sid)
     return 0
 
 
@@ -240,9 +302,11 @@ def cmd_bug(cfg: model.PmConfig, args: list[str]) -> int:
     cur = _was(bf)
     if cur == to:
         _ok(f'bug {bid} already {to} (no-op)')
+        _stamp_status(cfg, bf, cur, to, bid)
         return 0
     _set_status(cfg, bf, to)
     _ok(f'bug {bid}: {cur} -> {to}')
+    _stamp_status(cfg, bf, cur, to, bid)
     return 0
 
 
@@ -267,9 +331,11 @@ def cmd_feature_simple(cfg: model.PmConfig, to: str, args: list[str]) -> int:
     ff, cur = _feature_or_usage(cfg, fid)
     if cur == to:
         _ok(f'feature {fid} already {to} (no-op)')
+        _stamp_status(cfg, ff, cur, to, fid)
         return 0
     _set_status(cfg, ff, to)
     _ok(f'feature {fid}: {cur} -> {to}')
+    _stamp_status(cfg, ff, cur, to, fid)
     return 0
 
 
@@ -280,11 +346,13 @@ def cmd_feature_review(cfg: model.PmConfig, args: list[str]) -> int:
     ff, cur = _feature_or_usage(cfg, fid)
     if cur == 'review':
         _ok(f'feature {fid} already review (no-op)')
+        _stamp_status(cfg, ff, cur, 'review', fid)
         return 0
     pending = [f'{p.name}({st})' for p, st in _story_states(cfg, fid)
                if st not in ('review', 'done')]
     _set_status(cfg, ff, 'review')
     _ok(f'feature {fid}: {cur} -> review')
+    _stamp_status(cfg, ff, cur, 'review', fid)
     # Reported, never refused. "A feature cannot be under review while its own
     # work is unfinished" is a claim about how a team works; which stories are
     # where is a fact, and it is the caller's to act on.
@@ -407,18 +475,35 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
 
     # Stories first: if the FEATURE flip is the one that fails, the gate still
     # sees a non-done feature and a re-run completes the close cleanly.
-    for p in to_close:
-        _set_status(cfg, p, 'done',
-                    'CASCADE ABORTED — some stories may already be done; '
-                    're-run the same command to finish (it is idempotent).')
-        _ok(f'  story {p.name}: review -> done')
-    if cur == 'done':
-        _ok(f'feature {fid} already done (no-op)')
-    else:
-        _set_status(cfg, ff, 'done',
-                    'Stories were flipped; re-run to finish closing the feature.')
-        _ok(f'feature {fid}: {cur} -> done'
-            + (f' (review record: {record})' if record else ' (no review record)'))
+    #
+    # THE LEDGER READS THE OTHER WAY ROUND — the feature's row first, then one
+    # per story it closed — so a report reads the close as the one act it was.
+    # Each story's row is still BUILT the moment its own write lands (that is
+    # its timestamp), held until the feature's row is on disk, and flushed even
+    # when the feature flip fails: a write that landed always has its row.
+    story_rows = []
+    try:
+        for p in to_close:
+            _set_status(cfg, p, 'done',
+                        'CASCADE ABORTED — some stories may already be done; '
+                        're-run the same command to finish (it is idempotent).')
+            story_rows.append(ledger.status_row(
+                _ledger_id(p, f'{fid}/{model.story_slug_of(cfg, p.stem)}'),
+                'review', 'done'))
+            _ok(f'  story {p.name}: review -> done')
+        if cur == 'done':
+            _ok(f'feature {fid} already done (no-op)')
+        else:
+            _set_status(cfg, ff, 'done',
+                        'Stories were flipped; re-run to finish closing the '
+                        'feature.')
+            _ok(f'feature {fid}: {cur} -> done'
+                + (f' (review record: {record})' if record
+                   else ' (no review record)'))
+        _stamp_status(cfg, ff, cur, 'done', fid)
+    finally:
+        for row in story_rows:
+            _stamp(cfg, ff, row)
     if untouched:
         _ok(f'  {len(untouched)} story/ies not done and NOT touched: '
             f'{" ".join(untouched)}'
@@ -460,6 +545,7 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     cur = _was(mf)
     if cur == to:
         _ok(f'milestone {mid} already {to} (no-op)')
+        _stamp_status(cfg, mf, cur, to, mid)
         return 0
     pending: list[str] = []
     if to == 'done':
@@ -470,6 +556,7 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
                    if model.field_of(ff, 'status') != 'done']
     _set_status(cfg, mf, to)
     _ok(f'milestone {mid}: {cur} -> {to}')
+    _stamp_status(cfg, mf, cur, to, mid)
     # Reported, never refused — and D3 asks the same question of the tree, so
     # the state this leaves is not unwatched.
     if pending:
@@ -1198,6 +1285,10 @@ def cmd_decide(cfg: model.PmConfig, args: list[str]) -> int:
     except OSError as err:
         raise Usage(f'could not append to {cfg.rel(log)} ({err})') from err
     _ok(f'{cfg.rel(log)}: {eid} — {when} — {title}')
+    # The heading is on disk; the row records that it is. `decisions.md` is
+    # per-grain and the ledger is per-milestone (D6), so a feature's decision
+    # lands in its milestone's file, named by the grain it was made about.
+    _stamp(cfg, log, ledger.decision_row(gid, eid, title))
     return 0
 
 

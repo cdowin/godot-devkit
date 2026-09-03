@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -98,6 +99,28 @@ def tree(milestone_status='building', feature_status='building',
             yield root
         finally:
             os.chdir(previous)
+
+
+LEDGER_REL = 'pm/roadmap/0.1-demo/ledger.jsonl'
+
+
+def ledger_lines(root: Path, rel: str = LEDGER_REL) -> list[str]:
+    """The milestone ledger's raw LINES — the bytes, never a re-serialisation.
+
+    Read as text rather than through a parser on purpose: compactness, key
+    order and one-row-per-line are half the row shape, and a parse would
+    answer the same for a pretty-printed file that no `readline` reader could
+    use. An absent ledger is [] — a milestone nothing has happened in yet.
+    """
+    path = root / rel
+    if not path.is_file():
+        return []
+    return path.read_text(encoding='utf-8').splitlines()
+
+
+def ledger_rows(root: Path, rel: str = LEDGER_REL) -> list[dict]:
+    """The same lines, parsed, oldest first."""
+    return [json.loads(line) for line in ledger_lines(root, rel) if line.strip()]
 
 
 def cfg_for(root: Path) -> model.PmConfig:
