@@ -2,7 +2,7 @@
 id: 0.22.0/review-record-shape
 milestone: "0.22.0"
 name: A review record carries a machine-readable verdict block
-status: building
+status: review
 reviewed:
 phase: 1
 depends_on: []

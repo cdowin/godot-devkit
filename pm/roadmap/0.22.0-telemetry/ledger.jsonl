@@ -17,3 +17,6 @@
 {"ts":"2026-09-03T22:29:15Z","kind":"status","grain":"0.22.0/ledger-report","from":"ready","to":"building"}
 {"ts":"2026-09-03T22:29:15Z","kind":"status","grain":"0.22.0/ledger-report/cost-per-shipped-unit","from":"todo","to":"wip"}
 {"ts":"2026-09-03T22:32:41Z","kind":"status","grain":"0.22.0/usage-capture/subagent-stop-hook-records-usage","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.22.0/ledger","from":"building","to":"review"}
+{"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.22.0/review-record-shape","from":"building","to":"review"}
+{"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.22.0/usage-capture","from":"building","to":"review"}
