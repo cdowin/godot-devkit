@@ -77,12 +77,14 @@ export VERBOSE
 #   NAME — scenario / capture / symbol   make scenario NAME=boot_to_hub
 #   FILE — scene path               make scene FILE=scenes/world/hub.tscn
 #   OLD/NEW — two-file scene-diff   make scene-diff OLD=a.tscn NEW=b.tscn
+#   REF  — the diff base            make integration-diff REF=origin/main
 SYS  ?=
 ARGS ?=
 NAME ?=
 FILE ?=
 OLD  ?=
 NEW  ?=
+REF  ?= HEAD
 
 # Set by `check` when it re-enters itself through a sub-make. See `check`.
 GDK_IN_CHECK ?=
@@ -123,7 +125,8 @@ exit "$$status"
 endef
 
 .PHONY: help doctor parse lint warnings unit integration integration-all \
-        scenario smoke capture import-cache refs scene scene-diff orphans \
+        integration-diff scenario smoke capture import-cache refs scene \
+        scene-diff orphans \
         autoloads pm pm-scan uid-scan hermetic-scan hooks-self-test \
         runners-self-test check precommit milestone
 
@@ -134,7 +137,7 @@ help: ## Show this help (authoritative target list)
 		| sort -u \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo
-	@echo 'Args: SYS="a b"  ARGS="--all"  NAME=<scenario|symbol>  FILE=<path>  VERBOSE=1'
+	@echo 'Args: SYS="a b"  ARGS="--all"  NAME=<scenario|symbol>  FILE=<path>  REF=<git ref>  VERBOSE=1'
 	@echo 'Gates print ONE verdict line naming .gate-reports/<gate>.log; VERBOSE=1 streams it.'
 
 doctor: ## Verify the dev toolchain (godot, gdlint, GUT, hooks)
@@ -205,11 +208,19 @@ unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
 # true of every gate here. (`scenario.sh -v` remains the hand-run flag for the
 # ENGINE transcript, which lands in .scenario-reports/ and is named in the
 # runner's own output.)
-integration: ## Integration tier. Pass ARGS="--all|--system x|<names>"
+integration: ## Integration tier. Pass ARGS="--all|--system <dir>|--diff <ref>|<names>"
 	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
 
 integration-all: ## Every integration scenario, one process each, N in parallel
 	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
+
+# The per-change slice: every scenario whose header declares it covers a path
+# the diff against REF touched, plus the smoke scenario. A touched scenario runs;
+# a touched piece of the tier's own ground (fixtures, the base class, the
+# runners) makes the whole tier the honest slice. REF defaults to HEAD — the
+# uncommitted change — so a clean tree runs exactly what `smoke` runs.
+integration-diff: ## The scenarios covering what the diff against REF touched, plus smoke
+	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF))
 
 scenario: ## One scenario, cold:  make scenario NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make scenario NAME=<scenario>"; exit 2; }
@@ -284,8 +295,9 @@ check: ## Static gate: the devkit checks + this project's own ([gates] extra)
 	[ -z "$$extra" ] || $${MAKE:-make} GDK_IN_CHECK=1 $$extra
 
 # The per-change gate, and the compositions print nothing of their own: each
-# member's verdict is the output.
-precommit: check parse lint unit smoke ## Per-change gate: check + parse + lint + unit + smoke
+# member's verdict is the output. `integration-diff` is smoke plus whatever the
+# change's declared coverage selects — on a clean tree, exactly smoke.
+precommit: check parse lint unit integration-diff ## Per-change gate: check + parse + lint + unit + integration-diff
 
 # The full gate, run once all features land. `unit` runs whole here; the
 # per-change cadence slices it.
