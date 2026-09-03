@@ -3,7 +3,7 @@ id: 0.20.0/makefile-include/the-standard-target-set
 feature: 0.20.0/makefile-include
 milestone: "0.20.0"
 name: Makefile.devkit carries the standard targets and the quiet-by-default convention
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

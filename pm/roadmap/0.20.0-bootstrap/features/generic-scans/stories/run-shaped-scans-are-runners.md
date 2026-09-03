@@ -3,7 +3,7 @@ id: 0.20.0/generic-scans/run-shaped-scans-are-runners
 feature: 0.20.0/generic-scans
 milestone: "0.20.0"
 name: hermetic and warnings scans ship as runners
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

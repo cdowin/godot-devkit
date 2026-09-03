@@ -1,7 +1,7 @@
 ---
 id: "0.20.0"
 name: bootstrap
-status: building
+status: done
 depends_on: ["0.19.0"]
 branch: milestone/0.20.0-bootstrap
 ---

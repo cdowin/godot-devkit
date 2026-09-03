@@ -2,8 +2,8 @@
 id: 0.20.0/ci-set
 milestone: "0.20.0"
 name: install-ci writes the workflow set both consumers actually run
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.20.0-bootstrap/features/ci-set//decisions.md
 phase: 2
 depends_on: []
 consumed_by: ["0.20.0/init-verb"]

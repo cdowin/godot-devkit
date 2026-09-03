@@ -3,7 +3,7 @@ id: 0.20.0/generic-runners/unit-scenario-integration-capture
 feature: 0.20.0/generic-runners
 milestone: "0.20.0"
 name: GUT unit, scenario, integration and capture run through the installed runners
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

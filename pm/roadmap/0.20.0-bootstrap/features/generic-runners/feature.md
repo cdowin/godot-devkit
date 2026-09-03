@@ -2,8 +2,8 @@
 id: 0.20.0/generic-runners
 milestone: "0.20.0"
 name: The six Godot/GUT runners every consumer re-invents become installables
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.20.0-bootstrap/features/generic-runners//decisions.md
 phase: 1
 depends_on: ["0.19.0/install-runners"]
 consumed_by: ["0.20.0/makefile-include", "0.20.0/init-verb"]

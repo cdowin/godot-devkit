@@ -3,7 +3,7 @@ id: 0.20.0/init-verb/the-fresh-game-acceptance-test
 feature: 0.20.0/init-verb
 milestone: "0.20.0"
 name: a blank project after init passes make doctor and make precommit with zero hand edits
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

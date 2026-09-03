@@ -3,7 +3,7 @@ id: 0.20.0/ci-set/install-ci-writes-the-set
 feature: 0.20.0/ci-set
 milestone: "0.20.0"
 name: install-ci writes verify, uid-guard, semver-gate and auto-tag
-status: review
+status: done
 owner: developer
 depends_on: []
 ---

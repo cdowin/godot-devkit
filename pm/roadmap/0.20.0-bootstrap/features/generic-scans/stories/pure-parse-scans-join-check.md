@@ -3,7 +3,7 @@ id: 0.20.0/generic-scans/pure-parse-scans-join-check
 feature: 0.20.0/generic-scans
 milestone: "0.20.0"
 name: rng, tres-comment, unit-disk and test-shape scans become check gates
-status: review
+status: done
 owner: developer
 depends_on: []
 ---
