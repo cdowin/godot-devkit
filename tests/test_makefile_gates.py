@@ -43,7 +43,18 @@ NOT_A_GATE = {'help', 'precommit', 'milestone'}
 
 def make(*args: str, **env_extra: str) -> subprocess.CompletedProcess:
     import os
-    env = dict(os.environ, **env_extra)
+    env = dict(os.environ)
+    # Under `make test` the recipe's shell carries MAKELEVEL/MAKEFLAGS, and a
+    # sub-make that inherits them announces 'Entering directory' ahead of the
+    # one verdict line these tests read. The make under test is a top-level one.
+    # VERBOSE is the same shape one layer up: the installed CI exports it for
+    # the whole `make milestone` step, so under it every "quiet by default"
+    # run below streamed — green under bare pytest, red where CI runs it. The
+    # default these tests speak of is VERBOSE UNSET; a case that wants the
+    # stream passes VERBOSE='1' explicitly.
+    for leaked in ('MAKELEVEL', 'MAKEFLAGS', 'MFLAGS', 'VERBOSE'):
+        env.pop(leaked, None)
+    env.update(env_extra)
     return subprocess.run(['make', *args], cwd=REPO_ROOT, text=True,
                           capture_output=True, env=env)
 
@@ -81,6 +92,15 @@ def test_a_gate_prints_exactly_one_verdict_line_naming_its_log():
     assert log.exists(), 'the verdict named a log that was never written'
     assert '[check:doc]' in log.read_text(encoding='utf-8'), (
         'the transcript the verdict points at does not hold the run')
+
+
+def test_an_ambient_verbose_does_not_turn_the_quiet_run_loud(monkeypatch):
+    """The installed CI exports VERBOSE=1 for the whole `make milestone` step,
+    and this suite runs inside it: `make gates` printed seven lines there and
+    one under bare pytest. The default the case above speaks of is VERBOSE
+    UNSET, whatever the environment the suite was started from says."""
+    monkeypatch.setenv('VERBOSE', '1')
+    test_a_gate_prints_exactly_one_verdict_line_naming_its_log()
 
 
 def test_verbose_streams_the_transcript_and_still_ends_with_the_verdict():

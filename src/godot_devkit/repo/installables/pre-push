@@ -30,10 +30,8 @@ SCOPE_MARKER=".agent-scope"
 # standalone file, and `source` of a library the repo may lack fails the hook
 # instead of the check.
 is_agent_context() {
-	local root="${1:-}"
-	if [ -z "$root" ]; then
-		root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-	fi
+	local root
+	root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 	[ -n "${DEVKIT_AGENT_SCOPE:-}" ] && return 0
 	[ -n "$root" ] && [ -f "${root}/${SCOPE_MARKER}" ]
 }

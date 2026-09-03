@@ -106,13 +106,41 @@ USAGE_EOF
 # FAIL. The filesystems underneath keep nanosecond mtimes and find reads them.
 # The direction was loud rather than silent, but a false red on a small warm
 # project is still a gate nobody can trust.
+# mtime_ns <path> — the file's modification time as an integer count of
+# nanoseconds, on GNU (`stat -c`) and BSD/macOS (`stat -f`) alike. Empty when
+# neither stat answers, so the caller can fall back rather than misread.
+mtime_ns() {
+	local raw ns
+	raw="$(stat -c '%.9Y' "$1" 2>/dev/null)" || raw="$(stat -f '%Fm' "$1" 2>/dev/null)" || raw=''
+	case "$raw" in
+		*.*) ns="${raw%%.*}$(printf '%-9s' "${raw#*.}" | tr ' ' 0)" ;;
+		*)   ns="${raw}000000000" ;;
+	esac
+	# A stat that echoed its format string, or anything else non-numeric,
+	# answers nothing rather than a number the caller would compare.
+	case "$ns" in *[!0-9]*|"") ns='' ;; esac
+	printf '%s\n' "$ns"
+}
+
+# An artifact is fresh when it was written AT OR AFTER the stamp, compared at
+# nanosecond resolution. Not `find -newer`: that is strictly-newer, and a Linux
+# kernel stamps two files written in the same clock tick (~ms) with IDENTICAL
+# nanoseconds — so a cache refreshed right behind the stamp read as stale, and
+# the runner's self-test went red on every Linux container while macOS's fine
+# clock hid it. Not `[ -nt ]` either: bash 3.2 compares whole seconds. When
+# stat cannot answer at all, strictly-newer is the honest fallback.
 stale_cache_artifacts() {
 	local stamp="${1:?usage: stale_cache_artifacts <stamp> <artifact...>}"; shift
-	local artifact
+	local artifact stamp_ns artifact_ns
+	stamp_ns="$(mtime_ns "$stamp")"
 	for artifact in "$@"; do
-		if [ -e "$artifact" ] \
-			&& [ -n "$(find "$artifact" -prune -newer "$stamp" 2>/dev/null)" ]; then
-			continue
+		if [ -e "$artifact" ]; then
+			artifact_ns="$(mtime_ns "$artifact")"
+			if [ -n "$stamp_ns" ] && [ -n "$artifact_ns" ]; then
+				[ "$artifact_ns" -lt "$stamp_ns" ] || continue
+			elif [ -n "$(find "$artifact" -prune -newer "$stamp" 2>/dev/null)" ]; then
+				continue
+			fi
 		fi
 		printf '%s\n' "$artifact"
 	done
@@ -189,6 +217,16 @@ self_test() {
 	out="$(stale_cache_artifacts "$stamp" "$scratch/same-second.bin")"
 	[ -z "$out" ] \
 		|| { echo "  MISS — a cache refreshed within the stamp's second must read fresh, got '$out'" >&2; failures=$((failures + 1)); }
+
+	# outcome check: an artifact whose mtime EQUALS the stamp's is fresh — the
+	# same-tick case above made deterministic: `touch -r` copies the stamp's
+	# timestamp to the nanosecond on GNU and BSD alike, so this fails on every
+	# platform under a strictly-newer comparison and passes under at-or-after.
+	cases=$((cases + 1))
+	touch -r "$stamp" "$scratch/equal.bin"
+	out="$(stale_cache_artifacts "$stamp" "$scratch/equal.bin")"
+	[ -z "$out" ] \
+		|| { echo "  MISS — an artifact stamped IDENTICALLY to the stamp must read fresh, got '$out'" >&2; failures=$((failures + 1)); }
 
 	# outcome check: an artifact NEWER than the stamp is fresh — and the whole
 	# roster fresh means empty output, which is what the runner reads as PASS.
