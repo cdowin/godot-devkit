@@ -49,6 +49,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from support import REPO_ROOT  # noqa: E402
 
+sys.path.insert(0, str(REPO_ROOT / 'src'))
+from godot_devkit.repo import install  # noqa: E402
+
 pytestmark = pytest.mark.skipif(shutil.which('make') is None
                                 or shutil.which('bash') is None
                                 or shutil.which('git') is None,
@@ -243,3 +246,64 @@ def test_a_project_gate_joins_check_through_devkit_toml_not_a_fork():
     assert 'a gate this project owns' in listed.stdout
     assert roster.returncode == 0, roster.stdout + roster.stderr
     assert roster.stdout.split() == ['my-scan'], roster.stdout
+
+
+# --- the hook census: doctor's count, the install roster, and the smoke probe -
+# `make smoke`'s fresh-project probe asserts that the number of hooks doctor
+# reports armed equals the number `install-hooks` ships. It carried that number
+# as the literal `TRACKED_HOOKS = 6`, and the two 0.22.0 ledger couriers turned
+# it into `FAIL  make doctor: hook census  8 tracked hook(s) armed, 6
+# installed` on the day they landed — a red smoke run about a roster, not about
+# behaviour. doctor.sh itself was never wrong: it counts what is IN
+# tools/hooks/ precisely so a hook added after it was written is still covered.
+# The literal was the only roster in the loop, so it is now derived, and these
+# two tests are the reason it cannot come back: the census is proven HERE, in
+# the suite, instead of first in a gate that needs two consumer checkouts.
+HOOKS_DIR = 'tools/hooks'
+DOCTOR_ARMED = re.compile(r'tracked hook \S+ present \+ executable')
+
+
+def installed_hook_roster() -> list[str]:
+    """What `install-hooks` puts under tools/hooks/, minus doctor's own
+    exclusions (`_*` sourced libraries, `*.local` config drop-ins)."""
+    return [rel for _, rel in install.PLANS['install-hooks']
+            if rel.startswith(f'{HOOKS_DIR}/')
+            and not Path(rel).name.startswith('_')
+            and not rel.endswith('.local')]
+
+
+def test_the_smoke_probes_hook_census_is_derived_from_the_install_roster():
+    """The number `make smoke` compares against must BE the roster, not a copy
+    of it. A copy is only ever correct until the next hook."""
+    sys.path.insert(0, str(REPO_ROOT / 'tools'))
+    import consumer_smoke                                       # noqa: PLC0415
+    assert consumer_smoke.TRACKED_HOOKS == len(installed_hook_roster()), (
+        f'consumer_smoke.TRACKED_HOOKS = {consumer_smoke.TRACKED_HOOKS} but '
+        f'install-hooks ships {len(installed_hook_roster())} hooks under '
+        f'{HOOKS_DIR}/: {installed_hook_roster()}')
+
+
+def test_doctor_arms_and_reports_every_hook_the_install_verb_ships():
+    """The coupling itself, on a real `init`'d tree: doctor's census is asked
+    of the DIRECTORY, so it must come back equal to the roster that filled it.
+    This is the assertion `make smoke` makes with two consumer checkouts and a
+    host toolchain; making it here means a new hook can never be discovered by
+    the gate first."""
+    roster = installed_hook_roster()
+    with initialized_project() as root:
+        armed = subprocess.run(['bash', 'tools/setup-hooks.sh'], cwd=root,
+                               capture_output=True, text=True)
+        assert armed.returncode == 0, armed.stderr
+        done = subprocess.run(['bash', 'tools/dev/checks/doctor.sh'], cwd=root,
+                              capture_output=True, text=True,
+                              env=dict(os.environ))
+        for rel in roster:
+            assert (root / rel).is_file(), f'{rel} was not installed'
+        reported = DOCTOR_ARMED.findall(done.stdout)
+    assert len(reported) == len(roster), (
+        f'doctor reports {len(reported)} armed hook(s), install-hooks ships '
+        f'{len(roster)}: {roster}\n{done.stdout}')
+    for rel in roster:
+        assert any(Path(rel).name in row for row in reported), (
+            f'{rel} is installed and armed but doctor never named it\n'
+            f'{done.stdout}')

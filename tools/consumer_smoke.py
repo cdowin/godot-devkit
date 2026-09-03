@@ -41,6 +41,14 @@ import tempfile
 from pathlib import Path
 
 DEVKIT = Path(__file__).resolve().parent.parent
+# The WORKING TREE build, for the one thing this file needs to KNOW rather than
+# observe: which files `install-hooks` puts under tools/hooks/. Everything else
+# here runs the CLI out of process on purpose (a probe that imports what it is
+# probing can agree with a bug); a roster is not behaviour, and a literal copy
+# of one is the drift this import removes.
+sys.path.insert(0, str(DEVKIT / 'src'))
+from godot_devkit.repo import install  # noqa: E402
+
 CONSUMERS = (Path.home() / 'workspace' / 'trail',
              Path.home() / 'workspace' / 'nullbound')
 SCENE_SUFFIXES = ('.tres', '.tscn')
@@ -50,7 +58,18 @@ DEFAULT_EXCLUDES = ('addons/',)
 FRESH = 'fresh project'
 GODOT = 'godot'
 HOOKS_PATH = 'tools/hooks'
-TRACKED_HOOKS = 6
+# DERIVED, never a literal. doctor.sh counts what is IN the directory — asked
+# of the tree, not of a roster, so a hook added after it was written is still
+# covered — and this probe compares that count against what the install verb
+# ships. A hardcoded 6 here made the two couriers (0.22.0) read as a census
+# failure in `make smoke` on the day they landed: the roster this file could
+# not see had moved and the number it carried could not. `_*` and `*.local`
+# are doctor's own exclusions, mirrored so the two censuses count one thing.
+TRACKED_HOOKS = sum(
+    1 for _, rel in install.PLANS['install-hooks']
+    if rel.startswith(f'{HOOKS_PATH}/')
+    and not Path(rel).name.startswith('_')
+    and not rel.endswith('.local'))
 FRESH_PROJECT_GODOT = ('config_version=5\n\n[application]\n\n'
                        'config/name="Fresh"\nconfig/version="0.1.0"\n')
 FRESH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>\n'
