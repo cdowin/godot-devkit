@@ -34,3 +34,5 @@
 {"ts":"2026-09-03T23:03:33Z","kind":"decision","grain":"0.23.0","entry":"D10","title":"consumers-adopt leaves this milestone: a consumer adopts at its own pin bump, in its own PM tree"}
 {"ts":"2026-09-03T23:19:11Z","kind":"status","grain":"0.23.0/ledger-report/yield-rework-escapes-overhead","from":"todo","to":"review"}
 {"ts":"2026-09-03T23:19:11Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"todo","to":"wip"}
+{"ts":"2026-09-03T23:41:05Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"wip","to":"review"}
+{"ts":"2026-09-03T23:41:05Z","kind":"status","grain":"0.23.0/ledger-report","from":"building","to":"review"}
