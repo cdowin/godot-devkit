@@ -2,3 +2,6 @@
 {"ts":"2026-09-03T21:52:31Z","kind":"status","grain":"0.22.0/ledger/status-flips-stamp-the-ledger","from":"todo","to":"wip"}
 {"ts":"2026-09-03T21:52:31Z","kind":"status","grain":"0.22.0/ledger/status-flips-stamp-the-ledger","from":"wip","to":"review"}
 {"ts":"2026-09-03T21:58:12Z","kind":"status","grain":"0.22.0/bugs/boundaries-misses-path-open-mode","from":"open","to":"fixed"}
+{"ts":"2026-09-03T22:13:44Z","kind":"status","grain":"0.22.0/ledger/pm-ledger-record","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:13:44Z","kind":"status","grain":"0.22.0/ledger/pm-ledger-record","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:13:44Z","kind":"decision","grain":"0.22.0/ledger","entry":"D2","title":"The terminal state show totals to is done for milestones, features and stories, and bug_states[-1] for bugs"}

@@ -22,3 +22,14 @@ different contract, not a variant of overwrite. The pattern is built from `[pm] 
 whole-file overwrite); widening `godot-devkit init`'s pinned roster now.
 **Costs:** `tests/test_boundaries.py` must name `ledger.py`'s append as the one sanctioned exception
 once its `_is_write_open` reads `Path.open` modes correctly (bug filed).
+
+## D2 — 2026-09-03 — The terminal state show totals to is done for milestones, features and stories, and bug_states[-1] for bugs
+
+**Decision:** `ledger.terminal_state(cfg, kind)` names `done` for the three grains and reads
+`cfg.bug_states[-1]` for bugs. D8 said "the last state of its configured vocabulary"; the stock story
+vocabulary is `todo wip review done blocked`, whose last entry is `blocked`.
+**Because:** a total for a story that stalled and none for one that finished is the read-side sin
+(Hard rule 4). `done` is what D2/D3/D5 already treat as terminal, so `show` agrees with the gate.
+Reordering the tuple would change `pm vocabulary` output, a consumer contract.
+**Rejected:** `[-1]` as built; reordering `DEFAULT_STORY_STATES`; a new config key.
+**Costs:** a consumer whose story vocabulary lacks `done` never sees a total line.
