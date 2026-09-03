@@ -13,7 +13,7 @@ consumed_by: ["0.22.0/usage-capture", "0.22.0/ledger-report"]
 
 What it makes true: `pm/roadmap/<milestone>/ledger.jsonl` (D6), beside `decisions.md`, append-only,
 one JSON object per line, written by the verbs that already touch a grain and by `pm ledger record`.
-The grain's own frontmatter carries `started_at:` and `ended_at:` (D7). Row kinds:
+Rows carry every transition of every grain, bugs included (D8). Row kinds:
 
 ```
 {"ts":"2026-09-03T21:40:12Z","kind":"status","grain":"0.22.0/ledger/status-flips-stamp-the-ledger","from":"todo","to":"wip"}
@@ -30,18 +30,19 @@ The grain's own frontmatter carries `started_at:` and `ended_at:` (D7). Row kind
 `ts` is always full UTC ISO-8601 at second resolution. A `session` row carries cumulative totals for
 that session at that stop; the report diffs consecutive rows per `session_id`. Every number is a count
 or a sum as recorded; nothing is weighted or estimated (D5). `pm ledger show <grain-id>` prints the
-rows that name a grain (in `grain` or anywhere in `tree`), oldest first.
+rows that name a grain (in `grain` or anywhere in `tree`), oldest first, with the seconds spent in
+each state between consecutive status rows.
 
 ## Existing-construct audit
 
 `decisions.md` is prose and append-only — the ledger is its machine sibling in the same directory,
 not a second decisions log. The ledger is retired with the milestone; git is the archive and the prune
-log carries the anchor (D6). The frontmatter stamps are the simple story a reader wants from the file;
-the ledger is the whole story (D7). Stdlib, one file per milestone.
+log carries the anchor (D6). The ledger is the only home for a timestamp (D8); a grain's dates are `pm ledger show`, not a
+frontmatter field. Stdlib, one file per milestone.
 
 ## Ship criterion
 
-Every status flip in a milestone appears in its `ledger.jsonl` with a UTC timestamp; every grain that
-started and finished carries `started_at`/`ended_at`; a `pm ledger record` row round-trips;
+Every status flip in a milestone appears in its `ledger.jsonl` with a UTC timestamp; `pm ledger show` prints
+any grain's timeline with time in each state, bugs included; a `pm ledger record` row round-trips;
 `pm validate` and `check pm` ignore the ledger and never fail on a missing stamp; `retire` removes
 the ledger with the directory and the ROADMAP row's anchor resolves it from git.

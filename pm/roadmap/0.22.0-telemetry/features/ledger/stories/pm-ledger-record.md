@@ -21,7 +21,9 @@ a `dispatch` (SubagentStop) or `session` (Stop) row to the building milestone's
 `ledger.jsonl` (D6). A field the
 transcript lacks is omitted, never invented. Hand entry stays possible: `pm ledger record --grain <id>
 --agent-type <t> --tokens-in N --tokens-out N --tool-calls N --duration-s N` for a dispatch no hook
-saw. `pm ledger show <grain-id>` prints that grain's rows oldest first, `--json` for the raw lines.
+saw. `pm ledger show <grain-id>` prints that grain's rows oldest first with the seconds between
+consecutive status rows (time in each state) and, at the end, first-row to terminal-row total;
+`--json` for the raw lines.
 ## Gotchas
 The transcript shape is pinned by a fixture (a scrubbed real subagent transcript); a record without
 `message.usage` counts as a message and contributes zero, and a file with NO assistant records is a

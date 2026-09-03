@@ -13,8 +13,8 @@ depends_on: []
 ## Goal
 `pm ledger report <ms>` section 1: per story / feature / bug — sum of `usage.*`, `tool_calls`,
 dispatch count and `duration_s` from the dispatch rows whose `tree` names the grain, split by
-`agent_type`; `size:` printed as a column, never used as a divisor (D5); wall-clock from the grain's
-first `wip` row to its `review` row; rows with empty `tree` lists at the bottom as unattributed, never
+`agent_type`; `size:` printed as a column, never used as a divisor (D5); wall-clock per state from the status rows
+(seconds in `todo`, `wip`, `review`; bugs in `open`, `fixed`), and first-row to terminal-row total; rows with empty `tree` lists at the bottom as unattributed, never
 dropped. Quiet table; `--json`.
 ## Verification
 `make test` on a fixture ledger + PM tree; `make gates`.

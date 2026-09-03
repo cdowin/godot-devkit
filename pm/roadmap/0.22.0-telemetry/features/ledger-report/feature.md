@@ -12,8 +12,7 @@ consumed_by: ["0.22.0/consumers-adopt"]
 # pm ledger report answers the five questions from raw rows in one table
 
 What it makes true: `pm ledger report [<milestone>] [--json]` prints the five questions as one quiet
-table (a heading, the table, one summary line) from `pm/roadmap/<ms>/ledger.jsonl`, the grains'
-`started_at`/`ended_at`, the review records and the bug frontmatter — and, for a retired milestone,
+table (a heading, the table, one summary line) from `pm/roadmap/<ms>/ledger.jsonl`, the review records and the bug frontmatter — and, for a retired milestone,
 the same files out of git at the prune-log anchor (`--from <anchor>`, D6). No `.gate-reports/`, no
 weights (D5). Spend per
 grain by agent type with `size:` as a column; yield per review pass; rework from `review → wip` rows

@@ -125,3 +125,21 @@ reads). A stamp per status (`wip_at`, `review_at`, …): the ledger is that.
 **Costs:** two fields the resolvers do not read; `pm set` can edit them (a hand edit is a fact about
 a team, as with `reviewed:`). Bugs are NOT stamped in this milestone — their machine is
 `open → fixed → closed` and nobody asked; add later if wanted.
+
+## D8 — 2026-09-03 — SUPERSEDES D7 — no frontmatter stamps; every transition of every grain, bugs included, is a ledger row, and the terminal-state row is the end
+
+**Decision:** timestamps live in the ledger only. Every `pm milestone|feature|story|bug <status>`
+appends `{ts, kind: "status", grain, from, to}`; `pm feature done --cascade` appends one row per
+story it closes. A grain's start is its first row into a working state and its end is its row into
+the LAST state of its configured vocabulary (`done` for milestones, features and stories; the last
+entry of `[pm] bug_states` for bugs — `closed` stock). `pm ledger show <grain>` prints the rows
+oldest first with the seconds spent in each state, so "A → B → C, and how long in each" is one
+command. No `started_at:`/`ended_at:` on frontmatter; the stamps story is withdrawn.
+**Because:** Chris, 2026-09-03: "the ledger needs to mark the timestamp of each transition … so we
+can measure time in each phase and figure out which ones are taking the most time", and "ended_at
+should be stamped at done for everything — reviews are still part of the process; if a review takes
+3 days, that's data I want." A start/end pair on the grain cannot carry `review`, and a second home
+for a subset of the ledger's facts is the drift D6 exists to avoid.
+**Rejected:** D7's frontmatter pair (a subset, a second home); stamping `review` as an end (review
+time is the data).
+**Costs:** a reader wanting a grain's dates runs `pm ledger show` instead of opening the file.

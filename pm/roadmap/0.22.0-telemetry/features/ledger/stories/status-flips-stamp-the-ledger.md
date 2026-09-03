@@ -11,11 +11,13 @@ depends_on: []
 # pm story and feature verbs append a timestamped row to the milestone ledger
 
 ## Goal
-Every `pm story|feature|bug|milestone <status>` appends `{ts, kind: "status", grain, from, to}` and
+Every `pm story|feature|bug|milestone <status>` — bugs included, every state in each vocabulary —
+appends `{ts, kind: "status", grain, from, to}` and
 `pm decide` appends `{ts, kind: "decision", grain, entry, title}` to `pm/roadmap/<ms>/ledger.jsonl`
 (D6), `ts` full UTC ISO-8601 seconds, append-only, stdlib. The directory is the grain's own
 milestone directory (a story under `0.22.0/…` writes `0.22.0-telemetry/ledger.jsonl`).
-The verbs' existing output and exit codes do not change.
+`pm feature done --cascade` appends one row per story it closes, after its own row. The verbs'
+existing output and exit codes do not change.
 ## Gotchas
 The file and the directory are minted on first write, like `decisions.md`. A no-op flip (same
 status) still appends — a no-op is a fact. The row is written AFTER the frontmatter write succeeds,

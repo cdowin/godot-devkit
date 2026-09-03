@@ -10,7 +10,7 @@ risk: medium
 # telemetry
 
 Filed 2026-09-02 (Chris: *"Our goal is efficiency towards the goal, not necessarily no tokens
-spent."*). Re-scoped 2026-09-03 (D1–D7 in `decisions.md`; D6/D7 supersede D1/D2): raw data, written at the moment of the
+spent."*). Re-scoped 2026-09-03 (D1–D8 in `decisions.md`; D6 supersedes D1, D8 supersedes D2 and D7): raw data, written at the moment of the
 work, kept forever. After the 0.19.0/0.20.0 efficiency work the only evidence that it helped was the
 orchestrator tallying agent reports by hand — small N, self-reported, features of different size.
 This milestone makes the devkit record what every dispatch and every status flip cost in tokens,
@@ -19,9 +19,9 @@ across consumers.
 
 ## What gets recorded, and by whom
 
-- Every status flip and every decision → one row with a full UTC timestamp, appended by the `pm`
-  verb that made it. The grain itself carries `started_at:` and `ended_at:` on frontmatter, stamped by
-  the same verbs and cascading through `feature done` (D7).
+- Every status transition of every grain — milestones, features, stories, bugs — and every decision
+  → one row with a full UTC timestamp, appended by the `pm` verb that made it, so time in each state
+  is a subtraction over raw rows (D8). Nothing is stamped on frontmatter.
 - Every subagent dispatch → one row from the agent's own transcript: tokens in/out/cache, tool calls
   by name, first and last timestamp, model, agent type — appended by an installed `SubagentStop`
   hook through `pm ledger record` (D4). The orchestrator session's own totals land the same way
@@ -50,9 +50,9 @@ and nothing exits non-zero on a number.
 ## Ship criterion
 
 In an installed consumer, a milestone worked with the hooks armed and no hand entry yields
-`pm ledger report <ms>` printing the five sections from `pm/roadmap/<ms>/ledger.jsonl`; every closed
-story, feature and the milestone carry `started_at`/`ended_at`; `pm ledger report --from <anchor>`
-prints the same for a retired milestone out of git.
+`pm ledger report <ms>` printing the five sections from `pm/roadmap/<ms>/ledger.jsonl`;
+`pm ledger show <grain>` printing any grain's full state timeline with seconds in each state, bugs
+included; `pm ledger report --from <anchor>` printing the same for a retired milestone out of git.
 
 ## Risks
 
