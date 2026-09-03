@@ -235,6 +235,19 @@ self_test() {
 				rc=1 ;;
 		esac
 		self_test_says 'a payload with no ids still records' "$argv" 'exit=0' || rc=1
+
+		# THE SILENT VEHICLE. A Makefile with no `pm` target, in a repo that
+		# has a `pm/` DIRECTORY — which every PM tree does — is make's
+		# up-to-date case: exit 0, not a word, no row. An un-`.PHONY:`'d `pm`
+		# target is the same case with a recipe attached. This is the failure
+		# mode the header warns about, and the case is here because a warning
+		# in a comment has never caught anything.
+		mkdir -p "$repo/pm"
+		printf 'all:\n\t@true\n' >"$repo/Makefile"
+		self_test_case 'a vehicle that exits 0 without reaching the verb' \
+			"$(self_test_payload "$EVENT" "$repo" 'sess-1' "$tilde")" \
+			'without a word' || rc=1
+		rmdir "$repo/pm"
 	else
 		echo "  SKIP — make is not on PATH; the vehicle cases did not run" >&2
 	fi
@@ -319,7 +332,26 @@ fi
 # the hook log carries ONE stream: a refusal ("2 milestones are building …") is
 # the message a consumer has to see, and it is passed through verbatim rather
 # than summarised by a courier that did not decide it.
+#
+# AND A VEHICLE THAT EXITS 0 SAYING NOTHING NEVER REACHED THE VERB. The `pm`
+# target is un-`.PHONY:`'d — a PM tree IS a `pm/` directory, so make finds a
+# file by that name and calls the target up to date — or it is absent from a
+# Makefile that exists. Both exit 0, print nothing, and write no row. The
+# header comment above warns about the first; a comment is not a gate, and a
+# courier that cannot tell "wrote a row" from "did nothing" is hard rule 4's
+# read-side sin wearing a hook: the milestone reads as cheap forever after and
+# nothing downstream can tell it from one that was. The verb ALWAYS speaks —
+# `[pm] ledger … row appended` on success, `[pm] ERROR — …` on a refusal — so
+# silence is the one answer that is neither, and it is named rather than
+# counted as a success. The output is captured to ask that question and then
+# passed through verbatim; nothing here parses it.
 verb_rc=0
-"${MAKE_PM[@]}" ARGS="$ARGS" >&2 || verb_rc=$?
-[ "$verb_rc" -eq 0 ] || note "${MAKE_PM[*]} exited $verb_rc — see its output above"
+verb_out=""
+verb_out="$("${MAKE_PM[@]}" ARGS="$ARGS" 2>&1)" || verb_rc=$?
+[ -z "$verb_out" ] || printf '%s\n' "$verb_out" >&2
+if [ "$verb_rc" -ne 0 ]; then
+	note "${MAKE_PM[*]} exited $verb_rc — see its output above"
+elif [ -z "$verb_out" ]; then
+	note "${MAKE_PM[*]} exited 0 without a word — the vehicle never reached the verb (is the \`pm\` target present, and .PHONY?) — no ledger row"
+fi
 exit 0

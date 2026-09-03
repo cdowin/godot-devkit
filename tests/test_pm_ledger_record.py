@@ -456,6 +456,62 @@ class Show(unittest.TestCase):
         self.assertIn('line 2', out)
 
 
+class RowsThisVersionNeverWrote(unittest.TestCase):
+    """`ledger.jsonl` is `merge=union`, so the reader meets shapes it never emitted.
+
+    Another milestone branch's rows, a newer version of this package's rows and
+    a hand edit all land in this file without passing through `usage_row`, and
+    `read_rows` deliberately accepts any JSON OBJECT as a row. So the matcher
+    above it has to answer "does this row name the grain" for values that are
+    not strings at all. `{} in names` raises `TypeError`; the honest answer is
+    False — a value that cannot be a grain id does not name one — and a
+    traceback would take out the whole timeline over one line, at exit 1, which
+    hard rule 6 spells "findings".
+    """
+
+    def show(self, *rows: str, grain: str = STORY):
+        with tree() as root:
+            put_ledger(root,
+                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
+                                   'wip'),
+                       *rows)
+            return run_cli(root, 'ledger', 'show', grain)
+
+    def test_a_tree_bucket_holding_an_object_does_not_crash_the_timeline(self):
+        code, out = self.show(
+            '{"ts":"2026-09-03T10:01:00Z","kind":"dispatch",'
+            '"tree":{"stories_wip":[{"id":"' + STORY + '"}]}}')
+        self.assertEqual(code, 0, out)
+        self.assertIn('todo -> wip', out)
+
+    def test_a_tree_bucket_holding_a_list_or_null_does_not_crash(self):
+        code, out = self.show(
+            '{"ts":"2026-09-03T10:01:00Z","kind":"dispatch",'
+            '"tree":{"stories_wip":[null,3,["' + STORY + '"]]}}')
+        self.assertEqual(code, 0, out)
+        self.assertIn('todo -> wip', out)
+
+    def test_a_grain_key_that_is_not_a_string_does_not_crash(self):
+        code, out = self.show(
+            '{"ts":"2026-09-03T10:01:00Z","kind":"status",'
+            '"grain":{"id":"' + STORY + '"},"from":"a","to":"b"}')
+        self.assertEqual(code, 0, out)
+        self.assertIn('todo -> wip', out)
+
+    def test_such_a_row_does_not_become_this_grains_row(self):
+        """Not crashing is half of it: the match must still be False.
+
+        A dict whose `id` happens to spell the grain is not the grain being
+        named — reading it as one would put another row's cost on this
+        timeline, which is the same lie the crash was hiding.
+        """
+        self.assertFalse(ledger.row_names(
+            {'grain': {'id': STORY}, 'tree': {'stories_wip': [{'id': STORY}]}},
+            {STORY}))
+        self.assertTrue(ledger.row_names(
+            {'tree': {'stories_wip': [STORY]}}, {STORY}))
+
+
 class Refusals(unittest.TestCase):
     """SDLC § 5's matrix. Every one of these refuses WITHOUT writing a row."""
 
