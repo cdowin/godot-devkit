@@ -59,10 +59,10 @@ PROJECT_GODOT = ('config_version=5\n\n[application]\n\n'
                  'config/features=PackedStringArray("4.6")\n')
 ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>\n'
 
-# The standard set is 26 targets. The NUMBER is asserted, not just the list: a
+# The standard set is 27 targets. The NUMBER is asserted, not just the list: a
 # target quietly dropped from the include would otherwise shrink the sweep and
 # still pass it, which is this package's cardinal sin wearing a green tick.
-STANDARD_COUNT = 26
+STANDARD_COUNT = 27
 DOCUMENTED = re.compile(r'^([a-z][a-z0-9-]*):.*?## ', re.MULTILINE)
 
 # What a target needs on the command line to be asked for at all.
@@ -117,8 +117,8 @@ def test_the_installed_include_carries_the_whole_standard_set():
 
 
 def test_make_n_succeeds_for_every_standard_target_with_zero_hand_edits():
-    """One project, every target, in one fixture: standing up 26 of them would
-    cost 26 inits and prove the same thing 26 times."""
+    """One project, every target, in one fixture: standing up 27 of them would
+    cost 27 inits and prove the same thing 27 times."""
     with initialized_project() as root:
         before = files(root)
         failures = []

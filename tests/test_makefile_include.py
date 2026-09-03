@@ -48,8 +48,8 @@ INSTALLABLES = INCLUDE.parent
 STANDARD = (
     'help', 'doctor',
     'parse', 'lint', 'warnings',
-    'unit', 'integration', 'integration-all', 'scenario', 'smoke',
-    'capture', 'import-cache',
+    'unit', 'integration', 'integration-all', 'integration-diff', 'scenario',
+    'smoke', 'capture', 'import-cache',
     'refs', 'scene', 'scene-diff', 'orphans', 'autoloads', 'pm',
     'pm-scan', 'uid-scan', 'hermetic-scan',
     'hooks-self-test', 'runners-self-test',
@@ -69,7 +69,8 @@ SELF_PUBLISHING = {'parse': 'parse.sh', 'lint': 'lint.sh',
 # include's header, `help`'s footer and the README all promised it worked.
 WRAPPED = ('uid-scan', 'pm-scan', 'hermetic-scan', 'hooks-self-test',
            'runners-self-test', 'check',
-           'integration', 'integration-all', 'scenario', 'smoke', 'capture')
+           'integration', 'integration-all', 'integration-diff', 'scenario',
+           'smoke', 'capture')
 # Everything else is not a gate: `help` and `doctor` are reports, the read
 # verbs ARE their output, and the compositions print nothing beyond their
 # members' verdicts.
@@ -246,6 +247,7 @@ VERBOSE_TARGETS = [
     pytest.param('smoke', [], 'SMOKE', id='smoke'),
     pytest.param('integration', [], 'INTEGRATION', id='integration'),
     pytest.param('integration-all', [], 'INTEGRATION', id='integration-all'),
+    pytest.param('integration-diff', [], 'INTEGRATION', id='integration-diff'),
     pytest.param('capture', ['NAME=shot'], 'CAPTURE', id='capture'),
 ]
 

@@ -493,3 +493,190 @@ def test_no_installable_names_the_consumer_it_was_extracted_from(name):
                       if re.search(pattern, line)]
             for pattern in CONSUMER_NAMES}
     assert not any(hits.values()), {k: v for k, v in hits.items() if v}
+
+
+# --- the slice: --system is a DIRECTORY, --diff is what the change covers ----
+# Two consumer bugs in one matcher. `--system <x>` matched a scenario NAME
+# prefix: `--system threads` found nothing in tests/integration/threads/ (the
+# files are thread_*.gd) and two agents in a row concluded the system had no
+# coverage, while a typo'd prefix could quietly under-select. And a scenario
+# declared nothing about what it covered, so the per-change gate was a guess
+# (smoke) and the honest gate was the whole tier. The self-test corpus proves
+# the pure functions; these prove the CLI end to end against a git repo and a
+# stand-in scenario runner, booting nothing.
+COVERS_HEADER = ('extends "res://tests/integration/scenario_base.gd"\n\n'
+                 '## Boots because: tests/unit/alpha/test_alpha.gd cannot drive '
+                 'the live flow.\n'
+                 '## covers: systems/alpha\n\n'
+                 'func run() -> void:\n\tpass\n')
+UNDECLARED_BODY = 'extends "res://tests/integration/scenario_base.gd"\n\nfunc run() -> void:\n\tpass\n'
+SLICE_ENV = {'PATH': '/usr/bin:/bin', 'GDK_JOBS': '2',
+             'GDK_SCENARIO_RUNNER': 'stub_scenario.sh'}
+
+
+def _slice_fixture(tmp_path: Path) -> Path:
+    """A git repo at the stock layout: a declared scenario in alpha/, an
+    undeclared one in beta/, a directory holding only a capture tool, the
+    smoke scenario, and the system the declared one covers — committed, so a
+    diff against HEAD is empty until the test touches something."""
+    runner = _fanout_fixture(tmp_path, 0o755)
+    # The fan-out files each job's output under its own log, so the stand-in
+    # records what it was asked to run where the test can read it.
+    (runner.parent / 'stub_scenario.sh').write_text(
+        '#!/usr/bin/env bash\n'
+        f'echo "$1" >> "{tmp_path / "ran.txt"}"\n'
+        'echo "[SCENARIO] $1 PASS"\n', encoding='utf-8')
+    tier = tmp_path / 'tests' / 'integration'
+    for rel, body in (('alpha/alpha_flow.gd', COVERS_HEADER),
+                      ('beta/beta_flow.gd', UNDECLARED_BODY),
+                      ('tools_only/eyes_capture.gd', UNDECLARED_BODY),
+                      ('smoke.gd', UNDECLARED_BODY),
+                      ('scenario_base.gd', 'extends Node\n')):
+        (tier / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tier / rel).write_text(body, encoding='utf-8')
+    (tmp_path / 'systems' / 'alpha').mkdir(parents=True)
+    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node\n', encoding='utf-8')
+    (tmp_path / 'tests' / 'support').mkdir()
+    (tmp_path / 'tests' / 'support' / 'fixture.gd').write_text('extends Node\n', encoding='utf-8')
+    git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+    subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)
+    subprocess.run(['git', 'add', '-A'], cwd=tmp_path, check=True)
+    subprocess.run([*git, 'commit', '-q', '-m', 'fixture'], cwd=tmp_path, check=True)
+    return runner
+
+
+def _slice(runner: Path, *argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run(['bash', str(runner), *argv], cwd=runner.parents[3],
+                          text=True, capture_output=True, env=SLICE_ENV)
+
+
+def _ran(done: subprocess.CompletedProcess) -> set[str]:
+    """What the stand-in runner was asked to boot — read from its own record,
+    because the fan-out files every scenario's output under its own log."""
+    root = Path(done.args[1]).parents[3]   # tools/dev/runners/<runner> -> the repo
+    record = root / 'ran.txt'
+    if not record.exists():
+        return set()
+    return set(record.read_text(encoding='utf-8').split())
+
+
+def test_system_selects_the_directory_not_a_name_prefix(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--system', 'beta')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'beta_flow'}, done.stdout
+
+
+def test_a_name_prefix_that_is_not_a_directory_is_a_usage_error_naming_the_directories(tmp_path):
+    """`--system alph` used to select alpha_flow by prefix; `--system thread`
+    selected thread_*.gd out of threads/. A prefix is not a directory."""
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--system', 'alph')
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert _ran(done) == set(), 'a prefix selected scenarios'
+    assert "no directory 'alph'" in done.stderr, done.stderr
+    assert 'alpha' in done.stderr and 'beta' in done.stderr, done.stderr
+
+
+def test_a_directory_holding_no_gate_is_a_FAIL_not_a_green_run_over_nothing(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--system', 'tools_only')
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'EMPTY' in done.stderr, done.stderr
+    assert '1 .gd file(s)' in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize('bad', ['', '..', '.', 'a/b', 'a\\b', '/abs', '*',
+                                 'a b', '-x', 'a;b', 'a' * 65],
+                         ids=['empty', 'dotdot', 'dot', 'slash', 'backslash',
+                              'absolute', 'glob', 'space', 'dash', 'semicolon',
+                              'over-long'])
+def test_the_system_grammar_refuses_before_any_lookup(tmp_path, bad):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--system', bad)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert _ran(done) == set()
+
+
+def test_a_clean_tree_slices_to_exactly_smoke(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'smoke'}, done.stdout
+    assert '0 touched path(s)' in done.stdout, done.stdout
+
+
+def test_a_touched_covered_path_selects_the_declaring_scenario_plus_smoke(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node2D\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'smoke'}, done.stdout
+    # The undeclared scenario is REPORTED, not silently skipped — and not run.
+    assert 'UNDECLARED: 2 scenario(s)' in done.stdout, done.stdout
+    assert '    beta_flow' in done.stdout and '    smoke' in done.stdout, done.stdout
+    assert done.stdout.strip().endswith(
+        '(of 2); slice of 1 touched path(s), 2 undeclared scenario(s) ride only --all'), done.stdout
+
+
+def test_a_touched_path_outside_every_declaration_slices_to_smoke_alone(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'systems' / 'alphabet').mkdir()
+    (tmp_path / 'systems' / 'alphabet' / 'x.gd').write_text('extends Node\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'smoke'}, 'alphabet matched the prefix alpha'
+
+
+def test_a_new_untracked_scenario_is_a_touched_scenario(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'tests' / 'integration' / 'beta' / 'beta_new.gd').write_text(
+        UNDECLARED_BODY, encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'beta_new', 'smoke'}, done.stdout
+
+
+def test_a_touched_piece_of_the_tiers_ground_selects_every_scenario(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'tests' / 'support' / 'fixture.gd').write_text('extends Node2D\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
+    assert "the tier's own ground" in done.stdout, done.stdout
+    assert 'eyes_capture' not in done.stdout, 'a capture TOOL boots in the whole-tier slice'
+
+
+def test_a_ref_that_names_no_commit_is_a_usage_error(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--diff', 'no-such-ref')
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert 'does not name a commit' in done.stderr, done.stderr
+    assert _ran(done) == set()
+
+
+@pytest.mark.parametrize('bad', ['', '-x', '--all', 'HEAD extra'],
+                         ids=['empty', 'dash', 'flag', 'space'])
+def test_the_ref_grammar_refuses_a_flag_or_whitespace(tmp_path, bad):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--diff', bad)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert _ran(done) == set()
+
+
+def test_a_hostile_covers_entry_selects_nothing(tmp_path):
+    """The gate refuses the declaration; the runner must still not act on it.
+    An absolute or `..` entry compared as a prefix of a touched path can match
+    nothing git reports — proven, not assumed."""
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'tests' / 'integration' / 'alpha' / 'alpha_flow.gd').write_text(
+        COVERS_HEADER.replace('## covers: systems/alpha',
+                              '## covers: /systems, ../systems, systems/*, res://systems'),
+        encoding='utf-8')
+    git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+    subprocess.run([*git, 'commit', '-q', '-am', 'hostile'], cwd=tmp_path, check=True)
+    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node2D\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'smoke'}, done.stdout
+    assert '    alpha_flow' in done.stdout, 'a scenario whose every entry is refused is undeclared'
