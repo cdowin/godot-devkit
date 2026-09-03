@@ -4,9 +4,10 @@
 # `config/version` out of project.godot on the PR branch and on main, and
 # blocks the merge unless the PR's is strictly greater.
 #
-# TWO- AND THREE-PART VERSIONS both work: a missing component defaults to 0, so
-# `0.16` -> `0.16.1` compares as the bump it is rather than dying on an empty
-# string in a numeric test.
+# VERSIONS OF ANY LENGTH compare component-wise: a missing component defaults
+# to 0, so `0.16` -> `0.16.1` is the bump it is, and a fourth component (a
+# hotfix `0.90.3` -> `0.90.3.1`, a sub-milestone `0.90.4.1`) is compared, not
+# dropped. A non-numeric component is refused rather than crashing the test.
 #
 # The FIRST versioned merge is allowed with a warning: main having no
 # config/version yet is a one-time state, and failing it would mean no first
@@ -59,18 +60,26 @@ jobs:
             exit 0
           fi
 
-          # A missing component is 0, so a two-part version compares numerically.
-          IFS='.' read -r PR_MAJOR PR_MINOR PR_PATCH <<< "$PR"
-          IFS='.' read -r MAIN_MAJOR MAIN_MINOR MAIN_PATCH <<< "$MAIN"
-          PR_MAJOR=${PR_MAJOR:-0}; PR_MINOR=${PR_MINOR:-0}; PR_PATCH=${PR_PATCH:-0}
-          MAIN_MAJOR=${MAIN_MAJOR:-0}; MAIN_MINOR=${MAIN_MINOR:-0}; MAIN_PATCH=${MAIN_PATCH:-0}
-
-          if [ "$PR_MAJOR" -gt "$MAIN_MAJOR" ]; then
-            echo "Version bump OK: $MAIN -> $PR (major)"
-          elif [ "$PR_MAJOR" -eq "$MAIN_MAJOR" ] && [ "$PR_MINOR" -gt "$MAIN_MINOR" ]; then
-            echo "Version bump OK: $MAIN -> $PR (minor)"
-          elif [ "$PR_MAJOR" -eq "$MAIN_MAJOR" ] && [ "$PR_MINOR" -eq "$MAIN_MINOR" ] && [ "$PR_PATCH" -gt "$MAIN_PATCH" ]; then
-            echo "Version bump OK: $MAIN -> $PR (patch)"
+          # Compare component-wise, ANY length; a missing component is 0, so a
+          # two-part version compares numerically, and a fourth part (a hotfix
+          # 0.90.3 -> 0.90.3.1, a sub-milestone id 0.90.4.1) is compared rather
+          # than dropped on the floor. A non-numeric component refuses: a
+          # letter suffix would otherwise error this gate on every later PR.
+          IFS='.' read -r -a PR_PARTS <<< "$PR"
+          IFS='.' read -r -a MAIN_PARTS <<< "$MAIN"
+          n=${#PR_PARTS[@]}; [ "${#MAIN_PARTS[@]}" -gt "$n" ] && n=${#MAIN_PARTS[@]}
+          verdict=equal
+          for ((i = 0; i < n; i++)); do
+            p="${PR_PARTS[i]:-0}"; m="${MAIN_PARTS[i]:-0}"
+            case "$p$m" in *[!0-9]*)
+              echo "::error::Non-numeric version component — main is '$MAIN', PR is '$PR'. Versions are dotted integers only."
+              exit 1;;
+            esac
+            if [ "$p" -gt "$m" ]; then verdict=greater; break
+            elif [ "$p" -lt "$m" ]; then verdict=less; break; fi
+          done
+          if [ "$verdict" = greater ]; then
+            echo "Version bump OK: $MAIN -> $PR"
           else
             echo "::error::Version must increase. Main is $MAIN, PR is $PR. Bump config/version in project.godot before merging."
             exit 1
