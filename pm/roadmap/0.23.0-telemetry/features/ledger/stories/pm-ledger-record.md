@@ -3,7 +3,7 @@ id: 0.23.0/ledger/pm-ledger-record
 feature: 0.23.0/ledger
 milestone: "0.23.0"
 name: pm ledger record files a dispatch row by hand when no hook can
-status: review
+status: done
 owner:
 depends_on: []
 ---

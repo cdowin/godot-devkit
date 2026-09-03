@@ -2,8 +2,8 @@
 id: 0.23.0/review-record-shape
 milestone: "0.23.0"
 name: A review record carries a machine-readable verdict block
-status: review
-reviewed:
+status: done
+reviewed: pm/roadmap/0.23.0-telemetry/features/review-record-shape/review.md
 phase: 1
 depends_on: []
 consumed_by: ["0.23.0/ledger-report"]

@@ -2,8 +2,8 @@
 id: 0.23.0/ledger
 milestone: "0.23.0"
 name: The ledger — every status flip and every dispatch leaves a timestamped row
-status: review
-reviewed:
+status: done
+reviewed: pm/roadmap/0.23.0-telemetry/features/ledger/review.md
 phase: 1
 depends_on: []
 consumed_by: ["0.23.0/usage-capture", "0.23.0/ledger-report"]

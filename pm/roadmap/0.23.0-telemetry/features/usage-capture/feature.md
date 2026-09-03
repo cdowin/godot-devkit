@@ -2,8 +2,8 @@
 id: 0.23.0/usage-capture
 milestone: "0.23.0"
 name: Dispatch usage is captured by a hook, never by hand
-status: review
-reviewed:
+status: done
+reviewed: pm/roadmap/0.23.0-telemetry/features/usage-capture/review.md
 phase: 2
 depends_on: ["0.23.0/ledger"]
 consumed_by: ["0.23.0/ledger-report"]

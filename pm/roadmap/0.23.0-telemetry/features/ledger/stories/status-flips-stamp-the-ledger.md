@@ -3,7 +3,7 @@ id: 0.23.0/ledger/status-flips-stamp-the-ledger
 feature: 0.23.0/ledger
 milestone: "0.23.0"
 name: pm story and feature verbs append a timestamped row to the milestone ledger
-status: review
+status: done
 owner:
 depends_on: []
 ---
