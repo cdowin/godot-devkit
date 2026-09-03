@@ -158,3 +158,17 @@ edit — the alternative leaves rows naming grains that no longer resolve.
 name for one fact).
 **Costs:** the one deliberate rewrite of an append-only file, done by the orchestrator by hand and
 named here. The worktree path still says `godot-devkit-0.22.0`; a path is not an id.
+
+## D10 — 2026-09-03 — consumers-adopt leaves this milestone: a consumer adopts at its own pin bump, in its own PM tree
+
+**Decision:** the `consumers-adopt` feature and its `trail-adopts` story are removed from 0.23.0.
+Adoption is what a consumer does when it bumps its `DEVKIT_VERSION` pin: `install-hooks --force`,
+the two `.claude/settings.json` entries `install-hooks` prints, and its next milestone captured live.
+That work is a story in the consumer's PM tree (trail's, at its 0.28.4 close), not a feature here.
+**Because:** `pm milestone done` refuses while any feature is not `done` (D3), and a feature whose
+ship criterion is "trail's next milestone reports from live capture" cannot be done before the release
+it depends on. The devkit half — the verbs, the couriers, the printed settings — is `usage-capture`
+and `ledger`, already done.
+**Rejected:** closing the feature with a record that says "the consumer will do it" (a `done` that
+is not); keeping the milestone open until trail adopts.
+**Costs:** `ledger-report`'s `consumed_by:` loses its one entry.

@@ -6,7 +6,7 @@ status: building
 reviewed:
 phase: 3
 depends_on: ["0.23.0/ledger", "0.23.0/usage-capture", "0.23.0/review-record-shape"]
-consumed_by: ["0.23.0/consumers-adopt"]
+consumed_by: []
 ---
 
 # pm ledger report answers the five questions from raw rows in one table
