@@ -2,7 +2,7 @@
 id: 0.22.0/usage-capture
 milestone: "0.22.0"
 name: Dispatch usage is captured by a hook, never by hand
-status: planning
+status: building
 reviewed:
 phase: 2
 depends_on: ["0.22.0/ledger"]

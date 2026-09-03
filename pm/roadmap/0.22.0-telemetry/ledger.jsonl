@@ -5,3 +5,9 @@
 {"ts":"2026-09-03T22:13:44Z","kind":"status","grain":"0.22.0/ledger/pm-ledger-record","from":"todo","to":"wip"}
 {"ts":"2026-09-03T22:13:44Z","kind":"status","grain":"0.22.0/ledger/pm-ledger-record","from":"wip","to":"review"}
 {"ts":"2026-09-03T22:13:44Z","kind":"decision","grain":"0.22.0/ledger","entry":"D2","title":"The terminal state show totals to is done for milestones, features and stories, and bug_states[-1] for bugs"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture","from":"planning","to":"ready"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture","from":"ready","to":"building"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture/the-grain-is-the-trees-live-state","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture/the-grain-is-the-trees-live-state","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/review-record-shape/bugs-name-their-cause","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.22.0/usage-capture/subagent-stop-hook-records-usage","from":"todo","to":"wip"}

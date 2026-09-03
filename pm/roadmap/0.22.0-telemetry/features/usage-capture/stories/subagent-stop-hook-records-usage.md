@@ -3,7 +3,7 @@ id: 0.22.0/usage-capture/subagent-stop-hook-records-usage
 feature: 0.22.0/usage-capture
 milestone: "0.22.0"
 name: an installed SubagentStop hook records tokens, tool calls, duration and the grain per dispatch
-status: todo
+status: wip
 owner:
 depends_on: []
 ---

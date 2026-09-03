@@ -3,7 +3,7 @@ id: 0.22.0/usage-capture/the-grain-is-the-trees-live-state
 feature: 0.22.0/usage-capture
 milestone: "0.22.0"
 name: the dispatch row carries the tree's live state at the hook, never an inferred grain
-status: todo
+status: review
 owner:
 depends_on: []
 ---
