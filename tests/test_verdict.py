@@ -425,3 +425,180 @@ def test_the_paragraph_is_identical_across_the_four_definitions():
         start = body.rindex('### ', 0, body.index(marker))
         excerpts.add(body[start:body.index(marker) + len(marker)])
     assert len(excerpts) == 1, 'the verdict-block paragraph has drifted apart'
+
+
+# --- R1: one verdict vocabulary per definition, not two ----------------------
+# The repo-local reviewer. No installable counterpart (it reviews godot-devkit
+# itself), so it is read from the tree rather than through `install.PACKAGE` —
+# but it writes review records like the rest, so it carries the same block.
+LOCAL_REVIEWER = Path(REPO_ROOT) / '.claude' / 'agents' / 'code-reviewer.md'
+# Every definition that instructs the block, and the verdict trio its PROSE
+# verdict line must draw from — the block's words, never a second vocabulary.
+PROSE_VERDICT_TRIOS = {
+    'reviewer.md': ('SHIP', 'SHIP-WITH-FIXES', 'HOLD'),
+    'simplifier.md': (),                       # states no prose verdict of its own
+    'milestone-reviewer.md': ('SHIP', 'SHIP-WITH-FIXES', 'HOLD'),
+    'verification-reviewer.md': (),            # says "return the verdict", names no trio
+    'code-reviewer.md': ('RELEASE-SAFE', 'RELEASE-WITH-FIXES', 'NOT-RELEASE-SAFE'),
+}
+# The vocabularies these files used to end on, twenty lines above a block that
+# demanded different words. A reader cannot obey both, and the report reads the
+# block — so the prose was the half that had to move.
+RETIRED_VOCABULARY = (
+    ('reviewer.md', 'PASS | PASS WITH WARNINGS | FAIL'),
+    ('milestone-reviewer.md', 'EXECUTION-READY'),
+    ('milestone-reviewer.md', 'READY-WITH-FIXES'),
+    ('milestone-reviewer.md', 'NOT-READY'),
+    ('code-reviewer.md', 'RELEASE-SAFE or NOT'),
+)
+
+
+def definition(name: str) -> str:
+    """Any of the five, installable or repo-local, by file name."""
+    if name == LOCAL_REVIEWER.name:
+        return LOCAL_REVIEWER.read_text(encoding='utf-8')
+    return installable(name)
+
+
+ALL_DEFINITIONS = tuple(PROSE_VERDICT_TRIOS)
+
+
+@pytest.mark.parametrize('name, retired', RETIRED_VOCABULARY)
+def test_the_second_verdict_vocabulary_is_gone(name, retired):
+    assert retired not in definition(name), (
+        f'{name} still offers {retired!r} — a prose verdict in words the '
+        f'block refuses, which is two answers to one question')
+
+
+@pytest.mark.parametrize('name', ALL_DEFINITIONS)
+def test_the_prose_verdict_trio_is_drawn_from_the_block_vocabulary(name):
+    """Whatever trio a definition names, every word of it must be a value the
+    parser accepts — otherwise the prose and the block disagree by design."""
+    body = definition(name)
+    trio = PROSE_VERDICT_TRIOS[name]
+    for word in trio:
+        assert word in verdict.VERDICTS
+        assert word in body, f'{name} does not offer the prose verdict {word}'
+
+
+@pytest.mark.parametrize('name', ALL_DEFINITIONS)
+def test_each_definition_says_the_block_is_the_record_of_the_verdict(name):
+    """One sentence, identical in all of them: which of the two is the record,
+    so a reader who finds them disagreeing knows which to fix."""
+    assert 'The block IS the record' in definition(name), (
+        f'{name} does not say the block is the record of the verdict')
+
+
+@pytest.mark.parametrize('name', ALL_DEFINITIONS)
+def test_the_repo_local_reviewer_carries_the_same_paragraph(name):
+    """Five files, one paragraph. `code-reviewer.md` has no installable, so
+    nothing else in the suite would notice it drifting away from the other
+    four — and a record it writes is a record the report has to read."""
+    body = definition(name)
+    marker = 'verdict: SHIP-WITH-FIXES'
+    start = body.rindex('### ', 0, body.index(marker))
+    end = body.find('\n## ', start)
+    para = (body[start:] if end == -1 else body[start:end]).rstrip('\n')
+    assert para == PARAGRAPH, f'{name} has drifted from the shared paragraph'
+
+
+PARAGRAPH = (Path(REPO_ROOT) / 'src' / 'godot_devkit' / 'repo' / 'installables'
+             / 'reviewer.md').read_text(encoding='utf-8')
+PARAGRAPH = PARAGRAPH[PARAGRAPH.rindex('### The verdict block'):].rstrip('\n')
+
+
+# --- R2: `landed in-place`, because a reviewer here has no hash to give -------
+def test_landed_in_place_parses_as_a_landed_disposition():
+    """Reviewers in this SDLC fix in place and never commit, so at the moment
+    the record is written a landed fix HAS no hash. `landed <hex>` alone
+    under-counts exactly the findings that were acted on — the disposition the
+    yield number most wants to see."""
+    parsed = verdict.parse(block('| M4 | MAJOR | landed in-place |'))
+    assert parsed.findings == [verdict.Finding('M4', 'MAJOR', 'landed', 'in-place')]
+
+
+def test_landed_in_place_is_a_fixed_token_and_folds_case():
+    parsed = verdict.parse(block('| M4 | MAJOR | LANDED In-Place |'))
+    assert parsed.findings[0].disposition_value == verdict.IN_PLACE
+
+
+def test_landed_in_place_and_a_hash_coexist_in_one_block():
+    parsed = verdict.parse(block('| W1 | WARNING | landed 3a42f19ad |',
+                                 '| M4 | MAJOR | landed in-place |'))
+    assert [f.disposition_value for f in parsed.findings] == ['3a42f19ad', 'in-place']
+
+
+@pytest.mark.parametrize('disposition', (
+    'landed inplace',        # no hyphen
+    'landed in place',       # a space, so two words after the keyword
+    'landed in-place 3a42f19ad',
+    'landed in-place-ish',
+    'in-place',              # without the keyword it is not a disposition
+))
+def test_only_the_literal_in_place_token_is_accepted(disposition):
+    """A fixed token, not free text: `landed <anything>` would make the column
+    unreadable, which is the whole reason the hash form is bounded."""
+    assert 'unreadable disposition' in malformed(
+        block(f'| M4 | MAJOR | {disposition} |')).why
+
+
+@pytest.mark.parametrize('name', ALL_DEFINITIONS)
+def test_each_definition_shows_a_landed_in_place_row(name):
+    """The form exists for the case these agents are actually in, so the
+    example has to demonstrate it — an agent copies the shape it is shown."""
+    body = definition(name)
+    assert f'landed {verdict.IN_PLACE}' in body, f'{name} shows no in-place row'
+    parsed = verdict.parse(body)
+    assert verdict.IN_PLACE in [f.disposition_value for f in parsed.findings]
+
+
+# --- R3: an unfenced block is a near-miss, not an absence --------------------
+def test_an_unfenced_verdict_followed_by_the_header_refuses():
+    """The quiet miss, second route. A reviewer who forgot the fence wrote a
+    verdict; reporting "no verdict block" over it is the read-side sin — the
+    report prints a clean number for a pass it never counted."""
+    text = ('# Review\n\nProse.\n\nverdict: SHIP-WITH-FIXES\n'
+            + HEADER_ROW + '\n| W1 | WARNING | landed in-place |\n')
+    error = malformed(text)
+    assert 'not fenced' in error.why
+    assert error.line == 'verdict: SHIP-WITH-FIXES'
+    assert error.lineno == 5
+
+
+@pytest.mark.parametrize('gap', (0, 1, 2, 3))
+def test_the_header_is_looked_for_within_three_lines(gap):
+    """Three, because a blank line and a stray note between the two is still
+    obviously one block; further apart and the two lines are unrelated."""
+    filler = '\n'.join([''] * gap)
+    text = ('# R\n\nverdict: HOLD\n' + (filler + '\n' if gap else '')
+            + HEADER_ROW + '\n')
+    if gap <= verdict.NEAR_MISS_LOOKAHEAD:
+        assert 'not fenced' in malformed(text).why
+    else:
+        with pytest.raises(verdict.NoVerdict):
+            verdict.parse(text)
+
+
+def test_an_unfenced_verdict_far_from_any_header_is_still_NoVerdict():
+    """Scoped deliberately: a lone `verdict:` line in prose is not a block, and
+    claiming it would turn every record that discusses verdicts into exit 2."""
+    text = '# R\n\nverdict: HOLD\n\n\n\n\nprose\n\n' + HEADER_ROW + '\n'
+    with pytest.raises(verdict.NoVerdict):
+        verdict.parse(text)
+
+
+def test_a_properly_fenced_block_is_not_disturbed_by_an_unfenced_near_miss():
+    """The near-miss check runs only on the path that would otherwise report
+    NONE. A record that quotes an example beside its real block still parses —
+    a refusal there would redden every record that documents the shape."""
+    text = block('| W1 | WARNING | landed in-place |') + (
+        '\nFor reference the shape is\n\nverdict: HOLD\n' + HEADER_ROW + '\n')
+    assert verdict.parse(text).verdict == 'SHIP-WITH-FIXES'
+
+
+def test_the_corpus_prose_verdict_line_is_still_NoVerdict():
+    """R3 must not swallow the two records that already exist: their verdict is
+    `**Verdict: RELEASE-WITH-FIXES**`, bolded prose with no table after it."""
+    with pytest.raises(verdict.NoVerdict):
+        verdict.parse('# Review\n\n**Verdict: RELEASE-WITH-FIXES** — one MAJOR.\n\n'
+                      'Findings follow.\n')

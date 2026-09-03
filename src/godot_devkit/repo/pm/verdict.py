@@ -101,6 +101,14 @@ LANDED = 'landed'
 REJECTED = 'rejected'
 DEFERRED = 'deferred'
 DISPOSITION_KINDS = (LANDED, REJECTED, DEFERRED)
+# The second `landed` form, and it is not a convenience. Reviewers in this SDLC
+# fix in place and NEVER commit (SDLC.md §2) — so at the moment the record is
+# written, a landed fix genuinely has no hash. Admitting only `landed <hex>`
+# under-counts exactly the findings that were acted on, which is the one column
+# the yield number exists to read. A literal token, not free text: `landed
+# <anything>` would make the column unreadable, the same reason the hash form
+# is length-bounded.
+IN_PLACE = 'in-place'
 
 # --- the shape ----------------------------------------------------------------
 MARKER = 'verdict'
@@ -120,7 +128,8 @@ MAX_ID_SEGMENTS = 3
 
 _MARKER_LINE = re.compile(rf'^{MARKER}\s*:\s*(.*)$', re.IGNORECASE)
 _LANDED = re.compile(
-    rf'^{LANDED}\s+([0-9a-fA-F]{{{HASH_MIN_LEN},{HASH_MAX_LEN}}})$', re.IGNORECASE)
+    rf'^{LANDED}\s+({IN_PLACE}|[0-9a-fA-F]{{{HASH_MIN_LEN},{HASH_MAX_LEN}}})$',
+    re.IGNORECASE)
 _REJECTED = re.compile(rf'^{REJECTED}\s*:\s*(\S.*)$', re.IGNORECASE)
 _DEFERRED = re.compile(rf'^{DEFERRED}\s*:\s*(\S+)$', re.IGNORECASE)
 _DISPOSITIONS = ((_LANDED, LANDED), (_REJECTED, REJECTED), (_DEFERRED, DEFERRED))
@@ -128,8 +137,14 @@ _DISPOSITIONS = ((_LANDED, LANDED), (_REJECTED, REJECTED), (_DEFERRED, DEFERRED)
 _VERDICT_BY_FOLD = {value.casefold(): value for value in VERDICTS}
 _SEVERITY_BY_FOLD = {value.casefold(): value for value in SEVERITIES}
 
-_DISPOSITION_FORMS = (f'`{LANDED} <commit-hash>`, `{REJECTED}: <why>` '
-                      f'or `{DEFERRED}: <grain-id>`')
+_DISPOSITION_FORMS = (f'`{LANDED} <commit-hash>`, `{LANDED} {IN_PLACE}`, '
+                      f'`{REJECTED}: <why>` or `{DEFERRED}: <grain-id>`')
+
+# How far below an UNFENCED `verdict:` line this looks for the header row before
+# deciding the two are unrelated. Three: a blank line and a stray note between
+# them is still obviously one block, and further apart the `verdict:` is a word
+# in a paragraph. See `parse` for why this is not a general prose search.
+NEAR_MISS_LOOKAHEAD = 3
 
 
 class NoVerdict(Exception):
@@ -221,6 +236,42 @@ def _opens_a_verdict(body: list[tuple[int, str]]) -> bool:
     return bool(rows) and bool(_MARKER_LINE.match(rows[0][1]))
 
 
+def _is_header(line: str) -> bool:
+    """True for the header row, tolerantly — this one ASKS rather than refuses.
+
+    `_cells` raises, which is right once a block is known to exist; here the
+    question is whether these two lines ARE a block, and a refusal would answer
+    it before it was asked.
+    """
+    stripped = line.strip()
+    if len(stripped) < 2 or not (stripped.startswith(CELL_SEPARATOR)
+                                 and stripped.endswith(CELL_SEPARATOR)):
+        return False
+    cells = [cell.strip().casefold()
+             for cell in stripped[1:-1].split(CELL_SEPARATOR)]
+    return tuple(cells) == HEADER_CELLS
+
+
+def _unfenced_near_miss(lines: list[str],
+                        fenced: list[bool]) -> tuple[int, str] | None:
+    """An unfenced `verdict:` line with the header row right under it.
+
+    A reviewer who forgot the fence still WROTE a verdict, and answering "this
+    record has none" is rule 4's read-side sin by a second route: the report
+    prints a clean number for a pass it never counted. The header row within
+    `NEAR_MISS_LOOKAHEAD` lines is what separates that from prose — a lone
+    `verdict:` in a sentence stays NoVerdict, because claiming it would turn
+    every record that DISCUSSES the block into exit 2.
+    """
+    for idx, raw in enumerate(lines):
+        if fenced[idx] or not _MARKER_LINE.match(raw.strip()):
+            continue
+        window = lines[idx + 1:idx + 1 + NEAR_MISS_LOOKAHEAD + 1]
+        if any(_is_header(later) for later in window):
+            return idx + 1, raw.strip()
+    return None
+
+
 def _cells(lineno: int, line: str) -> list[str]:
     """The three stripped cells of a table row, or a refusal.
 
@@ -280,6 +331,8 @@ def _finding(lineno: int, line: str) -> Finding:
         match = pattern.match(disposition)
         if match:
             value = match.group(1).strip()
+            if kind == LANDED and value.casefold() == IN_PLACE:
+                value = IN_PLACE  # a fixed token folds; a hash stays raw
             break
     else:
         raise MalformedVerdict(
@@ -346,6 +399,16 @@ def parse(text: str) -> Verdict:
 
     found = [block for block in blocks if _opens_a_verdict(block)]
     if not found:
+        # Only on the path that would otherwise report NONE. A record carrying
+        # a real block AND quoting the shape in prose beside it must still
+        # parse — refusing there would redden every record that documents the
+        # block, including the four agent definitions that teach it.
+        near_miss = _unfenced_near_miss(lines, markdown.fenced_flags(lines)[0])
+        if near_miss:
+            raise MalformedVerdict(
+                *near_miss,
+                f'the verdict block is not fenced — the report reads a FENCED '
+                f'block, so wrap these lines in a code fence')
         raise NoVerdict(
             f'no verdict block: no fenced block in these {len(lines)} line(s) '
             f'opens with `{MARKER}:` ({len(blocks)} fenced block(s) read)')
