@@ -299,10 +299,13 @@ touched_substrate() {
 #   UNDECLARED\t<name>   a scenario with no covers entry — never selected here
 # `systems/alpha` covers `systems/alpha/x.gd` and not `systems/alphabet/x.gd`.
 slice_for_touched() {
+	# The touched list reaches awk as a FILE, never a `-v` value: BWK awk (macOS)
+	# refuses a newline inside one, so a list of two paths broke the slice.
 	local touched
-	touched="$(cat)"
-	covers_table "${1:-}" | awk -F'\t' -v touched="$touched" '
-		BEGIN { n = split(touched, t, "\n") }
+	touched="$(mktemp "${TMPDIR:-/tmp}/gdk-touched.XXXXXX")" || return 2
+	cat > "$touched"
+	covers_table "${1:-}" | awk -F'\t' '
+		FNR == NR { if ($0 != "") t[++n] = $0; next }
 		function covered(prefix,   i) {
 			for (i = 1; i <= n; i++) {
 				if (t[i] == "") continue
@@ -319,7 +322,8 @@ slice_for_touched() {
 			for (s in selected) print "SELECT\t" s
 			for (u in undeclared) print "UNDECLARED\t" u
 		}
-	' | sort
+	' "$touched" - | sort
+	rm -f "$touched"
 }
 
 # detect_jobs — cores minus two, floor one. Two are left for the shell, the
@@ -511,6 +515,13 @@ FIXTURE_EOF
 	cases=$((cases + 1))
 	out="$(printf '' | slice_for_touched "$scratch" | grep -c SELECT)"
 	[ "$out" = "0" ] || miss "no touched paths should select nothing"
+	# TWO OR MORE touched paths — the shape a real diff has. BWK awk refused a
+	# newline inside a -v string, so every multi-path slice came back empty
+	# and reported nothing undeclared: a green run over the wrong set.
+	cases=$((cases + 1))
+	out="$(printf '%s\n' CLAUDE.md systems/alpha/thing.gd docs/x.md | slice_for_touched "$scratch" | tr '\t\n' ': ')"
+	[ "$out" = "SELECT:alpha_flow UNDECLARED:plain_gate UNDECLARED:protocol_boot " ] \
+		|| miss "a multi-path touched list should slice like a single one, got '$out'"
 
 	# --- the tier's ground --------------------------------------------------
 	cases=$((cases + 1))

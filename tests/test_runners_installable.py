@@ -619,6 +619,22 @@ def test_a_touched_covered_path_selects_the_declaring_scenario_plus_smoke(tmp_pa
         '(of 2); slice of 1 touched path(s), 2 undeclared scenario(s) ride only --all'), done.stdout
 
 
+def test_a_diff_touching_several_paths_slices_by_every_one_of_them(tmp_path):
+    """The shape a real change has: more than one path. BWK awk (macOS)
+    refuses a newline inside a `-v` string, so a two-path list came back as
+    an EMPTY slice reporting nothing undeclared — green over the wrong set."""
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node2D\n', encoding='utf-8')
+    (tmp_path / 'README.md').write_text('# touched too\n', encoding='utf-8')
+    (tmp_path / 'tests' / 'integration' / 'beta' / 'beta_flow.gd').write_text(
+        UNDECLARED_BODY + '\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
+    assert '3 touched path(s)' in done.stdout, done.stdout
+    assert 'UNDECLARED: 2 scenario(s)' in done.stdout, done.stdout
+
+
 def test_a_touched_path_outside_every_declaration_slices_to_smoke_alone(tmp_path):
     runner = _slice_fixture(tmp_path)
     (tmp_path / 'systems' / 'alphabet').mkdir()
