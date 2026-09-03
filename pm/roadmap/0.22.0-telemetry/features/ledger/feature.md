@@ -24,7 +24,7 @@ Rows carry every transition of every grain, bugs included (D8). Row kinds:
  "usage":{"input":1200,"output":38000,"cache_creation":210000,"cache_read":9100000},
  "tree":{"milestones_building":["0.22.0"],"features_building":["0.22.0/ledger"],"features_review":[],
          "stories_wip":["0.22.0/ledger/status-flips-stamp-the-ledger"],"stories_review":[]}}
-{"ts":"…","kind":"session","session_id":"…","model":"…","started_at":"…","ended_at":"…","messages":…,"tool_calls":…,"tools":{…},"usage":{…},"tree":{…}}
+{"ts":"…","kind":"session","session_id":"…","model":"…","started_at":"…","ended_at":"…","duration_s":…,"messages":…,"tool_calls":…,"tools":{…},"tool_calls_before_first_write":…,"usage":{…},"tree":{…}}
 ```
 
 `ts` is always full UTC ISO-8601 at second resolution. A `session` row carries cumulative totals for
