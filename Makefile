@@ -84,7 +84,7 @@ gdk_gate_verdict $(2) "$$summary" "$$log"; \
 exit "$$status"
 endef
 
-.PHONY: help test matrix fuzz gates smoke precommit milestone
+.PHONY: help test matrix fuzz gates smoke precommit milestone pm
 
 help:
 	@echo 'godot-devkit — make targets'
@@ -95,11 +95,20 @@ help:
 	@echo '  make gates       godot-devkit check all, on this repo'
 	@echo '  make smoke       check all + autoloads/scene/refs/pm on the consumers (read-only)'
 	@echo
+	@echo '  make pm ARGS="…"  the pm tracker from SOURCE, never a cached wheel (the ledger couriers call this)'
+	@echo
 	@echo '  make precommit   gates + test           the per-change gate'
 	@echo '  make milestone   gates + matrix + smoke  the full gate, and what CI runs'
 	@echo
 	@echo 'Every gate prints ONE verdict line naming its full log under'
 	@echo '.gate-reports/. VERBOSE=1 streams the transcript as well.'
+
+# The pm tracker over THIS repo's tree, from source (CLAUDE.md: never verify
+# through a cached wheel). .PHONY matters: a pm/ directory at the root would
+# otherwise satisfy the target silently and the ledger couriers would record
+# nothing (0.23.0/usage-capture, reviewer U1).
+pm:
+	PYTHONPATH=src python3 -m godot_devkit.cli pm $(ARGS)
 
 test:
 	$(call gate,test,TEST,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q))
