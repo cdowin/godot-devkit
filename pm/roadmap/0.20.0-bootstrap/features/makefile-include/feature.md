@@ -2,8 +2,8 @@
 id: 0.20.0/makefile-include
 milestone: "0.20.0"
 name: Makefile.devkit — one standard target set, projects extend by config
-status: building
-reviewed:
+status: done
+reviewed: pm/roadmap/0.20.0-bootstrap/features/makefile-include//decisions.md
 phase: 2
 depends_on: ["0.20.0/generic-runners", "0.20.0/generic-scans"]
 consumed_by: ["0.20.0/init-verb"]

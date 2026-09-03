@@ -3,7 +3,7 @@ id: 0.20.0/init-verb/init-on-a-blank-project
 feature: 0.20.0/init-verb
 milestone: "0.20.0"
 name: godot-devkit init writes every installable in order on an empty Godot 4 project
-status: review
+status: done
 owner: developer
 depends_on: []
 ---
