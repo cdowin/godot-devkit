@@ -10,6 +10,7 @@ is the RELATION between a file, the cap and its ledger entry — not 300.
 """
 from __future__ import annotations
 
+import subprocess
 import unittest
 
 from support import run_check, temp_repo
@@ -122,6 +123,187 @@ class RefusesRatherThanGuesses(unittest.TestCase):
         and fail every file on the ledger."""
         with temp_repo('test_shape_repo', only=SCENARIOS) as root:
             _config(root, CAP_5 + f'ledger = {{ "{BIG}" = true }}\n')
+            with self.assertRaises(ConfigError):
+                run_check(test_shape)
+
+
+# --- the header: a scenario says why it boots and what it covers ------------
+# Opt-in (`header = true`); the existing tier enters `header_ledger` and
+# ratchets out as it is touched. The interesting relations: an unledgered
+# scenario with no header FAILS, a headed one PASSES, a ledgered one that grew
+# a header is a finding naming the ledger line to drop, and every hostile
+# `covers:` entry is refused rather than read as a prefix of nothing.
+HEADED = 'tests/integration/headed_scenario.gd'
+SMALL = 'tests/integration/small_scenario.gd'
+HEADER_ON = '[test_shape]\ncap = 50\nheader = true\n'
+GOOD_HEADER = ('extends "res://tests/integration/support/scenario_base.gd"\n'
+               '\n'
+               '## Boots because: tests/unit/contract_test.gd cannot drive the '
+               'live flow without a boot.\n'
+               '## covers: systems/alpha, tests/unit/contract_test.gd\n'
+               '\n'
+               'func run() -> void:\n\tpass\n')
+
+
+def _scenario(root, rel: str, body: str) -> None:
+    """Write a scenario into the temp repo and stage it — the gate scans
+    `git ls-files`, so an unstaged file is invisible to it."""
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding='utf-8')
+    subprocess.run(['git', 'add', rel], cwd=root, check=True)
+
+
+class TheHeaderIsOptIn(unittest.TestCase):
+    def test_stock_config_asks_nothing_of_a_headerless_scenario(self) -> None:
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, '[test_shape]\ncap = 50\n')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('NO-HEADER', out)
+        self.assertNotIn('header ledger', out)
+
+
+class TheHeaderRule(unittest.TestCase):
+    def test_an_unledgered_scenario_with_no_header_fails(self) -> None:
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, HEADER_ON)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'NO-HEADER  {SMALL}', out)
+        self.assertIn('## Boots because: tests/unit/<path> cannot', out)
+
+    def test_a_headed_scenario_passes(self) -> None:
+        with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd',
+                                                 'tests/unit/contract_test.gd']) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+        self.assertIn('every one off the header ledger says why it boots', out)
+
+    def test_the_ledger_exempts_an_existing_scenario(self) -> None:
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, HEADER_ON + f'header_ledger = ["{SMALL}", "{BIG}"]\n')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+        self.assertIn('header ledger: 2 scenario(s) yet to say why they boot', out)
+
+    def test_a_ledgered_scenario_that_grew_a_header_names_the_line_to_drop(self) -> None:
+        """The ratchet's other direction: the ledger only shrinks, and a file
+        that answered the question must leave it — otherwise the ledger is a
+        permission list that never empties."""
+        with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd',
+                                                 'tests/unit/contract_test.gd']) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON + f'header_ledger = ["{HEADED}"]\n')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'HEADED  {HEADED} — carries its header; drop it from '
+                      f'[test_shape] header_ledger', out)
+
+    def test_a_stale_ledger_entry_is_a_finding(self) -> None:
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, HEADER_ON + f'header_ledger = ["{SMALL}", "{BIG}", '
+                    f'"tests/integration/gone.gd"]\n')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn('STALE  tests/integration/gone.gd', out)
+
+    def test_a_covers_line_below_the_first_statement_is_prose(self) -> None:
+        """The header is the leading comment block. A declaration inside the
+        body is what the runner would never read, so the gate must not either
+        — or the two disagree on what a scenario covers."""
+        body = ('extends Node\n## Boots because: tests/unit/contract_test.gd '
+                'cannot.\nfunc run() -> void:\n\t## covers: systems/alpha\n\tpass\n')
+        with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd',
+                                                 'tests/unit/contract_test.gd']) as root:
+            _scenario(root, HEADED, body)
+            _config(root, HEADER_ON)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'HEADER  {HEADED} — no `## covers:` line', out)
+
+
+class TheHeaderRefusalMatrix(unittest.TestCase):
+    """Every claim the docstring makes about a covers entry — repo-relative,
+    no `..`, no scheme, no glob, no whitespace, EXISTS — gets the input that
+    attacks it. Each must be a finding, never a silent prefix of nothing."""
+
+    HOSTILE_COVERS = {
+        '/abs/systems/alpha': 'is absolute',
+        '../escape': 'carries a dot segment',
+        'systems/../alpha': 'carries a dot segment',
+        './systems/alpha': 'carries a dot segment',
+        'res://systems/alpha': 'carries a scheme',
+        'systems/*': 'carries a glob',
+        'systems/alph?': 'carries a glob',
+        'systems/[a]lpha': 'carries a glob',
+        'systems\\alpha': 'carries a backslash',
+        'systems/al pha': 'carries whitespace',
+        'systems/nowhere': 'is not in the tree',
+        'a' * 201: 'is longer than 200 characters',
+    }
+
+    def _run(self, covers_value: str) -> tuple[int, str]:
+        body = ('extends Node\n'
+                '## Boots because: tests/unit/contract_test.gd cannot.\n'
+                f'## covers: {covers_value}\n'
+                'func run() -> void:\n\tpass\n')
+        with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd',
+                                                 'tests/unit/contract_test.gd']) as root:
+            _scenario(root, HEADED, body)
+            _config(root, HEADER_ON)
+            return run_check(test_shape)
+
+    def test_every_hostile_covers_entry_is_refused(self) -> None:
+        for entry, reason in self.HOSTILE_COVERS.items():
+            with self.subTest(entry=entry):
+                code, out = self._run(f'systems/alpha, {entry}')
+                self.assertEqual(code, 1, out)
+                self.assertIn(reason, out)
+
+    def test_an_empty_entry_between_commas_is_refused(self) -> None:
+        code, out = self._run('systems/alpha, , tests/unit/contract_test.gd')
+        self.assertEqual(code, 1, out)
+        self.assertIn('covers `` is empty', out)
+
+    def test_a_covers_line_declaring_nothing_is_refused(self) -> None:
+        code, out = self._run('')
+        self.assertEqual(code, 1, out)
+        self.assertIn('is empty', out)
+
+    def test_a_boots_because_that_names_no_test_is_refused(self) -> None:
+        body = ('extends Node\n## Boots because: it just does.\n'
+                '## covers: systems/alpha\nfunc run() -> void:\n\tpass\n')
+        with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd']) as root:
+            _scenario(root, HEADED, body)
+            _config(root, HEADER_ON)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn('names no tests/ path', out)
+
+    def test_an_empty_boots_because_is_refused(self) -> None:
+        body = ('extends Node\n## Boots because:\n'
+                '## covers: systems/alpha\nfunc run() -> void:\n\tpass\n')
+        with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd']) as root:
+            _scenario(root, HEADED, body)
+            _config(root, HEADER_ON)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn('says nothing', out)
+
+
+class TheHeaderConfigIsRefusedRatherThanGuessed(unittest.TestCase):
+    def test_a_string_header_flag_is_refused(self) -> None:
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, '[test_shape]\nheader = "yes"\n')
+            with self.assertRaises(ConfigError):
+                run_check(test_shape)
+
+    def test_a_bare_string_header_ledger_is_refused_not_iterated(self) -> None:
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, HEADER_ON + f'header_ledger = "{SMALL}"\n')
             with self.assertRaises(ConfigError):
                 run_check(test_shape)
 
