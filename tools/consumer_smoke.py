@@ -476,7 +476,12 @@ def canonicalize_invents_no_index(root: Path, report: Report) -> None:
     under an inherited root carry one, 10 more at the same position carry none).
     But "restores nothing it cannot derive" is true of every scene in both trees
     TODAY, so it is asserted over all of them today — and a plausible-looking
-    widening of the restoration is what it exists to catch. Measured against the
+    widening of the restoration is what it exists to catch.
+
+    TWO gates, because a count of invented attributes cannot see a WRONG one: a
+    value that came back different from the authored one increments neither
+    `restored` nor `lost`, so `restored + lost == authored` is the identity "no
+    wrong value" and it is gated beside `invented == 0`. Measured against the
     rules proposed for that widening: keying restoration off "the parent is an
     instanced subtree" invents 38 attributes on trail and 87 on nullbound, and
     the narrowest form of it still invents 4.
@@ -493,6 +498,7 @@ def canonicalize_invents_no_index(root: Path, report: Report) -> None:
     authored = restored = invented = lost = 0
     differing: list[str] = []
     culprits: list[str] = []
+    wrong: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
         probes = {}
         for rel in files:
@@ -515,22 +521,44 @@ def canonicalize_invents_no_index(root: Path, report: Report) -> None:
                     authored += 1
                     restored += now == was
                     lost += now is None
+                    if now is not None and now != was and len(wrong) < 5:
+                        wrong.append(f'{rel} {header[:60]} authored '
+                                     f'index="{was}" -> index="{now}"')
                 elif now is not None:
                     invented += 1
                     if len(culprits) < 5:
                         culprits.append(f'{rel} {header[:60]} -> index="{now}"')
             if before != after:
                 differing.append(rel)
-    # The round-trip count is REPORTED, never gated: pinning it would be the
-    # known-fail list this package refused to write. It is here so it cannot go
-    # stale — the last census of it was wrong within a day of being taken.
+    # Two gates, and the second is the one a count alone hides. `restored +
+    # lost == authored` is the identity "no WRONG value": an authored index
+    # either came back as itself or came back not at all, and there is no third
+    # outcome that this row may print in green. It held on both consumers the
+    # day it was written (trail 5 + 12 = 17, nullbound 39 + 0 = 39) and it is
+    # what would notice the day a consumer grows a chained-inheritance scene —
+    # a base whose own root is instanced, whose file lists fewer children than
+    # the scene has, and whose ordinals are therefore too small. `invented`
+    # counts the same error on a node that had NO index to be wrong about.
+    #
+    # The round-trip COUNTS ride in the detail, reported and never pinned:
+    # pinning them would be the known-fail list this package refused to write,
+    # and the last census of them was wrong within a day of being taken.
+    misplaced = authored - restored - lost
+    faults = []
+    if invented:
+        faults.append(f'{invented} invented over {len(files)} scene(s): '
+                      + '; '.join(culprits))
+    if misplaced:
+        faults.append(f'{misplaced} of {authored} authored index= came back '
+                      f'WRONG (Godot reads index= as the child\'s position, so '
+                      f'a wrong one reorders the node on load): '
+                      + '; '.join(wrong))
     report.check(
-        name, 'canonicalize invents no index', invented == 0,
+        name, 'canonicalize invents no index', not faults,
         f'{len(files)} scene(s): {invented} invented, {restored}/{authored} '
         f'authored index= restored, {lost} not derivable '
         f'({len(differing)} scene(s) not index-identical)'
-        if invented == 0 else
-        f'{invented} invented over {len(files)} scene(s): ' + '; '.join(culprits))
+        if not faults else ' | '.join(faults))
 
 
 def defaults_elision(root: Path, report: Report) -> None:

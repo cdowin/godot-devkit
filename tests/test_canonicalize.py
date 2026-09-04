@@ -11,6 +11,7 @@ import contextlib
 import io
 import re
 import unittest
+from pathlib import Path
 
 from support import FIXTURES, temp_repo
 
@@ -289,6 +290,175 @@ class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
         self.assertIn('UNRESOLVED', out)
         self.assertIn('Ghost', out)
         self.assertIn('[node name="Ghost" parent="."]\n', text)
+
+
+# --- a base whose OWN root is instanced cannot be counted ----------------------
+# `_instance_host` reaching the root (above) made a whole class of override
+# resolvable — and made a second class RESOLVE WRONG. A `.tscn` holds only the
+# sections that file writes, so when the base's own root carries `instance=`,
+# its base's children are not in it: `child_index` counts the overrides the mid
+# scene declares and returns an ordinal that is too small. Godot reads `index=`
+# as the child's POSITION, so the verb wrote a value that REORDERS the node on
+# every load, printed `1 change(s), 0 unresolved` and exited 0. v0.23.0 refused
+# the same input (its walk stopped short of the root) — a fix that turned a
+# refusal into a wrong answer.
+#
+# `MID` overrides only `Inner`, so counting MID's own sections puts `Inner` at
+# ordinal 0 where the shell plainly places it at 1.
+MID = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonmid"]\n\n'
+       '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
+       ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
+       '[node name="Shell" instance=ExtResource("1_shell")]\n\n'
+       '[node name="Inner" parent="." index="1"]\nvisible = false\n')
+# Inherited from the INHERITED scene. `Inner` is still the shell's second child,
+# so the only correct answer is 1 — and the only correct answer available from
+# mid.tscn alone is "I cannot tell".
+CHAINED = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonchain"]\n\n'
+           '[ext_resource type="PackedScene" uid="uid://dcanonmid"'
+           ' path="res://scenes/mid.tscn" id="1_mid"]\n\n'
+           '[node name="Shell" instance=ExtResource("1_mid")]\n\n'
+           '[node name="Inner" parent="." index="1"]\nmodulate = Color(1, 0, 0, 1)\n')
+
+
+def over_chain(scene_text: str) -> tuple[int, str, str]:
+    """Canonicalize `scene_text` against a TWO-level chain: shell.tscn is a
+    plain scene, mid.tscn inherits it, and the subject inherits mid."""
+    with temp_repo('canon_repo') as root:
+        (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
+        (root / 'scenes/mid.tscn').write_text(MID, encoding='utf-8')
+        (root / 'scenes/subject.tscn').write_text(scene_text, encoding='utf-8')
+        code, out = canonicalize_in_repo('scenes/subject.tscn')
+        text = (root / 'scenes/subject.tscn').read_text(encoding='utf-8')
+    return code, out, text
+
+
+class AChainedBaseIsRefusedNotCounted(unittest.TestCase):
+    def test_the_ordinal_that_would_be_written_is_the_WRONG_one(self) -> None:
+        """The fixture's own claim, so no case below can pass on a chain that
+        was never chained: counting mid.tscn's sections gives 0, and the truth
+        the shell states is 1."""
+        with temp_repo('canon_repo') as root:
+            (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
+            (root / 'scenes/mid.tscn').write_text(MID, encoding='utf-8')
+            bases = scene_canonicalize.BaseScenes(root)
+            self.assertTrue(bases.root_is_instanced('res://scenes/mid.tscn'))
+            self.assertFalse(bases.root_is_instanced('res://scenes/shell.tscn'))
+            self.assertEqual(
+                bases.child_index('res://scenes/shell.tscn', [], 'Inner'), 1,
+                'the shell places Inner second — the fixture is wrong')
+            self.assertIsNone(
+                bases.child_index('res://scenes/mid.tscn', [], 'Inner'),
+                'mid.tscn lists only what it overrides, so nothing there is '
+                'countable — this is the value the verb used to write')
+
+    def test_an_override_under_a_chained_base_is_refused_not_guessed(self) -> None:
+        """The verb's hard rule: it cannot guarantee a correct result, so it
+        refuses, says why, writes nothing and exits non-zero."""
+        code, out, text = over_chain(strip_indexes(CHAINED))
+        self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS, out)
+        self.assertIn('UNRESOLVED', out)
+        self.assertNotIn('index=', text.split('\n')[4])
+        self.assertEqual(text, strip_indexes(CHAINED),
+                         'a refusal wrote to the file')
+
+    def test_the_refusal_names_the_chain_rather_than_the_missing_name(self) -> None:
+        """`Inner` IS in mid.tscn. A refusal saying "cannot count Inner in
+        mid.tscn" sends a reader to look for it, find it, and conclude the tool
+        is broken — so the refusal names the reason that is actually true."""
+        _code, out, _text = over_chain(strip_indexes(CHAINED))
+        self.assertIn('itself an inherited scene', out)
+        self.assertIn('res://scenes/mid.tscn', out)
+
+    def test_a_plain_base_one_level_down_still_resolves(self) -> None:
+        """The refusal is scoped to a base whose OWN root is instanced. An
+        ordinary inherited scene over a plain base is the case the same release
+        fixed, and it must stay fixed."""
+        code, out, text = over_shell(strip_indexes(INHERITED))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Inner" parent="." index="1"]', text)
+
+
+# --- the smoke row that would notice ------------------------------------------
+# `make smoke`'s `canonicalize invents no index` gated `invented == 0` only: a
+# value that came back DIFFERENT from the authored one increments neither
+# `restored` nor `lost`, so it was counted, printed in the detail of a green
+# row, and gated by nothing. `restored + lost == authored` is the identity "no
+# wrong value", and it is what would notice the day a consumer grows a scene
+# whose base is itself inherited.
+def smoke_harness():
+    """`tools/consumer_smoke.py` — a tool, not a package module, so the import
+    needs the path. Same spelling test_uid_codec.py uses."""
+    import sys                                                  # noqa: PLC0415
+    sys.path.insert(0, str(FIXTURES.parent.parent / 'tools'))
+    import consumer_smoke                                       # noqa: PLC0415
+    return consumer_smoke
+
+
+def canon_row(scenes: dict[str, str]) -> tuple[bool, str]:
+    """Run the smoke's canonicalize row over a repo holding EXACTLY `scenes`
+    -> (the row passed, its detail).
+
+    Its own repo rather than a fixture tree: the row scans every tracked
+    `.tscn`, so a fixture's other scenes would land in the same counts and the
+    assertions below would be about the fixture.
+    """
+    import subprocess                                           # noqa: PLC0415
+    import tempfile                                             # noqa: PLC0415
+    harness = smoke_harness()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / 'consumer'
+        root.mkdir()
+        (root / 'project.godot').write_text(
+            'config_version=5\n\n[application]\n\nconfig/name="Scratch"\n',
+            encoding='utf-8')
+        for rel, body in scenes.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(body, encoding='utf-8')
+        subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+        subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                       capture_output=True)
+        report = harness.Report()
+        harness.canonicalize_invents_no_index(root, report)
+    assert len(report.rows) == 1, report.rows
+    _consumer, what, detail = report.rows[0]
+    return what.startswith('ok'), detail
+
+
+class TheSmokeRowGatesAWrongValueNotOnlyAnInventedOne(unittest.TestCase):
+    def test_an_authored_index_that_comes_back_DIFFERENT_reds_the_row(self) -> None:
+        """Nothing was invented — a node that HAD an index still has one — and
+        it is not the one the file said. The old condition called that green
+        and printed the number in the detail."""
+        wrong = INHERITED.replace('[node name="Inner" parent="." index="1"]',
+                                  '[node name="Inner" parent="." index="7"]')
+        passed, detail = canon_row({'scenes/shell.tscn': SHELL_BASE,
+                                    'scenes/subject.tscn': wrong})
+        self.assertFalse(passed, detail)
+        self.assertIn('WRONG', detail)
+        self.assertIn('index="7"', detail)
+        self.assertIn('index="1"', detail)
+
+    def test_a_chained_scene_is_NOT_DERIVABLE_and_the_row_stays_green(self) -> None:
+        """Both halves together. The verb refuses the chain, so the authored
+        index comes back absent rather than wrong — `lost`, which the identity
+        accounts for, and the row is green with the refusal visible in its
+        own detail."""
+        passed, detail = canon_row({'scenes/shell.tscn': SHELL_BASE,
+                                    'scenes/mid.tscn': MID,
+                                    'scenes/subject.tscn': CHAINED})
+        self.assertTrue(passed, detail)
+        self.assertIn('0 invented', detail)
+        self.assertIn('1 not derivable', detail)
+
+    def test_the_identity_holds_on_a_corpus_with_nothing_wrong_in_it(self) -> None:
+        """A CONTROL: the new half of the condition must not red a tree the
+        verb handles correctly, or every consumer's smoke goes red on a rule
+        rather than on a defect."""
+        passed, detail = canon_row({'scenes/shell.tscn': SHELL_BASE,
+                                    'scenes/subject.tscn': INHERITED})
+        self.assertTrue(passed, detail)
+        self.assertIn('0 invented', detail)
+        self.assertIn('2/2 authored index= restored', detail)
 
 
 # --- a node the scene CREATES gains no index, wherever its PARENT came from ---

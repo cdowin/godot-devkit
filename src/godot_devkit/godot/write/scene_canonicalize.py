@@ -20,7 +20,11 @@ it leaves out are load-bearing, and all three recur on every single pass:
    unrelated unit test. The instancing ancestor may be the ROOT — an inherited
    scene's root is `[node name="X" instance=ExtResource(base)]`, its children
    are the base's children, and an override there is an override like any
-   other. What is NOT restored is an `index=` on a node this scene CREATES
+   other — unless the base is ITSELF an inherited scene, whose file lists only
+   the nodes it writes rather than its children; an ordinal counted there is
+   too small, and a too-small `index=` is read by Godot as a POSITION and
+   REORDERS the node on load, so that case is refused rather than guessed.
+   What is NOT restored is an `index=` on a node this scene CREATES
    (`type=` / `instance=`). Its ordinal often IS derivable — a created node
    appended under an instanced parent lands after that base's own children —
    but whether the engine WRITES the attribute there is not, and the corpus
@@ -92,10 +96,33 @@ class BaseScenes:
                 if res_path.startswith(RES_PREFIX) and file.is_file() else ())
         return self._parsed[res_path]
 
+    def root_is_instanced(self, res_path: str) -> bool:
+        """True when the base is ITSELF an inherited scene.
+
+        A `.tscn` holds only the sections that file WRITES. When its root
+        carries `instance=`, its own base's children are not among them — so
+        the file is not a listing of that scene's children, it is a listing of
+        the ones it overrides or adds.
+        """
+        root = next((s for s in self._sections(res_path)
+                     if s.kind == 'node' and s.attrs.get('parent') is None),
+                    None)
+        return root is not None and INSTANCE_ATTR in root.attrs
+
     def child_index(self, res_path: str, parent: list[str], name: str) -> int | None:
-        """The ordinal of `name` among the children of `parent` in `res_path`."""
+        """The ordinal of `name` among the children of `parent` in `res_path`.
+
+        `None` when the count would be a GUESS rather than a reading. A base
+        whose own root is instanced is the case that matters: counting the
+        `[node]` sections it writes yields an ordinal that is too small,
+        because the ones its base contributes are not in the file. Godot reads
+        `index=` as the child's POSITION, so a too-small ordinal does not
+        merely fail to help — it reorders the node on every load, which is
+        worse than the missing attribute it replaced. A verb that cannot
+        guarantee a correct result refuses and says why.
+        """
         sections = self._sections(res_path)
-        if not sections:
+        if not sections or self.root_is_instanced(res_path):
             return None
         wanted = ['.'] if not parent else parent
         siblings = [s for s in sections if s.kind == 'node'
@@ -202,8 +229,15 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
         base = ext[match.group(1)].attrs.get('path') if match and match.group(1) in ext else None
         ordinal = bases.child_index(base, list(inner[:-1]), inner[-1]) if base else None
         if ordinal is None:
-            fixed.append(f'  UNRESOLVED  cannot count {node_own_path(node)} in {base or "?"} '
-                         f'— index= left off (this node WILL reload as a new sibling)')
+            why = (f'{base} is itself an inherited scene, so its file lists '
+                   f'only the nodes IT writes and an ordinal counted there is '
+                   f'too SMALL — which Godot reads as a POSITION and reorders '
+                   f'the node on load'
+                   if base and bases.root_is_instanced(base)
+                   else f'cannot count {node_own_path(node)} in {base or "?"}')
+            fixed.append(f'  UNRESOLVED  {why} — index= left off for '
+                         f'{node_own_path(node)} (this node WILL reload as a '
+                         f'new sibling)')
             continue
         line = doc.lines[node.header_line]
         doc.lines[node.header_line] = line[:-1] + f' index="{ordinal}"]'
