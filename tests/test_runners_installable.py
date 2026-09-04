@@ -546,11 +546,16 @@ SLICE_ENV = {'PATH': '/usr/bin:/bin', 'GDK_JOBS': '2',
              'GDK_SCENARIO_RUNNER': 'stub_scenario.sh'}
 
 
-def _slice_fixture(tmp_path: Path) -> Path:
+def _slice_fixture(tmp_path: Path, git_root: Path | None = None) -> Path:
     """A git repo at the stock layout: a declared scenario in alpha/, an
     undeclared one in beta/, a directory holding only a capture tool, the
     smoke scenario, and the system the declared one covers — committed, so a
-    diff against HEAD is empty until the test touches something."""
+    diff against HEAD is empty until the test touches something.
+
+    `git_root` puts the git toplevel ABOVE the project (a monorepo's game/);
+    stock is the project root itself."""
+    git_root = git_root or tmp_path
+    tmp_path.mkdir(parents=True, exist_ok=True)
     runner = _fanout_fixture(tmp_path, 0o755)
     # The fan-out files each job's output under its own log, so the stand-in
     # records what it was asked to run where the test can read it.
@@ -571,15 +576,15 @@ def _slice_fixture(tmp_path: Path) -> Path:
     (tmp_path / 'tests' / 'support').mkdir()
     (tmp_path / 'tests' / 'support' / 'fixture.gd').write_text('extends Node\n', encoding='utf-8')
     git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
-    subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)
-    subprocess.run(['git', 'add', '-A'], cwd=tmp_path, check=True)
-    subprocess.run([*git, 'commit', '-q', '-m', 'fixture'], cwd=tmp_path, check=True)
+    subprocess.run(['git', 'init', '-q'], cwd=git_root, check=True)
+    subprocess.run(['git', 'add', '-A'], cwd=git_root, check=True)
+    subprocess.run([*git, 'commit', '-q', '-m', 'fixture'], cwd=git_root, check=True)
     return runner
 
 
-def _slice(runner: Path, *argv: str) -> subprocess.CompletedProcess:
+def _slice(runner: Path, *argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(['bash', str(runner), *argv], cwd=runner.parents[3],
-                          text=True, capture_output=True, env=SLICE_ENV)
+                          text=True, capture_output=True, env={**SLICE_ENV, **(env or {})})
 
 
 def _ran(done: subprocess.CompletedProcess) -> set[str]:
@@ -728,3 +733,110 @@ def test_a_hostile_covers_entry_selects_nothing(tmp_path):
     assert done.returncode == 0, done.stdout + done.stderr
     assert _ran(done) == {'smoke'}, done.stdout
     assert '    alpha_flow' in done.stdout, 'a scenario whose every entry is refused is undeclared'
+
+
+# --- the touched list is REPO_ROOT-relative and literal ----------------------
+# `git diff --name-only` names a path relative to the git TOPLEVEL and C-quotes
+# a non-ASCII one under core.quotePath (git's default), while a `## covers:`
+# entry is REPO_ROOT-relative and literal. A Godot project below the toplevel
+# (game/ in a monorepo) or a `café.gd` never matched anything, and `--diff`
+# under-selected to smoke without a word.
+def test_a_project_below_the_git_toplevel_slices_by_root_relative_paths(tmp_path):
+    """game/ in a monorepo: git names the change `game/systems/alpha/thing.gd`;
+    the scenario covers `systems/alpha`. A change OUTSIDE the project is not a
+    touched path of the project — nothing repo-relative can name it."""
+    project = tmp_path / 'game'
+    runner = _slice_fixture(project, git_root=tmp_path)
+    (project / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node2D\n', encoding='utf-8')
+    (tmp_path / 'README.md').write_text('# outside the project\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'smoke'}, done.stdout
+    assert '1 touched path(s)' in done.stdout, done.stdout
+
+
+def test_the_tiers_ground_is_ground_below_the_git_toplevel_too(tmp_path):
+    """The substrate pattern is repo-relative as well; a toplevel-relative
+    `game/tests/support/…` matched none of it and ran the wrong slice."""
+    project = tmp_path / 'game'
+    runner = _slice_fixture(project, git_root=tmp_path)
+    (project / 'tests' / 'support' / 'fixture.gd').write_text('extends Node2D\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
+    assert "the tier's own ground" in done.stdout, done.stdout
+
+
+def test_a_non_ascii_path_is_compared_literally_not_c_quoted(tmp_path):
+    """Under core.quotePath=true (git's default) `git diff --name-only` prints
+    `"systems/alpha/caf\\303\\251.gd"` — quotes and octal — which is a prefix
+    of nothing. The runner must ask git for the bytes."""
+    runner = _slice_fixture(tmp_path)
+    subprocess.run(['git', 'config', 'core.quotePath', 'true'], cwd=tmp_path, check=True)
+    (tmp_path / 'systems' / 'alpha' / 'café.gd').write_text('extends Node\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'smoke'}, done.stdout
+    assert '1 touched path(s)' in done.stdout, done.stdout
+
+
+def test_a_doubled_slash_entry_is_undeclared_not_a_silent_never_match(tmp_path):
+    """`## covers: systems/alpha//` — the gate normalised it away and passed;
+    the runner dropped ONE slash and compared `systems/alpha/` as a prefix,
+    which `systems/alpha/thing.gd` is not. The scenario was declared and
+    never selected, and nothing said so. One grammar in both now: an empty
+    segment is refused, so here it reads as UNDECLARED and is reported."""
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'tests' / 'integration' / 'alpha' / 'alpha_flow.gd').write_text(
+        COVERS_HEADER.replace('## covers: systems/alpha', '## covers: systems/alpha//'),
+        encoding='utf-8')
+    git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+    subprocess.run([*git, 'commit', '-q', '-am', 'doubled'], cwd=tmp_path, check=True)
+    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node2D\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'smoke'}, done.stdout
+    assert 'UNDECLARED: 3 scenario(s)' in done.stdout, done.stdout
+    assert '    alpha_flow' in done.stdout, 'a doubled-slash entry read as a declaration that never matches'
+
+
+# --- --list: the roster, owned here and read by the gate ---------------------
+# `check test-shape` scanned `git ls-files` minus infra basenames while this
+# runner discovers with find minus support/, the capture tools and its
+# keep-list — two rosters, and the header rule was asked of files --diff can
+# never slice to. The runner owns discovery (its config is in this file and in
+# GDK_* env, where no TOML reader can see it), so it prints the roster and the
+# gate asks.
+ROSTER = {'tests/integration/alpha/alpha_flow.gd', 'tests/integration/beta/beta_flow.gd',
+          'tests/integration/smoke.gd'}
+
+
+def test_list_prints_the_roster_the_sweep_would_boot_and_boots_nothing(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert set(done.stdout.split('\n')) - {''} == ROSTER, done.stdout
+    assert done.stdout.split('\n')[:-1] == sorted(ROSTER), 'the roster is sorted'
+    assert _ran(done) == set(), 'listing the roster booted something'
+
+
+def test_list_honours_the_runners_own_keep_list(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list', env={'GDK_CAPTURE_GATE_RE': '^(eyes_capture)$'})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert set(done.stdout.split('\n')) - {''} == ROSTER | {'tests/integration/tools_only/eyes_capture.gd'}
+
+
+def test_list_takes_no_argument(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list', 'extra')
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert _ran(done) == set()
+
+
+def test_an_empty_roster_is_a_fail_naming_the_directory(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list', env={'GDK_SCENARIO_SOURCE_DIR': 'tests/integration/tools_only'})
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'EMPTY' in done.stderr and 'tests/integration/tools_only' in done.stderr, done.stderr
+    assert done.stdout == ''

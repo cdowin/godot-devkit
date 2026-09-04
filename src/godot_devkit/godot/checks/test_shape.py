@@ -36,9 +36,24 @@ naming the ledger line to drop, so the ledger cannot go stale upward either.
   CHECK 3  every scenario off the header ledger carries both lines, well
            formed: a `Boots because:` naming a `tests/` path, and `covers:`
            entries that are repo-relative prefixes (no absolute, no `..`, no
-           scheme, no glob, no whitespace) each of which EXISTS in the tree.
+           scheme, no glob, no whitespace, no empty segment) each of which
+           EXISTS in the tree. The grammar is the runner's, entry for entry.
   CHECK 4  every scenario on the header ledger still exists, and carries no
            header — one that does has ratcheted out and the ledger line goes.
+
+CHECK 3 and 4 are asked of THE RUNNER'S ROSTER — what `integration.sh --list`
+prints, which is what `--all` boots and the only set `--diff` can slice to.
+The runner owns discovery: its rule (support/ is fixtures, `_capture` is a
+tool, the keep-list, the infra basenames) is configured in the runner file and
+in GDK_* env, which a consumer edits and no TOML reader can see, so a roster
+re-derived here was a second answer — measured on one consumer, 160 against
+137, and the header rule was being asked of 22 capture tools and a support
+stub. `[test_shape] runner` names the file (stock: where install-runners
+writes it). `header = true` with no runner there is exit 2; a runner that
+boots nothing is a FAIL, never a PASS over nothing. CHECK 1 and 2 keep the
+tracked census minus infra: the cap prices what lives in the tier, and a
+capture tool that grew to 900 lines is tier weight whether or not the sweep
+boots it.
 
 HONEST SCOPE: this counts lines and reads two header lines. It cannot tell a
 900-line scenario that genuinely needs a boot from one that should have been
@@ -63,14 +78,16 @@ devkit.toml:
     ledger = { "tests/integration/approach/approach_contracts.gd" = 956 }
     header = true
     header_ledger = ["tests/integration/approach/approach_contracts.gd"]
+    runner = "tools/dev/runners/integration.sh"
 """
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
-from godot_devkit.core.config import (config_section, flag, number,
-                                      number_table, str_tuple, text)
+from godot_devkit.core.config import (ConfigError, config_section, flag,
+                                      number, number_table, str_tuple, text)
 from godot_devkit.core.project import git_lines, repo_root
 
 SECTION = 'test_shape'
@@ -89,6 +106,12 @@ DEFAULT_INFRA: tuple[str, ...] = ()
 # it already has — a gate that reddened every existing scenario on the day of
 # a pin bump would be switched off, not adopted.
 DEFAULT_HEADER = False
+# Where install-runners writes the integration runner. The header rule is
+# asked of the roster it prints, so a header = true repo carries one.
+DEFAULT_RUNNER = 'tools/dev/runners/integration.sh'
+ROSTER_FLAG = '--list'
+# How much of the runner's stderr a refusal quotes.
+ROSTER_STDERR_LINES = 3
 PERCENT = 100
 
 BOOTS_KEY = 'Boots because:'
@@ -105,6 +128,60 @@ TESTS_PATH = re.compile(r'\btests/[A-Za-z0-9_./-]+')
 COVERS_ENTRY_MAX = 200
 
 
+class RosterUnavailable(Exception):
+    """The runner could not say what it boots. `code` is the gate's exit —
+    1 when it answered "nothing" (a finding), 2 when it could not answer."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def runner_path_defect(rel: str) -> str | None:
+    """Why `rel` is not a repo-relative file path, or None when it is."""
+    if not rel:
+        return 'is empty'
+    if rel.startswith('/'):
+        return 'is absolute — the runner is a repo-relative path'
+    if '\\' in rel:
+        return 'carries a backslash'
+    if any(seg in ('', '.', '..') for seg in rel.split('/')):
+        return 'carries a dot or empty segment'
+    return None
+
+
+def runner_roster(root: Path, runner: str) -> list[str]:
+    """The roster the runner would boot, repo-relative, sorted, deduplicated.
+
+    Runs `bash <runner> --list` — the runner boots nothing for it — under
+    `bash` by name, because a checkout can carry the file without its mode
+    bits. Raises RosterUnavailable rather than returning an empty roster:
+    a header rule asked of nothing must say so (rule 4).
+    """
+    path = root / runner
+    if not path.is_file():
+        raise RosterUnavailable(
+            2, f'[{SECTION}] header = true asks the header rule of the roster '
+               f'{runner} boots, and there is no such file — `install-runners` '
+               f'writes it; a runner elsewhere is `[{SECTION}] runner`')
+    try:
+        done = subprocess.run(['bash', str(path), ROSTER_FLAG], cwd=root,
+                              capture_output=True, text=True, encoding='utf-8',
+                              errors='replace')
+    except OSError as err:
+        raise RosterUnavailable(2, f'could not run {runner}: {err}') from err
+    said = ' / '.join(done.stderr.strip().splitlines()[-ROSTER_STDERR_LINES:])
+    if done.returncode == 1:
+        raise RosterUnavailable(1, f'{runner} boots NOTHING — {said}')
+    if done.returncode != 0:
+        raise RosterUnavailable(
+            2, f'{runner} {ROSTER_FLAG} exited {done.returncode} ({said}) — a '
+               f'runner installed before {ROSTER_FLAG} existed answers this; '
+               f're-install the runners with `install-runners --force`')
+    return sorted({str(Path(line.strip())) for line in done.stdout.splitlines()
+                   if line.strip()})
+
+
 def header_block(text_body: str) -> list[str]:
     """The leading run of lines a header may consist of."""
     lines: list[str] = []
@@ -119,8 +196,10 @@ def read_header(text_body: str) -> tuple[str | None, list[str] | None]:
     """(boots, covers) — each None when its key is absent from the header.
 
     Several `## covers:` lines union; the first `## Boots because:` wins.
-    Entries are comma-split and trimmed; a trailing `/` is dropped so a
-    directory spelled either way is the same prefix.
+    Entries are comma-split and trimmed; ONE trailing `/` is dropped so a
+    directory spelled either way is the same prefix — exactly one, the same
+    as the runner, so a doubled slash reaches the grammar as the empty
+    segment it is rather than being normalised into a directory that exists.
     """
     boots: str | None = None
     covers: list[str] | None = None
@@ -133,9 +212,13 @@ def read_header(text_body: str) -> tuple[str | None, list[str] | None]:
             if boots is None:
                 boots = value
         else:
-            covers = (covers or []) + [
-                part.strip().rstrip('/') for part in value.split(',')]
+            covers = (covers or []) + [_one_trailing_slash_dropped(part.strip())
+                                       for part in value.split(',')]
     return boots, covers
+
+
+def _one_trailing_slash_dropped(entry: str) -> str:
+    return entry[:-1] if entry.endswith('/') else entry
 
 
 def covers_entry_defect(entry: str) -> str | None:
@@ -161,6 +244,12 @@ def covers_entry_defect(entry: str) -> str | None:
         return 'carries whitespace'
     if any(seg in ('.', '..') for seg in entry.split('/')):
         return 'carries a dot segment'
+    # After the one trailing slash the reader drops, a slash with nothing
+    # after it — `a//b`, `a//`, `a/` — is an empty segment. Path() would
+    # collapse it to a directory that exists; the runner compares strings and
+    # would never match it. Refused, so the two cannot disagree.
+    if '' in entry.split('/')[1:]:
+        return 'carries an empty segment (a doubled slash)'
     return None
 
 
@@ -221,6 +310,10 @@ def run() -> int:
     ledger = number_table(sect, SECTION, 'ledger', {})
     header = flag(sect, SECTION, 'header', DEFAULT_HEADER)
     header_ledger = set(str_tuple(sect, SECTION, 'header_ledger', ()))
+    runner = text(sect, SECTION, 'runner', DEFAULT_RUNNER)
+    why = runner_path_defect(runner)
+    if why:
+        raise ConfigError(f'[{SECTION}] runner {why}: {runner!r}')
     root = repo_root()
 
     tracked = [rel for rel in git_lines('ls-files', '--', scenario_root)
@@ -247,9 +340,20 @@ def run() -> int:
                             f'on the [{SECTION}] ledger)')
 
     header_findings: list[str] = []
+    roster: list[str] = []
     if header:
-        for rel in sorted(sizes):
-            body = (root / rel).read_text(encoding='utf-8', errors='replace')
+        try:
+            roster = runner_roster(root, runner)
+        except RosterUnavailable as err:
+            print(f'{TAG} {"FAIL" if err.code == 1 else "ERROR"} — {err}')
+            return err.code
+        for rel in roster:
+            try:
+                body = (root / rel).read_text(encoding='utf-8', errors='replace')
+            except OSError:
+                header_findings.append(f'  UNREADABLE  {rel} — on the roster '
+                                       f'{runner} prints, not readable on disk')
+                continue
             if rel in header_ledger:
                 if has_any_header(body):
                     # Ratcheted out: the file answered the question. Validate
@@ -269,10 +373,11 @@ def run() -> int:
             else:
                 header_findings.extend(f'  HEADER  {rel} — {why}'
                                        for why in defects)
-        for rel in sorted(header_ledger - set(sizes)):
+        for rel in sorted(header_ledger - set(roster)):
             header_findings.append(
                 f'  STALE  {rel} — on [{SECTION}] header_ledger but not a '
-                f'scanned scenario; drop the line')
+                f'scenario the runner boots (a capture tool, a support stub, '
+                f'infra, or gone); drop the line')
 
     unit_lines = sum(_measure(root, [rel for rel
                                      in git_lines('ls-files', '--', unit_root)
@@ -292,6 +397,9 @@ def run() -> int:
     if header:
         print(f'  header ledger: {len(header_ledger)} scenario(s) yet to say '
               f'why they boot — this number should only shrink')
+        print(f'  roster: {len(roster)} scenario(s) the runner would boot '
+              f'({runner} {ROSTER_FLAG}) — the header rule is asked of exactly '
+              f'those')
 
     if findings or header_findings:
         for finding in findings + header_findings:
@@ -316,8 +424,8 @@ def run() -> int:
             print(f'      ## {COVERS_KEY} systems/<x>, resources/<y>.gd')
         return 1
 
-    headed = (f', every one off the header ledger says why it boots'
-              if header else '')
+    headed = (f', every one off the header ledger says why it boots '
+              f'({len(roster)} the runner would boot)' if header else '')
     print(f'{TAG} PASS — {len(scanned)} scenario(s) under {scenario_root}/, '
           f'none over the {cap}-line cap or its ledger ceiling{headed}')
     return 0

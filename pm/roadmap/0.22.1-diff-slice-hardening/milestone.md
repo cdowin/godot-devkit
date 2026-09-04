@@ -1,9 +1,9 @@
 ---
 id: "0.22.1"
 name: diff-slice-hardening
-status: ready
+status: building
 depends_on: []
-branch:
+branch: feat/0.22.1-diff-slice-hardening
 ---
 
 # 0.22.1 — diff-slice-hardening

@@ -2,7 +2,7 @@
 id: 0.22.1/bugs/covers-entry-double-slash-passes-the-gate-and-never-slices
 milestone: "0.22.1"
 name: check test-shape normalizes a covers entry with rstrip('/') while integration.sh strips ONE trailing slash
-status: open
+status: fixed
 caught_in: "0.22.1"
 fix_milestone:
 ---
@@ -20,4 +20,8 @@ MINOR — check test-shape normalizes a covers entry with rstrip('/') while inte
 
 ## Root cause
 
+Two normalisations of one declaration. The gate's `read_header` did `rstrip('/')` and `header_defects` tested existence through `Path(root / entry)`, which collapses `//` — so `systems/alpha//` and `systems//alpha` were both a directory that exists. The runner's `scenario_covers` drops ONE slash (`${entry%/}`) and `covered()` compares strings, so the same entry was `systems/alpha/` or `systems//alpha`, a prefix of no path git names. Declared, never selected, never reported.
+
 ## Fix
+
+fixed: c5564ee — one grammar, entry for entry: exactly one trailing slash is spelling (dropped by the reader on both sides, `_one_trailing_slash_dropped` / `${entry%/}`), and a slash with nothing after it is an empty segment refused as `carries an empty segment (a doubled slash)` by both `covers_entry_defect`s. Refuse rather than normalise-all: the gate's job is to make the declaration say what the runner reads, and a normalisation the runner does not share is this bug again. In the runner a scenario whose only entry is refused now reads as UNDECLARED and is reported. Red first: 2 matrix rows, 4 corpus MISSes (87 → 91), 1 e2e case.

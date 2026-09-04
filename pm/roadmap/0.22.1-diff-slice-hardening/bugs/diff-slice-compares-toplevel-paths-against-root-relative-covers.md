@@ -2,7 +2,7 @@
 id: 0.22.1/bugs/diff-slice-compares-toplevel-paths-against-root-relative-covers
 milestone: "0.22.1"
 name: integration.sh::touched_paths lists git-toplevel-relative, C-quoted paths while covers entries are REPO_ROOT-relative
-status: open
+status: fixed
 caught_in: "0.22.1"
 fix_milestone:
 ---
@@ -20,4 +20,8 @@ MAJOR (latent) — integration.sh::touched_paths lists git-toplevel-relative, C-
 
 ## Root cause
 
+`touched_paths` ran `git diff --name-only <ref>` and `git ls-files --others` bare: the diff names paths relative to the git TOPLEVEL, and both C-quote a non-ASCII path under `core.quotePath` (git's default) — while every `## covers:` entry, `GDK_SCENARIO_SUBSTRATE_RE` and the discovered scenario file paths are REPO_ROOT-relative and literal. The comparison was between two coordinate systems and two encodings; it only agreed when the project sat at the toplevel and every path was ASCII, which both consumers happen to satisfy.
+
 ## Fix
+
+fixed: 3d6cc87 — `git -c core.quotePath=false diff --name-only --relative` from the project root, and the same for the untracked list; a change outside the project is dropped (nothing repo-relative can name it), and the tier's ground is recognised below the toplevel too. Watched red first: corpus case on a monorepo git fixture with `game/` + `café.gd` (85 → 87), three e2e cases (monorepo select, monorepo substrate, non-ASCII) each `{smoke}` at HEAD.
