@@ -1,10 +1,10 @@
 ---
-id: 0.22.1/bugs/diff-slice-compares-toplevel-paths-against-root-relative-covers
-milestone: "0.22.1"
+id: 0.23.0/bugs/diff-slice-compares-toplevel-paths-against-root-relative-covers
+milestone: "0.23.0"
 name: integration.sh::touched_paths lists git-toplevel-relative, C-quoted paths while covers entries are REPO_ROOT-relative
 status: fixed
 caught_in: "0.22.1"
-fix_milestone:
+fix_milestone: "0.23.0"
 ---
 
 # diff-slice-compares-toplevel-paths-against-root-relative-covers

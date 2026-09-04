@@ -1,10 +1,10 @@
 ---
-id: 0.22.1/bugs/covers-entry-double-slash-passes-the-gate-and-never-slices
-milestone: "0.22.1"
+id: 0.23.0/bugs/covers-entry-double-slash-passes-the-gate-and-never-slices
+milestone: "0.23.0"
 name: check test-shape normalizes a covers entry with rstrip('/') while integration.sh strips ONE trailing slash
 status: fixed
 caught_in: "0.22.1"
-fix_milestone:
+fix_milestone: "0.23.0"
 ---
 
 # covers-entry-double-slash-passes-the-gate-and-never-slices

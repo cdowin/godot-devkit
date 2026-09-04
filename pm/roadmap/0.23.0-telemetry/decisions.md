@@ -172,3 +172,26 @@ and `ledger`, already done.
 **Rejected:** closing the feature with a record that says "the consumer will do it" (a `done` that
 is not); keeping the milestone open until trail adopts.
 **Costs:** `ledger-report`'s `consumed_by:` loses its one entry.
+
+## D11 — 2026-09-04 — 0.22.1 diff-slice-hardening folds into 0.23.0: its three fixed bugs move here, and no v0.22.1 ships
+
+**Decision:** the `0.22.1-diff-slice-hardening` milestone directory is gone; its three bugs —
+`diff-slice-compares-toplevel-paths-against-root-relative-covers` (3d6cc87),
+`covers-entry-double-slash-passes-the-gate-and-never-slices` (c5564ee) and
+`header-rule-census-differs-from-the-runner-roster` (c0dc460) — live at `0.23.0/bugs/<slug>`, `fixed`,
+`caught_in: "0.22.1"` kept and `fix_milestone: "0.23.0"` stamped. Its `milestone.md` (`building`, branch
+`feat/0.22.1-diff-slice-hardening`, no ship criterion written, no decisions log) is not carried: it
+recorded nothing the three bug files do not. The CHANGELOG bullets that were v0.22.1's `## Unreleased`
+are v0.23.0 bullets, and a fresh empty `## Unreleased` sits above.
+**Because:** `origin/main` opened 0.22.1 on 2026-09-03 for the v0.22.0 release review's three
+runner/gate findings while this branch was building 0.23.0 (D9); the fixes merged to main as PR #3
+before any v0.22.1 was tagged, and this branch merges main. Two open milestones for one minor is the D9
+situation again — a released version is the one fact, the fixes ship in v0.23.0, so that milestone owns
+them. The roster fix (c0dc460) was itself amended here (the v0.22.1 review's MAJOR 2: the roster
+depended on the caller's environment), one more reason the bug's record belongs beside its fix.
+**Rejected:** tagging v0.22.1 from main first (a release cut from a tree whose review found a MAJOR,
+and a patch tag v0.23.0 would supersede the same day); leaving the directory at `building` beside a
+`done` 0.23.0 (a `branch:` stamp naming a branch that never merges); rewriting `caught_in:` (provenance
+is a fact — the v0.22.0 review caught them, under the 0.22.1 id).
+**Costs:** the three bug ids change (`0.22.1/bugs/…` → `0.23.0/bugs/…`); main's pm commits (`b38ae33`,
+`a1b295b`, `aa6adee`, `e28904e`) name the old ids — git is the archive.

@@ -41,3 +41,4 @@
 {"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"review","to":"done"}
 {"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/yield-rework-escapes-overhead","from":"review","to":"done"}
 {"ts":"2026-09-04T00:16:11Z","kind":"status","grain":"0.23.0","from":"building","to":"done"}
+{"ts":"2026-09-04T00:58:00Z","kind":"decision","grain":"0.23.0","entry":"D11","title":"0.22.1 diff-slice-hardening folds into 0.23.0: its three fixed bugs move here, and no v0.22.1 ships"}
