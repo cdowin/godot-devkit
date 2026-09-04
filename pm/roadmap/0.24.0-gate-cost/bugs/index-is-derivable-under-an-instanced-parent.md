@@ -2,7 +2,7 @@
 id: 0.24.0/bugs/index-is-derivable-under-an-instanced-parent
 milestone: "0.24.0"
 name: "a created node whose PARENT is an instanced subtree takes a derivable `index=`, and canonicalize drops it"
-status: open
+status: closed
 caught_in: "0.24.0"
 fix_milestone:
 caused_by:
@@ -114,3 +114,32 @@ save. Revert afterwards; nothing needs committing.
 `index=`, none of them a defect this package can fix. If trail dropped those ten attributes the row
 would widen unchanged on both consumers; if the engine answer says the attribute belongs there, the
 row widens once the tool writes it. Either way it is one decision, not three.
+
+## Disposition for 0.24.0 — PARKED, deliberately, and here is the posture
+
+**Parked, not fixed.** The investigation is complete; the restoration was refused on measurement, and
+what shipped instead is a guard in the direction that matters.
+
+**Why this is a defensible release posture:**
+
+- **The tool is correct today by the only evidence available.** nullbound is the engine-written half
+  of the reachable corpus — **1065 created nodes, zero carrying an `index=`** — and canonicalize
+  invents zero across both consumers.
+- **The direction is now gated, not merely believed.** `make smoke` carries
+  `canonicalize invents no index` over all 310 tracked scenes on both consumers, mutation-proven to
+  redden at 500 inventions under the filed rule and at 4 under the narrowest one, naming each culprit.
+  A regression toward invention is caught by a gate rather than by someone re-deriving this census.
+- **The refused change was the risky one.** Implementing the rule as filed took nullbound from 0
+  failing scenes to 26 and invented 87 attributes. Shipping nothing is strictly safer than shipping
+  that, and the cost of waiting is one narrow smoke row staying pinned to one scene per consumer.
+- **The open question cannot be answered by this package.** It never boots Godot, and no reachable
+  corpus contains an engine-written inherited scene with children — all 21 are hand-authored. Waiting
+  on an experiment is honest; guessing to close a bug before a release is not.
+
+**What unparks it:** the editor experiment above, on
+`trail/scenes/moments/force_resolution.tscn`. Its four outcomes are already mapped to four different
+answers, so whoever runs it does not need to re-read this bug to know what it means.
+
+**What must NOT happen in the meantime:** do not "fix" `BaseScenes.child_index` to agree with a
+file, or a file to agree with the counter. A tool that rewrites a number it disagrees with is the
+invention failure this whole line of bugs is about.
