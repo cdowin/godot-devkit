@@ -80,6 +80,7 @@ if _TARGET_SRC:
         del sys.modules[_name]
 
 from godot_devkit import cli  # noqa: E402
+from godot_devkit.repo.pm.ledger import LEDGER_FILE_NAME  # noqa: E402
 
 pytestmark = pytest.mark.fuzz
 
@@ -364,6 +365,13 @@ def _judge_pm(verb: str, argv: tuple[str, ...], ids: tuple[str, ...],
             resolved = (outer / rel.rstrip('/')).resolve()
             if not resolved.is_relative_to(roadmap):
                 return f'ESCAPED pm/roadmap/: {rel} on {where}'
+            if resolved.name == LEDGER_FILE_NAME:
+                # Every WRITING verb appends a row (D6/D8), so the question
+                # for the ledger is not which verb wrote it but WHERE: it is
+                # legal in a milestone directory and nowhere else in the tree.
+                if resolved.parent.parent != roadmap:
+                    return f'LEDGER OUTSIDE A MILESTONE DIR: {rel} on {where}'
+                continue
             if not _KIND_OK[verb](Path(rel)):
                 return f'WRONG GRAIN KIND: {rel} on {where}'
         if delta:

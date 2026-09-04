@@ -7,13 +7,14 @@
 # this file, and this file is the proof it can.
 
 [checks]
-# The roster `check all` runs HERE. Five of the eight gates read .tscn/.tres or
-# shell scripts, and this package holds neither outside its FIXTURES — so on the
-# default roster five gates report a 0-file census and rule 4 correctly reddens
-# every one. That is the roster being wrong for the repo, not a reason to soften
-# a gate: `check uid|tres|props|shell` still run here on demand and still say
-# exactly what they scanned. The repo-family two are the ones that apply.
-all = ["doc", "pm"]
+# The roster `check all` runs HERE. Four of the eight gates read .tscn/.tres,
+# and this package holds none outside its FIXTURES — so on the default roster
+# those four report a 0-file census and rule 4 correctly reddens every one.
+# That is the roster being wrong for the repo, not a reason to soften a gate:
+# `check uid|tres|props` still run here on demand and still say exactly what
+# they scanned. The repo-family two apply, and `shell` joined them when the
+# repo started self-hosting its own hook corpus under tools/ (0.23.0).
+all = ["doc", "pm", "shell"]
 
 # The deliberately-drifted Godot corpus under tests/fixtures/ is the INPUT to
 # this package's tests, not content this repo maintains: a stale uid and a

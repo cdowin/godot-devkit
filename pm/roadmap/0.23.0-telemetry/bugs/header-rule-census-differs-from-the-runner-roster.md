@@ -1,10 +1,10 @@
 ---
-id: 0.22.1/bugs/header-rule-census-differs-from-the-runner-roster
-milestone: "0.22.1"
+id: 0.23.0/bugs/header-rule-census-differs-from-the-runner-roster
+milestone: "0.23.0"
 name: check test-shape scans git ls-files tests/integration minus infra basenames (160 on nullbound) while integration.sh discovers via find minus
 status: fixed
 caught_in: "0.22.1"
-fix_milestone:
+fix_milestone: "0.23.0"
 ---
 
 # header-rule-census-differs-from-the-runner-roster

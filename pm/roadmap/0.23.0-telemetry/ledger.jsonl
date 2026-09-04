@@ -1,0 +1,44 @@
+{"ts":"2026-09-03T21:52:31Z","kind":"decision","grain":"0.23.0/ledger","entry":"D1","title":"Append-only is a primitive ledger.py owns; the merge attribute ships from pm init"}
+{"ts":"2026-09-03T21:52:31Z","kind":"status","grain":"0.23.0/ledger/status-flips-stamp-the-ledger","from":"todo","to":"wip"}
+{"ts":"2026-09-03T21:52:31Z","kind":"status","grain":"0.23.0/ledger/status-flips-stamp-the-ledger","from":"wip","to":"review"}
+{"ts":"2026-09-03T21:58:12Z","kind":"status","grain":"0.23.0/bugs/boundaries-misses-path-open-mode","from":"open","to":"fixed"}
+{"ts":"2026-09-03T22:13:44Z","kind":"status","grain":"0.23.0/ledger/pm-ledger-record","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:13:44Z","kind":"status","grain":"0.23.0/ledger/pm-ledger-record","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:13:44Z","kind":"decision","grain":"0.23.0/ledger","entry":"D2","title":"The terminal state show totals to is done for milestones, features and stories, and bug_states[-1] for bugs"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.23.0/usage-capture","from":"planning","to":"ready"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.23.0/usage-capture","from":"ready","to":"building"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.23.0/usage-capture/the-grain-is-the-trees-live-state","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.23.0/usage-capture/the-grain-is-the-trees-live-state","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.23.0/review-record-shape/bugs-name-their-cause","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:14:12Z","kind":"status","grain":"0.23.0/usage-capture/subagent-stop-hook-records-usage","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:29:02Z","kind":"status","grain":"0.23.0/review-record-shape/bugs-name-their-cause","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:29:02Z","kind":"decision","grain":"0.23.0/review-record-shape","entry":"D1","title":"check pm sees a dangling caused_by the way it sees a dangling depends_on"}
+{"ts":"2026-09-03T22:29:15Z","kind":"status","grain":"0.23.0/ledger-report","from":"planning","to":"ready"}
+{"ts":"2026-09-03T22:29:15Z","kind":"status","grain":"0.23.0/ledger-report","from":"ready","to":"building"}
+{"ts":"2026-09-03T22:29:15Z","kind":"status","grain":"0.23.0/ledger-report/cost-per-shipped-unit","from":"todo","to":"wip"}
+{"ts":"2026-09-03T22:32:41Z","kind":"status","grain":"0.23.0/usage-capture/subagent-stop-hook-records-usage","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.23.0/ledger","from":"building","to":"review"}
+{"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.23.0/review-record-shape","from":"building","to":"review"}
+{"ts":"2026-09-03T22:32:54Z","kind":"status","grain":"0.23.0/usage-capture","from":"building","to":"review"}
+{"ts":"2026-09-03T22:59:57Z","kind":"status","grain":"0.23.0/ledger-report/cost-per-shipped-unit","from":"wip","to":"review"}
+{"ts":"2026-09-03T22:59:57Z","kind":"decision","grain":"0.23.0","entry":"D9","title":"Renumbered 0.22.0 -> 0.23.0: v0.22.0 was released upstream mid-build; the ledger rows were rewritten to the new ids in the same commit"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/ledger","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/ledger/pm-ledger-record","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/ledger/status-flips-stamp-the-ledger","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/review-record-shape","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/review-record-shape/bugs-name-their-cause","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/review-record-shape/the-verdict-block","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/usage-capture","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/usage-capture/subagent-stop-hook-records-usage","from":"review","to":"done"}
+{"ts":"2026-09-03T23:02:53Z","kind":"status","grain":"0.23.0/usage-capture/the-grain-is-the-trees-live-state","from":"review","to":"done"}
+{"ts":"2026-09-03T23:03:33Z","kind":"decision","grain":"0.23.0","entry":"D10","title":"consumers-adopt leaves this milestone: a consumer adopts at its own pin bump, in its own PM tree"}
+{"ts":"2026-09-03T23:19:11Z","kind":"status","grain":"0.23.0/ledger-report/yield-rework-escapes-overhead","from":"todo","to":"review"}
+{"ts":"2026-09-03T23:19:11Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"todo","to":"wip"}
+{"ts":"2026-09-03T23:41:05Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"wip","to":"review"}
+{"ts":"2026-09-03T23:41:05Z","kind":"status","grain":"0.23.0/ledger-report","from":"building","to":"review"}
+{"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report","from":"review","to":"done"}
+{"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/cost-per-shipped-unit","from":"review","to":"done"}
+{"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"review","to":"done"}
+{"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/yield-rework-escapes-overhead","from":"review","to":"done"}
+{"ts":"2026-09-04T00:16:11Z","kind":"status","grain":"0.23.0","from":"building","to":"done"}
+{"ts":"2026-09-04T00:58:00Z","kind":"decision","grain":"0.23.0","entry":"D11","title":"0.22.1 diff-slice-hardening folds into 0.23.0: its three fixed bugs move here, and no v0.22.1 ships"}

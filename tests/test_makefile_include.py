@@ -48,8 +48,8 @@ INSTALLABLES = INCLUDE.parent
 STANDARD = (
     'help', 'doctor',
     'parse', 'lint', 'warnings',
-    'unit', 'integration', 'integration-all', 'integration-diff', 'scenario',
-    'smoke', 'capture', 'import-cache',
+    'unit', 'integration', 'integration-all', 'integration-diff',
+    'integration-list', 'scenario', 'smoke', 'capture', 'import-cache',
     'refs', 'scene', 'scene-diff', 'orphans', 'autoloads', 'pm',
     'pm-scan', 'uid-scan', 'hermetic-scan',
     'hooks-self-test', 'runners-self-test',

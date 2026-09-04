@@ -64,6 +64,7 @@ GATE_FAIL_LINES := 20
 SUM_PYTEST := grep -aoE '[0-9]+ (passed|failed)[^|]*' "$$log" | tail -1
 SUM_GATES  := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z]+\] PASS' "$$log")"
 SUM_SMOKE  := tail -1 "$$log" | sed -E 's/^\[[a-z:-]+\] //'
+SUM_HOOKS  := printf '%s hook(s) SELF-TEST OK' "$$(grep -ac 'SELF-TEST OK' "$$log")"
 
 # $(call gate,<log slot>,<TAG>,<summary command>,<argv...>)
 # Run a command through the shipped capture helper: quiet by default, the full
@@ -84,7 +85,7 @@ gdk_gate_verdict $(2) "$$summary" "$$log"; \
 exit "$$status"
 endef
 
-.PHONY: help test matrix fuzz gates smoke precommit milestone
+.PHONY: help test matrix fuzz gates hooks-self-test smoke precommit milestone pm
 
 help:
 	@echo 'godot-devkit — make targets'
@@ -93,13 +94,23 @@ help:
 	@echo '  make matrix      the suite on every claimed interpreter ($(PY_MATRIX))'
 	@echo '  make fuzz        the committed seeded harnesses (differential + replay)'
 	@echo '  make gates       godot-devkit check all, on this repo'
+	@echo '  make hooks-self-test  the installed hooks that ship a corpus, replayed (sandbox + the two ledger couriers)'
 	@echo '  make smoke       check all + autoloads/scene/refs/pm on the consumers (read-only)'
 	@echo
-	@echo '  make precommit   gates + test           the per-change gate'
-	@echo '  make milestone   gates + matrix + smoke  the full gate, and what CI runs'
+	@echo '  make pm ARGS="…"  the pm tracker from SOURCE, never a cached wheel (the ledger couriers call this)'
+	@echo
+	@echo '  make precommit   gates + hooks-self-test + test           the per-change gate'
+	@echo '  make milestone   gates + hooks-self-test + matrix + smoke  the full gate, and what CI runs'
 	@echo
 	@echo 'Every gate prints ONE verdict line naming its full log under'
 	@echo '.gate-reports/. VERBOSE=1 streams the transcript as well.'
+
+# The pm tracker over THIS repo's tree, from source (CLAUDE.md: never verify
+# through a cached wheel). .PHONY matters: a pm/ directory at the root would
+# otherwise satisfy the target silently and the ledger couriers would record
+# nothing (0.23.0/usage-capture, reviewer U1).
+pm:
+	PYTHONPATH=src python3 -m godot_devkit.cli pm $(ARGS)
 
 test:
 	$(call gate,test,TEST,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q))
@@ -115,6 +126,14 @@ gates:
 
 smoke:
 	$(call gate,smoke,SMOKE,$(SUM_SMOKE),$(PY) tools/consumer_smoke.py)
+
+# The hooks this repo self-hosts that ship their own block/allow corpus: the
+# raw-engine-boot guard and the two ledger couriers. Replayed here so an edit
+# to a guard cannot quietly change a verdict — the same wiring the README asks
+# of a consumer (nullbound: a `hooks-self-test` target in `make check`).
+HOOKS_WITH_CORPUS := tools/hooks/cc-godot-sandbox.sh tools/hooks/cc-ledger-subagent.sh tools/hooks/cc-ledger-session.sh
+hooks-self-test:
+	$(call gate,hooks-self-test,HOOKS,$(SUM_HOOKS),sh -c 'for h in $(HOOKS_WITH_CORPUS); do bash "$$h" --self-test || exit 1; done')
 
 # Every interpreter in one target, and it reports which one failed. A matrix
 # that stops at the first failure hides the difference between "3.14 only" and
@@ -141,8 +160,8 @@ matrix:
 # The per-change gate. Gates first: they take under a second and they are what
 # catches a doc or a PM-tree edit that the suite has no opinion about. A
 # composition prints its members' verdicts — one line each, nothing of its own.
-precommit: gates test
+precommit: gates hooks-self-test test
 
 # The full gate, and what CI runs. The matrix subsumes `test`, so it is not
 # listed twice.
-milestone: gates matrix smoke
+milestone: gates hooks-self-test matrix smoke

@@ -38,7 +38,9 @@ VERDICT = re.compile(r'^\[GATES\] .+ — full log: \.gate-reports/gates\.log$')
 
 # `help` prints the target roster and is not a gate; `precommit` and
 # `milestone` are compositions whose members each print their own verdict.
-NOT_A_GATE = {'help', 'precommit', 'milestone'}
+NOT_A_GATE = {'help', 'precommit', 'milestone',
+    'pm',  # a VEHICLE, not a gate: it prints whatever the tracker prints (make pm ARGS=…)
+}
 
 
 def make(*args: str, **env_extra: str) -> subprocess.CompletedProcess:

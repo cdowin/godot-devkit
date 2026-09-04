@@ -6,7 +6,7 @@ description: Cut a godot-devkit release — verify, bump the version everywhere 
 # Release protocol
 
 Preconditions — refuse to proceed if any fail:
-1. Working tree clean, on `main`, up to date with `origin/main`.
+1. Working tree clean, on the MILESTONE BRANCH with `origin/main` merged in — never on `main`: `main` is merge-commit-only at close ([`CLAUDE.md`](../../../CLAUDE.md)), and the self-hosted `tools/hooks/pre-push` blocks a direct push to it, so a release is a PR merge and a tag, not a push of `main`.
 2. `make milestone` green — the full gate: every check in this repo's `[checks] all` roster, the suite on every claimed interpreter, and the consumer smoke. This is the same target CI runs, so a green release is green for the same reason CI is.
 3. The judgment half of `/consumer-smoke` (negative probes for any gate whose scoping changed, and the config-equivalence pass) — `make smoke` covers the census half and the skill says which is which.
 4. The code-reviewer agent has reviewed the diff since the last tag with a RELEASE-SAFE verdict (full review for a minor/major).
@@ -20,9 +20,9 @@ Steps (X.Y.Z = the new version):
 2. Bump the README's two pin sites to `vX.Y.Z` in the same commit: the `uvx --from "…@vX.Y.Z"` install example under "## Install" (and its `# godot-devkit X.Y.Z` trailing comment), and the `DEVKIT_VERSION := vX.Y.Z` line in the Makefile snippet under "## Wiring it into your project". These are the strings consumers copy-paste; a stale pin there ships an old release to every new adopter.
 3. **Close the milestone — before the render, not after.** `pm feature review` / `pm feature done <fid> --review-record <path>` for each feature first — point it at the feature's `decisions.md`, which is where a review's durable half belongs (`pm milestone done X.Y.Z` refuses while any feature is live). `check pm` at this point is the release gate.
 4. **Retitle** `CHANGELOG.md`'s `## Unreleased` section to `## vX.Y.Z — <today's ISO date>`, and open a fresh empty `## Unreleased` above it. The file is hand-maintained end to end; the only mechanical part is that the heading names the tag it maps to. Then commit `release: vX.Y.Z — <one-line summary>`.
-5. `git tag vX.Y.Z && git push origin main --tags`.
+5. Push the branch, open (or update) the PR to `main`, CI green (`verify.yml` is `make milestone`), merge it as a merge commit. Then on `main` at that merge commit: `git tag vX.Y.Z && git push origin vX.Y.Z` — the TAG ref only. A `git push origin main` is exactly what the pre-push hook exists to block, and the merge already put the commits there.
 6. Prove the published artifact: `uvx --from "git+https://github.com/cdowin/godot-devkit@vX.Y.Z" godot-devkit --version` must print the new version (run with a cold cache if uv has the ref cached: `uv cache clean godot-devkit` first).
-7. Report the consumer follow-up explicitly: each consumer bumps `DEVKIT_VERSION` in its Makefile (trail: `~/workspace/trail/Makefile`; nullbound: `~/workspace/nullbound/Makefile`), runs its gate set, commits the one-line diff. Do NOT edit consumer repos from this session unless the user asks.
+7. Report the consumer follow-up explicitly: each consumer bumps `DEVKIT_VERSION` in its Makefile (trail: `~/workspace/trail/Makefile`; nullbound: `~/workspace/nullbound/Makefile`), runs `install-* --diff` then `--force` for what the release shipped, re-runs `pm init` once (a `.gitattributes` line a release added reaches an existing tree only that way), runs its gate set, commits the diff. Do NOT edit consumer repos from this session unless the user asks.
 
 After the release, open the next milestone so the notes have somewhere to go from the first commit: `godot-devkit pm new milestone <next> <name>` then `pm milestone ready|building <next>`. Bullets go into `## Unreleased` as work lands, which is the whole point — the v0.13.0 section ran ~250 lines because nobody wrote it incrementally.
 

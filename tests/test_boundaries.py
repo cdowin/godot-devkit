@@ -63,6 +63,25 @@ MODULE_MUTATORS = {
 # Modes that make `open()` a mutation. A read-mode `open()` is not a write and
 # stays anybody's to call.
 WRITE_MODES = ('w', 'a', 'x', '+')
+# Where the mode SITS, per spelling. The builtin carries the path first, so its
+# mode is the second argument; the bound method already has the path in the
+# receiver, so its mode is the FIRST. Reading `args[1]` for both was this gate's
+# blind spot: every `p.open('w')` in `src/` classified as a read and passed.
+BUILTIN_OPEN_MODE_ARG = 1
+METHOD_OPEN_MODE_ARG = 0
+# `mode=` outranks the positional slot in either spelling, because that is what
+# Python itself does; an absent mode is a read, because that is the default.
+OPEN_MODE_KEYWORD = 'mode'
+DEFAULT_OPEN_MODE = 'r'
+# The ONE sanctioned writer outside APPLY_MODULE, pinned by PATH **and** MODE
+# rather than by a blanket allowlist. `ledger.append_row` opens its file in
+# append mode deliberately (0.22.0/ledger decision D1): a read-modify-write
+# drops rows when two appenders collide and rewrites the bytes `merge=union`
+# depends on nobody rewriting. Append is a different primitive, not a variant of
+# overwrite — so a `'w'` in THIS file is still a finding, and an `'a'` in any
+# other module is too.
+APPEND_ONLY_MODULE = 'repo/pm/ledger.py'
+APPEND_MODES = ('a', 'ab')
 
 
 def _sources() -> list[tuple[str, Path]]:
@@ -88,25 +107,59 @@ def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
 
 
+def _is_an_open_call(node: ast.Call) -> bool:
+    """True for both spellings of `open` — the builtin and the bound method."""
+    func = node.func
+    return ((isinstance(func, ast.Attribute) and func.attr == 'open')
+            or (isinstance(func, ast.Name) and func.id == 'open'))
+
+
+def _open_mode(node: ast.Call) -> str | None:
+    """The literal mode of this `open(...)`, or None when it is not a literal.
+
+    The positional slot depends on the SPELLING: `open(path, 'w')` puts the mode
+    where `p.open('w')` puts nothing at all. `mode=` wins over the positional in
+    either form, and an absent mode is `DEFAULT_OPEN_MODE` — `open(p)` reads.
+    """
+    index = (METHOD_OPEN_MODE_ARG if isinstance(node.func, ast.Attribute)
+             else BUILTIN_OPEN_MODE_ARG)
+    mode: ast.expr | None = node.args[index] if len(node.args) > index else None
+    for kw in node.keywords:
+        if kw.arg == OPEN_MODE_KEYWORD:
+            mode = kw.value
+    if mode is None:
+        return DEFAULT_OPEN_MODE
+    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+        return mode.value
+    return None
+
+
 def _is_write_open(node: ast.Call) -> bool:
     """True when this `open(...)` call names a WRITE mode.
 
-    The mode is the second positional argument or the `mode=` keyword, and it
-    is a literal in every call in this package. A non-literal mode is treated as
-    a write: an unreadable mode is exactly the case a guard must not wave
-    through.
+    The mode is a literal in every call in this package. A non-literal mode is
+    treated as a write: an unreadable mode is exactly the case a guard must not
+    wave through.
     """
-    mode: ast.expr | None = None
-    if len(node.args) >= 2:
-        mode = node.args[1]
-    for kw in node.keywords:
-        if kw.arg == 'mode':
-            mode = kw.value
+    mode = _open_mode(node)
     if mode is None:
-        return False  # read is the default
-    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
-        return any(ch in mode.value for ch in WRITE_MODES)
-    return True
+        return True
+    return any(ch in mode for ch in WRITE_MODES)
+
+
+def _is_sanctioned_append(rel: str, node: ast.Call) -> bool:
+    """True for the one append `APPEND_ONLY_MODULE` is allowed to make.
+
+    By path AND by mode: a `'w'` in that same file is not sanctioned, and an
+    `'a'` anywhere else is not either. A non-literal mode (None) matches no
+    entry in `APPEND_MODES`, so an unreadable mode cannot buy the exception.
+    """
+    return rel == APPEND_ONLY_MODULE and _open_mode(node) in APPEND_MODES
+
+
+def _is_unsanctioned_write_open(rel: str, node: ast.Call) -> bool:
+    """A write-mode `open(...)` that is not the ledger's sanctioned append."""
+    return _is_write_open(node) and not _is_sanctioned_append(rel, node)
 
 
 def _calls(tree: ast.Module):
@@ -147,7 +200,7 @@ def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
     for node in _calls(tree):
         func = node.func
         if isinstance(func, ast.Name):
-            if func.id == 'open' and _is_write_open(node):
+            if func.id == 'open' and _is_unsanctioned_write_open(rel, node):
                 out.append(f'{rel}:{node.lineno}: open(..., write mode)')
             continue
         if not isinstance(func, ast.Attribute):
@@ -159,7 +212,7 @@ def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
             out.append(f'{rel}:{node.lineno}: {func.attr}()')
         elif func.attr == 'replace' and _replace_is_a_path_replace(node):
             out.append(f'{rel}:{node.lineno}: replace() (one arg — Path.replace)')
-        elif func.attr == 'open' and _is_write_open(node):
+        elif func.attr == 'open' and _is_unsanctioned_write_open(rel, node):
             out.append(f'{rel}:{node.lineno}: .open(..., write mode)')
     return out
 
@@ -225,6 +278,168 @@ class OneApply(unittest.TestCase):
     def test_the_apply_module_does_write(self):
         sites = _mutation_sites(APPLY_MODULE, _tree(SRC / APPLY_MODULE))
         self.assertGreaterEqual(len(sites), 4, sites)
+
+
+# Every spelling of `open` the classifier has to get right, as
+# (source, is a write). The mode MOVES between argument slots with the
+# spelling — `p.open('w')` puts it where `open(p, 'w')` puts the path — and
+# that is the whole of the defect this table exists to hold shut. A scratch
+# module, not a real one: the gate is being MUTATED here, not observed.
+OPEN_SPELLINGS = (
+    # bound method — the mode is the FIRST argument.
+    ("p.open('w')", True),
+    ("p.open(mode='w')", True),
+    ("Path(x).open('a')", True),
+    ("p.open('x')", True),
+    ("p.open('w+')", True),
+    ("p.open('r+')", True),
+    ("p.open('wb')", True),
+    ("p.open('ab')", True),
+    ("p.open('a', encoding='utf-8', newline='\\n')", True),
+    ("p.open()", False),
+    ("p.open('r')", False),
+    ("p.open('rb')", False),
+    ("p.open(encoding='utf-8')", False),
+    # builtin — the mode is the SECOND argument, after the path.
+    ("open(p, 'w')", True),
+    ("open(p, mode='w')", True),
+    ("open(p, 'a')", True),
+    ("open(p, 'x')", True),
+    ("open(p, 'w+')", True),
+    ("open(p, 'r+')", True),
+    ("open(p, 'wb')", True),
+    ("open(p, 'ab')", True),
+    ("open(p)", False),
+    ("open(p, 'r')", False),
+    ("open(p, 'rb')", False),
+    ("open(p, encoding='utf-8')", False),
+    # An unreadable mode is a write in both spellings: a guard that cannot read
+    # the mode must refuse rather than wave the call through (rule 4).
+    ("open(p, mode)", True),
+    ("p.open(mode)", True),
+)
+# A module path that is emphatically NOT the ledger, for proving the exception
+# is pinned to one file rather than granted to append mode generally.
+SCRATCH_MODULE = 'repo/pm/scratch_not_the_ledger.py'
+# The floor under the `open` census, in the same spirit as MIN_SOURCES: well
+# under the real count (7 at the time of writing) and well over zero, so the
+# classifier cannot be declared correct over a tree it never read.
+MIN_OPEN_CALLS = 4
+
+
+def _sites_for(source: str, rel: str = SCRATCH_MODULE) -> list[str]:
+    """The real classifier, run over a source snippet as if it were `rel`."""
+    return _mutation_sites(rel, ast.parse(source))
+
+
+class TheOpenModeIsReadFromTheRightArgument(unittest.TestCase):
+    """`Path.open('w')` is a write, and this gate used to say otherwise.
+
+    `_is_write_open` read the mode from `args[1]` — correct for the builtin
+    `open(path, 'w')`, and wrong for `p.open('w')`, whose `args[1]` is not the
+    mode and is usually nothing at all. Every `p.open('w')` and `p.open('a')`
+    under `src/` therefore classified as a READ and passed the one-writer
+    boundary: a gate that missed real drift and printed PASS, which CLAUDE.md
+    rule 4 calls the cardinal sin.
+    """
+
+    def test_every_spelling_of_open_is_classified_by_its_real_mode(self):
+        for source, is_write in OPEN_SPELLINGS:
+            with self.subTest(source=source):
+                sites = _sites_for(source)
+                self.assertEqual(
+                    is_write, bool(sites),
+                    f'{source!r} classified as a '
+                    f'{"read" if is_write else "write"}. The mode is the first '
+                    'argument for the bound method and the second for the '
+                    f'builtin; sites={sites}')
+
+    def test_a_scratch_module_writing_by_Path_open_is_caught(self):
+        """End to end, through the same path the gate walks: a real file on
+        disk, parsed by `_tree`, classified by `_mutation_sites`."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            module = Path(scratch) / 'scratch.py'
+            module.write_text(
+                'from pathlib import Path\n'
+                '\n'
+                '\n'
+                'def sneak(target: Path, payload: str) -> None:\n'
+                "    with target.open('w', encoding='utf-8') as handle:\n"
+                '        handle.write(payload)\n',
+                encoding='utf-8')
+            sites = _mutation_sites(SCRATCH_MODULE, _tree(module))
+        self.assertEqual([f'{SCRATCH_MODULE}:5: .open(..., write mode)'], sites)
+
+    def test_the_open_census_is_not_empty(self):
+        """The classifier above is only worth anything over a tree it read."""
+        census = sum(1 for _, path in _sources()
+                     for node in _calls(_tree(path)) if _is_an_open_call(node))
+        self.assertGreaterEqual(
+            census, MIN_OPEN_CALLS,
+            f'{census} open() call(s) under {SRC} — expected at least '
+            f'{MIN_OPEN_CALLS}. A correct mode classifier over nothing is '
+            'still a gate that checks nothing.')
+
+
+class TheLedgerAppendIsTheOneException(unittest.TestCase):
+    """PRIMITIVE 2, continued — the single sanctioned writer outside apply.
+
+    Decision D1 of `0.22.0/ledger`: `ledger.append_row` owns append as a
+    PRIMITIVE, because a read-modify-write drops rows when two appenders
+    collide. The exception it earns is one file in one mode — not an allowlist
+    entry that would also excuse an overwrite, a `mkdir`, or a `write_text`.
+    """
+
+    def test_append_is_admitted_in_the_ledger(self):
+        for source in ("p.open('a')", "p.open('ab')",
+                       "p.open(mode='a')",
+                       "p.open('a', encoding='utf-8', newline='\\n')"):
+            with self.subTest(source=source):
+                self.assertEqual([], _sites_for(source, APPEND_ONLY_MODULE))
+
+    def test_an_overwrite_in_the_ledger_is_still_a_finding(self):
+        for source in ("p.open('w')", "open(p, 'w')", "p.open('w+')",
+                       "p.open(mode='w')", "p.open('x')"):
+            with self.subTest(source=source):
+                self.assertNotEqual(
+                    [], _sites_for(source, APPEND_ONLY_MODULE),
+                    'the ledger exception is append-only — an overwrite there '
+                    'rewrites the bytes `merge=union` relies on nobody '
+                    'rewriting, which is the defect D1 exists to prevent')
+
+    def test_the_exception_does_not_excuse_other_mutations(self):
+        for source in ('p.write_text(x)', 'p.mkdir()', 'p.unlink()',
+                       'os.remove(p)'):
+            with self.subTest(source=source):
+                self.assertNotEqual([], _sites_for(source, APPEND_ONLY_MODULE),
+                                    'the exception is by MODE, not a blanket '
+                                    'allowlist for the file')
+
+    def test_append_anywhere_else_is_a_finding(self):
+        for rel in (SCRATCH_MODULE, 'cli.py', 'repo/pm/model.py'):
+            for source in ("p.open('a')", "open(p, 'a')", "p.open('ab')"):
+                with self.subTest(rel=rel, source=source):
+                    self.assertNotEqual([], _sites_for(source, rel))
+
+    def test_an_unreadable_mode_does_not_buy_the_exception(self):
+        self.assertNotEqual([], _sites_for('p.open(mode)', APPEND_ONLY_MODULE))
+
+    def test_the_ledger_really_does_append(self):
+        """The exception must not outlive the append it was granted for.
+
+        An allowlist entry nothing matches is a hole waiting for a file to move
+        into it — the same reasoning `CONFIG_IMPORT_ALLOWLIST` prunes for.
+        """
+        tree = _tree(SRC / APPEND_ONLY_MODULE)
+        appends = [f'{APPEND_ONLY_MODULE}:{node.lineno}'
+                   for node in _calls(tree)
+                   if _is_an_open_call(node)
+                   and _is_sanctioned_append(APPEND_ONLY_MODULE, node)]
+        self.assertEqual(
+            1, len(appends),
+            f'{APPEND_ONLY_MODULE} should hold exactly ONE sanctioned append; '
+            f'found {appends}. If the append is gone, delete the exception.')
 
 
 class WalkHasNoLength(unittest.TestCase):

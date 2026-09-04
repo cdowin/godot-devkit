@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -105,6 +106,10 @@ HOOKS = ('tools/hooks/cc-commit-pathspec.sh',
          'tools/hooks/cc-godot-sandbox.sh',
          'tools/hooks/cc-stop-gate.sh',
          'tools/hooks/cc-write-confine.sh',
+         # The two ledger couriers (0.22.0). They guard nothing; they carry a
+         # stop event's transcript path to `pm ledger record` and exit 0.
+         'tools/hooks/cc-ledger-subagent.sh',
+         'tools/hooks/cc-ledger-session.sh',
          'tools/hooks/pre-push',
          'tools/hooks/prepare-commit-msg',
          'tools/dev/agent-worktree.sh',
@@ -424,6 +429,8 @@ def test_the_hooks_carry_no_project_name_and_source_no_library():
 
 
 CONFIG_HEADED = ('tools/hooks/cc-stop-gate.sh',
+                 'tools/hooks/cc-ledger-subagent.sh',
+                 'tools/hooks/cc-ledger-session.sh',
                  'tools/hooks/pre-push',
                  'tools/hooks/prepare-commit-msg',
                  'tools/dev/agent-worktree.sh',
@@ -527,9 +534,10 @@ def test_this_repo_carries_what_install_ci_produces():
     The other three read `config/version` out of a project.godot — this package
     has neither, versions in pyproject.toml, and bumps at CLOSE rather than at
     merge. Installing them here would be three workflows guarding a flow this
-    repo does not run, which is the same reasoning that keeps `install-hooks`
-    un-self-hosted. What is carried must be current; what is absent is
-    legitimately absent.
+    repo does not run — the reasoning that kept `install-hooks` un-self-hosted
+    until 0.23.0 gave its corpus a job here (the ledger couriers; the hook
+    headers are then this repo's `project config`, edited on purpose). What is
+    carried must be current; what is absent is legitimately absent.
     """
     repo_root.cache_clear()
     load_config.cache_clear()
@@ -680,3 +688,76 @@ def test_install_runners_next_step_no_longer_asks_for_a_chmod():
     assert code == 0, out
     assert 'chmod +x' not in out, out
     assert 'EXECUTABLE' in out, out
+
+
+# --- install-hooks prints the settings.json entries that FIRE the hooks -------
+# A git hook runs because `tools/setup-hooks.sh` points core.hooksPath at the
+# directory. A Claude Code hook runs because `.claude/settings.json` names it,
+# and nothing else does — so an install that wrote eleven files and said
+# nothing about registration left six guards on disk and none of them armed.
+# The block is PRINTED rather than written: settings.json is hand-maintained,
+# carries permissions/env/MCP entries this package knows nothing about, and
+# these verbs write a whole file or refuse.
+CC_HOOKS = tuple(rel for rel in HOOKS if rel.startswith('tools/hooks/cc-'))
+ASYNC_HOOKS = ('tools/hooks/cc-ledger-subagent.sh',
+               'tools/hooks/cc-ledger-session.sh')
+
+
+def test_install_hooks_prints_the_settings_entries_that_fire_every_cc_hook():
+    """Every installed Claude Code hook is named in the snippet, and the
+    snippet parses as JSON — a block an operator has to repair before pasting
+    is a block they will hand-write instead, which is the fork this verb
+    exists to prevent."""
+    with repo():
+        code, out = run('install-hooks')
+        assert code == 0, out
+        assert '.claude/settings.json' in out, out
+        opened = out.index('{\n  "hooks"')
+        block = json.loads(out[opened:out.rindex('}') + 1])
+        commands = [entry['command']
+                    for event in block['hooks'].values()
+                    for group in event for entry in group['hooks']]
+        for rel in CC_HOOKS:
+            assert any(rel in command for command in commands), (
+                f'{rel} is installed but no settings entry fires it\n{out}')
+
+
+def test_the_two_ledger_couriers_are_registered_async_and_unmatched():
+    """`async` is the whole reason a Stop hook may parse a transcript at all
+    (D4): the orchestrator must not wait for it. And neither courier carries a
+    matcher — every dispatch costs something, so a roster of agent types here
+    would silently stop measuring the day a repo adds one."""
+    with repo():
+        code, out = run('install-hooks')
+        assert code == 0, out
+        block = json.loads(out[out.index('{\n  "hooks"'):out.rindex('}') + 1])
+        wired = {}
+        for event, groups in block['hooks'].items():
+            for group in groups:
+                for entry in group['hooks']:
+                    for rel in ASYNC_HOOKS:
+                        if rel in entry['command']:
+                            wired[rel] = (event, group.get('matcher'), entry)
+        assert set(wired) == set(ASYNC_HOOKS), wired
+        subagent_event, subagent_matcher, subagent = wired[ASYNC_HOOKS[0]]
+        session_event, session_matcher, session = wired[ASYNC_HOOKS[1]]
+        assert subagent_event == 'SubagentStop', wired
+        assert session_event == 'Stop', wired
+        assert subagent_matcher is None and session_matcher is None, wired
+        assert subagent['async'] is True and session['async'] is True, wired
+
+
+@pytest.mark.skipif(shutil.which('bash') is None, reason='needs bash')
+@pytest.mark.parametrize('rel', ASYNC_HOOKS)
+def test_the_installed_ledger_couriers_are_executable_and_replay_their_corpus(
+        rel):
+    """Installed, armed by the write itself, and PROVEN by their own
+    `--self-test` — the same contract cc-godot-sandbox.sh carries."""
+    with repo() as root:
+        assert run('install-hooks')[0] == 0
+        target = root / rel
+        assert target.stat().st_mode & 0o111, f'{rel} is not executable'
+        done = subprocess.run(['bash', str(target), '--self-test'],
+                              capture_output=True, text=True, cwd=root)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert 'SELF-TEST OK' in done.stdout, done.stdout

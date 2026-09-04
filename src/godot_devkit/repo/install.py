@@ -112,6 +112,13 @@ PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ('cc-godot-sandbox.sh', 'tools/hooks/cc-godot-sandbox.sh'),
         ('cc-stop-gate.sh', 'tools/hooks/cc-stop-gate.sh'),
         ('cc-write-confine.sh', 'tools/hooks/cc-write-confine.sh'),
+        # The two ledger couriers. They GUARD nothing — they copy the stop
+        # event's transcript path and ids into `pm ledger record` and exit 0 —
+        # but they are hooks, they are standalone, and they carry the same
+        # editable header, so they ship on the verb that already writes
+        # tools/hooks/ and the script that already arms it by glob.
+        ('cc-ledger-subagent.sh', 'tools/hooks/cc-ledger-subagent.sh'),
+        ('cc-ledger-session.sh', 'tools/hooks/cc-ledger-session.sh'),
         ('pre-push', 'tools/hooks/pre-push'),
         ('prepare-commit-msg', 'tools/hooks/prepare-commit-msg'),
         ('agent-worktree.sh', 'tools/dev/agent-worktree.sh'),
@@ -198,14 +205,19 @@ install-agents  the review/build contract plus the base agent roster, as
                 `Project config` section — yours to edit after install.
 install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 hooks (cc-commit-pathspec, cc-godot-sandbox, cc-stop-gate,
-                cc-write-confine), the git hooks (pre-push, prepare-commit-msg),
+                cc-write-confine) plus the two ledger couriers
+                (cc-ledger-subagent on SubagentStop, cc-ledger-session on
+                Stop, each handing the stop event's transcript path to
+                `pm ledger record` and exiting 0 whatever it says), the git
+                hooks (pre-push, prepare-commit-msg),
                 tools/dev/agent-worktree.sh, tools/dev/checks/doctor.sh, and
                 tools/setup-hooks.sh, which arms them. Each carries a small
                 `project config` header — yours to edit after install.
-                cc-godot-sandbox.sh ships its own block/allow corpus: wire
-                `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your
-                static gate (nullbound: a `hooks-self-test` target in
-                `make check`).
+                cc-godot-sandbox.sh and the two couriers ship their own
+                corpora: wire `bash tools/hooks/<hook>.sh --self-test` into
+                your static gate (nullbound: a `hooks-self-test` target in
+                `make check`). The run prints the .claude/settings.json entries
+                that fire them.
 install-runners tools/dev/gdk_runners.sh — the shell library your
                 Godot-booting make targets source (one verdict line per gate
                 naming .gate-reports/<gate>.log, VERBOSE=1 streams, a per-run
@@ -267,7 +279,10 @@ _NEXT_STEP = {
                      'static gate (nullbound: a `hooks-self-test` target in '
                      '`make check`) — it replays the hook\'s own block/allow '
                      'corpus, so an edit to the guard cannot quietly change '
-                     'a verdict.',
+                     'a verdict. Then paste the settings block below into '
+                     '.claude/settings.json — installing a Claude Code hook '
+                     'is not registering it, and an unregistered hook is a '
+                     'file nothing ever runs.',
     'install-agents': 'the verification pair carries the review and build '
                       'contract; the rest are the base roster. Each roster '
                       'file opens with a `Project config` section — edit its '
@@ -298,6 +313,69 @@ _NEXT_STEP = {
                        'bits. Then edit each file\'s `project config` header: '
                        'the files are yours now.',
 }
+
+# The `.claude/settings.json` entries that FIRE the Claude Code half of the
+# corpus. `tools/setup-hooks.sh` arms the GIT hooks — `core.hooksPath` plus the
+# exec bit — and there is no equivalent for a Claude Code hook: it runs because
+# a settings file names it, and nothing else. So an install that wrote the
+# files and said nothing else left every guard on disk and none of them armed.
+#
+# PRINTED, not written. `.claude/settings.json` is a hand-maintained file with
+# permissions, env and MCP entries this package knows nothing about, and the
+# install verbs write a whole file or refuse — there is no merge here and there
+# is deliberately not going to be one. Copying a block is the operator's edit
+# to their own file.
+#
+# The two ledger couriers are `"async": true` because they are the only entries
+# here that do WORK rather than decide: the verb parses a transcript that can
+# be tens of megabytes (D4), and an orchestrator that waits for that on every
+# stop pays the cost the async flag exists to remove. The four guards are
+# synchronous on purpose — a PreToolUse block that arrived after the tool ran
+# would be narration, and cc-stop-gate's exit 2 IS the gate.
+#
+# `SubagentStop` takes a matcher (on `agent_type`) and `Stop` takes none;
+# cc-ledger-subagent.sh is registered with NO matcher, because every dispatch
+# costs something and a roster written here would silently stop measuring the
+# day a repo adds an agent.
+_HOOK_SETTINGS = '''{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "bash tools/hooks/cc-commit-pathspec.sh"},
+          {"type": "command", "command": "bash tools/hooks/cc-godot-sandbox.sh"}
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {"type": "command", "command": "bash tools/hooks/cc-write-confine.sh"}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "bash tools/hooks/cc-stop-gate.sh"},
+          {"type": "command", "command": "bash tools/hooks/cc-ledger-session.sh", "async": true}
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "bash tools/hooks/cc-ledger-subagent.sh", "async": true}
+        ]
+      }
+    ]
+  }
+}'''
+
+# Only `install-hooks` has a registration step; the other three verbs' files
+# are found by a path (a workflow directory, an agents directory, a make
+# include) rather than by a settings entry.
+_SETTINGS_BLOCK = {'install-hooks': _HOOK_SETTINGS}
 
 
 def collision_refusal(collisions: list[str]) -> tuple[str, str]:
@@ -535,4 +613,12 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
         return 1
     if written and next_step:
         print(f'[install] {_NEXT_STEP[command]}')
+        settings = _SETTINGS_BLOCK.get(command)
+        if settings:
+            # Raw, unprefixed, so the block can be selected and pasted whole.
+            # A `[install] ` on every line would make the operator strip it,
+            # and a JSON file is the one place a stray prefix is not a cosmetic
+            # problem.
+            print(f'\n.claude/settings.json — the entries that FIRE these '
+                  f'hooks (merge into yours):\n\n{settings}\n')
     return 0

@@ -12,7 +12,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from support.pm import run_cli, run_gate, tree, write
+from support.pm import frontmatter, run_cli, run_gate, tree, write
 
 from godot_devkit.repo.pm import cli, model, templates
 
@@ -453,6 +453,157 @@ class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
             code, out = run_cli(root, 'new', 'story', '0.1/alpha', '01-', 'B')
             self.assertEqual(code, 1, out)
             self.assertEqual(sorted(p.name for p in sdir.iterdir()), before)
+
+
+class BugNamesItsCause(unittest.TestCase):
+    """`caused_by:` — the feature whose change produced the bug.
+
+    `caught_in:` says which milestone FOUND it; `caused_by:` says which feature
+    MADE it. Different facts, and an escape needs both — which is the whole
+    reason the field is not a second spelling of the one already there.
+    """
+
+    BUGS = 'pm/roadmap/0.1-demo/bugs'
+
+    def _bug_dir(self, root: Path) -> list[str]:
+        bugs = root / self.BUGS
+        return sorted(p.name for p in bugs.iterdir()) if bugs.is_dir() else []
+
+    def test_without_the_flag_the_field_is_there_and_empty(self):
+        # The template's default. An empty `caused_by:` (no trailing space) is
+        # the honest record of a cause nobody has named — the field exists so
+        # `pm set` and the report have somewhere to look, not so it gets
+        # guessed at.
+        with tree() as root:
+            code, out = run_cli(root, 'new', 'bug', '0.1', 'seed-is-zero')
+            self.assertEqual(code, 0, out)
+            bf = root / self.BUGS / 'seed-is-zero.md'
+            self.assertEqual(frontmatter(bf), [
+                'id: 0.1/bugs/seed-is-zero',
+                'milestone: "0.1"',
+                'name:',
+                'status: open',
+                'caught_in: "0.1"',
+                'fix_milestone:',
+                'caused_by:',
+            ])
+            # Nothing extra printed, and nothing beyond the one file written.
+            self.assertNotIn('caused_by', out)
+            self.assertEqual(self._bug_dir(root), ['seed-is-zero.md'])
+
+    def test_the_flag_stamps_the_feature_and_changes_nothing_else(self):
+        with tree() as root:
+            code, out = run_cli(root, 'new', 'bug', '0.1', 'seed-is-zero',
+                                '--caused-by', '0.1/alpha')
+            self.assertEqual(code, 0, out)
+            bf = root / self.BUGS / 'seed-is-zero.md'
+            self.assertEqual(frontmatter(bf), [
+                'id: 0.1/bugs/seed-is-zero',
+                'milestone: "0.1"',
+                'name:',
+                'status: open',
+                'caught_in: "0.1"',
+                'fix_milestone:',
+                'caused_by: 0.1/alpha',
+            ])
+            self.assertIn("caused_by '0.1/alpha'", out)
+            self.assertEqual(model.field_of(bf, 'caused_by'), '0.1/alpha')
+
+    def test_both_flag_spellings_do_the_same_thing(self):
+        with tree() as root:
+            self.assertEqual(run_cli(root, 'new', 'bug', '0.1', 'a',
+                                     '--caused-by=0.1/alpha')[0], 0)
+            self.assertEqual(
+                model.field_of(root / self.BUGS / 'a.md', 'caused_by'),
+                '0.1/alpha')
+
+    def test_a_feature_of_ANY_status_resolves(self):
+        # The report decides what counts as an ESCAPE (a bug caused by a
+        # CLOSED feature); the verb records which change produced the bug and
+        # holds no opinion. Refusing a non-`done` feature would make the
+        # record unwritable in the case it is most often known — during the
+        # build that caused it.
+        for status in ('planning', 'building', 'review', 'done'):
+            with self.subTest(status=status), tree(feature_status=status) as root:
+                code, out = run_cli(root, 'new', 'bug', '0.1', 'b',
+                                    '--caused-by', '0.1/alpha')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(
+                    model.field_of(root / self.BUGS / 'b.md', 'caused_by'),
+                    '0.1/alpha')
+
+    def test_the_stamped_bug_validates_and_leaves_the_gate_clean(self):
+        with tree(story_statuses=('todo',)) as root:
+            self.assertEqual(run_cli(root, 'new', 'bug', '0.1', 'c',
+                                     '--caused-by', '0.1/alpha')[0], 0)
+            code, out = run_cli(root, 'validate')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(run_gate(root)[0], 0)
+
+    # --- the refusal matrix ---------------------------------------------------
+    # Every one of these exits 2 naming the value, and NONE of them writes: the
+    # cause is resolved before the slug is checked and long before the file is
+    # minted, so a bug is never filed carrying an unresolvable attribution.
+    UNRESOLVABLE = (
+        ('traversal', '../../../pwned'),
+        ('traversal-inside-an-id', '0.1/../../oops'),
+        ('dot-segment', '0.1/.'),
+        ('absolute', '/etc/passwd'),
+        ('glob', '0.1/*'),
+        ('glob-in-the-milestone', '*/alpha'),
+        ('backslash', '0.1\\alpha'),
+        ('leading-whitespace', '0.1/ alpha'),
+        ('trailing-whitespace', '0.1/alpha '),
+        ('inner-whitespace', '0.1/al pha'),
+        ('newline', '0.1/alpha\nname: pwned'),
+        ('over-long', '0.1/' + 'a' * 300),
+        ('a-story-id', '0.1/alpha/s0'),
+        ('a-milestone-id', '0.1'),
+        ('a-bug-id', '0.1/bugs/other'),
+        ('no-such-feature', '0.1/never-existed'),
+        ('scheme', 'file:///etc/passwd'),
+    )
+
+    def test_an_unresolvable_cause_exits_2_and_writes_nothing(self):
+        with tree(story_statuses=('todo',)) as root:
+            before_tree = sorted(p.name for p in root.iterdir())
+            for label, value in self.UNRESOLVABLE:
+                with self.subTest(case=label):
+                    code, out = run_cli(root, 'new', 'bug', '0.1', 'x',
+                                        '--caused-by', value)
+                    self.assertEqual(code, 2, out)
+                    self.assertNotIn('Traceback', out)
+                    self.assertIn('resolves to no feature', out)
+                    self.assertIn('nothing was written', out)
+                    self.assertEqual(self._bug_dir(root), [])
+            self.assertEqual(sorted(p.name for p in root.iterdir()), before_tree)
+
+    def test_an_empty_value_refuses_in_both_spellings(self):
+        # `--caused-by=` storing '' would file the bug with the field silently
+        # unset, at exit 0, after the caller asked for it.
+        with tree() as root:
+            for argv in (('--caused-by', ''), ('--caused-by=',)):
+                with self.subTest(argv=argv):
+                    code, out = run_cli(root, 'new', 'bug', '0.1', 'x', *argv)
+                    self.assertEqual(code, 2, out)
+                    self.assertIn('needs a feature id', out)
+                    self.assertEqual(self._bug_dir(root), [])
+
+    def test_a_dangling_flag_refuses_rather_than_eating_the_slug(self):
+        with tree() as root:
+            code, out = run_cli(root, 'new', 'bug', '0.1', '--caused-by')
+            self.assertEqual(code, 2, out)
+            self.assertIn('needs a feature id', out)
+            self.assertEqual(self._bug_dir(root), [])
+
+    def test_the_flag_is_not_mistaken_for_the_slug(self):
+        # `--caused-by <id>` is consumed as a pair, so what is left has to be
+        # exactly the milestone and the slug — never three positional args.
+        with tree() as root:
+            code, out = run_cli(root, 'new', 'bug', '0.1', 'x', 'y',
+                                '--caused-by', '0.1/alpha')
+            self.assertEqual(code, 2, out)
+            self.assertEqual(self._bug_dir(root), [])
 
 
 class NewRefusesUnsafeSlugs(unittest.TestCase):

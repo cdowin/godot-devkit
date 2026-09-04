@@ -5,3 +5,6 @@ uv.lock
 
 # Gate transcripts: one slot per gate, cleared per run, bounded by construction.
 .gate-reports/
+
+# Per-worktree scope marker tools/dev/agent-worktree.sh plants for the hooks to read.
+.agent-scope
