@@ -125,7 +125,8 @@ exit "$$status"
 endef
 
 .PHONY: help doctor parse lint warnings unit integration integration-all \
-        integration-diff scenario smoke capture import-cache refs scene \
+        integration-diff integration-list scenario smoke capture \
+        import-cache refs scene \
         scene-diff orphans \
         autoloads pm pm-scan uid-scan hermetic-scan hooks-self-test \
         runners-self-test check precommit milestone
@@ -221,6 +222,15 @@ integration-all: ## Every integration scenario, one process each, N in parallel
 # uncommitted change — so a clean tree runs exactly what `smoke` runs.
 integration-diff: ## The scenarios covering what the diff against REF touched, plus smoke
 	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF))
+
+# The roster `--all` boots, one repo-relative path per line, booting nothing.
+# Not a gate — the list IS the output — and it lives here rather than as a
+# bare `bash … --list` because this file is where the runner's exports live:
+# `check test-shape` asks its header rule of exactly this list, THROUGH this
+# target, so a keep-list exported above reaches `--list` the same way it
+# reaches `integration`. Whoever runs the gate gets the same census.
+integration-list: ## The roster --all would boot, one path per line (what check test-shape asks)
+	@bash $(GDK_RUNNERS_DIR)/integration.sh --list
 
 scenario: ## One scenario, cold:  make scenario NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make scenario NAME=<scenario>"; exit 2; }

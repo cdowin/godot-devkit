@@ -148,20 +148,33 @@ GOOD_HEADER = ('extends "res://tests/integration/support/scenario_base.gd"\n'
                'func run() -> void:\n\tpass\n')
 
 
-INTEGRATION_RUNNER = (REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
-                      / 'integration.sh')
+INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
+INTEGRATION_RUNNER = INSTALLABLES / 'integration.sh'
+MAKEFILE_DEVKIT = INSTALLABLES / 'Makefile.devkit'
 RUNNER_REL = 'tools/dev/runners/integration.sh'
 CAPTURE = 'tests/integration/thing_capture.gd'
 SUPPORT_STUB = 'tests/integration/support/stub.gd'
+KEEP_LIST = {'GDK_CAPTURE_GATE_RE': '^(thing_capture)$'}
+# The two lines a consumer's Makefile is, per the README.
+CONSUMER_MAKEFILE = 'DEVKIT_VERSION := v0.0.0\ninclude Makefile.devkit\n'
 
 
-def _runner(root, rel: str = RUNNER_REL) -> None:
+def _makefile(root, extra: str = '') -> None:
+    """The consumer's Makefile: the pin, the include, and whatever it exports
+    to its runners — which is where a keep-list lives, and why the roster is
+    asked through `make integration-list` rather than `bash … --list`."""
+    shutil.copy2(MAKEFILE_DEVKIT, root / 'Makefile.devkit')
+    (root / 'Makefile').write_text(extra + CONSUMER_MAKEFILE, encoding='utf-8')
+
+
+def _runner(root, rel: str = RUNNER_REL, exports: str = '') -> None:
     """The header rule is asked of the roster the integration runner boots,
-    read from the runner itself — so a `header = true` repo carries one, at
-    the depth install-runners writes it."""
+    through the Makefile that includes the standard set — so a `header = true`
+    repo carries both, the runner at the depth install-runners writes it."""
     target = root / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(INTEGRATION_RUNNER, target)
+    _makefile(root, exports)
 
 
 def _scenario(root, rel: str, body: str) -> None:
@@ -368,21 +381,115 @@ class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn('1 the runner would boot', out)
 
-    def test_a_keep_listed_capture_is_on_the_roster_and_is_asked(self) -> None:
+    def test_a_keep_list_the_makefile_exports_reaches_the_roster(self) -> None:
         """The runner's own configuration decides — GDK_CAPTURE_GATE_RE makes
-        a capture a gate, and then it is asked. A rule re-derived in the gate
-        could not know that."""
+        a capture a gate, and then it is asked. That knob is a MAKEFILE
+        export, so it reaches `--list` only through make: the gate's own
+        process has no such variable here, and the capture must be asked
+        regardless. Red at HEAD: `bash <runner> --list` from the gate's
+        process saw no keep-list and PASSed over the capture."""
         with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
             _scenario(root, HEADED, GOOD_HEADER)
             _scenario(root, CAPTURE, 'extends Node\n')
             _scenario(root, SUPPORT_STUB, 'extends Node\n')
             _config(root, HEADER_ON)
-            _runner(root)
-            with mock.patch.dict(os.environ, {'GDK_CAPTURE_GATE_RE': '^(thing_capture)$'}):
+            _runner(root, exports=('GDK_CAPTURE_GATE_RE := ^(thing_capture)$$\n'
+                                   'export GDK_CAPTURE_GATE_RE\n'))
+            with mock.patch.dict(os.environ, clear=False):
+                os.environ.pop('GDK_CAPTURE_GATE_RE', None)
                 code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn(f'NO-HEADER  {CAPTURE}', out)
+        self.assertIn('2 the runner would boot', out)
         self.assertNotIn(SUPPORT_STUB, out)
+
+    def test_a_keep_list_in_the_gates_own_environment_never_reaches_the_roster(self) -> None:
+        """The adversarial half of "the roster is the tree's": the SAME
+        variable in the gate's own environment — a shell export, a parent
+        make's leftovers — must change nothing, or the census is a function
+        of who ran the gate (147 under make, 137 from the shim, measured).
+        Red at HEAD: the env reached `--list` and the capture was asked."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _scenario(root, CAPTURE, 'extends Node\n')
+            _config(root, HEADER_ON)
+            _runner(root)
+            with mock.patch.dict(os.environ, KEEP_LIST):
+                code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+        self.assertIn('1 the runner would boot', out)
+        self.assertNotIn(CAPTURE, out)
+
+    def test_the_invoking_makes_flags_do_not_reach_the_roster(self) -> None:
+        """A gate run under `make -n check` inherits MAKEFLAGS=n; a nested
+        make that honoured it would print the recipe instead of running it,
+        and the recipe text is not a roster. Stripped, so the answer is real."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            _runner(root)
+            with mock.patch.dict(os.environ, {'MAKEFLAGS': 'n', 'MFLAGS': '-n'}):
+                code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+        self.assertIn('1 the runner would boot', out)
+
+    def test_a_makefile_without_the_target_is_a_config_error_naming_it(self) -> None:
+        """A consumer on a Makefile.devkit from before the target, or a
+        Makefile that never included one: exit 2, and the message names the
+        target and where it comes from — never a roster guessed some other
+        way. Red at HEAD: the gate never asked make, so this PASSed."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            _runner(root)
+            (root / 'Makefile').write_text('all:\n\t@true\n', encoding='utf-8')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 2, out)
+        self.assertIn('integration-list', out)
+        self.assertIn('Makefile.devkit', out)
+
+    def test_no_makefile_at_all_is_the_same_config_error(self) -> None:
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            _runner(root)
+            (root / 'Makefile').unlink()
+            (root / 'Makefile.devkit').unlink()
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 2, out)
+        self.assertIn('integration-list', out)
+
+    def test_a_fail_with_the_header_on_prints_one_census_per_line(self) -> None:
+        """A size finding is asked of the tracked tier minus infra (3 here:
+        the headed scenario, the small one, the capture tool); a header
+        finding of the roster (2: the capture tool is not booted). One
+        sentence holding both — `2 finding(s) across 3 scenario(s)` beside a
+        roster of 2 — was two censuses and neither number was the other's.
+        Red at HEAD: the verdict line read `FAIL — 2 finding(s) across 3`."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)          # 7 lines: over cap 3
+            _scenario(root, SMALL, 'extends Node\n')       # 1 line, no header
+            _scenario(root, CAPTURE, 'extends Node\n')     # tracked, not booted
+            _config(root, '[test_shape]\ncap = 3\nheader = true\n')
+            _runner(root)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn('[check:test-shape] FAIL — 2 finding(s)\n', out)
+        self.assertIn('  size: 1 finding(s) across 3 scenario(s) under '
+                      'tests/integration/\n', out)
+        self.assertIn('  header: 1 finding(s) across 2 the runner would boot\n',
+                      out)
+        self.assertNotIn('finding(s) across 3 scenario(s)\n', out)
+
+    def test_a_fail_with_the_header_off_keeps_the_one_census_line(self) -> None:
+        """The header-off consumer's line shape is untouched: one census, the
+        tracked tier, on the verdict line as before."""
+        with temp_repo('test_shape_repo', only=SCENARIOS) as root:
+            _config(root, CAP_5)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn('FAIL — 1 finding(s) across 2 scenario(s)\n', out)
+        self.assertNotIn('size:', out)
 
     def test_a_ledger_line_naming_a_file_the_runner_does_not_boot_is_stale(self) -> None:
         """The ledger only shrinks: a line for a capture tool is a debt that
@@ -413,9 +520,14 @@ class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
             old.parent.mkdir(parents=True)
             old.write_text('#!/usr/bin/env bash\necho "unknown flag" >&2; exit 2\n',
                            encoding='utf-8')
+            _makefile(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 2, out)
         self.assertIn('--force', out)
+        # The runner's OWN exit came back through make's `Error 2` line —
+        # not make's exit 2 for any failed recipe, which would read "boots
+        # nothing" and a runner that boots nothing the same.
+        self.assertIn('exited 2', out)
 
     def test_a_runner_that_boots_nothing_is_a_fail_not_a_pass_over_nothing(self) -> None:
         """A tracked tier of one capture tool: the cap census is 1, the roster

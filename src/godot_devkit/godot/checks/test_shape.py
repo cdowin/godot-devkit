@@ -48,9 +48,19 @@ tool, the keep-list, the infra basenames) is configured in the runner file and
 in GDK_* env, which a consumer edits and no TOML reader can see, so a roster
 re-derived here was a second answer — measured on one consumer, 160 against
 137, and the header rule was being asked of 22 capture tools and a support
-stub. `[test_shape] runner` names the file (stock: where install-runners
-writes it). `header = true` with no runner there is exit 2; a runner that
-boots nothing is a FAIL, never a PASS over nothing. CHECK 1 and 2 keep the
+stub. That GDK_* env is the consumer MAKEFILE's (`GDK_CAPTURE_GATE_RE := …`
+plus `export`), so `bash <runner> --list` spawned from the gate's own process
+answered with whatever the gate happened to inherit — 147 under `make check`,
+137 from the `tools/dev/devkit` shim or a bare `uvx` — a census that was a
+function of the CALLER, not of the tree. The gate therefore asks THROUGH the
+consumer's `make integration-list` (a `Makefile.devkit` target) with the
+GDK_* and MAKE* variables of its own environment stripped: the roster is what
+a clean-shell `make integration` would boot, whoever runs the gate. No such
+target is exit 2 naming it. `[test_shape] runner` names the file (stock:
+where install-runners writes it) and reaches the target as
+`GDK_RUNNERS_DIR`, so the gate and the target cannot name different files.
+`header = true` with no runner there is exit 2; a runner that boots nothing
+is a FAIL, never a PASS over nothing. CHECK 1 and 2 keep the
 tracked census minus infra: the cap prices what lives in the tier, and a
 capture tool that grew to 900 lines is tier weight whether or not the sweep
 boots it.
@@ -82,6 +92,7 @@ devkit.toml:
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -110,6 +121,25 @@ DEFAULT_HEADER = False
 # asked of the roster it prints, so a header = true repo carries one.
 DEFAULT_RUNNER = 'tools/dev/runners/integration.sh'
 ROSTER_FLAG = '--list'
+# The roster is asked THROUGH the consumer's make, so every export its
+# Makefile hands `make integration` reaches `--list` the same way. The
+# target is Makefile.devkit's; a Makefile that lacks it is exit 2 naming it.
+MAKE = 'make'
+ROSTER_TARGET = 'integration-list'
+# What the gate's own environment must NOT contribute to that answer: the
+# runner knobs (the consumer's Makefile sets them, or the runner defaults
+# them) and the invoking make's flags (a `-n` or a jobserver would reach the
+# nested run). Stripped, so the roster is a function of the tree alone.
+ROSTER_ENV_PREFIX = 'GDK_'
+ROSTER_ENV_DROPPED = ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL')
+# make turns any recipe failure into its own exit 2 and names the recipe's
+# real code on stderr — `make: *** [integration-list] Error 1` — which is
+# the only way to tell the runner's "boots nothing" (1) from its "no such
+# flag" (2) through the target.
+MAKE_ERROR_RE = re.compile(r'\] Error (\d+)\s*$')
+# make's own words for "there is no such target here", GNU make 3.81 and 4.x.
+NO_TARGET_MARKERS = ('No rule to make target', 'no makefile found',
+                     'No targets specified')
 # How much of the runner's stderr a refusal quotes.
 ROSTER_STDERR_LINES = 3
 PERCENT = 100
@@ -153,10 +183,13 @@ def runner_path_defect(rel: str) -> str | None:
 def runner_roster(root: Path, runner: str) -> list[str]:
     """The roster the runner would boot, repo-relative, sorted, deduplicated.
 
-    Runs `bash <runner> --list` — the runner boots nothing for it — under
-    `bash` by name, because a checkout can carry the file without its mode
-    bits. Raises RosterUnavailable rather than returning an empty roster:
-    a header rule asked of nothing must say so (rule 4).
+    Asked through `make integration-list` — the consumer's own Makefile, the
+    one place its runner exports live — with `GDK_RUNNERS_DIR` set to the
+    configured runner's directory, so the file this gate names is the file
+    the target runs. The gate's own GDK_* / MAKE* environment is dropped
+    first: the answer must be the tree's, never the caller's. Raises
+    RosterUnavailable rather than returning an empty roster: a header rule
+    asked of nothing must say so (rule 4).
     """
     path = root / runner
     if not path.is_file():
@@ -164,22 +197,38 @@ def runner_roster(root: Path, runner: str) -> list[str]:
             2, f'[{SECTION}] header = true asks the header rule of the roster '
                f'{runner} boots, and there is no such file — `install-runners` '
                f'writes it; a runner elsewhere is `[{SECTION}] runner`')
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(ROSTER_ENV_PREFIX)
+           and key not in ROSTER_ENV_DROPPED}
+    runners_dir = Path(runner).parent.as_posix()
+    argv = [MAKE, '-s', '--no-print-directory', '-C', str(root),
+            ROSTER_TARGET, f'GDK_RUNNERS_DIR={runners_dir}']
     try:
-        done = subprocess.run(['bash', str(path), ROSTER_FLAG], cwd=root,
-                              capture_output=True, text=True, encoding='utf-8',
-                              errors='replace')
+        done = subprocess.run(argv, cwd=root, env=env, capture_output=True,
+                              text=True, encoding='utf-8', errors='replace')
     except OSError as err:
-        raise RosterUnavailable(2, f'could not run {runner}: {err}') from err
-    said = ' / '.join(done.stderr.strip().splitlines()[-ROSTER_STDERR_LINES:])
-    if done.returncode == 1:
-        raise RosterUnavailable(1, f'{runner} boots NOTHING — {said}')
-    if done.returncode != 0:
+        raise RosterUnavailable(2, f'could not run {MAKE}: {err}') from err
+    if done.returncode == 0:
+        return sorted({str(Path(line.strip())) for line in done.stdout.splitlines()
+                       if line.strip()})
+    stderr_lines = done.stderr.strip().splitlines()
+    if any(marker in done.stderr for marker in NO_TARGET_MARKERS):
         raise RosterUnavailable(
-            2, f'{runner} {ROSTER_FLAG} exited {done.returncode} ({said}) — a '
-               f'runner installed before {ROSTER_FLAG} existed answers this; '
-               f're-install the runners with `install-runners --force`')
-    return sorted({str(Path(line.strip())) for line in done.stdout.splitlines()
-                   if line.strip()})
+            2, f'`{MAKE} {ROSTER_TARGET}` is not a target here — the roster is '
+               f'asked through your Makefile so the exports `make integration` '
+               f'boots with reach {ROSTER_FLAG} too; `include Makefile.devkit` '
+               f'defines it, and `install-runners --force` writes the current '
+               f'one')
+    runner_exit = next((int(m.group(1)) for line in reversed(stderr_lines)
+                        if (m := MAKE_ERROR_RE.search(line))), 2)
+    said = ' / '.join(line for line in stderr_lines[-ROSTER_STDERR_LINES:]
+                      if not line.startswith(f'{MAKE}:'))
+    if runner_exit == 1:
+        raise RosterUnavailable(1, f'{runner} boots NOTHING — {said}')
+    raise RosterUnavailable(
+        2, f'{runner} {ROSTER_FLAG} exited {runner_exit} ({said}) — a runner '
+           f'installed before {ROSTER_FLAG} existed answers this; re-install '
+           f'the runners with `install-runners --force`')
 
 
 def header_block(text_body: str) -> list[str]:
@@ -404,8 +453,20 @@ def run() -> int:
     if findings or header_findings:
         for finding in findings + header_findings:
             print(finding)
-        print(f'\n{TAG} FAIL — {len(findings) + len(header_findings)} '
-              f'finding(s) across {len(scanned)} scenario(s)')
+        # One census per line. The cap is asked of the tracked tier minus
+        # infra; the header rule of the roster the runner boots. A verdict
+        # that said "N findings across 160" while the roster was 147 was
+        # two censuses in one sentence, and neither number was the other's.
+        if header:
+            print(f'\n{TAG} FAIL — {len(findings) + len(header_findings)} '
+                  f'finding(s)')
+            print(f'  size: {len(findings)} finding(s) across {len(scanned)} '
+                  f'scenario(s) under {scenario_root}/')
+            print(f'  header: {len(header_findings)} finding(s) across '
+                  f'{len(roster)} the runner would boot')
+        else:
+            print(f'\n{TAG} FAIL — {len(findings)} finding(s) across '
+                  f'{len(scanned)} scenario(s)')
         if findings:
             print(f'  A scenario over {cap} lines is usually a unit suite '
                   f"wearing a scenario's clothes:")
