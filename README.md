@@ -92,7 +92,7 @@ done. This is the order for a tree that already has content in it.
 Order matters — some start red by design. Steps 2 and 4 are also the cure for `.tscn`/`.tres` churn.
 That churn — files you did not edit turning up in every commit — has three causes: path-only
 `ext_resource` refs, which Godot 4.4+ rewrites silently on any editor or import pass; what
-`PackedScene.pack()` drops (the header uid, `index=` on instance children, `[editable path=]`), which
+`PackedScene.pack()` drops (uid-in-refs, the header uid, `index=` on instance children), which
 `scene canonicalize` restores; and hand-authored `@export` defaults Godot's writer omits, which
 `scene canonicalize --elide-defaults` deletes.
 
@@ -158,7 +158,7 @@ Nodes are addressed **by path**, the way `.tscn` addresses them in `parent=` and
 | `scene add <file> <parent> <name> --instance res://x.tscn` | Add an instance node (no `type=`); the `PackedScene` ref is minted from the target scene's own uid, or refused — never invented |
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | Author / remove one `[connection]` in Godot's serialization position; ambiguous disconnects are refused, `--flags` names one |
 | `refs --retarget <old> <new> [--dry-run]` | After a `git mv`: rewrite every `ext_resource` path attr and exact `preload`/`load` literal naming old (uid untouched); unprovable occurrences are SKIPPED with a reason and exit 1 |
-| `scene canonicalize <file>... [--elide-defaults]` | Restore what `PackedScene.pack()` drops: uid-in-refs, the header uid, `index=` on instance-child overrides, `[editable path=]`. `--elide-defaults` also **deletes** `.tres` assignments proven equal to the script's `@export` default |
+| `scene canonicalize <file>... [--elide-defaults]` | Restore what `PackedScene.pack()` drops: uid-in-refs, the header uid, `index=` on instance-child overrides. `[editable path=]` is authored state, not a loss, and is left exactly as the source stated it. `--elide-defaults` also **deletes** `.tres` assignments proven equal to the script's `@export` default |
 | `tiles paint <file> --layer N --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` | Fill a rectangle of one TileMapLayer; only that one `tile_map_data` assignment is regenerated |
 | `tiles erase <file> --layer N --region X0,Y0,X1,Y1` | Delete every cell in a rectangle |
 

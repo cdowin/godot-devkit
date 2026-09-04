@@ -19,6 +19,17 @@ it leaves out are load-bearing, and all three recur on every single pass:
    child leaks as an orphan on EVERY load. That is what stack-overflowed an
    unrelated unit test.
 
+**`[editable path=]` is NOT one of them, and is never written here.** The marker
+records the editor's per-instance "Editable Children" toggle and nothing else:
+the engine emits it from the live `is_editable_instance(node)` flag, and applies
+it on load LAST, after every node and property already exists, by calling
+`set_editable_instance()`. Overrides on an instance's children neither require
+it nor imply it. Deriving one from the node tree therefore invents authored
+state — it hands a human a sub-tree the scene never said was editable, and the
+next editor save writes the marker out for good. Both consumers' trees show the
+two facts are independent in both directions: markers on hosts with no
+overridden child, and overridden children under hosts with no marker.
+
 `--elide-defaults` adds the fourth, and it SUBTRACTS instead of restoring: a
 hand-authored `.tres` spells out properties whose value equals the script's
 `@export` default, and Godot's writer omits exactly those — so the file diffs on
@@ -53,7 +64,6 @@ TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
 SCENE_HEADER_KINDS = ('gd_scene', RESOURCE_HEADER_KIND)
 INSTANCE_ATTR = 'instance'
-EDITABLE_KIND = 'editable'
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
@@ -159,32 +169,6 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
     return fixed
 
 
-def _restore_editable_markers(doc: TscnDocument) -> list[str]:
-    """An instance whose children are overridden is an editable instance; Godot
-    writes the marker, `pack()` does not."""
-    declared = {s.attrs.get('path') for s in doc.sections if s.kind == EDITABLE_KIND}
-    missing: list[str] = []
-    for node in doc.nodes:
-        if 'type' in node.attrs or INSTANCE_ATTR in node.attrs:
-            continue
-        host = _instance_host(doc, doc.node_path(node))
-        if host is None:
-            continue
-        host_path = '/'.join(doc.node_path(host[0]))
-        if host_path not in declared:
-            declared.add(host_path)
-            missing.append(host_path)
-    if not missing:
-        return []
-    end = len(doc.lines)
-    while end > 0 and not doc.lines[end - 1].strip():
-        end -= 1                                     # keep the file's trailing newline
-    markers = [line for host in missing for line in ('', f'[{EDITABLE_KIND} path="{host}"]')]
-    doc.lines[end:end] = markers
-    doc._reparse()
-    return [f'  EDITABLE  added [editable path="{host}"]' for host in missing]
-
-
 def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> list[str]:
     """Delete assignments PROVEN equal to the script's declared default."""
     redundant = analyzer.analyze(doc.sections)
@@ -205,7 +189,6 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
     report = _restore_ref_uids(doc, uids)
     report += _restore_header_uid(doc, rel, uids)
     report += _restore_indexes(doc, bases)
-    report += _restore_editable_markers(doc)
     if analyzer is not None:
         report += _elide_redundant_defaults(doc, analyzer)
     return doc.text, report
