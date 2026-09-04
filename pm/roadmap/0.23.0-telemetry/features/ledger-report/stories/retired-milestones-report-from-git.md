@@ -3,7 +3,7 @@ id: 0.23.0/ledger-report/retired-milestones-report-from-git
 feature: 0.23.0/ledger-report
 milestone: "0.23.0"
 name: pm ledger report reads a retired milestone's ledger and frontmatter from git via the prune-log anchor
-status: review
+status: done
 owner:
 depends_on: []
 ---
