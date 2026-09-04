@@ -2,9 +2,9 @@
 id: 0.24.0/bugs/verdict-refusals-do-not-name-the-separator-row-or-a-pipe-in-a-reason
 milestone: "0.24.0"
 name: "a markdown separator row or a `|` inside a disposition reason refuses with a message that does not name what was written"
-status: open
+status: fixed
 caught_in: "0.24.0"
-fix_milestone:
+fix_milestone: 0.24.0
 caused_by: 0.23.0/review-record-shape
 ---
 
