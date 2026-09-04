@@ -16,6 +16,18 @@ WHAT IT ASSERTS, and why each is more than "it did not crash":
   * the checkout is byte-clean before and after. Write verbs never run here —
     the consumers are shipping repos with their own dirty-tree gates — and a
     smoke run that leaves one dirty is a broken smoke run, not a thorough one.
+  * THE GATES RUN AGAINST THE RUNNERS THE RELEASE WOULD SHIP, in a `git
+    worktree` of the consumer. Run in place they graded the working tree's
+    checks against the runners the consumer's PIN installed — a combination a
+    consumer occupies for the minutes between a pin bump and `install-runners
+    --force`, and never the one a release ships. v0.23.0 found it: `check
+    test-shape` asks its roster through `make integration-list`, nullbound had
+    opted into the header rule, its `Makefile.devkit` predated the target, and
+    the smoke was red on a consumer state the release's own adoption note says
+    to leave. So `check all` and the two censuses run inside a throwaway
+    worktree with `install-runners --force` applied to it; the read-only verbs
+    stay on the main checkout, because they are what the consumer's pin runs
+    today.
   * a consumer that is not checked out is SKIPPED LOUDLY and named in the
     summary. Silence about what was not run is the thing this file's own
     contract forbids.
@@ -70,6 +82,17 @@ CONSUMERS = (Path.home() / 'workspace' / 'trail',
              Path.home() / 'workspace' / 'nullbound')
 SCENE_SUFFIXES = ('.tres', '.tscn')
 DEFAULT_EXCLUDES = ('addons/',)
+
+# --- the release's runners, in a worktree of the consumer ---------------------
+RUNNERS = 'install-runners'
+FORCE = '--force'
+WORKTREE_PREFIX = 'gdk-release-runners-'
+WORKTREE_DIR = 'wt'
+# What the install says it wrote, per file. READ rather than assumed: the row
+# compares it against a census computed here from the installable bodies, and a
+# count taken from the thing being graded agrees with any bug it has.
+WROTE_RE = re.compile(r'^\[install\] wrote (.+)$', re.MULTILINE)
+EXECUTABLE_BITS = 0o111
 
 # --- the fresh-project probe --------------------------------------------------
 FRESH = 'fresh project'
@@ -130,10 +153,16 @@ def working_tree_devkit() -> str:
             f'{sys.executable} -m godot_devkit.cli')
 
 
-def git(root: Path, *argv: str) -> list[str]:
-    proc = subprocess.run(['git', *argv], cwd=root,
+def git_run(root: Path, *argv: str) -> subprocess.CompletedProcess:
+    """One git invocation. `git()` reads its lines; the worktree verbs need the
+    EXIT CODE and the stderr, because a removal that failed quietly leaves a
+    worktree behind in somebody's live repo. One spawner, two readings."""
+    return subprocess.run(['git', *argv], cwd=root,
                           capture_output=True, text=True)
-    return [ln for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+def git(root: Path, *argv: str) -> list[str]:
+    return [ln for ln in git_run(root, *argv).stdout.splitlines() if ln.strip()]
 
 
 class Report:
@@ -471,6 +500,126 @@ def defaults_elision(root: Path, report: Report) -> None:
                  f'and idempotent' if not faults else '; '.join(faults))
 
 
+def runners_ahead(root: Path) -> list[str]:
+    """The `install-runners` entries the WORKING TREE would change in `root`.
+
+    Computed from the installable bodies and the destination's mode — the two
+    ways the installer has something to write, restated here from the disk
+    rather than read off the install's own report, because the row below
+    compares the two against each other.
+    """
+    ahead = []
+    for name, rel in install.PLANS[RUNNERS]:
+        target = root / rel
+        try:
+            current = target.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
+            # Missing, or not text this can compare: either way the install
+            # has that file to write.
+            ahead.append(rel)
+            continue
+        armed = (not rel.endswith(install.EXECUTABLE_SUFFIX)
+                 or target.stat().st_mode & EXECUTABLE_BITS)
+        if current != install.body_of(name) or not armed:
+            ahead.append(rel)
+    return ahead
+
+
+def against_the_release_runners(root: Path, report: Report) -> None:
+    """`check all` and the two censuses, in a throwaway `git worktree` of the
+    consumer carrying the runners the working tree would INSTALL.
+
+    THE MAIN CHECKOUT IS NEVER WRITTEN TO, which is the whole reason this is a
+    worktree and not an install: `git worktree add` costs a checkout and no
+    copy, every write lands inside it, and the removal is in a `finally`
+    reported as its own row — a worktree leaked into somebody's live repo is
+    worse than a red smoke.
+
+    The worktree carries HEAD, so uncommitted work in the consumer is not
+    graded here. The read-only verbs above still see it.
+
+    A FAILING INSTALL IS A RED ROW, never a fallback to the in-place run. The
+    fallback would be the exact blind spot this exists to close, and it would
+    look green.
+
+    `--force` is what makes this usable on a real consumer: every runner ships
+    an editable `project config` header, and a run that refused on one would
+    redden the smoke on every consumer that edited theirs — 0.24.0/m1's shape,
+    from the other side. The consequence is said out loud rather than hidden:
+    a consumer whose header edits are load-bearing sees the STOCK runners
+    here, and a gate that then fails is a finding about the release's
+    defaults, not a false red.
+    """
+    name = root.name
+    before = git(root, 'worktree', 'list')
+    ahead = runners_ahead(root)
+    holder = tempfile.mkdtemp(prefix=WORKTREE_PREFIX)
+    worktree = Path(holder) / WORKTREE_DIR
+    try:
+        added = git_run(root, 'worktree', 'add', '--detach',
+                        str(worktree), 'HEAD')
+        if added.returncode != 0:
+            report.bad(name, 'release worktree',
+                       f'`git worktree add` exit {added.returncode}: '
+                       f'{added.stderr.strip()[-800:]}')
+            report.skipped.append(
+                f'{name}: check all + the two censuses — no worktree, and this '
+                f'run does NOT fall back to the consumer\'s own runners')
+            return
+
+        code, out = devkit(worktree, RUNNERS, FORCE)
+        wrote = WROTE_RE.findall(out)
+        if code != 0:
+            report.bad(name, 'runners ahead',
+                       f'`{RUNNERS} {FORCE}` exit {code} — the release\'s '
+                       f'runners are NOT in the worktree:\n{out[-1500:]}')
+            report.skipped.append(
+                f'{name}: check all + the two censuses — the release\'s '
+                f'runners would not install, and this run does NOT fall back '
+                f'to the consumer\'s own')
+            return
+        report.check(name, 'runners ahead', sorted(wrote) == sorted(ahead),
+                     f'{len(ahead)} file(s) ahead of the consumer\'s install'
+                     + (f': {", ".join(ahead)}' if ahead else
+                        ' — the consumer is current with the working tree')
+                     if sorted(wrote) == sorted(ahead) else
+                     f'{len(ahead)} ahead by body+mode, {len(wrote)} written by '
+                     f'the install: only-ahead {sorted(set(ahead) - set(wrote))}, '
+                     f'only-written {sorted(set(wrote) - set(ahead))}')
+
+        code, out = devkit(worktree, 'check', 'all')
+        report.check(name, 'check all', code == 0,
+                     f'exit {code} against the release\'s runners'
+                     + ('' if code == 0 else f'\n{out[-2000:]}'))
+
+        population = _scene_population(worktree)
+        for gate, pattern in (('check tres', r'across (\d+) \.tres/\.tscn'),
+                              ('check uid', r'across (\d+) file\(s\)')):
+            code, out = devkit(worktree, *gate.split())
+            match = re.search(pattern, out)
+            if not match:
+                report.bad(name, f'{gate} census', 'no census line in output')
+                continue
+            report.check(name, f'{gate} census',
+                         int(match.group(1)) == population,
+                         f'gate says {match.group(1)}, git ls-files says '
+                         f'{population}')
+    finally:
+        removed = git_run(root, 'worktree', 'remove', '--force', str(worktree))
+        git_run(root, 'worktree', 'prune')
+        shutil.rmtree(holder, ignore_errors=True)
+        after = git(root, 'worktree', 'list')
+        leaked = [ln for ln in after if str(worktree) in ln]
+        report.check(name, 'worktree list unchanged', after == before,
+                     f'{len(before)} worktree(s), the same before and after'
+                     if after == before else
+                     (f'LEAKED a worktree into a live repo — `git worktree '
+                      f'remove --force` exit {removed.returncode}: '
+                      f'{removed.stderr.strip()[-500:]}\n{leaked}' if leaked
+                      else f'the list changed and none of it is this run\'s: '
+                           f'{sorted(set(after) ^ set(before))}'))
+
+
 def smoke(root: Path, report: Report) -> None:
     name = root.name
     before = git(root, 'status', '--porcelain')
@@ -481,20 +630,7 @@ def smoke(root: Path, report: Report) -> None:
         report.ok(name, 'pre-existing dirty tree',
                   f'{len(before)} path(s) already modified — not this run')
 
-    code, out = devkit(root, 'check', 'all')
-    report.check(name, 'check all', code == 0,
-                 f'exit {code}' + ('' if code == 0 else f'\n{out[-2000:]}'))
-
-    population = _scene_population(root)
-    for gate, pattern in (('check tres', r'across (\d+) \.tres/\.tscn'),
-                          ('check uid', r'across (\d+) file\(s\)')):
-        code, out = devkit(root, *gate.split())
-        match = re.search(pattern, out)
-        if not match:
-            report.bad(name, f'{gate} census', f'no census line in output')
-            continue
-        report.check(name, f'{gate} census', int(match.group(1)) == population,
-                     f'gate says {match.group(1)}, git ls-files says {population}')
+    against_the_release_runners(root, report)
 
     code, out = devkit(root, 'autoloads')
     declared = _autoload_count(root)
@@ -663,7 +799,8 @@ def main() -> int:
         return 0
     print(f'[smoke] PASS — {len(report.rows)} check(s) across '
           f'{len(present)} consumer(s) + the fresh project, every census '
-          f'matched an independent count, both checkouts unchanged')
+          f'matched an independent count, the gates run against the release\'s '
+          f'own runners, both checkouts unchanged and no worktree left behind')
     return 0
 
 
