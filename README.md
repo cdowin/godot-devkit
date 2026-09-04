@@ -175,8 +175,12 @@ drops every `uid=`, and can save an EMPTY file returning `OK`). `canonicalize` r
 An install verb writes a file. **Once.** A destination that exists and is not byte-for-byte what would
 be written is refused by path, naming both remedies — move it aside, or `--force`. `--diff` prints what
 a run would change and writes nothing. No manifest, no merge: after the write the file is the repo's.
-Every refusal is decided before the first byte, so a collision on the third file leaves the first two
-unwritten.
+Every refusal is decided before the first byte; a collision withholds **that file**, so the entries
+with nothing in their way are written, every collision is named, and the run exits 1 because a
+replacement was held back. A difference confined to the `project config` header the file invites you to
+edit is reported as one — the rest of that file is byte-current, so it needs no `--force`, and `--force`
+would replace the header too. A destination that cannot be written at all (a directory, a read-only
+path, a parent that is a file) still refuses the whole command with nothing written.
 
 | Verb | Writes |
 |---|---|
