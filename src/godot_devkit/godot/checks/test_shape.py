@@ -188,8 +188,9 @@ def runner_roster(root: Path, runner: str) -> list[str]:
     configured runner's directory, so the file this gate names is the file
     the target runs. The gate's own GDK_* / MAKE* environment is dropped
     first: the answer must be the tree's, never the caller's. Raises
-    RosterUnavailable rather than returning an empty roster: a header rule
-    asked of nothing must say so (rule 4).
+    RosterUnavailable rather than returning an empty roster — including when
+    the target exits 0 having printed nothing: a header rule asked of nothing
+    must say so (rule 4), and never PASS over it.
     """
     path = root / runner
     if not path.is_file():
@@ -209,8 +210,20 @@ def runner_roster(root: Path, runner: str) -> list[str]:
     except OSError as err:
         raise RosterUnavailable(2, f'could not run {MAKE}: {err}') from err
     if done.returncode == 0:
-        return sorted({str(Path(line.strip())) for line in done.stdout.splitlines()
-                       if line.strip()})
+        roster = sorted({str(Path(line.strip())) for line in done.stdout.splitlines()
+                         if line.strip()})
+        if not roster:
+            # Exit 0 and nothing printed is a target that never asked the runner
+            # (the runner's own `--list` of nothing exits 1 — the FAIL above).
+            # Returning [] here read `roster: 0 scenario(s)` then PASS: a header
+            # rule asked of nothing must say so (rule 4), by construction.
+            raise RosterUnavailable(
+                2, f'`{MAKE} {ROSTER_TARGET}` exited 0 and printed NOTHING — the '
+                   f'roster is what that target prints, so it must print the '
+                   f'scenarios `{runner} {ROSTER_FLAG}` boots, one per line, or '
+                   f'fail; `install-runners --force` writes the current runner and '
+                   f'`include Makefile.devkit` the current target')
+        return roster
     stderr_lines = done.stderr.strip().splitlines()
     if any(marker in done.stderr for marker in NO_TARGET_MARKERS):
         raise RosterUnavailable(

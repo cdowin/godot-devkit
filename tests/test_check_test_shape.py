@@ -540,6 +540,26 @@ class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn('boots NOTHING', out)
 
+    def test_a_target_that_exits_zero_and_prints_nothing_is_a_config_error(self) -> None:
+        """`integration-list` answered exit 0 with a blank stdout — a target
+        that never asked the runner. The roster is what the target prints, and
+        an empty one from a green exit was `roster: 0 scenario(s)` then PASS
+        `(0 the runner would boot)`: a PASS over nothing, which the module
+        promises it refuses. Exit 2, naming the target and that it printed
+        nothing — by construction in `runner_roster`, not only through the
+        runner's own empty check. Red at HEAD: exit 0."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            _runner(root)
+            (root / 'Makefile').write_text('integration-list:\n\t@true\n',
+                                           encoding='utf-8')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 2, out)
+        self.assertIn('integration-list', out)
+        self.assertIn('printed NOTHING', out)
+        self.assertNotIn('PASS', out)
+
     def test_the_runner_path_is_configurable_and_repo_relative(self) -> None:
         elsewhere = 'ci/dev/runners/integration.sh'
         with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
