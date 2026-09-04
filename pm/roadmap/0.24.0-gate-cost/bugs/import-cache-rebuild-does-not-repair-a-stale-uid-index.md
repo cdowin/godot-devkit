@@ -2,9 +2,9 @@
 id: 0.24.0/bugs/import-cache-rebuild-does-not-repair-a-stale-uid-index
 milestone: "0.24.0"
 name: "`gdk_rebuild_import_cache` cannot repair a stale uid index, so the cold-cache auto-recovery retries the same failure and every scenario fails green-inside"
-status: open
+status: fixed
 caught_in: "0.24.0"
-fix_milestone:
+fix_milestone: "0.24.0"
 caused_by:
 ---
 
