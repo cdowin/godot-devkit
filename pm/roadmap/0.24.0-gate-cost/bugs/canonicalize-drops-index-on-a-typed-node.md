@@ -2,9 +2,9 @@
 id: 0.24.0/bugs/canonicalize-drops-index-on-a-typed-node
 milestone: "0.24.0"
 name: "`scene canonicalize` never restores `index=` on a node that also carries `type=`, so every inherited scene loses child ordering"
-status: open
+status: fixed
 caught_in: "0.24.0"
-fix_milestone:
+fix_milestone: 0.24.0
 caused_by:
 ---
 
