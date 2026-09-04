@@ -243,6 +243,12 @@ class TheHeaderRefusalMatrix(unittest.TestCase):
         'systems/al pha': 'carries whitespace',
         'systems/nowhere': 'is not in the tree',
         'a' * 201: 'is longer than 200 characters',
+        # A doubled slash. `rstrip('/')` read `systems/alpha//` as a directory
+        # that exists, and Path() collapsed `systems//alpha` to one that does —
+        # the gate passed both, and the runner (which strips ONE slash and
+        # compares strings) never selected on either.
+        'systems/alpha//': 'carries an empty segment',
+        'systems//alpha': 'carries an empty segment',
     }
 
     def _run(self, covers_value: str) -> tuple[int, str]:

@@ -778,3 +778,23 @@ def test_a_non_ascii_path_is_compared_literally_not_c_quoted(tmp_path):
     assert done.returncode == 0, done.stdout + done.stderr
     assert _ran(done) == {'alpha_flow', 'smoke'}, done.stdout
     assert '1 touched path(s)' in done.stdout, done.stdout
+
+
+def test_a_doubled_slash_entry_is_undeclared_not_a_silent_never_match(tmp_path):
+    """`## covers: systems/alpha//` — the gate normalised it away and passed;
+    the runner dropped ONE slash and compared `systems/alpha/` as a prefix,
+    which `systems/alpha/thing.gd` is not. The scenario was declared and
+    never selected, and nothing said so. One grammar in both now: an empty
+    segment is refused, so here it reads as UNDECLARED and is reported."""
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'tests' / 'integration' / 'alpha' / 'alpha_flow.gd').write_text(
+        COVERS_HEADER.replace('## covers: systems/alpha', '## covers: systems/alpha//'),
+        encoding='utf-8')
+    git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+    subprocess.run([*git, 'commit', '-q', '-am', 'doubled'], cwd=tmp_path, check=True)
+    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node2D\n', encoding='utf-8')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'smoke'}, done.stdout
+    assert 'UNDECLARED: 3 scenario(s)' in done.stdout, done.stdout
+    assert '    alpha_flow' in done.stdout, 'a doubled-slash entry read as a declaration that never matches'

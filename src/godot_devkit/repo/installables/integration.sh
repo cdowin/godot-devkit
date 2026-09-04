@@ -206,12 +206,18 @@ covers_entry_defect() {
 		*[\*\?\[]*) echo "carries a glob — a covers entry is a literal prefix"; return 0 ;;
 		*[[:space:]]*) echo "carries whitespace"; return 0 ;;
 		.|..|./*|../*|*/.|*/..|*/./*|*/../*) echo "carries a dot segment"; return 0 ;;
+		# After the ONE trailing slash scenario_covers drops, a slash with
+		# nothing after it is an empty segment: `a//b`, `a//`, `a/`. Compared as
+		# a prefix it can never match a path git names; the gate refuses it by
+		# the same name, so the two cannot disagree.
+		*//*|*/) echo "carries an empty segment (a doubled slash)"; return 0 ;;
 	esac
 	return 1
 }
 
 # scenario_covers <file> — the prefixes the scenario's header declares, one per
-# line, a trailing `/` dropped. The header is the leading run of blank, comment,
+# line, ONE trailing `/` dropped (exactly one, as the gate drops it — a second
+# is an empty segment the grammar refuses). The header is the leading run of blank, comment,
 # `extends`, `class_name` and annotation lines; a `## covers:` below the first
 # statement is prose, not a declaration. Several `## covers:` lines union. An
 # entry the grammar refuses is dropped here — the gate reports it.
@@ -410,7 +416,7 @@ self_test() {
 
 	# --- the covers-entry grammar ------------------------------------------
 	for bad in '' '/abs/x' '../x' 'a/../b' './x' 'a/./b' '.' '..' 'res://x' \
-		'a b' 'a\b' 'systems/*' 'a?b' 'a[b]' \
+		'a b' 'a\b' 'systems/*' 'a?b' 'a[b]' 'systems//alpha' 'systems/alpha//' 'a/' \
 		"$(printf 'a%.0s' $(seq 1 201))"; do
 		cases=$((cases + 1))
 		covers_entry_defect "$bad" >/dev/null || miss "covers admits '$bad'"
@@ -501,6 +507,16 @@ FIXTURE_EOF
 	cases=$((cases + 1))
 	out="$(scenario_covers "$scratch/plain_gate.gd" | tr '\n' ' ')"
 	[ -z "$out" ] || miss "an undeclared scenario should read as no entries, got '$out'"
+	# A doubled slash: one trailing slash is spelling, two is an empty segment.
+	# `systems/alpha//` lost ONE slash and compared `systems/alpha/` as a
+	# prefix of `systems/alpha/x.gd` — never true — while the gate's
+	# rstrip('/') passed it. Refused by name in both now.
+	mkdir -p "$scratch/dbl"
+	printf '## covers: systems/alpha//, systems//beta, systems/gamma/\n' > "$scratch/dbl/dbl_flow.gd"
+	cases=$((cases + 1))
+	out="$(scenario_covers "$scratch/dbl/dbl_flow.gd" | tr '\n' ' ')"
+	[ "$out" = "systems/gamma " ] \
+		|| miss "a doubled slash is an empty segment and dropped; one trailing slash is spelling — got '$out'"
 
 	# --- the slice ----------------------------------------------------------
 	cases=$((cases + 1))

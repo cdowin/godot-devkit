@@ -36,7 +36,8 @@ naming the ledger line to drop, so the ledger cannot go stale upward either.
   CHECK 3  every scenario off the header ledger carries both lines, well
            formed: a `Boots because:` naming a `tests/` path, and `covers:`
            entries that are repo-relative prefixes (no absolute, no `..`, no
-           scheme, no glob, no whitespace) each of which EXISTS in the tree.
+           scheme, no glob, no whitespace, no empty segment) each of which
+           EXISTS in the tree. The grammar is the runner's, entry for entry.
   CHECK 4  every scenario on the header ledger still exists, and carries no
            header — one that does has ratcheted out and the ledger line goes.
 
@@ -119,8 +120,10 @@ def read_header(text_body: str) -> tuple[str | None, list[str] | None]:
     """(boots, covers) — each None when its key is absent from the header.
 
     Several `## covers:` lines union; the first `## Boots because:` wins.
-    Entries are comma-split and trimmed; a trailing `/` is dropped so a
-    directory spelled either way is the same prefix.
+    Entries are comma-split and trimmed; ONE trailing `/` is dropped so a
+    directory spelled either way is the same prefix — exactly one, the same
+    as the runner, so a doubled slash reaches the grammar as the empty
+    segment it is rather than being normalised into a directory that exists.
     """
     boots: str | None = None
     covers: list[str] | None = None
@@ -133,9 +136,13 @@ def read_header(text_body: str) -> tuple[str | None, list[str] | None]:
             if boots is None:
                 boots = value
         else:
-            covers = (covers or []) + [
-                part.strip().rstrip('/') for part in value.split(',')]
+            covers = (covers or []) + [_one_trailing_slash_dropped(part.strip())
+                                       for part in value.split(',')]
     return boots, covers
+
+
+def _one_trailing_slash_dropped(entry: str) -> str:
+    return entry[:-1] if entry.endswith('/') else entry
 
 
 def covers_entry_defect(entry: str) -> str | None:
@@ -161,6 +168,12 @@ def covers_entry_defect(entry: str) -> str | None:
         return 'carries whitespace'
     if any(seg in ('.', '..') for seg in entry.split('/')):
         return 'carries a dot segment'
+    # After the one trailing slash the reader drops, a slash with nothing
+    # after it — `a//b`, `a//`, `a/` — is an empty segment. Path() would
+    # collapse it to a directory that exists; the runner compares strings and
+    # would never match it. Refused, so the two cannot disagree.
+    if '' in entry.split('/')[1:]:
+        return 'carries an empty segment (a doubled slash)'
     return None
 
 
