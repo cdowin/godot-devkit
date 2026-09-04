@@ -11,6 +11,13 @@ Every case below builds a REAL repo, installs the REAL corpus into it and runs
 the gate against it. Nothing disarms the checkout the suite is running in —
 that would be a test that breaks the tree it is proving.
 
+A hook can also be dead before the exec bit is ever asked about. Git's hook
+universe is every ENTRY in the directory, so a broken symlink or a directory
+holding a hook's name is a name git tries and cannot start — and enumerating
+only regular files does not miss it, it SUBTRACTS it: the census reads smaller
+than the directory and no line says why. `NOT A FILE` is that case, in both
+shipped surfaces (`doctor.sh` carried the same `-f` skip).
+
 The sharp case is `test_a_hook_that_starts_and_dies_...`: armed, executable,
 byte-present, and dead. It is the shape the installer measured on this
 package's own history — a 0.16.0 project-config header under a current body
@@ -22,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -182,6 +190,90 @@ def test_a_corpus_of_nothing_is_a_FAIL_not_a_PASS_over_nothing():
         code, out = gate()
     assert code == 1, out
     assert '0 hook(s)' in out, out
+
+
+# --- the census is the DIRECTORY --------------------------------------------
+# `Kind.FILE` is a universe declaration and a universe reason never renders, so
+# a non-regular entry left the walk with nothing saying so. Every case here
+# counts the directory with a raw listing, so a test can never inherit the
+# enumeration defect it exists to catch.
+CENSUS = re.compile(r'(\d+) hook\(s\) under ')
+
+
+def census_of(out: str) -> int:
+    match = CENSUS.search(out)
+    assert match, out
+    return int(match.group(1))
+
+
+def entries_on_disk(root: Path) -> list[str]:
+    """Every name git would try, minus the two shapes the gate declares it
+    excludes."""
+    return sorted(p.name for p in (root / HOOKS_DIR).iterdir()
+                  if not p.name.startswith('_')
+                  and not p.name.endswith('.local'))
+
+
+def test_a_directory_that_took_a_hooks_name_is_a_finding_not_a_subtraction():
+    """It is on disk, it is tracked, it looks installed, and git cannot exec
+    it. The old walk answered by making it disappear from the count."""
+    with hooked_repo(arm=True) as root:
+        (root / HOOKS_DIR / A_GIT_HOOK).unlink()
+        (root / HOOKS_DIR / A_GIT_HOOK).mkdir()
+        (root / HOOKS_DIR / A_GIT_HOOK / 'hook.sh').write_text('true\n',
+                                                               encoding='utf-8')
+        code, out = gate()
+        on_disk = entries_on_disk(root)
+    assert code == 1, out
+    assert 'NOT A FILE' in out, out
+    assert f'{A_GIT_HOOK} is a directory' in out, out
+    assert census_of(out) == len(on_disk), (census_of(out), on_disk)
+
+
+def test_a_broken_symlink_where_a_hook_was_is_a_finding_not_a_subtraction():
+    """A checkout whose symlink target went away. git skips it in silence,
+    which is a disarmed guard — and the walk skipped it in silence too, which
+    is the same failure one layer up."""
+    with hooked_repo(arm=True) as root:
+        (root / HOOKS_DIR / A_CC_HOOK).unlink()
+        (root / HOOKS_DIR / A_CC_HOOK).symlink_to('../../gone/somewhere.sh')
+        code, out = gate()
+        on_disk = entries_on_disk(root)
+    assert code == 1, out
+    assert 'NOT A FILE' in out, out
+    assert f'{A_CC_HOOK} is a symlink to ../../gone/somewhere.sh' in out, out
+    assert 'does not resolve' in out, out
+    assert census_of(out) == len(on_disk), (census_of(out), on_disk)
+
+
+def test_the_census_never_reads_smaller_than_the_directory():
+    """The universal the two cases above are instances of. Whatever is under
+    the corpus, the number in the verdict is the number of entries git would
+    try — the disclosed `_*`/`*.local` exclusions being the only subtraction,
+    and they are disclosed IN the same string."""
+    with hooked_repo(arm=True) as root:
+        (root / HOOKS_DIR / 'a-directory').mkdir()
+        (root / HOOKS_DIR / 'a-dangling-link').symlink_to('nowhere')
+        (root / HOOKS_DIR / '_lib.sh').write_text('true\n', encoding='utf-8')
+        (root / HOOKS_DIR / 'pre-push.local').write_text('X=1\n', encoding='utf-8')
+        code, out = gate()
+        on_disk = entries_on_disk(root)
+    assert code == 1, out
+    assert census_of(out) == len(on_disk) == len(SHIPPED) + 2, (out, on_disk)
+    assert '2 path(s) excluded from scope' in out, out
+    assert out.count('NOT A FILE') == 2, out
+
+
+def test_an_underscore_prefix_is_how_a_non_hook_lives_there_legitimately():
+    """The finding names `_`-prefixing as the way out, so it has to BE one: a
+    directory of fixtures under a corpus is a real thing to want, and the
+    escape hatch has to leave the tree green and the subtraction disclosed."""
+    with hooked_repo(arm=True) as root:
+        (root / HOOKS_DIR / '_fixtures').mkdir()
+        code, out = gate()
+    assert code == 0, out
+    assert f'{len(SHIPPED)} hook(s)' in out, out
+    assert '1 path(s) excluded from scope' in out, out
 
 
 def test_sourced_libraries_and_local_dropins_are_not_hooks():

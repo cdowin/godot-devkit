@@ -335,6 +335,9 @@ STOP_GATE = 'tools/hooks/cc-stop-gate.sh'
 CONFINE = 'tools/hooks/cc-write-confine.sh'
 WORKTREE = 'tools/dev/agent-worktree.sh'
 DOCTOR = 'tools/dev/checks/doctor.sh'
+# One shipped git hook, by name: the doctor cases below replace it with
+# something git cannot exec.
+A_GIT_HOOK = 'pre-push'
 MARKER = '.agent-scope'
 
 # The corpus reads DEVKIT_AGENT_SCOPE; a test machine that happens to export
@@ -794,6 +797,38 @@ def test_doctor_reds_on_a_disarmed_hook_whatever_its_name(tmp_path):
     done = run_doctor(root, stub_bin)
     assert done.returncode == 1
     assert 'cc-invented-later.sh not executable' in done.stdout
+
+
+@pytest.mark.parametrize('shape', ['directory', 'broken symlink'])
+def test_doctor_reds_on_an_entry_git_cannot_exec_at_all(tmp_path, shape):
+    """The other way a guard dies: not a lost exec bit but a name git tries
+    and cannot start. doctor skipped these on `[ -f ]`, so its census read
+    SMALLER than the directory with no line saying so — the same defect
+    `check hooks` carried, and two shipped surfaces agreeing on the wrong
+    answer is worse than one."""
+    root, stub_bin = ready_repo(tmp_path)
+    dead = root / 'tools/hooks' / A_GIT_HOOK
+    dead.unlink()
+    if shape == 'directory':
+        dead.mkdir()
+    else:
+        dead.symlink_to('../../gone/somewhere.sh')
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 1, done.stdout
+    assert f'tracked hook {A_GIT_HOOK} is not a regular file' in done.stdout, done.stdout
+    assert '[DOCTOR] FAIL' in done.stdout
+
+
+def test_doctor_still_warns_rather_than_reds_on_an_EMPTY_corpus(tmp_path):
+    """The one thing the `-f` skip was load-bearing for: an unmatched glob is
+    the literal pattern, and a census that turned THAT into a finding would be
+    a gate reddening on nothing. `no tracked hooks` is still the answer."""
+    root, stub_bin = ready_repo(tmp_path)
+    for entry in (root / 'tools/hooks').iterdir():
+        entry.unlink()
+    done = run_doctor(root, stub_bin)
+    assert 'no tracked hooks under tools/hooks/' in done.stdout, done.stdout
+    assert 'is not a regular file' not in done.stdout, done.stdout
 
 
 # --- fail-open posture, both PreToolUse hooks ---------------------------------

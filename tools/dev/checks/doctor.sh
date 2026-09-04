@@ -218,19 +218,29 @@ if [ "$hookspath" != "$HOOKS_PATH" ]; then
 else
 	pass "git core.hooksPath = $HOOKS_PATH"
 fi
-# Check the exec bit on EVERY hook entry point — core.hooksPath silently skips
-# a non-executable hook, so a lost +x (a checkout onto a filesystem that drops
-# it) disarms a guard with no other signal. Asked of the directory, not of a
-# roster: a roster silently skips the hook added after it was written. The
-# `_*` sourced-library and `*.local` config shapes are the only exclusions.
+# Check EVERY hook entry point — core.hooksPath silently skips a hook it cannot
+# run, so a lost +x (a checkout onto a filesystem that drops it), a symlink
+# whose target went away, or a directory that took a hook's name each disarms a
+# guard with no other signal. Asked of the directory, not of a roster: a roster
+# silently skips the hook added after it was written, and git's hook universe
+# is every entry in the directory. Skipping a non-regular entry on `-f` made
+# this census read SMALLER than the directory with no line saying so, which is
+# the one thing a census must never do. The `_*` sourced-library and `*.local`
+# config shapes are the only exclusions.
 if [ -d "$HOOKS_PATH" ]; then
 	hooks_seen=0
 	for hook in "$HOOKS_PATH"/*; do
-		[ -f "$hook" ] || continue
+		# The ONLY skip: an unmatched glob, which is the literal pattern and
+		# is neither present nor a symlink. `-e` alone is false for a broken
+		# symlink, which is precisely an entry that must be reported.
+		[ -e "$hook" ] || [ -L "$hook" ] || continue
 		h="$(basename "$hook")"
 		case "$h" in _*|*.local) continue ;; esac
 		hooks_seen=1
-		if [ -x "$hook" ]; then
+		if [ ! -f "$hook" ]; then
+			fail "tracked hook $h is not a regular file git can exec" \
+			     "It is on disk under $HOOKS_PATH/ and git cannot start it, so whatever guard that name stands for runs nothing. Restore what it points at, remove it, or rename it _$h if it is not a hook."
+		elif [ -x "$hook" ]; then
 			pass "tracked hook $h present + executable"
 		else
 			fail "tracked hook $h not executable" \

@@ -8,9 +8,16 @@ signal anywhere. This package told its consumers the corpus was self-hosted
 HERE while `core.hooksPath` was unset in every checkout of it, for two releases
 (0.24.0/bugs/self-hosting-has-no-arm-or-verify-target).
 
-Three questions, and the third is the one a path check alone gets wrong:
+Four questions, and the last two are the ones a path check alone gets wrong:
 
   ARMED       `core.hooksPath` resolves to this repo's `tools/hooks`.
+  A FILE      the entry is a regular file at all. Git's hook universe is every
+              entry in the directory, so a directory or a broken symlink there
+              is a name git tries and cannot exec — the guard that name stands
+              for runs nothing. Enumerating only regular files does not merely
+              miss it, it SUBTRACTS it: the census reads smaller than the
+              directory and no line says why, which is the shape this gate was
+              written against.
   EXECUTABLE  every entry carries an exec bit — git skips one that does not,
               in silence, which is a disarmed guard with nothing red.
   RUNS        the file still executes at all. Measured on this package's own
@@ -79,15 +86,36 @@ def _entries(directory: Path) -> Walk:
     """The hook entry points, asked of the DIRECTORY rather than of a list —
     a roster silently skips the hook added after it was written.
 
+    `Kind.ANY`, deliberately. `Kind.FILE` is a UNIVERSE declaration and a
+    universe reason never renders in `disclosures()`, so a directory or a
+    broken symlink under `tools/hooks/` left the census with no line saying so
+    and the number came out smaller than the directory — a gate PASSing over
+    exactly the drift it was written to catch. Git's hook universe is every
+    entry in the directory; so is this one, and a non-regular entry is a
+    FINDING below rather than a subtraction here.
+
     Through `core.walk`, so the two shapes the filter removes are DISCLOSED in
     the count instead of subtracted from it: a directory holding nothing but
     `_*` libraries must not read as a corpus of that many hooks, and a `.local`
     that was meant to be a hook must be visible as the thing that was dropped.
     """
-    return walk.children(directory, Kind.FILE).filter(
+    return walk.children(directory, Kind.ANY).filter(
         lambda path: not path.name.startswith('_')
         and not path.name.endswith('.local'),
         SkipReason.EXCLUDED_PATH)
+
+
+def _not_a_file(path: Path) -> str:
+    """What an entry git cannot exec actually IS. Named, because 'not a regular
+    file' sends nobody anywhere: the two real shapes are a checkout that lost a
+    symlink's target and a directory that took a hook's name."""
+    if path.is_dir():
+        return 'is a directory'
+    if path.is_symlink():
+        return f'is a symlink to {os.readlink(path)}, which does not resolve'
+    if not path.exists():
+        return 'does not resolve'
+    return 'is not a regular file'
 
 
 def _hooks_path(root: Path) -> str:
@@ -159,6 +187,16 @@ def run() -> int:
     ran = parsed = 0
     for path in entries:
         rel = path.relative_to(root)
+        if not path.is_file():
+            # On disk, tracked, named like a hook, and git cannot start it.
+            # DEAD by another route, and the one route where the entry never
+            # even reaches the exec bit.
+            findings.append((
+                'NOT A FILE',
+                f'{rel} {_not_a_file(path)} — git cannot exec it, so whatever '
+                f'guard that name stands for runs nothing; `_`-prefix it if it '
+                f'is not a hook — `{ARM_COMMAND}`'))
+            continue
         if not os.access(path, os.X_OK):
             findings.append((
                 'NOT EXECUTABLE',
