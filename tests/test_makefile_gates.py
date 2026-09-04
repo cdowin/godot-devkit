@@ -41,6 +41,8 @@ VERDICT = re.compile(r'^\[GATES\] .+ — full log: \.gate-reports/gates\.log$')
 # `milestone` are compositions whose members each print their own verdict.
 NOT_A_GATE = {'help', 'precommit', 'milestone',
     'pm',  # a VEHICLE, not a gate: it prints whatever the tracker prints (make pm ARGS=…)
+    'hooks',  # a REPAIR, not a gate: it arms the tree. `check hooks`, inside
+              # `gates`, is the one that reports an unarmed one.
 }
 
 

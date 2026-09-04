@@ -85,7 +85,7 @@ gdk_gate_verdict $(2) "$$summary" "$$log"; \
 exit "$$status"
 endef
 
-.PHONY: help test matrix fuzz gates hooks-self-test smoke precommit milestone pm
+.PHONY: help test matrix fuzz gates hooks hooks-self-test smoke precommit milestone pm
 
 help:
 	@echo 'godot-devkit — make targets'
@@ -94,6 +94,7 @@ help:
 	@echo '  make matrix      every claimed interpreter ($(PY_MATRIX)): $(PY_FLOOR) runs the whole suite, the rest -m "not shell" (a spawn is not interpreter-sensitive)'
 	@echo '  make fuzz        the committed seeded harnesses (differential + replay)'
 	@echo '  make gates       godot-devkit check all, on this repo'
+	@echo '  make hooks       ARM this checkout: point git at tools/hooks/ and restore the exec bits'
 	@echo '  make hooks-self-test  the installed hooks that ship a corpus, replayed (sandbox + the two ledger couriers)'
 	@echo '  make smoke       check all + autoloads/scene/refs/pm on the consumers (read-only)'
 	@echo
@@ -126,6 +127,20 @@ gates:
 
 smoke:
 	$(call gate,smoke,SMOKE,$(SUM_SMOKE),$(PY) tools/consumer_smoke.py)
+
+# ARM this checkout. `install-hooks` writes the corpus; writing it is not arming
+# it, and git runs nothing under tools/hooks/ until core.hooksPath points there.
+# This repo told its consumers the corpus was self-hosted here while that config
+# was unset in every checkout of it, for two releases, because there was no
+# target to run and none that looked
+# (0.24.0/bugs/self-hosting-has-no-arm-or-verify-target).
+#
+# This is the one command that FIXES an unarmed tree; `check hooks` — inside
+# `make gates`, and so inside `precommit` and `milestone` — is what reports one.
+# Not a gate, so it prints what the script prints: it is asked for a repair and
+# the two lines are the repair.
+hooks:
+	@bash tools/setup-hooks.sh
 
 # The hooks this repo self-hosts that ship their own block/allow corpus: the
 # raw-engine-boot guard and the two ledger couriers. Replayed here so an edit

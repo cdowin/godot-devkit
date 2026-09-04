@@ -40,7 +40,7 @@ SUPPORT = TESTS / 'support'
 # module must never have to touch this file. Unmarked is the roster, because
 # the eight that do not spawn are the eight three interpreters still run, and
 # each one is worth naming.
-MARKED_MODULES = 35
+MARKED_MODULES = 36
 UNMARKED_MODULES = (
     'test_apply.py',
     'test_boundaries.py',

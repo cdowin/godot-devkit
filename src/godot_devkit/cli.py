@@ -84,8 +84,8 @@ Installers (write the file once; after that it is the repo's):
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
-                      | repo-hygiene | pm | rng | tres-comment | unit-disk
-                      | test-shape
+                      | repo-hygiene | pm | hooks | rng | tres-comment
+                      | unit-disk | test-shape
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
@@ -130,7 +130,10 @@ RETARGET_FLAG = '--retarget'
 # canonicalized, so folding it in would redden every existing consumer on a
 # version bump — wire it explicitly, after the one-time cleanup pass;
 # `repo-hygiene` is close-time and hits the network; `pm` would fail a repo for
-# not having a PM tree at all.
+# not having a PM tree at all; `hooks` would fail one that has not run
+# `install-hooks`, and arming is a decision a consumer makes once — the gate is
+# for a repo that HAS decided, and would otherwise be told so by a red run on
+# the day it upgraded.
 # The four ported project scans are all False for one shared reason and one
 # each: none of them can state a stock scope that is true of every repo. `rng`
 # defaults to the WHOLE tree and would redden a consumer's cosmetic jitter on a
@@ -141,7 +144,7 @@ RETARGET_FLAG = '--retarget'
 # not a default.
 KNOWN_GATES = {
     'uid': True, 'tres': True, 'props': True, 'doc': True, 'shell': True,
-    'defaults': False, 'repo-hygiene': False, 'pm': False,
+    'defaults': False, 'repo-hygiene': False, 'pm': False, 'hooks': False,
     'rng': False, 'tres-comment': False, 'unit-disk': False,
     'test-shape': False,
 }
@@ -262,6 +265,9 @@ def _check_module(name: str):
     if name == 'pm':
         from godot_devkit.repo.checks import pm
         return pm
+    if name == 'hooks':
+        from godot_devkit.repo.checks import hooks
+        return hooks
     return None
 
 
