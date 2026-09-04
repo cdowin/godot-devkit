@@ -11,13 +11,32 @@ consumed_by: []
 
 # A grain says which half of its life it is in
 
-`done` currently means *the features are closed*. It does not mean shipped, and the release protocol
-says so out loud — step 3 is **"Close the milestone — before the render, not after"**, with the
-changelog retitle at step 4 and the tag at step 5. So a milestone reaches its terminal state with its
-notes unwritten, nothing tagged and nothing merged.
+`done` currently means *the features are closed* — reached with the changelog unwritten and the
+release unreviewed, because the release protocol says so out loud: step 3 is **"Close the milestone —
+before the render, not after"**, with the retitle at step 4 and the tag at step 5.
 
-Chris, 2026-09-04: *"The milestone should only be moved to `done` after EVERYTHING is finished. That
-should be literally the last thing before a merge, it means DONE."*
+Chris, 2026-09-04: *"The milestone should only be moved to `done` after EVERYTHING is finished.
+Changelog written, reviewers all done. Done."*
+
+## `done` does NOT mean shipped, and it cannot
+
+Chris settled this and it is the load-bearing definition here:
+
+> *"done and shipped always have this weird relationship. `done` gets flipped when everything is
+> done. Changelog written, reviewers all done. Done does not necessarily mean shipped — that's a
+> branching/PR/push thing that's outside the scope of the pm tree."*
+
+**The flip is itself a commit that has not shipped at the moment it is written.** `pm milestone done`
+edits a string in a file; that edit needs a commit and a push. So a `done` that meant *shipped* would
+be unrepresentable — the tree can never observe its own release.
+
+So the terminal state means: **everything inside the PM tree's authority is finished.** Changelog
+written, reviews closed, findings landed, gates green, nothing left to do. Branch, PR, merge and tag
+are git events, outside the tree, after `done`.
+
+That is what makes the lifecycle work rather than just longer: `packaging` is where the changelog and
+version work HAPPENS, `done` says that work is COMPLETE, and the ship follows. Neither state has to
+lie.
 
 **One vocabulary, seven states, across milestone / feature / story:**
 
@@ -98,15 +117,18 @@ drift in that repo, surfaced by this census and left for trail's own session.
 | `repo/pm/model.py` | MODIFY | The three `DEFAULT_*_STATES` become the one seven-state vocabulary. |
 | `repo/checks/pm.py` | MODIFY | D6's message stops claiming `done` is the only next state. |
 | `repo/pm/cli.py` | MODIFY | `pm vocabulary` reports the new sets; usage text follows. |
-| `.claude/skills/release/SKILL.md` | MODIFY | Step 3 stops closing before the render. `done` becomes the last step, after the tag. |
+| `.claude/skills/release/SKILL.md` | MODIFY | Re-ordered, not re-worded: run the gate at `accepted`, render the notes at `packaging`, flip `done` when that work is complete, THEN branch/PR/merge/tag. Step 3's "close before the render" inverts and becomes the last PM action rather than an early one. |
 | this repo's own `pm/roadmap/**` | MODIFY | 4 `todo` grains migrate. |
 | `tests/` | MODIFY | The vocabulary, D6's wording, and the migration mapping. |
 
 ## Ship criterion
 
-`0.24.0` itself walks `building → reviewing → accepted → packaging → done`, and the tag is cut while
-it is at `packaging` — **the first release where `done` means shipped.** `make milestone` runs green
-at `accepted` without the milestone having to lie about being finished.
+`0.24.0` itself walks `building → reviewing → accepted → packaging → done`, with **`make milestone`
+green at `accepted`** — before the notes are rendered and before anything closes, which is the whole
+point: the gate that informs the ship decision runs while the decision is still open.
+
+`done` is flipped last, when the changelog is written and every finding is landed. The tag comes
+after, outside the tree. **0.24.0 is the first milestone whose `done` is true when it is written.**
 
 ## Gotchas
 
