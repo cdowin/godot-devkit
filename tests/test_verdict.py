@@ -92,12 +92,14 @@ def test_every_disposition_kind_and_its_raw_value():
     parsed = verdict.parse(block(
         '| W1 | WARNING | landed 3a42f19ad |',
         '| S3 | SUGGESTION | rejected: pause regression |',
-        '| D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |'))
+        '| D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |',
+        '| Q5 | QUESTION | open |'))
     assert parsed.verdict == 'SHIP-WITH-FIXES'
     assert parsed.findings == [
         verdict.Finding('W1', 'WARNING', 'landed', '3a42f19ad'),
         verdict.Finding('S3', 'SUGGESTION', 'rejected', 'pause regression'),
         verdict.Finding('D2', 'DELTA', 'deferred', '0.90.3/throwable-as-behavior'),
+        verdict.Finding('Q5', 'QUESTION', 'open', ''),
     ]
     assert {f.disposition_kind for f in parsed.findings} == set(verdict.DISPOSITION_KINDS)
 
@@ -277,6 +279,42 @@ def test_a_rejected_with_no_reason_refuses():
     sentence for."""
     assert 'unreadable disposition' in malformed(
         block('| S3 | SUGGESTION | rejected: |')).why
+
+
+# --- `open`: raised, not yet landed ------------------------------------------
+# A record written BEFORE the landing pass has findings nobody has acted on.
+# Without a kind for that, an honest author misfiles them as `rejected:` (this
+# repo's own 0.23.0 records did) and the yield column reads a lie.
+def test_open_parses_as_its_own_kind_with_no_value():
+    parsed = verdict.parse(block('| C1 | CRITICAL | open |'))
+    assert parsed.findings == [verdict.Finding('C1', 'CRITICAL', 'open', '')]
+
+
+def test_open_with_a_note_carries_the_note_raw():
+    parsed = verdict.parse(block('| M1 | MAJOR | open: awaiting the landing pass |'))
+    assert parsed.findings == [
+        verdict.Finding('M1', 'MAJOR', 'open', 'awaiting the landing pass')]
+
+
+def test_open_is_a_fixed_token_and_folds_case():
+    parsed = verdict.parse(block('| M1 | MAJOR | OPEN |'))
+    assert parsed.findings[0].disposition_kind == verdict.OPEN
+
+
+@pytest.mark.parametrize('cell', (
+    'open:',              # a colon with no note is not a note
+    'open awaiting',      # free text without the colon
+    'opened',             # a longer word that starts with the token
+    'reopen',             # a word that ends with it
+))
+def test_open_admits_only_the_bare_word_or_a_noted_form(cell):
+    assert 'unreadable disposition' in malformed(
+        block(f'| M1 | MAJOR | {cell} |')).why
+
+
+def test_open_is_in_the_closed_set_and_the_refusal_names_it():
+    assert verdict.OPEN in verdict.DISPOSITION_KINDS
+    assert '`open`' in malformed(block('| W1 | WARNING | wontfix |')).why
 
 
 def test_an_unknown_disposition_kind_refuses():

@@ -123,6 +123,7 @@ verdict: SHIP-WITH-FIXES
 | M4 | MAJOR | landed in-place |
 | S3 | SUGGESTION | rejected: pause regression |
 | D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |
+| Q5 | QUESTION | open |
 ```
 
 `verdict:` is exactly one of SHIP, SHIP-WITH-FIXES, HOLD, RELEASE-SAFE,
@@ -130,9 +131,11 @@ RELEASE-WITH-FIXES or NOT-RELEASE-SAFE — the trio your prose verdict already
 uses. Then the header row, then one row per finding you raised: `id` is the
 label it carries in the prose above, `severity` the grade you gave it, and
 `disposition` exactly one of `landed <commit-hash>`, `landed in-place`,
-`rejected: <why>` or `deferred: <grain-id>`. Use `landed in-place` whenever the
-fix was applied but not committed by you — reviewers here fix in place and never
-commit, and a hash you do not have is not a reason to leave the row out. A pass
+`rejected: <why>`, `deferred: <grain-id>` or `open` (optionally `open: <note>`).
+Use `landed in-place` whenever the fix was applied but not committed by you —
+reviewers here fix in place and never commit, and a hash you do not have is not
+a reason to leave the row out. `open` is raised and not yet acted on — the honest
+disposition of a record written before the landing pass, never `rejected:`. A pass
 that raised nothing writes the verdict line and the header row alone — that is a
 complete block, and it is how the report tells a clean pass from a record nobody
 finished. No separator row, no fourth column, no second block.

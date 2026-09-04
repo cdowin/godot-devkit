@@ -61,6 +61,7 @@ verdict: HOLD
 | id | severity | disposition |
 | B1 | CRITICAL | deferred: 0.1/beta |
 | B2 | WARNING | deferred: 0.1/gamma |
+| B3 | MAJOR | open: the landing pass has not run |
 ```
 """
 # A real review, written before the block existed. A FACT about the pass.
@@ -170,21 +171,22 @@ def seeded_report(test, *argv) -> str:
 
 
 YIELD_TABLE = """\
-[ledger:report] 0.1 — yield per review pass — 3 record(s), 6 finding(s)
+[ledger:report] 0.1 — yield per review pass — 3 record(s), 7 finding(s)
 
 -- verdict (3)
-feature    record                                        verdict           findings  landed  rejected  deferred
-0.1/alpha  docs/reviews/alpha.md                         SHIP-WITH-FIXES          4       2         1         1
-0.1/beta   pm/roadmap/0.1-demo/features/beta/review.md   HOLD                     2       0         0         2
-0.1/delta  pm/roadmap/0.1-demo/features/delta/review.md  no verdict block         -       -         -         -
+feature    record                                        verdict           findings  landed  rejected  deferred  open
+0.1/alpha  docs/reviews/alpha.md                         SHIP-WITH-FIXES          4       2         1         1     0
+0.1/beta   pm/roadmap/0.1-demo/features/beta/review.md   HOLD                     3       0         0         2     1
+0.1/delta  pm/roadmap/0.1-demo/features/delta/review.md  no verdict block         -       -         -         -     -
 
--- findings by severity (6)
+-- findings by severity (7)
 feature    severity  findings
 0.1/alpha  MAJOR            1
 0.1/alpha  MINOR            1
 0.1/alpha  NIT              1
 0.1/alpha  QUESTION         1
 0.1/beta   CRITICAL         1
+0.1/beta   MAJOR            1
 0.1/beta   WARNING          1
 
 -- deferred to (3)
@@ -285,12 +287,20 @@ class Yield(unittest.TestCase):
         self.assertNotEqual(*[f.disposition_value for f in parsed.findings
                               if f.disposition_kind == verdict.LANDED])
         row = row_of(seeded_report(self), YIELD, 'verdict (3)', ALPHA)
-        self.assertEqual(row[-4:], ['4', '2', '1', '1'])
+        self.assertEqual(row[-5:], ['4', '2', '1', '1', '0'])
+
+    def test_open_is_its_own_column_and_never_a_rejection(self):
+        """B3 was raised and nobody has acted on it yet: `open`, counted in
+        its own column beside the three, never folded into `rejected` (which
+        is where this repo's own records misfiled them before the kind
+        existed) and never reweighting the others."""
+        row = row_of(seeded_report(self), YIELD, 'verdict (3)', BETA)
+        self.assertEqual(row[-5:], ['3', '0', '0', '2', '1'])
 
     def test_a_record_with_no_block_is_listed_and_never_counted_as_zero(self):
         row = row_of(seeded_report(self), YIELD, 'verdict (3)', DELTA)
         self.assertEqual(row[2:], ['no', 'verdict', 'block', '-', '-', '-',
-                                   '-'])
+                                   '-', '-'])
 
     def test_a_feature_with_no_record_at_all_is_not_a_review_pass(self):
         """`gamma` has no record: there was no pass, so there is no row."""
@@ -501,18 +511,20 @@ class Json(unittest.TestCase):
                  'severities': {'MAJOR': 1, 'MINOR': 1, 'NIT': 1,
                                 'QUESTION': 1},
                  'deferred': [{'target': BETA, 'findings': 1}],
-                 'dispositions': {'landed': 2, 'rejected': 1, 'deferred': 1}},
+                 'dispositions': {'landed': 2, 'rejected': 1, 'deferred': 1,
+                                  'open': 0}},
                 {'feature': BETA, 'record': BETA_RECORD, 'verdict': 'HOLD',
-                 'findings': 2,
-                 'severities': {'CRITICAL': 1, 'WARNING': 1},
+                 'findings': 3,
+                 'severities': {'CRITICAL': 1, 'MAJOR': 1, 'WARNING': 1},
                  'deferred': [{'target': BETA, 'findings': 1},
                               {'target': GAMMA, 'findings': 1}],
-                 'dispositions': {'landed': 0, 'rejected': 0, 'deferred': 2}},
+                 'dispositions': {'landed': 0, 'rejected': 0, 'deferred': 2,
+                                  'open': 1}},
                 {'feature': DELTA, 'record': DELTA_RECORD, 'verdict': None,
                  'findings': None, 'severities': {}, 'deferred': [],
                  'dispositions': blank},
             ],
-            'totals': {'records': 3, 'findings': 6}})
+            'totals': {'records': 3, 'findings': 7}})
 
     def test_section_three_rework(self):
         self.assertEqual(self.payload()['rework'], {

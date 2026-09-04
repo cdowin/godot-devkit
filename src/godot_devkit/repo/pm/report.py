@@ -1130,6 +1130,8 @@ def yield_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     and `landed in-place` are one column, because a reviewer in this SDLC fixes
     in place and never commits (SDLC § 2), so counting only the hash form would
     under-count exactly the findings that were acted on.
+    `open` — raised, not yet acted on — is its own column beside the three,
+    never folded into `rejected` and never a reweighting of the others.
 
     Spend is NOT joined in here. Section 1 already splits every grain's tokens
     by `agent_type`, and picking the types that are "reviewer-shaped" out of

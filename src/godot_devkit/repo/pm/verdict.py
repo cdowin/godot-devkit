@@ -9,6 +9,7 @@ finding, with the severity it was graded and what was DONE about it.
     | W1 | WARNING | landed 3a42f19ad |
     | S3 | SUGGESTION | rejected: pause regression |
     | D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |
+    | Q5 | QUESTION | open |
 
 That block is what makes review YIELD computable — findings by severity and
 disposition, per pass — without anyone tallying reports by hand. The four
@@ -100,7 +101,12 @@ SEVERITIES = (
 LANDED = 'landed'
 REJECTED = 'rejected'
 DEFERRED = 'deferred'
-DISPOSITION_KINDS = (LANDED, REJECTED, DEFERRED)
+# Raised and not yet acted on. A record written BEFORE the landing pass —
+# every release review is — has findings with no honest home among the three
+# above; without this kind the author misfiles them as `rejected:` and the
+# yield column reads a lie. A bare token, or `open: <note>`; never free text.
+OPEN = 'open'
+DISPOSITION_KINDS = (LANDED, REJECTED, DEFERRED, OPEN)
 # The second `landed` form, and it is not a convenience. Reviewers in this SDLC
 # fix in place and NEVER commit (SDLC.md §2) — so at the moment the record is
 # written, a landed fix genuinely has no hash. Admitting only `landed <hex>`
@@ -132,13 +138,16 @@ _LANDED = re.compile(
     re.IGNORECASE)
 _REJECTED = re.compile(rf'^{REJECTED}\s*:\s*(\S.*)$', re.IGNORECASE)
 _DEFERRED = re.compile(rf'^{DEFERRED}\s*:\s*(\S+)$', re.IGNORECASE)
-_DISPOSITIONS = ((_LANDED, LANDED), (_REJECTED, REJECTED), (_DEFERRED, DEFERRED))
+_OPEN = re.compile(rf'^{OPEN}(?:\s*:\s*(\S.*))?$', re.IGNORECASE)
+_DISPOSITIONS = ((_LANDED, LANDED), (_REJECTED, REJECTED), (_DEFERRED, DEFERRED),
+                 (_OPEN, OPEN))
 
 _VERDICT_BY_FOLD = {value.casefold(): value for value in VERDICTS}
 _SEVERITY_BY_FOLD = {value.casefold(): value for value in SEVERITIES}
 
 _DISPOSITION_FORMS = (f'`{LANDED} <commit-hash>`, `{LANDED} {IN_PLACE}`, '
-                      f'`{REJECTED}: <why>` or `{DEFERRED}: <grain-id>`')
+                      f'`{REJECTED}: <why>`, `{DEFERRED}: <grain-id>`, '
+                      f'`{OPEN}` or `{OPEN}: <note>`')
 
 # How far below an UNFENCED `verdict:` line this looks for the header row before
 # deciding the two are unrelated. Three: a blank line and a stray note between
@@ -179,8 +188,9 @@ class Finding:
     """One row: what was raised, how it was graded, and what was DONE about it.
 
     `disposition_value` is carried RAW (D5 — no inference): the commit hash for
-    `landed`, the reason text for `rejected`, the grain id for `deferred`. The
-    id and the reason are the author's words; only the closed-set tokens
+    `landed`, the reason text for `rejected`, the grain id for `deferred`, the
+    note (or nothing) for `open`. The id and the reason are the author's
+    words; only the closed-set tokens
     (`severity`, `disposition_kind`) are canonicalized.
     """
 
@@ -330,7 +340,7 @@ def _finding(lineno: int, line: str) -> Finding:
     for pattern, kind in _DISPOSITIONS:
         match = pattern.match(disposition)
         if match:
-            value = match.group(1).strip()
+            value = (match.group(1) or '').strip()  # `open` alone has none
             if kind == LANDED and value.casefold() == IN_PLACE:
                 value = IN_PLACE  # a fixed token folds; a hash stays raw
             break
