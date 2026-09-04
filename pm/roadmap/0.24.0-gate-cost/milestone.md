@@ -26,7 +26,7 @@ just to release a milestone!?" — and the choice A + C, both.
 `make milestone` on the release commit finishes in under 8 minutes on the same machine with the
 same verdict lines it prints today (`[MATRIX] PASS on 3.11 3.12 3.13 3.14` still names every
 interpreter; `[SMOKE]` still reports every census), no test deleted — every test that leaves
-`tests/` reappears as a smoke row — and the six bugs under `bugs/` fixed or explicitly parked.
+`tests/` reappears as a smoke row — and every bug under `bugs/` fixed or explicitly parked.
 
 ## Risks
 
