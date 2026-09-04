@@ -408,6 +408,42 @@ class Overhead(unittest.TestCase):
         self.assertEqual(row[-2:], ['1500', '-'])
 
 
+class Vocabulary(unittest.TestCase):
+    """A rule that cannot SEE a transition prints `-`, never `0` (rule 4)."""
+
+    def test_a_renamed_story_vocabulary_dashes_reopens_rather_than_zeroing(self):
+        """A reopen is `review -> wip`, and both names are the STOCK ones. A
+        project that renamed either has a machine this rule cannot read, and a
+        `0` there would say "nothing was reopened" about transitions nobody
+        looked for — the read-side sin with a column header on it."""
+        with tree(story_statuses=('shipped',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nstory_states = ["queued", "doing", "checking", '
+                '"shipped"]\n', encoding='utf-8')
+            put_ledger(root,
+                       status_line('2026-09-03T10:00:00Z', A_S0, 'queued',
+                                   'doing'),
+                       status_line('2026-09-03T10:30:00Z', A_S0, 'checking',
+                                   'doing'))
+            out = report(root, '0.1')[1]
+        row = row_of(out, REWORK, 'story (1)', ALPHA)
+        self.assertEqual(row[-2], '-')
+        self.assertIn('- reopen(s)', section_of(out, REWORK))
+
+    def test_the_stock_vocabulary_still_counts_a_reopen(self):
+        """The other half of the same claim: where the rule CAN see the
+        transition, it counts it, so the `-` above is about the vocabulary and
+        not about the column being broken."""
+        with tree(story_statuses=('wip',)) as root:
+            put_ledger(root,
+                       status_line('2026-09-03T10:00:00Z', A_S0, 'todo',
+                                   'wip'),
+                       status_line('2026-09-03T10:30:00Z', A_S0, 'review',
+                                   'wip'))
+            out = report(root, '0.1')[1]
+        self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2], '1')
+
+
 class NoData(unittest.TestCase):
     """A section with nothing in it prints ONE line, never a table of zeros."""
 

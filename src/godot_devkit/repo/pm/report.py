@@ -831,6 +831,31 @@ def state_columns(cfg: model.PmConfig, kind: str) -> tuple[str, ...]:
     return tuple(state for state in states if state != terminal)
 
 
+def in_time_order(rows: list) -> list:
+    """The rows sorted by their own `ts`, stably, unstamped ones last.
+
+    Every subtraction below reads "the interval between two CONSECUTIVE rows",
+    and that sentence is only a measurement when consecutive means consecutive
+    IN TIME. The file's order is not that: `pm/roadmap/*/ledger.jsonl` is
+    `merge=union` (D6), so a merge interleaves two branches' appends by branch
+    rather than by clock, and `ledger.read_rows` reads the file as it finds it.
+    Read in file order a merged ledger bills a NEGATIVE stint to one state and
+    the leftover to another — two numbers that look like measurements and are
+    not, which is hard rule 4's read side with a column header on it.
+
+    Sorting is not inference: `ts` is on every row, recorded by the verb that
+    wrote it, and ordering by it adds no fact the rows do not already carry.
+    The sort is STABLE, so two rows stamped the same second stay in the order
+    the file spells them — a no-op flip and the flip it repeats are one
+    instant, and which came first is the file's answer to give. A row whose
+    `ts` will not parse sorts LAST and contributes no arithmetic anywhere;
+    leaving it mid-file would silently destroy the two intervals it sits
+    between.
+    """
+    return sorted(rows, key=lambda row: (
+        (stamp := ledger.parse_ts(row.data.get('ts'))) is None, stamp))
+
+
 def state_seconds(rows: list) -> dict[str, int]:
     """Seconds in each state, by subtraction over consecutive status rows.
 
@@ -864,6 +889,13 @@ def total_seconds(cfg: model.PmConfig, kind: str, rows: list,
     if not rows or not status:
         return None
     if status[-1].data.get('to') != ledger.terminal_state(cfg, kind):
+        return None
+    # A span needs TWO rows. When the grain's first row IS its terminal row —
+    # a story flipped straight to `done` — there is an instant and no
+    # duration, and the `0` that subtraction produces would read as "finished
+    # in no time at all": a measurement nobody made, in the one column a
+    # reader compares grains by. Same rule the state columns already keep.
+    if rows[0] is status[-1]:
         return None
     start = ledger.parse_ts(rows[0].data.get('ts'))
     end = ledger.parse_ts(status[-1].data.get('ts'))
@@ -1505,12 +1537,31 @@ def build(cfg: model.PmConfig, mid: str, mdir: Path, rows: list,
     consumer would have to learn it to keep reading.
     """
     src = DiskSource() if src is None else src
+    rows = in_time_order(rows)
     out: dict = {'milestone': mid}
     if src.rev:
         out['rev'] = src.rev
     for section in SECTIONS:
         out.update(section.data(src, cfg, mid, mdir, rows))
     return out
+
+
+def beyond_ledger(data: dict) -> bool:
+    """Did anything OUTSIDE `ledger.jsonl` get measured for this milestone?
+
+    Sections 2 and 4 read the review records and the bug frontmatter, and
+    neither document has anything to do with the ledger. So "there is no
+    ledger" is a true statement about section 1 and not about the report, and
+    a caller that stops at the one-line form when this returns True tells a
+    reader there is nothing where there is a verdict block and an escape —
+    the read-side sin, phrased as a line about a different file.
+
+    Narrow on purpose: a review record with NO verdict block is a row saying so
+    and not a measurement, and a milestone nobody has recorded anything for
+    keeps its one quiet line.
+    """
+    return (any(record['verdict'] for record in data[SECTION_YIELD]['records'])
+            or bool(data[SECTION_ESCAPES]['totals']['bugs']))
 
 
 def render(cfg: model.PmConfig, data: dict) -> list[str]:

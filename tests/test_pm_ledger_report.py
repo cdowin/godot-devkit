@@ -217,6 +217,102 @@ class Table(unittest.TestCase):
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
         self.assertEqual(line.split()[-5:], ['-', '600', '-', '-', '-'])
 
+    def test_one_row_is_an_instant_and_never_a_zero_second_total(self):
+        """A span needs two rows. A grain whose only row is its own terminal
+        flip has an instant and no duration, and `0` there reads as "this was
+        done in no time at all" — a measurement nobody made, in the one column
+        a reader compares grains by. This repo's own tree prints it: a story
+        flipped straight to `done` shows every state column `-` and `total_s`
+        `0`."""
+        with tree(story_statuses=('done', 'todo')) as root:
+            put_ledger(root, status_line('2026-09-03T10:00:00Z', STORY,
+                                         'review', 'done'))
+            out = report(root, '0.1')[1]
+        line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
+        self.assertEqual(line.split()[-5:], ['-', '-', '-', '-', '-'])
+
+    def test_rows_out_of_time_order_never_fabricate_an_interval(self):
+        """`merge=union` (D6) interleaves two branches' appends by BRANCH, so
+        the file's order is not the clock's. The subtraction is over the rows
+        in TIME order or it is not a measurement: read in file order, this
+        fixture bills 3600s of `review` backwards and 10800s to a `wip` the
+        story spent 7200s in — two numbers that look like measurements and are
+        not (hard rule 4, read side)."""
+        with tree(story_statuses=('done', 'todo')) as root:
+            put_ledger(
+                root,
+                status_line('2026-09-03T12:00:00Z', STORY, 'wip', 'review'),
+                status_line('2026-09-03T10:00:00Z', STORY, 'todo', 'wip'),
+                status_line('2026-09-03T13:00:00Z', STORY, 'review', 'done'))
+            out = report(root, '0.1')[1]
+        line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
+        self.assertNotIn('-7200', line)
+        # todo, wip, review, blocked, total_s — the story's real life.
+        self.assertEqual(line.split()[-5:],
+                         ['-', '7200', '3600', '-', '10800'])
+
+    def test_an_unparseable_stamp_leaves_the_state_absent_not_zero(self):
+        """A row whose `ts` will not parse contributes no arithmetic, and no
+        arithmetic is `-`. A `0` there would say the story passed through the
+        state in no time at all."""
+        with tree(story_statuses=('wip', 'todo')) as root:
+            put_ledger(root,
+                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
+                                   'wip'),
+                       status_line('not-a-timestamp', STORY, 'wip', 'review'))
+            out = report(root, '0.1')[1]
+        line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
+        self.assertEqual(line.split()[-5:], ['-', '-', '-', '-', '-'])
+
+    def test_a_snapshot_id_from_another_milestone_names_nothing_here(self):
+        """D3 puts every live candidate on the row; the rule that reads it is
+        this module's. An id that is not a grain of THIS milestone attributes
+        to no grain, and the row lands in the trailing block rather than being
+        dropped or inventing a grain."""
+        with tree(story_statuses=('wip', 'todo')) as root:
+            put_ledger(root, dispatch_line(
+                '2026-09-03T10:00:00Z',
+                tree=snapshot(stories_wip=['0.9/other/s0'],
+                              features_building=['0.9/other']),
+                usage={'input': 7}, tool_calls=1))
+            out = report(root, '0.1')[1]
+        line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
+        # dispatches, then the four token sums — nothing was attributed here.
+        self.assertEqual(line.split()[1:6], ['0', '-', '-', '-', '-'])
+        self.assertIn('-- rows naming no grain (1)', out)
+        self.assertNotIn('0.9/other', out)
+
+    def test_a_grain_with_no_id_frontmatter_gets_the_id_its_path_spells(self):
+        """A grain missing from the table reads as a grain that never existed
+        (hard rule 4's census clause), so the path's id stands in for the
+        absent claim rather than the row being dropped or blank."""
+        with tree(story_statuses=('todo',)) as root:
+            write(root / 'pm/roadmap/0.1-demo/features/alpha/stories/s9.md',
+                  {'feature': FEATURE, 'milestone': '"0.1"', 'name': 'S9',
+                   'status': 'todo'})
+            put_ledger(root, status_line('2026-09-03T10:00:00Z', STORY,
+                                         'todo', 'wip'))
+            out = report(root, '0.1')[1]
+        self.assertIn('0.1/alpha/s9', out)
+
+    def test_no_ledger_still_reports_what_the_ledger_never_held(self):
+        """Sections 2 and 4 read the review records and the bug frontmatter —
+        documents `ledger.jsonl` has nothing to do with. Saying `no ledger` and
+        stopping there hides a yield of real findings and a real escape behind
+        a line about a different file, which is the read-side sin: the reader
+        is told there is nothing and there is something."""
+        with tree() as root:
+            bug(root, 'esc', caused_by=FEATURE)
+            (root / 'docs/reviews/alpha.md').write_text(
+                'x\n\n```text\nverdict: SHIP-WITH-FIXES\n'
+                '| id | severity | disposition |\n'
+                '| W1 | WARNING | landed in-place |\n```\n', encoding='utf-8')
+            code, out = report(root, '0.1')
+        self.assertEqual(code, 0, out)
+        self.assertIn('[ledger:report] 0.1 — no ledger', out)
+        self.assertIn('SHIP-WITH-FIXES', out)
+        self.assertIn('0.1/bugs/esc', out)
+
     def test_the_no_grain_block_counts_the_rows_it_names_nothing_about(self):
         with tree(story_statuses=('done', 'todo')) as root:
             seeded(root)

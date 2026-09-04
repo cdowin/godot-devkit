@@ -1822,12 +1822,6 @@ def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
             rows = src.ledger_rows(path)
         except ledger.LedgerError as err:
             raise Usage(f'{err}') from err
-        if not src.is_file(path) and not as_json:
-            # The table would be a screen of dashes saying one thing; say it
-            # once — and still say WHICH tree it is one thing about.
-            head = report.heading_id({'milestone': mid, 'rev': rev})
-            print(f'{report.HEADING_PREFIX} {head} — {report.NO_LEDGER}')
-            return 0
         try:
             data = report.build(cfg, mid, mdir, rows, src)
         except report.RecordError as err:
@@ -1847,6 +1841,18 @@ def cmd_ledger_report(cfg: model.PmConfig, args: list[str]) -> int:
     if as_json:
         print(json.dumps(data, ensure_ascii=False))
         return 0
+    if not src.is_file(path):
+        # No ledger is a fact about SECTION 1's source, so say it where the
+        # table would have been — and still say WHICH tree it is one fact
+        # about. Sections 2 and 4 read the review records and the bug
+        # frontmatter, documents this file has nothing to do with: stopping
+        # here when THOSE hold something would tell a reader there is nothing
+        # measured while a verdict block and an escape sit in the tree. When
+        # they hold nothing, the one quiet line is still the whole report.
+        print(f'{report.HEADING_PREFIX} {report.heading_id(data)} — '
+              f'{report.NO_LEDGER}')
+        if not report.beyond_ledger(data):
+            return 0
     for line in report.render(cfg, data):
         print(line)
     return 0

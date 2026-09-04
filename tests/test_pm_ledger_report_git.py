@@ -249,6 +249,63 @@ class AtARev(unittest.TestCase):
         self.assertNotIn('parked', live)
         self.assertEqual(stripped(at_tag), live)
 
+    def test_a_directory_at_the_rev_is_not_a_file(self):
+        """`git show <rev>:<a-directory>` SUCCEEDS and hands back a listing,
+        which a reader expecting a document parses as one. `is_file` asks git
+        for the object TYPE for exactly that reason, and a `reviewed:` pointing
+        at a directory must resolve to no record rather than to a yield built
+        out of `git ls-tree` output."""
+        with tree(story_statuses=('done', 'todo')) as root:
+            seeded(root)
+            (root / 'docs/reviews/alpha.md').unlink()
+            write(root / 'docs/reviews/alpha.md/inside.md',
+                  {'id': '0.1/nope', 'name': 'not a record'})
+            commit(root, 'a pointer that names a directory')
+            git(root, 'tag', TAG)
+            code, out = report(root, '0.1', '--from', TAG)
+        self.assertEqual(code, 0, out)
+        # The pointer resolved to nothing, so the record is absent — never a
+        # verdict table assembled from a directory listing.
+        self.assertNotIn('alpha.md', out)
+        self.assertNotIn('not a record', out)
+
+    def test_an_absolute_reviewed_pointer_never_reads_todays_disk(self):
+        """An absolute path is in no rev. Answering it from the working tree
+        would put a file the milestone never shipped with into a report about
+        history — the live tree leaking into a historical read."""
+        with tree(story_statuses=('done', 'todo')) as root:
+            seeded(root)
+            outside = root / 'todays-record.md'
+            outside.write_text(RECORD.replace('SHIP-WITH-FIXES', 'HOLD'),
+                               encoding='utf-8')
+            write(root / f'{MILESTONE_DIR}/features/alpha/feature.md',
+                  {'id': FEATURE, 'milestone': '"0.1"', 'name': 'Alpha',
+                   'status': 'done', 'reviewed': str(outside)})
+            commit(root, 'an absolute pointer')
+            git(root, 'tag', TAG)
+            code, out = report(root, '0.1', '--from', TAG)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('HOLD', out)
+        self.assertNotIn(str(outside), out)
+
+    def test_crlf_terminators_read_the_same_from_git_as_from_disk(self):
+        """`git show` hands over the bytes as they are; `Path.read_text` — the
+        reader `ledger.read_rows` uses — translates. A ledger and a record
+        whose terminators are CRLF must still produce ONE table either way, or
+        the same milestone has two reports and nothing says which is which."""
+        with tree(story_statuses=('done', 'todo')) as root:
+            seeded(root)
+            for rel in (LEDGER_REL, RECORD_REL):
+                path = root / rel
+                path.write_bytes(path.read_text(encoding='utf-8')
+                                 .replace('\n', '\r\n').encode('utf-8'))
+            _, live = self.capture(root, '0.1')
+            commit(root, 'CRLF terminators on both documents')
+            git(root, 'tag', TAG)
+            _, at_tag = self.capture(root, '0.1', '--from', TAG)
+        self.assertIn('SHIP-WITH-FIXES', live)
+        self.assertEqual(stripped(at_tag), live)
+
     def test_the_verb_writes_nothing_and_checks_nothing_out(self):
         """The claim in the docstring, asserted against the tree itself."""
         with tree(story_statuses=('done', 'todo')) as root:
