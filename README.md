@@ -430,7 +430,8 @@ make precommit   # gates + hooks-self-test + test — the per-change gate
 make milestone   # gates + hooks-self-test + matrix + smoke — the full gate, and what CI runs
 ```
 
-`make matrix` runs the suite on every claimed interpreter and reports which one failed; `make fuzz`
+`make matrix` runs the whole suite on `PY_FLOOR` and the Python-only slice (`-m "not shell"`)
+on every other claimed interpreter, and reports which one failed; `make fuzz`
 runs the seeded differential + replay harnesses alone; `make smoke` runs `check all`, `autoloads`,
 `scene`, `refs`, `pm status`, `pm validate` and `check pm` against the live consumer checkouts,
 compares each printed census against an independent count, and fails if it leaves either dirty. It
