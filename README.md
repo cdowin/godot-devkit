@@ -34,7 +34,10 @@ uvx --from "git+https://github.com/cdowin/godot-devkit@v0.23.0" godot-devkit --v
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
 adopt a release. **Adopting a bump is three reads:** the CHANGELOG, `pm vocabulary` for what the
 closed state/rule sets became, and `install-* --diff` for what the shipped files would change before
-you let them.
+you let them. **And one re-run of `pm init`** (idempotent — it fills gaps and rewrites nothing): a
+line a release adds to `.gitattributes` reaches an existing tree only that way — since 0.23.0,
+`pm/roadmap/*/ledger.jsonl merge=union`, without which the ledger every branch appends to conflicts
+on every merge.
 
 ## Quickstart: five minutes
 
