@@ -2,9 +2,9 @@
 id: 0.24.0/bugs/install-hooks-refuses-whole-on-header-edited-consumers
 milestone: "0.24.0"
 name: "`install-hooks` refuses whole on a consumer with edited project-config headers, so a new hook cannot be added without `--force` and four re-edits"
-status: open
+status: fixed
 caught_in: "0.24.0"
-fix_milestone:
+fix_milestone: 0.24.0
 caused_by: 0.23.0/usage-capture
 ---
 
