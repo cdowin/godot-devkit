@@ -207,10 +207,21 @@ def test_this_repo_runs_the_gate_in_its_own_aggregate():
     assert 'hooks' in roster, roster
 
 
-def test_the_repair_the_gate_names_is_the_target_that_performs_it():
-    """`check hooks` says `make hooks`; `make hooks` has to be the arm script,
-    or the gate names a repair that does not repair."""
-    makefile = (REPO_ROOT / 'Makefile').read_text(encoding='utf-8')
-    recipe = makefile.split('\nhooks:\n', 1)[1].split('\n\n', 1)[0]
-    assert 'tools/setup-hooks.sh' in recipe, recipe
-    assert hooks.ARM_COMMAND == 'make hooks'
+def test_the_repair_the_gate_names_is_runnable_by_a_CONSUMER():
+    """The repair has to work in the tree that TRIPS the gate. `make hooks` is
+    this repo's own target and no consumer has it, so naming it sends a consumer
+    to `No rule to make target`. The script is shipped by `install-hooks` into
+    every tree, which is why it is the one named."""
+    assert hooks.ARM_COMMAND == 'bash tools/setup-hooks.sh'
+    shipped = REPO_ROOT / 'src/godot_devkit/repo/installables/setup-hooks.sh'
+    assert shipped.is_file(), shipped
+    install = (REPO_ROOT / 'src/godot_devkit/repo/install.py').read_text(encoding='utf-8')
+    assert "'tools/setup-hooks.sh'" in install, 'the arm script must be an installable'
+
+
+def test_the_two_shipped_surfaces_name_the_SAME_repair():
+    """`check hooks` and `doctor.sh` both tell an operator how to arm the corpus.
+    Two surfaces disagreeing is how a consumer learns to trust neither."""
+    doctor = (REPO_ROOT / 'src/godot_devkit/repo/installables/doctor.sh').read_text(encoding='utf-8')
+    assert 'tools/setup-hooks.sh' in doctor
+    assert 'make hooks' not in doctor

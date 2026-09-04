@@ -60,7 +60,12 @@ from godot_devkit.core.walk import Kind, SkipReason, Walk
 
 HOOKS_DIR = 'tools/hooks'
 CC_PREFIX = 'cc-'
-ARM_COMMAND = 'make hooks'
+# The repair every finding prints. It must be runnable by a CONSUMER, not only
+# here: `install-hooks` ships `tools/setup-hooks.sh` into every tree, while
+# `make hooks` exists in this repo's own root Makefile and nowhere else. Naming
+# the target would send a consumer to `No rule to make target`. This is the same
+# wording `doctor.sh` prints, on purpose — two shipped surfaces, one repair.
+ARM_COMMAND = 'bash tools/setup-hooks.sh'
 
 # A payload no Claude Code hook can act on. Each one's own header promises the
 # same answer to it: exit 0, and the reason on stderr.
