@@ -268,15 +268,22 @@ ref_defect() {
 	return 1
 }
 
-# touched_paths <ref> — every repo-relative path the working tree differs from
-# <ref> on (staged or not), plus every untracked file git does not ignore: a
-# new scenario is a touched scenario before it is ever added. Exit 2 when
+# touched_paths <ref> — every REPO_ROOT-relative path the working tree differs
+# from <ref> on (staged or not), plus every untracked file git does not ignore:
+# a new scenario is a touched scenario before it is ever added. Exit 2 when
 # <ref> does not name a commit.
+#
+# Relative to REPO_ROOT (the cwd), NOT the git toplevel — a covers entry is
+# repo-relative, and a project below the toplevel (game/ in a monorepo) would
+# otherwise compare `game/systems/alpha/x.gd` against `systems/alpha` and
+# match nothing. A change outside the project is dropped: nothing repo-relative
+# can name it. And the bytes, not git's C-quoting: under core.quotePath (the
+# default) a non-ASCII path prints as `"caf\303\251.gd"`, a prefix of nothing.
 touched_paths() {
 	local ref="$1"
 	git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1 || return 2
-	{ git diff --name-only "$ref" -- 2>/dev/null
-	  git ls-files --others --exclude-standard 2>/dev/null; } | sort -u
+	{ git -c core.quotePath=false diff --name-only --relative "$ref" -- 2>/dev/null
+	  git -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null; } | sort -u
 }
 
 # touched_substrate — touched paths on stdin; the ones that are the tier's own
@@ -529,6 +536,31 @@ FIXTURE_EOF
 		| touched_substrate | tr '\n' ' ')"
 	[ "$out" = "tests/support/maps/x.tscn tests/integration/scenario_base.gd tools/dev/runners/scenario.sh " ] \
 		|| miss "substrate: fixtures, the base class and the runners are ground; a system is not — got '$out'"
+
+	# --- touched_paths: REPO_ROOT-relative and literal ------------------------
+	# `git diff --name-only` names a path relative to the git TOPLEVEL and
+	# C-quotes a non-ASCII one under core.quotePath (git's default), while a
+	# covers entry is REPO_ROOT-relative and literal. A project below the
+	# toplevel (game/ in a monorepo) or a café.gd matched nothing, and --diff
+	# under-selected to smoke without a word. A change OUTSIDE the project is
+	# not a touched path of the project: nothing repo-relative can name it.
+	mono="$scratch/mono"
+	mkdir -p "$mono/game/systems/alpha" "$mono/game/tests/support"
+	: > "$mono/README.md"; : > "$mono/game/project.godot"; : > "$mono/game/tests/support/base.gd"
+	( cd "$mono" && git init -q . && git config core.quotePath true && git add -A \
+		&& git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m fixture ) >/dev/null 2>&1 \
+		|| miss "the git fixture could not be built"
+	: > "$mono/game/systems/alpha/x.gd"
+	: > "$mono/game/systems/alpha/café.gd"
+	echo change >> "$mono/README.md"
+	echo change >> "$mono/game/tests/support/base.gd"
+	cases=$((cases + 1))
+	out="$( (cd "$mono/game" && touched_paths HEAD) | tr '\n' ' ')"
+	[ "$out" = "systems/alpha/café.gd systems/alpha/x.gd tests/support/base.gd " ] \
+		|| miss "touched paths must be REPO_ROOT-relative and literal (a project under game/, a café.gd; the toplevel README is outside the project) — got '$out'"
+	cases=$((cases + 1))
+	rc=0; (cd "$mono/game" && touched_paths no-such-ref >/dev/null 2>&1) || rc=$?
+	[ "$rc" -eq 2 ] || miss "touched_paths with no such ref should return 2, got $rc"
 
 	# --- every keep-listed gate must EXIST and survive the filter ------------
 	# A renamed or deleted keep-listed capture must fail loudly here, never

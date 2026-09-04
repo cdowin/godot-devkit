@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`integration.sh --diff <ref>` compares the touched list REPO_ROOT-relative and literal** — `git diff --name-only` names a path relative to the git TOPLEVEL and C-quotes a non-ASCII one under `core.quotePath` (git's default), while a `## covers:` entry is repo-relative and literal: a Godot project below the toplevel (`game/` in a monorepo) compared `game/systems/alpha/x.gd` against `systems/alpha`, a `café.gd` arrived as `"caf\303\251.gd"`, and either way the slice was smoke alone with no hint. Now `--relative` from the project root under `core.quotePath=false`, for the diff and the untracked list alike; a change outside the project is not a touched path of it, and the tier's own ground is ground below the toplevel too. Self-test 85 → 87 cases; three end-to-end cases against a monorepo fixture and a non-ASCII path, each watched red first. (repo/installables/integration.sh)
+
 ## v0.22.0 — 2026-09-03
 
 **A scenario declares its coverage.** Three consumer bugs in the integration runner's one matcher and one in the warnings gate's reach, fixed at the source.
