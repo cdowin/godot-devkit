@@ -1,0 +1,98 @@
+---
+id: 0.24.0/the-lifecycle-says-what-it-means
+milestone: "0.24.0"
+name: A grain says which half of its life it is in
+status: planning
+reviewed:
+phase: 3
+depends_on: []
+consumed_by: []
+---
+
+# A grain says which half of its life it is in
+
+`done` currently means *the features are closed*. It does not mean shipped, and the release protocol
+says so out loud — step 3 is **"Close the milestone — before the render, not after"**, with the
+changelog retitle at step 4 and the tag at step 5. So a milestone reaches its terminal state with its
+notes unwritten, nothing tagged and nothing merged.
+
+Chris, 2026-09-04: *"The milestone should only be moved to `done` after EVERYTHING is finished. That
+should be literally the last thing before a merge, it means DONE."*
+
+**One vocabulary, seven states, across milestone / feature / story:**
+
+```
+planning → ready → building → reviewing → accepted → packaging → done
+```
+
+Transitions stay open — this package has never had a transition graph and does not grow one here. A
+grain uses the states it needs and skips the rest: *"packaging a feature is different from packaging
+a milestone. A story may skip packaging."*
+
+## The deadlock this fixes, reproduced 2026-09-04
+
+Closing 0.24.0 with all three features `done` and the milestone still `building`, `make milestone`
+failed in **1.1 seconds** at `gates`, before the matrix or the smoke ran:
+
+```
+DRIFT  milestone 0.24.0 is 'building' but all 3 features are done (should be done)
+[GATES] FAIL (exit 1) — 3 check(s) PASS
+```
+
+So the release gate could not run until the milestone was flipped `done` — the decision that gate
+exists to inform. Filed as `bugs/the-release-gate-cannot-run-before-the-close-it-gates`; this feature
+is its fix.
+
+**D6 needs no new logic.** `checks/pm.py:188` keys off the literal string:
+
+```python
+if ('D6' in enabled and mstat == 'building' and feat_total > 0 and feat_done_n == feat_total):
+```
+
+The moment a milestone moves to `reviewing`, D6 goes quiet and the gate runs. Its message must stop
+saying "should be done" — the truthful reading is *you finished the features and are still calling
+it building*.
+
+## The migration, measured across all three trees
+
+| from | to | grains | why |
+|---|---|---|---|
+| `todo` (story) | `ready` | 66 | These are PO-written, dispatch-ready stories. `planning` would assert they are still being shaped, which is less true than `ready`. |
+| `review` (feature) | `reviewing` | 9 | Rename only. |
+| `wip` (story) | `building` | **0** | Transient; none in any tree right now. |
+| `blocked` (story) | — | **0** | Declared and never used in any of the three trees. It dies with its last reader — which there never was. |
+| `done` | `done` | 427 | Untouched. |
+
+Bug states (`open` / `fixed` / `closed`) are a different machine and do **not** change.
+
+**Not ours:** trail carries 8 grains at `active`, a status in no devkit default set — pre-existing
+drift in that repo, surfaced by this census and left for trail's own session.
+
+## Scope
+
+| File | Action | Purpose |
+|---|---|---|
+| `repo/pm/model.py` | MODIFY | The three `DEFAULT_*_STATES` become the one seven-state vocabulary. |
+| `repo/checks/pm.py` | MODIFY | D6's message stops claiming `done` is the only next state. |
+| `repo/pm/cli.py` | MODIFY | `pm vocabulary` reports the new sets; usage text follows. |
+| `.claude/skills/release/SKILL.md` | MODIFY | Step 3 stops closing before the render. `done` becomes the last step, after the tag. |
+| this repo's own `pm/roadmap/**` | MODIFY | 4 `todo` grains migrate. |
+| `tests/` | MODIFY | The vocabulary, D6's wording, and the migration mapping. |
+
+## Ship criterion
+
+`0.24.0` itself walks `building → reviewing → accepted → packaging → done`, and the tag is cut while
+it is at `packaging` — **the first release where `done` means shipped.** `make milestone` runs green
+at `accepted` without the milestone having to lie about being finished.
+
+## Gotchas
+
+1. **A state a consumer's tree already uses cannot vanish under it.** Every consumer's `status:` line
+   is validated against these sets; a set that drops a word a tree holds turns every one of those
+   grains into a `check pm` finding on upgrade day. `blocked` and `wip` are safe only because the
+   census says zero — re-run it rather than trusting this table.
+2. **The consumer migration is a follow-up, not part of this.** nullbound holds 38 `todo` and 8
+   `review`; adopting v0.24.0 means bumping the pin AND rewriting those lines. Name it in the release
+   notes' consumer-follow-up list or it will be discovered as a red gate.
+3. **`pm feature done --cascade` moves stories at `review`.** If features go to `reviewing`, the
+   cascade's source state moves with it.
