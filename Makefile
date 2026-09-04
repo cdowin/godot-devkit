@@ -91,7 +91,7 @@ help:
 	@echo 'godot-devkit — make targets'
 	@echo
 	@echo '  make test        the suite on the $(PY_FLOOR) floor'
-	@echo '  make matrix      the suite on every claimed interpreter ($(PY_MATRIX))'
+	@echo '  make matrix      every claimed interpreter ($(PY_MATRIX)): $(PY_FLOOR) runs the whole suite, the rest -m "not shell" (a spawn is not interpreter-sensitive)'
 	@echo '  make fuzz        the committed seeded harnesses (differential + replay)'
 	@echo '  make gates       godot-devkit check all, on this repo'
 	@echo '  make hooks-self-test  the installed hooks that ship a corpus, replayed (sandbox + the two ledger couriers)'
@@ -140,14 +140,43 @@ hooks-self-test:
 # "everywhere", which is the whole question a matrix is asked. It writes its own
 # loop rather than $(call gate,...) because it captures N runs into ONE
 # transcript — but it ends the same way, with one verdict line naming that log.
+#
+# The FLOOR runs the whole suite; every other interpreter runs `-m "not shell"`.
+# ~85% of this suite's wall clock is `subprocess` — bash, make, git, the
+# installed hook corpora — and a spawn is not something a Python version
+# changes, so four interpreters replaying it bought minutes and no information.
+# The `shell` mark is DERIVED per module in tests/conftest.py from what the
+# source does, never a list here: a roster in this file is a roster that goes
+# stale, and a module that quietly leaves it stops running on three
+# interpreters with nothing going red.
+#
+# A PY_FLOOR that is not in PY_MATRIX is refused BEFORE the first interpreter —
+# the slice would then be run by nobody and the matrix would print PASS over a
+# suite that never ran, which is worse than the sixteen minutes this saves.
+# Membership is decided by the same word splitting the loop uses, so the guard
+# and the run cannot disagree; a `case` pattern would call a 3.1 floor a member
+# of a 3.11 matrix. (PY_FLOOR/PY_MATRIX are operator configuration: the guard
+# is against bumping one and not the other, not against shell injection
+# through a make variable.)
 matrix:
 	@set -o pipefail; . $(RUNNERS_LIB); \
-	log="$$(gdk_gate_log matrix)"; fail=''; \
+	log="$$(gdk_gate_log matrix)"; fail=''; floor=''; full=''; \
+	for v in $(PY_MATRIX); do [ "$$v" = "$(PY_FLOOR)" ] && floor="$$v"; done; \
+	if [ -z "$$floor" ]; then \
+		echo 'PY_FLOOR "$(PY_FLOOR)" is not in PY_MATRIX "$(PY_MATRIX)"' >> "$$log"; \
+		gdk_gate_verdict MATRIX 'REFUSED: PY_FLOOR "$(PY_FLOOR)" is not in PY_MATRIX "$(PY_MATRIX)", so no interpreter would run the whole suite' "$$log"; \
+		exit 2; \
+	fi; \
 	for v in $(PY_MATRIX); do \
-		echo "=== python $$v ===" >> "$$log"; \
-		[ "$$VERBOSE" = "0" ] || echo "=== python $$v ==="; \
+		if [ -z "$$full" ] && [ "$$v" = "$(PY_FLOOR)" ]; then \
+			full="$$v"; slice=(); ran='the whole suite'; \
+		else \
+			slice=(-m 'not shell'); ran='-m "not shell"'; \
+		fi; \
+		echo "=== python $$v ($$ran) ===" >> "$$log"; \
+		[ "$$VERBOSE" = "0" ] || echo "=== python $$v ($$ran) ==="; \
 		gdk_gate_capture "$$log" -- \
-			$(UV) run --python $$v $(TEST_DEPS) python -m pytest $(PYTEST_Q) || true; \
+			$(UV) run --python $$v $(TEST_DEPS) python -m pytest $(PYTEST_Q) "$${slice[@]}" || true; \
 		[ "$$GDK_GATE_EXIT" -eq 0 ] || fail="$$fail $$v"; \
 	done; \
 	if [ -n "$$fail" ]; then \

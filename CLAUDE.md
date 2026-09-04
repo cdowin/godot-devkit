@@ -92,6 +92,16 @@ hand-roll an incantation.** `make help` lists every target. If the check you nee
 a target, **add the target**, then run it — apparatus that lives in one agent's context
 is apparatus that gets rebuilt.
 
+**`make milestone` runs the matrix, and the matrix proves PYTHON on every interpreter —
+bash once.** `PY_FLOOR` runs the whole suite; the other interpreters in `PY_MATRIX` run
+`-m "not shell"`. ~85% of this suite's wall clock is `subprocess` — bash, make, git, the
+installed hook corpora — and a spawn is not something a Python version changes, so
+replaying it four times bought minutes and no information. The `shell` mark is DERIVED
+per module in `tests/conftest.py` from what the source does, never hand-applied (a
+hand-written one is a collection refusal). A `PY_FLOOR` outside `PY_MATRIX` is refused
+by name before the first interpreter starts: a matrix with no full pass would print PASS
+over a suite nothing ran. `make test` is unaffected — it runs everything.
+
 **Every gate prints ONE verdict line naming its full transcript under .gate-reports/;
 `VERBOSE=1` streams the whole thing.** A new target routes through the shipped
 `gdk_gate_capture` / `gdk_gate_verdict` (installables/gdk_runners.sh, sourced from
