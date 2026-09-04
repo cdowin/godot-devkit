@@ -2,7 +2,7 @@
 id: 0.24.0/matrix-runs-bash-once
 milestone: "0.24.0"
 name: the matrix proves Python on every interpreter and bash once
-status: building
+status: review
 reviewed:
 phase: 1
 depends_on: []
