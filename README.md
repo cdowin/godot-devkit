@@ -28,7 +28,7 @@ Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 Consumed at a **pinned tag** so every machine and CI runs identical gate code:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.22.0" godot-devkit --version   # godot-devkit 0.22.0
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.23.0" godot-devkit --version   # godot-devkit 0.23.0
 ```
 
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
@@ -342,7 +342,7 @@ skipped.
 **A new project — one command.** From inside the repo:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.22.0" godot-devkit init
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.23.0" godot-devkit init
 make doctor && make help
 ```
 
@@ -350,7 +350,7 @@ make doctor && make help
 project, so it lives in YOUR file and a bump is a one-line diff:
 
 ```make
-DEVKIT_VERSION := v0.22.0
+DEVKIT_VERSION := v0.23.0
 include Makefile.devkit
 
 my-scan: ## a gate this project owns
