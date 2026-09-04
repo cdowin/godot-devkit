@@ -62,10 +62,10 @@ PROJECT_GODOT = ('config_version=5\n\n[application]\n\n'
                  'config/features=PackedStringArray("4.6")\n')
 ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>\n'
 
-# The standard set is 27 targets. The NUMBER is asserted, not just the list: a
+# The standard set is 28 targets. The NUMBER is asserted, not just the list: a
 # target quietly dropped from the include would otherwise shrink the sweep and
 # still pass it, which is this package's cardinal sin wearing a green tick.
-STANDARD_COUNT = 27
+STANDARD_COUNT = 28  # +integration-list (0.23.0): the roster, asked by check test-shape
 DOCUMENTED = re.compile(r'^([a-z][a-z0-9-]*):.*?## ', re.MULTILINE)
 
 # What a target needs on the command line to be asked for at all.
