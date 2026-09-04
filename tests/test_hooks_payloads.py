@@ -891,7 +891,7 @@ FRONTMATTER = {
          'status': 'building', 'reviewed': ''},
     'pm/roadmap/0.1-demo/features/alpha/stories/s0.md':
         {'id': '0.1/alpha/s0', 'feature': '0.1/alpha', 'milestone': '"0.1"',
-         'name': 'S0', 'status': 'wip'},
+         'name': 'S0', 'status': 'building'},
 }
 
 

@@ -55,24 +55,24 @@ def seeded(root) -> None:
     three dispatch rows — two agent types on the story, one naming no grain."""
     write(root / 'pm/roadmap/0.1-demo/features/alpha/stories/s1.md',
           {'id': QUIET, 'feature': FEATURE, 'milestone': '"0.1"', 'name': 'S1',
-           'status': 'todo', 'size': 'm'})
+           'status': 'ready', 'size': 'm'})
     bug(root, 'crash', 'closed')
     put_ledger(
         root,
-        status_line('2026-09-03T10:00:00Z', STORY, 'todo', 'wip'),
+        status_line('2026-09-03T10:00:00Z', STORY, 'ready', 'building'),
         dispatch_line('2026-09-03T10:05:00Z', agent_type='developer',
                       tool_calls=37, duration_s=812,
                       usage={'input': 1200, 'output': 38000,
                              'cache_creation': 210000, 'cache_read': 9100000},
                       tree=snapshot(stories_wip=[STORY],
                                     features_building=[FEATURE])),
-        status_line('2026-09-03T10:10:00Z', STORY, 'wip', 'review'),
+        status_line('2026-09-03T10:10:00Z', STORY, 'building', 'reviewing'),
         # No `tool_calls`, no `duration_s`, and one usage key only: absent is
         # not zero, and this row is what proves the columns say so.
         dispatch_line('2026-09-03T10:11:00Z', agent_type='reviewer',
                       usage={'output': 500},
                       tree=snapshot(stories_review=[STORY])),
-        status_line('2026-09-03T10:12:00Z', STORY, 'review', 'done'),
+        status_line('2026-09-03T10:12:00Z', STORY, 'reviewing', 'done'),
         status_line('2026-09-03T10:20:00Z', BUG, 'open', 'fixed'),
         status_line('2026-09-03T10:20:30Z', BUG, 'fixed', 'closed'),
         # Nothing was `wip` when this one stopped. A true statement about
@@ -85,15 +85,15 @@ TABLE = """\
 [ledger:report] 0.1 — spend per grain — 3 dispatch row(s), 5 status row(s), 4 grain(s)
 
 -- story (2)
-grain         size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  todo  wip  review  blocked  total_s
-0.1/alpha/s0                 2  1200  38500        210000     9100000          37         812     -  600     120        -      720
+grain         size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  building  reviewing  accepted  packaging  total_s
+0.1/alpha/s0                 2  1200  38500        210000     9100000          37         812         -      -       600        120         -          -      720
   developer                  1  1200  38000        210000     9100000          37         812
   reviewer                   1     -    500             -           -           -           -
-0.1/alpha/s1  m              0     -      -             -           -           -           -     -    -       -        -        -
+0.1/alpha/s1  m              0     -      -             -           -           -           -         -      -         -          -         -          -        -
 
 -- feature (1)
-grain        size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  building  review  total_s
-0.1/alpha                   2  1200  38500        210000     9100000          37         812         -      -         -       -        -
+grain        size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  building  reviewing  accepted  packaging  total_s
+0.1/alpha                   2  1200  38500        210000     9100000          37         812         -      -         -          -         -          -        -
   developer                 1  1200  38000        210000     9100000          37         812
   reviewer                  1     -    500             -           -           -           -
 
@@ -121,7 +121,7 @@ class Table(unittest.TestCase):
     """The exact lines, for the exact fixture. Rule 6: the shape is the API."""
 
     def test_the_seeded_ledger_prints_this_exact_table(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             code, out = report(root, '0.1')
         self.assertEqual(code, 0, out)
@@ -132,7 +132,7 @@ class Table(unittest.TestCase):
 
     def test_the_report_prints_the_five_sections_in_the_milestones_order(self):
         """The five questions of milestone.md, once each, in its order."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             out = report(root, '0.1')[1]
         heads = [line for line in out.splitlines()
@@ -143,7 +143,7 @@ class Table(unittest.TestCase):
                           'escapes', 'overhead shape'])
 
     def test_the_report_never_writes(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             before = ledger_lines(root)
             paths = sorted(p.name for p in (root / 'pm/roadmap/0.1-demo')
@@ -157,17 +157,17 @@ class Table(unittest.TestCase):
 
     def test_a_grain_no_row_names_is_present_and_dashed(self):
         """Walk the tree, not the ledger — a grain nothing measured EXISTS."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(QUIET))
         # `size:` verbatim as a COLUMN (D5), then dashes: no zero anywhere.
-        self.assertEqual(line.split(), [QUIET, 'm', '0'] + ['-'] * 11)
+        self.assertEqual(line.split(), [QUIET, 'm', '0'] + ['-'] * 13)
 
     def test_an_absent_usage_key_prints_a_dash_and_never_a_zero(self):
         """The reviewer row carried `output` only. A `0` under `in` would read
         forever after as a dispatch that consumed no input."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines()
@@ -176,7 +176,7 @@ class Table(unittest.TestCase):
                          ['reviewer', '1', '-', '500', '-', '-', '-', '-'])
 
     def test_two_agent_types_split_into_sub_rows_one_does_not(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             both = report(root, '0.1')[1]
             put_ledger(root,
@@ -193,7 +193,7 @@ class Table(unittest.TestCase):
     def test_a_bugs_states_come_from_the_bug_vocabulary(self):
         """`open`/`fixed` — the states BEFORE `[pm] bug_states[-1]`, which is
         where the bug ended and so where its total stops."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             out = report(root, '0.1')[1]
         header, row = out.split('-- bug (1)')[1].splitlines()[1:3]
@@ -206,16 +206,18 @@ class Table(unittest.TestCase):
 
     def test_a_non_terminal_grain_has_no_total(self):
         """A running clock is not a duration — the same rule `show` prints by."""
-        with tree(story_statuses=('review', 'todo')) as root:
+        with tree(story_statuses=('reviewing', 'ready')) as root:
             seeded(root)
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:10:00Z', STORY, 'wip',
-                                   'review'))
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:10:00Z', STORY, 'building',
+                                   'reviewing'))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
-        self.assertEqual(line.split()[-5:], ['-', '600', '-', '-', '-'])
+        # planning ready building reviewing accepted packaging total_s
+        self.assertEqual(line.split()[-7:],
+                         ['-', '-', '600', '-', '-', '-', '-'])
 
     def test_one_row_is_an_instant_and_never_a_zero_second_total(self):
         """A span needs two rows. A grain whose only row is its own terminal
@@ -224,12 +226,12 @@ class Table(unittest.TestCase):
         a reader compares grains by. This repo's own tree prints it: a story
         flipped straight to `done` shows every state column `-` and `total_s`
         `0`."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             put_ledger(root, status_line('2026-09-03T10:00:00Z', STORY,
-                                         'review', 'done'))
+                                         'reviewing', 'done'))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
-        self.assertEqual(line.split()[-5:], ['-', '-', '-', '-', '-'])
+        self.assertEqual(line.split()[-7:], ['-'] * 7)
 
     def test_only_status_rows_bound_the_total(self):
         """R3: a `decision` row NAMES a grain but does not move it.
@@ -240,60 +242,63 @@ class Table(unittest.TestCase):
         that read 4222s against 1799s of measured status time, a number the
         state columns contradict and a reader compares grains by.
         """
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             put_ledger(
                 root,
                 decision_line('2026-09-03T09:00:00Z', STORY, 'D1'),
-                status_line('2026-09-03T10:00:00Z', STORY, 'todo', 'wip'),
-                status_line('2026-09-03T10:15:00Z', STORY, 'wip', 'done'),
+                status_line('2026-09-03T10:00:00Z', STORY, 'ready', 'building'),
+                status_line('2026-09-03T10:15:00Z', STORY, 'building', 'done'),
                 # After the terminal row, and no more able to extend the span
                 # than the decision was to start it early.
                 dispatch_line('2026-09-03T11:00:00Z',
                               tree=snapshot(stories_wip=[STORY])))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
-        # todo, wip, review, blocked, total_s — 10:00:00 -> 10:15:00.
-        self.assertEqual(line.split()[-5:], ['-', '900', '-', '-', '900'])
+        # planning ready building reviewing accepted packaging total_s —
+        # 10:00:00 -> 10:15:00, all of it in `building`.
+        self.assertEqual(line.split()[-7:],
+                         ['-', '-', '900', '-', '-', '-', '900'])
 
     def test_rows_out_of_time_order_never_fabricate_an_interval(self):
         """`merge=union` (D6) interleaves two branches' appends by BRANCH, so
         the file's order is not the clock's. The subtraction is over the rows
         in TIME order or it is not a measurement: read in file order, this
-        fixture bills 3600s of `review` backwards and 10800s to a `wip` the
-        story spent 7200s in — two numbers that look like measurements and are
-        not (hard rule 4, read side)."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        fixture bills 3600s of `reviewing` backwards and 10800s to a `building`
+        the story spent 7200s in — two numbers that look like measurements and
+        are not (hard rule 4, read side)."""
+        with tree(story_statuses=('done', 'ready')) as root:
             put_ledger(
                 root,
-                status_line('2026-09-03T12:00:00Z', STORY, 'wip', 'review'),
-                status_line('2026-09-03T10:00:00Z', STORY, 'todo', 'wip'),
-                status_line('2026-09-03T13:00:00Z', STORY, 'review', 'done'))
+                status_line('2026-09-03T12:00:00Z', STORY, 'building', 'reviewing'),
+                status_line('2026-09-03T10:00:00Z', STORY, 'ready', 'building'),
+                status_line('2026-09-03T13:00:00Z', STORY, 'reviewing', 'done'))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
         self.assertNotIn('-7200', line)
-        # todo, wip, review, blocked, total_s — the story's real life.
-        self.assertEqual(line.split()[-5:],
-                         ['-', '7200', '3600', '-', '10800'])
+        # planning ready building reviewing accepted packaging total_s —
+        # the story's real life, read in TIME order.
+        self.assertEqual(line.split()[-7:],
+                         ['-', '-', '7200', '3600', '-', '-', '10800'])
 
     def test_an_unparseable_stamp_leaves_the_state_absent_not_zero(self):
         """A row whose `ts` will not parse contributes no arithmetic, and no
         arithmetic is `-`. A `0` there would say the story passed through the
         state in no time at all."""
-        with tree(story_statuses=('wip', 'todo')) as root:
+        with tree(story_statuses=('building', 'ready')) as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
-                       status_line('not-a-timestamp', STORY, 'wip', 'review'))
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
+                       status_line('not-a-timestamp', STORY, 'building', 'reviewing'))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
-        self.assertEqual(line.split()[-5:], ['-', '-', '-', '-', '-'])
+        self.assertEqual(line.split()[-7:], ['-'] * 7)
 
     def test_a_snapshot_id_from_another_milestone_names_nothing_here(self):
         """D3 puts every live candidate on the row; the rule that reads it is
         this module's. An id that is not a grain of THIS milestone attributes
         to no grain, and the row lands in the trailing block rather than being
         dropped or inventing a grain."""
-        with tree(story_statuses=('wip', 'todo')) as root:
+        with tree(story_statuses=('building', 'ready')) as root:
             put_ledger(root, dispatch_line(
                 '2026-09-03T10:00:00Z',
                 tree=snapshot(stories_wip=['0.9/other/s0'],
@@ -310,12 +315,12 @@ class Table(unittest.TestCase):
         """A grain missing from the table reads as a grain that never existed
         (hard rule 4's census clause), so the path's id stands in for the
         absent claim rather than the row being dropped or blank."""
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             write(root / 'pm/roadmap/0.1-demo/features/alpha/stories/s9.md',
                   {'feature': FEATURE, 'milestone': '"0.1"', 'name': 'S9',
                    'status': 'todo'})
             put_ledger(root, status_line('2026-09-03T10:00:00Z', STORY,
-                                         'todo', 'wip'))
+                                         'ready', 'building'))
             out = report(root, '0.1')[1]
         self.assertIn('0.1/alpha/s9', out)
 
@@ -338,7 +343,7 @@ class Table(unittest.TestCase):
         self.assertIn('0.1/bugs/esc', out)
 
     def test_the_no_grain_block_counts_the_rows_it_names_nothing_about(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             out = report(root, '0.1')[1]
         block = out.split('-- rows naming no grain (1)')[1].splitlines()
@@ -351,9 +356,9 @@ class Table(unittest.TestCase):
 
     def test_an_empty_no_grain_block_still_says_zero(self):
         """A census that saw nothing says so; silence reads as never scanned."""
-        with tree(story_statuses=('done', 'todo')) as root:
-            put_ledger(root, status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                         'wip'))
+        with tree(story_statuses=('done', 'ready')) as root:
+            put_ledger(root, status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                         'building'))
             out = report(root, '0.1')[1]
         self.assertIn('-- rows naming no grain (0)', out)
 
@@ -377,7 +382,7 @@ class Json(unittest.TestCase):
         rev = {'agent_type': 'reviewer', 'dispatches': 1,
                'usage': dict(blank_usage(), output=500),
                'tool_calls': None, 'duration_s': None}
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             data = self.payload(root)
         # Section 1's own keys, exactly — sections 2-5 add one key each and are
@@ -391,20 +396,23 @@ class Json(unittest.TestCase):
                 {'grain': STORY, 'kind': 'story', 'size': None,
                  'dispatches': 2, 'usage': full, 'tool_calls': 37,
                  'duration_s': 812, 'agent_types': [dev, rev],
-                 'states': {'todo': None, 'wip': 600, 'review': 120,
-                            'blocked': None},
+                 'states': {'planning': None, 'ready': None, 'building': 600,
+                            'reviewing': 120, 'accepted': None,
+                            'packaging': None},
                  'total_s': 720},
                 {'grain': QUIET, 'kind': 'story', 'size': 'm',
                  'dispatches': 0, 'usage': blank_usage(), 'tool_calls': None,
                  'duration_s': None, 'agent_types': [],
-                 'states': {'todo': None, 'wip': None, 'review': None,
-                            'blocked': None},
+                 'states': {'planning': None, 'ready': None,
+                            'building': None, 'reviewing': None,
+                            'accepted': None, 'packaging': None},
                  'total_s': None},
                 {'grain': FEATURE, 'kind': 'feature', 'size': None,
                  'dispatches': 2, 'usage': full, 'tool_calls': 37,
                  'duration_s': 812, 'agent_types': [dev, rev],
-                 'states': {'planning': None, 'ready': None, 'building': None,
-                            'review': None},
+                 'states': {'planning': None, 'ready': None,
+                            'building': None, 'reviewing': None,
+                            'accepted': None, 'packaging': None},
                  'total_s': None},
                 {'grain': BUG, 'kind': 'bug', 'size': None, 'dispatches': 0,
                  'usage': blank_usage(), 'tool_calls': None,
@@ -421,7 +429,7 @@ class Json(unittest.TestCase):
         self.assertEqual(sorted(data), sorted(SPEND_KEYS + SECTION_KEYS))
 
     def test_json_prints_an_object_even_with_no_ledger_at_all(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             data = self.payload(root)
         self.assertEqual(data['totals'],
                          {'dispatch_rows': 0, 'status_rows': 0, 'grains': 3,
@@ -433,7 +441,7 @@ class Resolution(unittest.TestCase):
     """Which milestone's ledger — the building one, or the one you named."""
 
     def test_the_default_is_the_building_milestone(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             named = report(root, '0.1')
             default = report(root)
@@ -442,7 +450,7 @@ class Resolution(unittest.TestCase):
         self.assertEqual(default, named)
 
     def test_an_explicit_id_reads_that_milestone_not_the_building_one(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             write(root / 'pm/roadmap/0.2-next/milestone.md',
                   {'id': '"0.2"', 'name': 'Next', 'status': 'planning'})
@@ -451,7 +459,7 @@ class Resolution(unittest.TestCase):
         self.assertEqual(out.strip(), '[ledger:report] 0.2 — no ledger')
 
     def test_no_ledger_file_is_exit_zero_and_one_line(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             code, out = report(root, '0.1')
         self.assertEqual(code, 0, out)
         self.assertEqual(out.strip(), '[ledger:report] 0.1 — no ledger')
@@ -468,13 +476,13 @@ class Refusals(unittest.TestCase):
         return out
 
     def test_a_malformed_ledger_line_names_its_line_number(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
                        '{not json',
-                       status_line('2026-09-03T10:01:00Z', STORY, 'wip',
-                                   'review'))
+                       status_line('2026-09-03T10:01:00Z', STORY, 'building',
+                                   'reviewing'))
             self.refuses(root, '0.1', needle='line 2')
             self.refuses(root, '0.1', '--json', needle='line 2')
 

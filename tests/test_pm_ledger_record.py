@@ -104,7 +104,7 @@ class TranscriptRow(unittest.TestCase):
     """The scrubbed fixture in, one exact row out — every key asserted."""
 
     def test_the_subagent_fixture_produces_this_exact_dispatch_row(self):
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             code, out = record(root, '--from-transcript', str(SUBAGENT),
                                '--event', 'SubagentStop',
                                '--agent-type', 'developer')
@@ -306,13 +306,13 @@ class TreeSnapshot(unittest.TestCase):
         beta = root / 'pm/roadmap/0.1-demo/features/beta'
         write(beta / 'feature.md',
               {'id': '0.1/beta', 'milestone': '"0.1"', 'name': 'Beta',
-               'status': 'review', 'reviewed': ''})
+               'status': 'reviewing', 'reviewed': ''})
         write(beta / 'stories/b0.md',
               {'id': '0.1/beta/b0', 'feature': '0.1/beta', 'milestone': '"0.1"',
-               'name': 'B0', 'status': 'review'})
+               'name': 'B0', 'status': 'reviewing'})
 
     def test_one_wip_one_review_one_building_feature_one_review_feature(self):
-        with tree(story_statuses=('wip', 'done')) as root:
+        with tree(story_statuses=('building', 'done')) as root:
             self.build(root)
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
@@ -326,7 +326,7 @@ class TreeSnapshot(unittest.TestCase):
         })
 
     def test_every_bucket_is_present_and_empty_rather_than_absent(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
             snap = only_row(root)['tree']
@@ -349,7 +349,7 @@ class TreeSnapshot(unittest.TestCase):
         self.assertEqual(snap, fresh())
 
     def test_the_ids_are_sorted_so_two_rows_of_one_state_compare(self):
-        with tree(story_statuses=('wip', 'wip', 'wip')) as root:
+        with tree(story_statuses=('building', 'building', 'building')) as root:
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
             wip = only_row(root)['tree']['stories_wip']
@@ -361,7 +361,7 @@ class HandEntry(unittest.TestCase):
     """`--grain`: the same row shape, from a person, for a dispatch no hook saw."""
 
     def test_a_hand_row_round_trips_with_exactly_the_keys_given(self):
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             code, out = record(root, '--grain', STORY, '--agent-type',
                                'reviewer', '--tokens-in', '1200',
                                '--tokens-out', '38000', '--tool-calls', '37',
@@ -420,9 +420,9 @@ class Show(unittest.TestCase):
     def timeline(self, root, last_to: str = 'done') -> None:
         one, two, three = self.TIMELINE
         put_ledger(root,
-                   status_line(one, STORY, 'todo', 'wip'),
-                   status_line(two, STORY, 'wip', 'review'),
-                   status_line(three, STORY, 'review', last_to))
+                   status_line(one, STORY, 'ready', 'building'),
+                   status_line(two, STORY, 'building', 'reviewing'),
+                   status_line(three, STORY, 'reviewing', last_to))
 
     def test_the_human_form_is_one_line_per_row_with_the_gap_after_the_first(self):
         with tree() as root:
@@ -430,9 +430,9 @@ class Show(unittest.TestCase):
             code, out = run_cli(root, 'ledger', 'show', STORY)
         self.assertEqual(code, 0, out)
         self.assertEqual(out.strip().splitlines(), [
-            '2026-09-03T10:00:00Z  status    todo -> wip',
-            '2026-09-03T10:13:32Z  status    wip -> review  +812s',
-            '2026-09-03T10:20:00Z  status    review -> done  +388s',
+            '2026-09-03T10:00:00Z  status    ready -> building',
+            '2026-09-03T10:13:32Z  status    building -> reviewing  +812s',
+            '2026-09-03T10:20:00Z  status    reviewing -> done  +388s',
             # `done` is terminal for a story, so the run ends with the total.
             'first row → terminal row: 1200s',
         ])
@@ -489,9 +489,9 @@ class Show(unittest.TestCase):
             put_ledger(root,
                        ledger.dumps(ledger.decision_row(
                            STORY, 'D1', 'why', ts='2026-09-03T09:00:00Z')),
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:15:00Z', STORY, 'wip',
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:15:00Z', STORY, 'building',
                                    'done'))
             out = run_cli(root, 'ledger', 'show', STORY)[1]
         self.assertIn('first row → terminal row: 900s', out)
@@ -500,9 +500,9 @@ class Show(unittest.TestCase):
     def test_a_dispatch_after_the_terminal_row_does_not_extend_the_total(self):
         with tree() as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:15:00Z', STORY, 'wip',
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:15:00Z', STORY, 'building',
                                    'done'))
             before = run_cli(root, 'ledger', 'show', STORY)[1]
             self.assertEqual(record(root, '--grain', STORY,
@@ -538,7 +538,7 @@ class Show(unittest.TestCase):
         self.assertEqual(out.strip().splitlines(), expected)
 
     def test_a_dispatch_row_is_found_through_the_tree_snapshot(self):
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
             story_out = run_cli(root, 'ledger', 'show', STORY)[1]
@@ -565,11 +565,11 @@ class Show(unittest.TestCase):
     def test_a_malformed_ledger_line_refuses_and_names_the_line(self):
         with tree() as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
                        '{not json',
-                       status_line('2026-09-03T10:01:00Z', STORY, 'wip',
-                                   'review'))
+                       status_line('2026-09-03T10:01:00Z', STORY, 'building',
+                                   'reviewing'))
             code, out = run_cli(root, 'ledger', 'show', STORY)
         self.assertEqual(code, 2, out)
         self.assertIn('line 2', out)
@@ -591,8 +591,8 @@ class RowsThisVersionNeverWrote(unittest.TestCase):
     def show(self, *rows: str, grain: str = STORY):
         with tree() as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
                        *rows)
             return run_cli(root, 'ledger', 'show', grain)
 
@@ -601,21 +601,21 @@ class RowsThisVersionNeverWrote(unittest.TestCase):
             '{"ts":"2026-09-03T10:01:00Z","kind":"dispatch",'
             '"tree":{"stories_wip":[{"id":"' + STORY + '"}]}}')
         self.assertEqual(code, 0, out)
-        self.assertIn('todo -> wip', out)
+        self.assertIn('ready -> building', out)
 
     def test_a_tree_bucket_holding_a_list_or_null_does_not_crash(self):
         code, out = self.show(
             '{"ts":"2026-09-03T10:01:00Z","kind":"dispatch",'
             '"tree":{"stories_wip":[null,3,["' + STORY + '"]]}}')
         self.assertEqual(code, 0, out)
-        self.assertIn('todo -> wip', out)
+        self.assertIn('ready -> building', out)
 
     def test_a_grain_key_that_is_not_a_string_does_not_crash(self):
         code, out = self.show(
             '{"ts":"2026-09-03T10:01:00Z","kind":"status",'
             '"grain":{"id":"' + STORY + '"},"from":"a","to":"b"}')
         self.assertEqual(code, 0, out)
-        self.assertIn('todo -> wip', out)
+        self.assertIn('ready -> building', out)
 
     def test_such_a_row_does_not_become_this_grains_row(self):
         """Not crashing is half of it: the match must still be False.

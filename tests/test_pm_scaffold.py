@@ -21,7 +21,7 @@ LEGACY_LOG = '# legacy log\n\nM1 said something.\n'
 
 class Scaffolding(unittest.TestCase):
     def test_new_grains_round_trip_into_a_clean_gate(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(run_cli(root, 'new', 'feature', '0.1', 'beta', 'Beta')[0], 0)
             self.assertEqual(
                 run_cli(root, 'new', 'story', '0.1/beta', 'first', 'First')[0], 0)
@@ -33,7 +33,7 @@ class Scaffolding(unittest.TestCase):
         # This is how a consumer MIGRATES. A tree of 22 milestones and 136
         # features cannot be hand-shaped, so re-running the scaffolder has to
         # fill gaps and leave every existing byte alone.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
             before = ff.read_text(encoding='utf-8')
             code, out = run_cli(root, 'new', 'feature', '0.1', 'alpha')
@@ -49,7 +49,7 @@ class Scaffolding(unittest.TestCase):
             self.assertEqual(ff.read_text(encoding='utf-8'), before)
 
     def test_new_fills_a_milestones_slots_without_touching_milestone_md(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mf = root / 'pm/roadmap/0.1-demo/milestone.md'
             before = mf.read_text(encoding='utf-8')
             code, out = run_cli(root, 'new', 'milestone', '0.1')
@@ -65,7 +65,7 @@ class Scaffolding(unittest.TestCase):
         # name — never a rename, and never a `decisions.md` minted beside
         # `DECISIONS.md` (a twin on a case-sensitive filesystem, a truncation
         # of the legacy bytes on an insensitive one).
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             legacy = mdir / 'DECISIONS.md'
             model.write_raw(legacy, LEGACY_LOG)
@@ -88,7 +88,7 @@ class Scaffolding(unittest.TestCase):
         # Rule 6 reserves exit 1 for FINDINGS, so an uncaught IsADirectoryError
         # reads to a consumer's hook as "drift found" with a traceback attached.
         # ScaffoldRefused is the shape, and it refuses before anything moves.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             (mdir / model.DECISION_FILE_NAME).mkdir()
             code, out = run_cli(root, 'new', 'milestone', '0.1')
@@ -102,7 +102,7 @@ class Scaffolding(unittest.TestCase):
         # `_fill_header` guarded the READ and not the write, so a read-only
         # legacy doc raised `PermissionError` — a traceback, exit 1, and the
         # remaining slots never created. Writability is inspectable up front.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             model.write_raw(mdir / 'handoff.md', 'legacy prose\n')
             model.write_raw(mdir / 'decisions.md', LEGACY_LOG)
@@ -124,7 +124,7 @@ class Scaffolding(unittest.TestCase):
         # A latin-1 byte in a project's `template_dir` raised
         # `UnicodeDecodeError` from inside the slot loop, two files in. Every
         # template the grain needs is loaded and decoded before anything lands.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
             self.assertEqual(run_cli(root, 'templates')[0], 0)
@@ -141,7 +141,7 @@ class Scaffolding(unittest.TestCase):
         # `pm decide` mints the log on first write, so the decode that used to
         # happen inside `pm new` now happens here — and it refuses the same
         # way, with the grain byte-identical.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\ntemplate_dir = "pm/templates"\n', encoding='utf-8')
             self.assertEqual(run_cli(root, 'templates')[0], 0)
@@ -158,7 +158,7 @@ class Scaffolding(unittest.TestCase):
         # that fills. Rule 6 still holds: exit 1 is a finding a consumer's hook
         # can print, so the escaping exception becomes a refusal that names
         # exactly which slots did land rather than a stack trace over them.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             gdir = root / 'pm/roadmap/0.2-second'
             real = templates.write
 
@@ -182,7 +182,7 @@ class Scaffolding(unittest.TestCase):
     def test_new_refuses_a_slot_that_is_a_symlink_out_of_the_grain(self):
         # `_fill_header` followed it and rewrote a file the verb was never
         # pointed at. A write verb stays inside the grain it was asked to fill.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             outside = root / 'outside.md'
             model.write_raw(outside, 'OUTSIDE\n')
@@ -198,7 +198,7 @@ class Scaffolding(unittest.TestCase):
         # `dir_entries` classifies with `is_dir()`, which FOLLOWS the link, so a
         # link to a directory got the DIRECTORY refusal: refused correctly, and
         # then told to move aside a directory that is not in the grain at all.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             outside = root / 'outside'
             outside.mkdir()
@@ -209,7 +209,7 @@ class Scaffolding(unittest.TestCase):
             self.assertNotIn('is a DIRECTORY', out)
 
     def test_new_never_stacks_a_second_header_on_a_doc_that_has_one(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             model.write_raw(mdir / 'decisions.md',
@@ -220,7 +220,7 @@ class Scaffolding(unittest.TestCase):
                              before)
 
     def test_new_needs_a_name_only_when_the_grain_does_not_exist(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             code, out = run_cli(root, 'new', 'milestone', '0.2')
             self.assertEqual(code, 2, out)
             self.assertIn('needs a name', out)
@@ -229,7 +229,7 @@ class Scaffolding(unittest.TestCase):
         # BOTH halves. `pm new` stopped CREATING a shared doc — that scaffolded
         # 204 empty files into one consumer's tree — and still MANAGES one that
         # exists, which is what a migration needs.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             mdir = root / 'pm/roadmap/0.1-demo'
             self.assertEqual(run_cli(root, 'new', 'milestone', '0.1')[0], 0)
             for slot in model.MILESTONE_OPTIONAL_SLOTS:
@@ -246,7 +246,7 @@ class Scaffolding(unittest.TestCase):
         # name too long for the filesystem came out as an OSError traceback
         # under exit 1, and exit 1 is what a consumer's pre-push hook reads as
         # "drift found".
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             code, out = run_cli(root, 'new', 'milestone', '0.2-' + 'a' * 300,
                                 'Too Long')
             self.assertEqual(code, 1, out)
@@ -258,7 +258,7 @@ class Scaffolding(unittest.TestCase):
     def test_new_story_and_new_bug_refuse_a_name_the_filesystem_rejects(self):
         # Those two write straight rather than through the scaffolder, so
         # neither guard `new` grew ever covered them.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             for argv in (('new', 'story', '0.1/alpha', 'a' * 300, 'S'),
                          ('new', 'bug', '0.1', 'a' * 300)):
                 code, out = run_cli(root, *argv)
@@ -271,13 +271,13 @@ class Scaffolding(unittest.TestCase):
         # answers False from 3.14 on, so the verb came out as a traceback or as
         # a refusal depending on which interpreter `uvx` picked.
         from godot_devkit.repo.pm import cli as pm_cli
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertFalse(pm_cli._exists(root / ('a' * 300)))
 
     def test_an_unwritable_roadmap_dir_is_a_refusal_not_a_traceback(self):
         # The same unguarded call from the other side, and the claim is
         # honest here: nothing has been written when the mkdir fails.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             rdir = root / 'pm/roadmap'
             rdir.chmod(0o555)
             try:
@@ -398,7 +398,7 @@ class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
         (root / 'devkit.toml').write_text(self.ORDINAL_ON, encoding='utf-8')
 
     def test_the_id_drops_the_prefix_and_validate_passes(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._enable(root)
             code, out = run_cli(root, 'new', 'story', '0.1/alpha',
                                 '01-a-world-is-a-named-saved-thing', 'A world')
@@ -412,11 +412,11 @@ class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
             self.assertEqual(code, 0, out)
             # And the id the file now carries is the one the CLI addresses it by.
             self.assertEqual(
-                run_cli(root, 'story', 'wip',
+                run_cli(root, 'story', 'building',
                         '0.1/alpha/a-world-is-a-named-saved-thing')[0], 0)
 
     def test_an_unprefixed_slug_is_untouched(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._enable(root)
             self.assertEqual(
                 run_cli(root, 'new', 'story', '0.1/alpha', 'plain', 'Plain')[0], 0)
@@ -426,7 +426,7 @@ class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
     def test_the_prefix_stays_in_the_id_when_the_flag_is_off(self):
         # No devkit.toml: a file really named `01-boots.md` owns that id, and
         # validate agrees. Defaults-vs-declared equivalence, in both directions.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(
                 run_cli(root, 'new', 'story', '0.1/alpha', '01-boots', 'B')[0], 0)
             sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/01-boots.md'
@@ -434,7 +434,7 @@ class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
             self.assertEqual(run_cli(root, 'validate')[0], 0)
 
     def test_a_second_file_claiming_one_id_refuses_without_writing(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._enable(root)
             self.assertEqual(
                 run_cli(root, 'new', 'story', '0.1/alpha', '01-boots', 'B')[0], 0)
@@ -446,7 +446,7 @@ class OrdinalPrefixedStoriesScaffoldValid(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in sdir.iterdir()), before)
 
     def test_a_slug_that_is_only_a_prefix_refuses(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._enable(root)
             sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
             before = sorted(p.name for p in sdir.iterdir())
@@ -523,7 +523,7 @@ class BugNamesItsCause(unittest.TestCase):
         # holds no opinion. Refusing a non-`done` feature would make the
         # record unwritable in the case it is most often known — during the
         # build that caused it.
-        for status in ('planning', 'building', 'review', 'done'):
+        for status in ('planning', 'building', 'reviewing', 'done'):
             with self.subTest(status=status), tree(feature_status=status) as root:
                 code, out = run_cli(root, 'new', 'bug', '0.1', 'b',
                                     '--caused-by', '0.1/alpha')
@@ -533,7 +533,7 @@ class BugNamesItsCause(unittest.TestCase):
                     '0.1/alpha')
 
     def test_the_stamped_bug_validates_and_leaves_the_gate_clean(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(run_cli(root, 'new', 'bug', '0.1', 'c',
                                      '--caused-by', '0.1/alpha')[0], 0)
             code, out = run_cli(root, 'validate')
@@ -565,7 +565,7 @@ class BugNamesItsCause(unittest.TestCase):
     )
 
     def test_an_unresolvable_cause_exits_2_and_writes_nothing(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             before_tree = sorted(p.name for p in root.iterdir())
             for label, value in self.UNRESOLVABLE:
                 with self.subTest(case=label):
@@ -747,7 +747,7 @@ class YourMilestoneDirectoryIsYours(unittest.TestCase):
     def test_your_own_files_in_your_own_milestone_dir_are_not_findings(self):
         for name in ('plans', 'findings', 'AUDIT-REPORT.md',
                      'DELETED-SCENARIO-LEDGER.md', 'design'):
-            with self.subTest(name=name), tree(story_statuses=('todo',)) as root:
+            with self.subTest(name=name), tree(story_statuses=('ready',)) as root:
                 target = root / 'pm/roadmap/0.1-demo' / name
                 if name.endswith('.md'):
                     target.write_text('# notes\n', encoding='utf-8')
@@ -757,7 +757,7 @@ class YourMilestoneDirectoryIsYours(unittest.TestCase):
                 self.assertEqual(code, 0, out)
 
     def test_a_shared_doc_that_lost_its_header_is_not_a_finding(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             (root / 'pm/roadmap/0.1-demo/decisions.md').write_text(
                 '# log\n\n## D1 — 2026-01-01 — a thing\n', encoding='utf-8')
             code, out = run_gate(root)
@@ -766,7 +766,7 @@ class YourMilestoneDirectoryIsYours(unittest.TestCase):
     def test_a_missing_grain_file_is_STILL_reported_by_two_other_rules(self):
         # The fold-in, proven. If this ever goes quiet, the D13a coverage left
         # with the rule and the census is lying about what it scanned.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             (root / 'pm/roadmap/0.2-scaffolded-by-hand').mkdir()
             (root / 'pm/roadmap/0.1-demo/features/beta').mkdir()
             code, out = run_gate(root)
@@ -776,7 +776,7 @@ class YourMilestoneDirectoryIsYours(unittest.TestCase):
             self.assertIn('SKIPPED', out)
 
     def test_a_grain_file_with_no_id_or_status_is_STILL_V1(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             (root / 'pm/roadmap/0.1-demo/features/beta').mkdir()
             (root / 'pm/roadmap/0.1-demo/features/beta/feature.md').write_text(
                 '---\nname: Beta\n---\n\nprose\n', encoding='utf-8')
@@ -786,7 +786,7 @@ class YourMilestoneDirectoryIsYours(unittest.TestCase):
 
     def test_the_rule_and_its_config_name_are_both_gone(self):
         self.assertNotIn('D13', model.KNOWN_CHECKS)
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\nchecks = ["D13"]\n', encoding='utf-8')
             self.assertEqual(run_gate(root)[0], 2)

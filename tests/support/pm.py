@@ -71,7 +71,7 @@ def write(path: Path, front: dict[str, str], body: str = 'x') -> None:
 
 @contextlib.contextmanager
 def tree(milestone_status='building', feature_status='building',
-         story_statuses=('todo',), with_record=True):
+         story_statuses=('ready',), with_record=True):
     """A one-milestone/one-feature/N-story repo, cwd'd into."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / 'repo'

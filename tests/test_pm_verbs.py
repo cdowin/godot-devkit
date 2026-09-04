@@ -75,7 +75,7 @@ class StatusMoves(unittest.TestCase):
         # feature — a state the old graph refused from `todo` — and every rule
         # that reads an END STATE is satisfied by it.
         with tree(milestone_status='done', feature_status='done',
-                  story_statuses=('todo',)) as root:
+                  story_statuses=('ready',)) as root:
             sf = root / STORY_REL
             sf.write_text(sf.read_text(encoding='utf-8')
                           .replace('status: todo', 'status: done'),
@@ -84,9 +84,11 @@ class StatusMoves(unittest.TestCase):
             self.assertEqual(code, 0, out)
 
     def test_the_END_STATE_is_still_gated(self):
-        # Report, do not refuse: a done story under a live feature is D5's
-        # finding whether the CLI or an editor put it there.
-        with tree(feature_status='building', story_statuses=('todo',)) as root:
+        # Report, do not refuse: a story at work under a feature that says it
+        # has not started is D5's finding whether the CLI or an editor put it
+        # there. `building` is NOT that state — a story finishing ahead of its
+        # feature's own review/packaging work is the normal path.
+        with tree(feature_status='planning', story_statuses=('ready',)) as root:
             self.assertEqual(run_cli(root, 'story', 'done', '0.1/alpha/s0')[0], 0)
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
@@ -96,14 +98,14 @@ class StatusMoves(unittest.TestCase):
         # It used to refuse: "a feature cannot be under review while its own
         # work is unfinished" is a claim about how a team works. Which stories
         # are where is a fact, and it belongs in the output, not in a veto.
-        with tree(story_statuses=('review', 'wip')) as root:
-            code, out = run_cli(root, 'feature', 'review', '0.1/alpha')
+        with tree(story_statuses=('reviewing', 'building')) as root:
+            code, out = run_cli(root, 'feature', 'reviewing', '0.1/alpha')
             self.assertEqual(code, 0, out)
-            self.assertIn('not at review', out)
-            self.assertIn('s1.md(wip)', out)
+            self.assertIn('not at reviewing', out)
+            self.assertIn('s1.md(building)', out)
             self.assertEqual(
                 model.field_of(root / 'pm/roadmap/0.1-demo/features/alpha/feature.md',
-                               'status'), 'review')
+                               'status'), 'reviewing')
 
     def test_milestone_done_REPORTS_live_features_and_still_moves(self):
         with tree(feature_status='building') as root:
@@ -237,7 +239,7 @@ class FeatureClose(unittest.TestCase):
         # The default blast radius is the file the caller named. A command
         # aimed at a feature that rewrites three story files is the tool acting
         # on its own initiative.
-        with tree(feature_status='review', story_statuses=('review', 'review')) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing', 'reviewing')) as root:
             sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
             before = {p.name: p.read_bytes() for p in sorted(sdir.iterdir())}
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
@@ -249,23 +251,23 @@ class FeatureClose(unittest.TestCase):
             self.assertEqual(before, after)
 
     def test_it_REPORTS_the_stories_it_did_not_touch(self):
-        with tree(feature_status='review', story_statuses=('review', 'wip')) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing', 'building')) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
             self.assertEqual(code, 0, out)
             self.assertIn('NOT touched', out)
-            self.assertIn('s0.md(review)', out)
-            self.assertIn('s1.md(wip)', out)
+            self.assertIn('s0.md(reviewing)', out)
+            self.assertIn('s1.md(building)', out)
             self.assertIn('--cascade', out)
 
     def test_an_unfinished_story_is_reported_never_refused(self):
-        with tree(feature_status='review', story_statuses=('wip',)) as root:
+        with tree(feature_status='reviewing', story_statuses=('building',)) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
             self.assertEqual(code, 0, out)
-            self.assertIn('s0.md(wip)', out)
-            self.assertEqual(model.field_of(root / STORY_REL, 'status'), 'wip')
+            self.assertIn('s0.md(building)', out)
+            self.assertEqual(model.field_of(root / STORY_REL, 'status'), 'building')
 
     def test_cascade_closes_stories_and_feature(self):
-        with tree(feature_status='review', story_statuses=('review', 'review')) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing', 'reviewing')) as root:
             code, _ = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
             self.assertEqual(code, 0)
             fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
@@ -276,7 +278,7 @@ class FeatureClose(unittest.TestCase):
     def test_close_without_a_record_says_so_and_closes(self):
         # "You have not written a review record yet" is an opinion about how a
         # person works. The verb says what it saw and does what it was asked.
-        with tree(feature_status='review', story_statuses=('review',),
+        with tree(feature_status='reviewing', story_statuses=('reviewing',),
                   with_record=False) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
             self.assertEqual(code, 0, out)
@@ -288,7 +290,7 @@ class FeatureClose(unittest.TestCase):
     def test_a_record_pointer_naming_no_file_is_refused_and_writes_nothing(self):
         # The half that IS a fact, and the one D1 reports afterwards: a pointer
         # that resolves to nothing. Refused WHOLE — no stale stamp, no story.
-        with tree(feature_status='review', story_statuses=('review',),
+        with tree(feature_status='reviewing', story_statuses=('reviewing',),
                   with_record=False) as root:
             ff = root / 'pm/roadmap/0.1-demo/features/alpha/feature.md'
             story = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
@@ -300,8 +302,8 @@ class FeatureClose(unittest.TestCase):
             self.assertEqual(ff.read_text(), before)
             self.assertEqual(story.read_text(), sbefore)
 
-    def test_cascade_moves_only_the_stories_at_review(self):
-        with tree(feature_status='review', story_statuses=('review', 'wip')) as root:
+    def test_cascade_moves_only_the_stories_at_reviewing(self):
+        with tree(feature_status='reviewing', story_statuses=('reviewing', 'building')) as root:
             sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
             wip_before = (sdir / 's1.md').read_bytes()
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
@@ -312,10 +314,10 @@ class FeatureClose(unittest.TestCase):
     def test_an_unfinished_story_does_not_block_the_close(self):
         # It used to refuse. A feature close is a statement about the feature;
         # what its stories are left holding is D5's question, asked of the tree.
-        with tree(feature_status='review', story_statuses=('review', 'todo')) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing', 'ready')) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
             self.assertEqual(code, 0, out)
-            self.assertIn('s1.md(todo)', out)
+            self.assertIn('s1.md(ready)', out)
 
     def test_the_two_step_the_output_recommends_actually_cascades(self):
         # The literal sequence a plain close PRINTS as the remedy: close the
@@ -323,35 +325,35 @@ class FeatureClose(unittest.TestCase):
         # `review` story has to end up `done`. A second run that answers
         # "already done (no-op)" at exit 0 and writes nothing is the remedy the
         # tool recommended being a silent partial success.
-        with tree(feature_status='review',
-                  story_statuses=('review', 'todo')) as root:
+        with tree(feature_status='reviewing',
+                  story_statuses=('reviewing', 'ready')) as root:
             sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
             code, first = run_cli(root, 'feature', 'done', '0.1/alpha')
             self.assertEqual(code, 0, first)
-            self.assertIn('--cascade closes the ones at `review`', first)
-            self.assertEqual(model.field_of(sdir / 's0.md', 'status'), 'review')
+            self.assertIn('--cascade closes the ones at `reviewing`', first)
+            self.assertEqual(model.field_of(sdir / 's0.md', 'status'), 'reviewing')
 
             code, second = run_cli(root, 'feature', 'done', '0.1/alpha',
                                    '--cascade')
             self.assertEqual(code, 0, second)
             self.assertEqual(model.field_of(sdir / 's0.md', 'status'), 'done')
             # ...and the story it still did not touch is still reported.
-            self.assertIn('s1.md(todo)', second)
+            self.assertIn('s1.md(ready)', second)
 
     def test_an_already_done_feature_still_reports_what_it_did_not_touch(self):
         # The no-op branch used to swallow the report as well as the cascade,
         # so the second run was quieter than the first about the same tree.
-        with tree(feature_status='done', story_statuses=('review', 'todo')) as root:
+        with tree(feature_status='done', story_statuses=('reviewing', 'ready')) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
             self.assertEqual(code, 0, out)
             self.assertIn('already done (no-op)', out)
-            self.assertIn('s0.md(review)', out)
-            self.assertIn('s1.md(todo)', out)
+            self.assertIn('s0.md(reviewing)', out)
+            self.assertIn('s1.md(ready)', out)
 
     def test_the_second_cascade_run_writes_nothing(self):
         # Rule 3: the same command twice is a no-op the second time.
-        with tree(feature_status='review',
-                  story_statuses=('review', 'todo')) as root:
+        with tree(feature_status='reviewing',
+                  story_statuses=('reviewing', 'ready')) as root:
             fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
             self.assertEqual(
                 run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')[0], 0)
@@ -369,7 +371,7 @@ class FeatureClose(unittest.TestCase):
     def test_a_durable_decision_log_serves_as_the_review_record(self):
         # The close-protocol model end to end: `pm decide` writes the durable
         # log, and that log IS an acceptable `--review-record`.
-        with tree(feature_status='review', story_statuses=('review',),
+        with tree(feature_status='reviewing', story_statuses=('reviewing',),
                   with_record=False) as root:
             code, out = run_cli(root, 'decide', '0.1/alpha', 'ship', 'it')
             self.assertEqual(code, 0, out)
@@ -384,7 +386,7 @@ class FeatureClose(unittest.TestCase):
     def test_a_dangling_symlink_is_judged_without_raising(self):
         # A `--review-record` pointer can outlive what it points at. A path
         # that resolves nowhere names no file — a refusal, not a crash.
-        with tree(feature_status='review', story_statuses=('review',),
+        with tree(feature_status='reviewing', story_statuses=('reviewing',),
                   with_record=False) as root:
             fdir = root / 'pm/roadmap/0.1-demo/features/alpha'
             (fdir / 'gone.md').symlink_to('nowhere.md')
@@ -399,7 +401,7 @@ class FeatureClose(unittest.TestCase):
         # `review_min_content_bytes = 20` refused this exact string. Whether a
         # one-line close is enough review is the reviewer's call, and it was
         # never a fact about the tree.
-        with tree(feature_status='review', story_statuses=('review',),
+        with tree(feature_status='reviewing', story_statuses=('reviewing',),
                   with_record=False) as root:
             record = root / 'docs' / 'reviews' / 'f.md'
             record.parent.mkdir(parents=True)
@@ -415,7 +417,7 @@ class FeatureClose(unittest.TestCase):
         # The refusal is aimed at ONE named slot, not at review records
         # generally — a rule that widened to any file called review-anything
         # would break a consumer that had done nothing wrong.
-        with tree(feature_status='review', story_statuses=('review',),
+        with tree(feature_status='reviewing', story_statuses=('reviewing',),
                   with_record=False) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\nreview_dir = "docs/reviews"\n', encoding='utf-8')
@@ -459,7 +461,7 @@ class ListFindsTheNail(unittest.TestCase):
                 if '\t' in line]
 
     def _tree(self):
-        return tree(story_statuses=('todo', 'wip', 'review', 'done'))
+        return tree(story_statuses=('ready', 'building', 'reviewing', 'done'))
 
     def test_every_story_one_tab_separated_row(self):
         with self._tree() as root:
@@ -468,14 +470,15 @@ class ListFindsTheNail(unittest.TestCase):
             rows = self._rows(out)
             self.assertEqual(len(rows), 4)
             self.assertEqual(rows[0][0], '0.1/alpha/s0')
-            self.assertEqual(rows[0][1], 'todo')
+            self.assertEqual(rows[0][1], 'ready')
             self.assertEqual(rows[0][3], '0.1/alpha')
 
     def test_status_filter_narrows_to_what_is_open(self):
         with self._tree() as root:
-            code, out = run_cli(root, 'list', '--status', 'wip,review')
+            code, out = run_cli(root, 'list', '--status', 'building,reviewing')
             self.assertEqual(code, 0, out)
-            self.assertEqual([r[1] for r in self._rows(out)], ['wip', 'review'])
+            self.assertEqual([r[1] for r in self._rows(out)],
+                             ['building', 'reviewing'])
             self.assertIn('2 of 4 story/ies', out)
 
     def test_owner_filter(self):
@@ -497,7 +500,7 @@ class ListFindsTheNail(unittest.TestCase):
                    'status': 'planning'})
             write(root / 'pm/roadmap/0.2-later/features/beta/stories/b0.md',
                   {'id': '0.2/beta/b0', 'feature': '0.2/beta',
-                   'milestone': '"0.2"', 'name': 'B0', 'status': 'todo'})
+                   'milestone': '"0.2"', 'name': 'B0', 'status': 'ready'})
             code, out = run_cli(root, 'list', '--milestone', '0.2')
             self.assertEqual(code, 0, out)
             self.assertEqual([r[0] for r in self._rows(out)], ['0.2/beta/b0'])
@@ -560,12 +563,12 @@ class ListFindsTheNail(unittest.TestCase):
 
 class StatusReport(unittest.TestCase):
     def test_unphased_milestone_prints_no_bucket_header(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             _, out = run_cli(root, 'status')
             self.assertNotIn('--', out)
 
     def test_phases_group_numeric_then_seam_then_unphased(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             run_cli(root, 'new', 'feature', '0.1', 'b', 'B')
             run_cli(root, 'new', 'feature', '0.1', 'c', 'C')
             fdir = root / 'pm/roadmap/0.1-demo/features'
@@ -586,10 +589,10 @@ class WriteFidelity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / 'g.md'
             p.write_bytes(b'---\r\nid: a\r\nstatus: todo\r\n---\r\n\r\nbody\r\n')
-            self.assertTrue(model.set_field(p, 'status', 'wip'))
+            self.assertTrue(model.set_field(p, 'status', 'building'))
             self.assertEqual(
                 p.read_bytes(),
-                b'---\r\nid: a\r\nstatus: wip\r\n---\r\n\r\nbody\r\n')
+                b'---\r\nid: a\r\nstatus: building\r\n---\r\n\r\nbody\r\n')
 
     def test_exotic_body_line_breaks_survive(self):
         # str.splitlines() breaks on U+2028, form feed and a lone CR; joining
@@ -598,24 +601,26 @@ class WriteFidelity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / 'g.md'
             body = 'A\u2028B\npage\x0cbreak\ncr-only\rtail\n'
-            p.write_text('---\nid: a\nstatus: todo\n---\n\n' + body, encoding='utf-8')
+            p.write_text('---\nid: a\nstatus: ready\n---\n\n' + body,
+                         encoding='utf-8')
             before = p.read_bytes()
-            self.assertTrue(model.set_field(p, 'status', 'wip'))
+            self.assertTrue(model.set_field(p, 'status', 'building'))
             self.assertEqual(p.read_bytes(),
-                             before.replace(b'status: todo', b'status: wip'))
+                             before.replace(b'status: ready',
+                                            b'status: building'))
 
     def test_an_unwritable_file_reports_failure_instead_of_raising(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / 'g.md'
-            write(p, {'id': 'a', 'status': 'todo'})
+            write(p, {'id': 'a', 'status': 'ready'})
             p.chmod(0o444)
             try:
-                self.assertFalse(model.set_field(p, 'status', 'wip'))
+                self.assertFalse(model.set_field(p, 'status', 'building'))
             finally:
                 p.chmod(0o644)
 
     def test_a_mid_cascade_write_failure_aborts_loudly(self):
-        with tree(feature_status='review', story_statuses=('review', 'review')) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing', 'reviewing')) as root:
             sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
             blocked = sorted(sdir.glob('*.md'))[-1]
             blocked.chmod(0o444)
@@ -682,7 +687,7 @@ class PhaseIsABucketNotAConstraint(unittest.TestCase):
 
 class FieldMutation(unittest.TestCase):
     def test_set_and_get_round_trip(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(
                 run_cli(root, 'set', '0.1/alpha/s0', 'estimate', '3d')[0], 0)
             code, out = run_cli(root, 'get', '0.1/alpha/s0', 'estimate')
@@ -693,7 +698,7 @@ class FieldMutation(unittest.TestCase):
         # `status` was refused here because it "has a transition graph behind
         # it". There is no graph, and the refusal never protected anything: the
         # `sed` it pushed people towards is the write this verb does correctly.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             code, out = run_cli(root, 'set', '0.1/alpha/s0', 'status', 'done')
             self.assertEqual(code, 0, out)
             sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
@@ -702,7 +707,7 @@ class FieldMutation(unittest.TestCase):
     def test_set_moves_owner_in_both_directions(self):
         # `claim`/`release` were fourteen lines calling this with the key
         # hardcoded. One verb, and `owner` is not special among fields.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             sf = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md'
             self.assertEqual(
                 run_cli(root, 'set', '0.1/alpha/s0', 'owner', 'dev-1')[0], 0)
@@ -712,7 +717,7 @@ class FieldMutation(unittest.TestCase):
             self.assertEqual(model.field_of(sf, 'owner'), '')
 
     def test_every_grain_kind_resolves(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             run_cli(root, 'new', 'bug', '0.1', 'oops')
             for gid in ('0.1', '0.1/alpha', '0.1/alpha/s0', '0.1/bugs/oops'):
                 with self.subTest(gid=gid):
@@ -743,7 +748,7 @@ class ExecutionList(unittest.TestCase):
         return validate.run(model.PmConfig(root=root))
 
     def test_sync_writes_a_block_and_validate_then_passes(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(run_cli(root, 'sync')[0], 0)
             mfile = root / 'pm/roadmap/0.1-demo/milestone.md'
             self.assertIn('pm:execution', mfile.read_text())
@@ -752,12 +757,12 @@ class ExecutionList(unittest.TestCase):
     def test_a_tree_with_no_block_is_not_stale(self):
         # The list is opt-in per file; absence is not staleness, or the gate
         # would go red on every tree that never asked for the feature.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(self._validate(root)[0], [])
             self.assertEqual(run_cli(root, 'sync', '--check')[0], 0)
 
     def test_v6_catches_a_stale_list_when_asked_to(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             run_cli(root, 'sync')
             run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
             self.assertTrue(any('stale' in f for f in self._validate(root)[0]))
@@ -769,7 +774,7 @@ class ExecutionList(unittest.TestCase):
         # Demoted, not deleted. A generated VIEW going stale while ordinary work
         # moves the tree is not a defect in the tree, and reddening a commit
         # gate over it makes the ordinary case the exceptional one.
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             run_cli(root, 'sync')
             run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
             code, out = run_gate(root)
@@ -781,7 +786,7 @@ class ExecutionList(unittest.TestCase):
         self.assertIn('V6', model.KNOWN_CHECKS)
 
     def test_naming_V6_puts_it_back_on_the_gate(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             run_cli(root, 'sync')
             run_cli(root, 'new', 'feature', '0.1', 'newcomer', 'Newcomer')
             (root / 'devkit.toml').write_text(
@@ -803,7 +808,7 @@ class ExecutionList(unittest.TestCase):
             self.assertIn('after zzz', block)
 
     def test_sync_is_idempotent(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             run_cli(root, 'sync')
             mfile = root / 'pm/roadmap/0.1-demo/milestone.md'
             once = mfile.read_bytes()
@@ -851,7 +856,7 @@ class AStatusVerbIsTheREPAIRForWhatD4Reports(unittest.TestCase):
             # precondition is a separate question); the fixture satisfies it so
             # this case isolates the one being asked here.
             kw = ({'feature_status': 'done', 'story_statuses': ('done',)}
-                  if grain == 'milestone' else {'story_statuses': ('todo',)})
+                  if grain == 'milestone' else {'story_statuses': ('ready',)})
             with self.subTest(grain=grain), tree(**kw) as root:
                 path = self._mangle(root, rel, junk)
                 # The gate reports it...
@@ -865,20 +870,20 @@ class AStatusVerbIsTheREPAIRForWhatD4Reports(unittest.TestCase):
                 self.assertEqual(model.field_of(path, 'status'), 'done')
 
     def test_an_absent_status_key_reads_as_none_and_is_still_settable(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             path = root / STORY_REL
             path.write_text(
                 '\n'.join(l for l in path.read_text(encoding='utf-8').split('\n')
                           if not l.startswith('status:')), encoding='utf-8')
-            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+            code, out = run_cli(root, 'story', 'building', '0.1/alpha/s0')
             self.assertEqual(code, 0, out)
-            self.assertIn('(none) -> wip', out)
-            self.assertEqual(model.field_of(path, 'status'), 'wip')
+            self.assertIn('(none) -> building', out)
+            self.assertEqual(model.field_of(path, 'status'), 'building')
 
     def test_the_REQUESTED_state_is_still_closed(self):
         # The one refusal that survives, on every grain kind, naming the set.
         for grain, (_, gid, _) in self.NONSENSE.items():
-            with self.subTest(grain=grain), tree(story_statuses=('todo',)) as root:
+            with self.subTest(grain=grain), tree(story_statuses=('ready',)) as root:
                 code, out = run_cli(root, grain, 'butterfly', gid)
                 self.assertEqual(code, 2, out)
                 self.assertIn(f'is not a {grain} status', out)
@@ -910,7 +915,7 @@ class TheShortestPathFromNothingToAClosedMilestone(unittest.TestCase):
                     ('new', 'milestone', '0.1', 'Demo'),
                     ('new', 'feature', '0.1', 'alpha', 'Alpha'),
                     ('new', 'story', '0.1/alpha', 's0', 'S0'),
-                    ('story', 'review', '0.1/alpha/s0'),
+                    ('story', 'reviewing', '0.1/alpha/s0'),
                     ('feature', 'done', '0.1/alpha', '--cascade',
                      '--review-record', 'docs/reviews/alpha.md'),
                     ('milestone', 'done', '0.1'),
@@ -973,15 +978,6 @@ class Vocabulary(unittest.TestCase):
             self.assertNotIn('->', out)
 
 
-class BlockedIsNotATrap(unittest.TestCase):
-    def test_a_blocked_story_can_be_unblocked_through_the_cli(self):
-        with tree(story_statuses=('todo',)) as root:
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
-            self.assertEqual(run_cli(root, 'story', 'blocked', '0.1/alpha/s0')[0], 0)
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
-            self.assertEqual(run_cli(root, 'story', 'review', '0.1/alpha/s0')[0], 0)
-
-
 class StoryResolution(unittest.TestCase):
     """`story_file` and `story_files` must agree about what a story IS.
 
@@ -998,18 +994,18 @@ class StoryResolution(unittest.TestCase):
         with tree() as root:
             write(root / self.FDIR / 'stories/parked/s2.md',
                   {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
-                   'milestone': '"0.1"', 'name': 'S2', 'status': 'todo'})
-            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s2')
+                   'milestone': '"0.1"', 'name': 'S2', 'status': 'ready'})
+            code, out = run_cli(root, 'story', 'building', '0.1/alpha/s2')
             self.assertEqual(code, 0, out)
             self.assertEqual(
                 model.field_of(root / self.FDIR / 'stories/parked/s2.md', 'status'),
-                'wip')
+                'building')
 
     def test_the_gate_and_the_verb_now_see_the_same_story(self):
         with tree() as root:
             write(root / self.FDIR / 'stories/parked/s2.md',
                   {'id': '0.1/alpha/s2', 'feature': '0.1/alpha',
-                   'milestone': '"0.1"', 'name': 'S2', 'status': 'todo'})
+                   'milestone': '"0.1"', 'name': 'S2', 'status': 'ready'})
             _, gate = run_gate(root)
             self.assertIn('2 story/ies', gate)
             self.assertIsNotNone(model.story_file(cfg_for(root), '0.1/alpha/s2'))
@@ -1019,7 +1015,7 @@ class StoryResolution(unittest.TestCase):
         with tree() as root:
             write(root / self.FDIR / 'stories/S3.MD',
                   {'id': '0.1/alpha/S3', 'feature': '0.1/alpha',
-                   'milestone': '"0.1"', 'name': 'S3', 'status': 'todo'})
+                   'milestone': '"0.1"', 'name': 'S3', 'status': 'ready'})
             self.assertEqual(model.story_file(cfg_for(root), '0.1/alpha/S3').name,
                              'S3.MD')
 
@@ -1028,7 +1024,7 @@ class StoryResolution(unittest.TestCase):
             for where in ('stories/dup.md', 'stories/parked/dup.md'):
                 write(root / self.FDIR / where,
                       {'id': '0.1/alpha/dup', 'feature': '0.1/alpha',
-                       'milestone': '"0.1"', 'name': 'Dup', 'status': 'todo'})
+                       'milestone': '"0.1"', 'name': 'Dup', 'status': 'ready'})
             with self.assertRaises(model.AmbiguousStory):
                 model.story_file(cfg_for(root), '0.1/alpha/dup')
 
@@ -1039,7 +1035,7 @@ class StoryResolution(unittest.TestCase):
             for where in ('stories/s9.md', 'stories/07-s9.md'):
                 write(root / self.FDIR / where,
                       {'id': '0.1/alpha/s9', 'feature': '0.1/alpha',
-                       'milestone': '"0.1"', 'name': 'S9', 'status': 'todo'})
+                       'milestone': '"0.1"', 'name': 'S9', 'status': 'ready'})
             self.assertEqual(model.story_file(cfg, '0.1/alpha/s9').name, 's9.md')
 
     def test_an_ordinal_prefixed_story_one_directory_down_resolves(self):
@@ -1047,7 +1043,7 @@ class StoryResolution(unittest.TestCase):
             cfg = model.PmConfig(root=root, story_ordinal_prefix=True)
             write(root / self.FDIR / 'stories/parked/03-s4.md',
                   {'id': '0.1/alpha/s4', 'feature': '0.1/alpha',
-                   'milestone': '"0.1"', 'name': 'S4', 'status': 'todo'})
+                   'milestone': '"0.1"', 'name': 'S4', 'status': 'ready'})
             self.assertEqual(model.story_file(cfg, '0.1/alpha/s4').name, '03-s4.md')
 
     def test_a_note_beside_the_stories_is_not_addressable_as_one(self):
@@ -1070,7 +1066,7 @@ class OrdinalPrefix(unittest.TestCase):
         sdir = root / 'pm/roadmap/0.1-demo/features/alpha/stories'
         p = sdir / '01-boots.md'
         write(p, {'id': sid, 'feature': '0.1/alpha', 'milestone': '"0.1"',
-                  'name': 'B', 'status': 'todo'})
+                  'name': 'B', 'status': 'ready'})
         return p
 
     def _validate(self, root: Path):
@@ -1385,20 +1381,20 @@ class StatusVerbHonoursACustomVocabulary(unittest.TestCase):
             self.assertIn('todo building shipped', out)
             self.assertEqual(ffile.read_bytes(), before)
 
-    def test_feature_review_refuses_when_the_vocabulary_excludes_review(self):
+    def test_feature_reviewing_refuses_when_the_vocabulary_excludes_it(self):
         with tree() as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\nfeature_states = ["todo", "building", "shipped"]\n',
                 encoding='utf-8')
             ffile = root / self.FFILE
             before = ffile.read_bytes()
-            code, out = run_cli(root, 'feature', 'review', '0.1/alpha')
+            code, out = run_cli(root, 'feature', 'reviewing', '0.1/alpha')
             self.assertEqual(code, 2, out)
             self.assertIn('todo building shipped', out)
             self.assertEqual(ffile.read_bytes(), before)
 
     def test_cascade_refuses_when_story_states_exclude_done(self):
-        with tree(story_statuses=('review',)) as root:
+        with tree(story_statuses=('reviewing',)) as root:
             (root / 'devkit.toml').write_text(
                 '[pm]\nstory_states = ["todo", "wip", "review", "shipped"]\n',
                 encoding='utf-8')
@@ -1665,7 +1661,7 @@ class Move(unittest.TestCase):
                'status': 'building', 'reviewed': ''})
 
     def test_a_story_moves_whole(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._second_feature(root)
             code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/beta')
             self.assertEqual(code, 0, out)
@@ -1679,7 +1675,7 @@ class Move(unittest.TestCase):
             self.assertIn('milestone: "0.1"', new.read_text(encoding='utf-8'))
 
     def test_every_other_byte_survives_the_move(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._second_feature(root)
             before = (root / STORY_REL).read_text(encoding='utf-8')
             code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/beta')
@@ -1691,7 +1687,7 @@ class Move(unittest.TestCase):
             self.assertEqual(expected, after)
 
     def test_unknown_target_feature_is_usage_naming_known_features(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._second_feature(root)
             code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/nope')
             self.assertEqual(code, 2, out)
@@ -1701,13 +1697,13 @@ class Move(unittest.TestCase):
             self.assertTrue((root / STORY_REL).is_file())
 
     def test_unresolvable_story_is_a_usage_error(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._second_feature(root)
             code, out = run_cli(root, 'move', '0.1/alpha/nope', '0.1/beta')
             self.assertEqual(code, 2, out)
 
     def test_already_under_the_target_is_a_noop(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             code, out = run_cli(root, 'move', '0.1/alpha/s0', '0.1/alpha')
             self.assertEqual(code, 0, out)
             self.assertIn('no-op', out)
@@ -1716,7 +1712,7 @@ class Move(unittest.TestCase):
     @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
                      'permission bits are not the obstruction as root')
     def test_an_unwritable_target_directory_moves_nothing(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self._second_feature(root)
             target_dir = root / 'pm/roadmap/0.1-demo/features/beta'
             target_dir.chmod(0o555)

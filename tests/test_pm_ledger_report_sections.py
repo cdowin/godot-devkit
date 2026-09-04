@@ -98,34 +98,34 @@ def seeded(root) -> None:
     found, both exercised, and both printed as the path that answered.
     """
     (root / ALPHA_RECORD).write_text(ALPHA_BLOCK, encoding='utf-8')
-    feature(root, BETA, 'building', BETA_BLOCK, (('s0', 'wip'),))
+    feature(root, BETA, 'building', BETA_BLOCK, (('s0', 'building'),))
     feature(root, GAMMA, 'planning')
-    feature(root, DELTA, 'review', NO_BLOCK)
+    feature(root, DELTA, 'reviewing', NO_BLOCK)
     bug(root, 'crash', 'open', caused_by=ALPHA)
     bug(root, 'wobble', 'closed', caused_by=BETA)
     bug(root, 'quiet', 'open')
     put_ledger(
         root,
-        status_line('2026-09-03T10:00:00Z', A_S0, 'todo', 'wip'),
+        status_line('2026-09-03T10:00:00Z', A_S0, 'ready', 'building'),
         dispatch_line('2026-09-03T10:05:00Z', agent_type='developer',
                       tool_calls=37, tool_calls_before_first_write=12,
                       tree=snapshot(stories_wip=[A_S0])),
-        status_line('2026-09-03T10:10:00Z', A_S0, 'wip', 'review'),
+        status_line('2026-09-03T10:10:00Z', A_S0, 'building', 'reviewing'),
         dispatch_line('2026-09-03T10:11:00Z', agent_type='reviewer',
                       tool_calls_before_first_write=3,
                       tree=snapshot(stories_review=[A_S0])),
         # The reopen: `review` back to `wip`, one row, nothing inferred.
-        status_line('2026-09-03T10:12:00Z', A_S0, 'review', 'wip'),
+        status_line('2026-09-03T10:12:00Z', A_S0, 'reviewing', 'building'),
         # No `tool_calls_before_first_write`: absent, so it is neither in the
         # sum nor in the list.
         dispatch_line('2026-09-03T10:13:00Z', agent_type='developer',
                       tree=snapshot(stories_wip=[A_S0])),
-        status_line('2026-09-03T10:20:00Z', A_S0, 'wip', 'done'),
+        status_line('2026-09-03T10:20:00Z', A_S0, 'building', 'done'),
         # A feature-grained decision with no status row of alpha's after it,
         # and a milestone-grained one whose scope is every grain here.
         decision_line('2026-09-03T10:21:00Z', ALPHA, 'D1'),
         decision_line('2026-09-03T10:22:00Z', '0.1', 'D2'),
-        status_line('2026-09-03T10:25:00Z', B_S0, 'todo', 'wip'),
+        status_line('2026-09-03T10:25:00Z', B_S0, 'ready', 'building'),
         session_line('2026-09-03T11:00:00Z', session_id='sess-1',
                      tool_calls=10, usage={'output': 1000}),
         session_line('2026-09-03T11:05:00Z', session_id='sess-1',
@@ -163,7 +163,7 @@ def row_of(out: str, title: str, block: str, first: str) -> list[str]:
 
 
 def seeded_report(test, *argv) -> str:
-    with tree(feature_status='done', story_statuses=('done', 'todo')) as root:
+    with tree(feature_status='done', story_statuses=('done', 'ready')) as root:
         seeded(root)
         code, out = report(root, '0.1', *argv)
     test.assertEqual(code, 0, out)
@@ -263,7 +263,7 @@ class Tables(unittest.TestCase):
 
     def test_the_report_never_writes(self):
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             before = {p: p.read_bytes() for p in sorted(root.rglob('*'))
                       if p.is_file()}
@@ -357,7 +357,7 @@ class Escapes(unittest.TestCase):
         """A retired or mistyped cause is a fact `pm validate` reports; the
         report prints the row with `-` rather than dropping the bug."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             bug(root, 'ghost', 'open', caused_by='0.9/vanished')
             out = report(root, '0.1')[1]
@@ -392,7 +392,7 @@ class Overhead(unittest.TestCase):
         """A cumulative total with nothing to subtract from it is not a delta,
         and the census still says the row is there."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             put_ledger(root, session_line('2026-09-03T11:00:00Z',
                                           session_id='sess-1', tool_calls=10,
@@ -405,7 +405,7 @@ class Overhead(unittest.TestCase):
     def test_a_delta_needs_both_ends_measured(self):
         """One end absent is not a delta of the other end minus zero."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             put_ledger(
                 root,
@@ -422,7 +422,7 @@ class Vocabulary(unittest.TestCase):
     """A rule that cannot SEE a transition prints `-`, never `0` (rule 4)."""
 
     def test_a_renamed_story_vocabulary_dashes_reopens_rather_than_zeroing(self):
-        """A reopen is `review -> wip`, and both names are the STOCK ones. A
+        """A reopen is `reviewing -> building`, both STOCK names. A
         project that renamed either has a machine this rule cannot read, and a
         `0` there would say "nothing was reopened" about transitions nobody
         looked for — the read-side sin with a column header on it."""
@@ -444,12 +444,12 @@ class Vocabulary(unittest.TestCase):
         """The other half of the same claim: where the rule CAN see the
         transition, it counts it, so the `-` above is about the vocabulary and
         not about the column being broken."""
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', A_S0, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:30:00Z', A_S0, 'review',
-                                   'wip'))
+                       status_line('2026-09-03T10:00:00Z', A_S0, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:30:00Z', A_S0, 'reviewing',
+                                   'building'))
             out = report(root, '0.1')[1]
         self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2], '1')
 
@@ -584,7 +584,7 @@ class Refusals(unittest.TestCase):
 
     def malformed(self, *argv) -> str:
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             (root / ALPHA_RECORD).write_text(BAD_BLOCK, encoding='utf-8')
             code, out = report(root, '0.1', *argv)
@@ -610,7 +610,7 @@ class Refusals(unittest.TestCase):
         """`NoVerdict` is a fact about the pass. Mapping it to exit 2 would
         turn "we have not measured this" into "the tooling is broken"."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             (root / ALPHA_RECORD).write_text(NO_BLOCK, encoding='utf-8')
             code, out = report(root, '0.1')
