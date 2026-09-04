@@ -65,8 +65,9 @@ count. Measured over both trees:
   these 4 too.
 - **The editor-written half of the corpus says no.** All 116 trail scenes carry a `;` comment,
   so none has been through `ResourceSaver` since it was written; 0 of nullbound's 194 do. In
-  nullbound — every file editor-written — **113 created nodes sit inside an instanced sub-tree
-  and not one carries an `index=`.**
+  nullbound — every file editor-written — **74 created nodes sit inside an instanced sub-tree
+  and not one carries an `index=`** (52 instanced + 19 typed under a base child, 2 + 1 under an
+  instance node), against 39 overrides that all carry one.
 
 So the 12 are authored state, exactly like the `[editable]` marker of the sibling bug, and
 restoring them would be that same defect in the same module twice. Measured: a probe that
