@@ -32,6 +32,7 @@ godot-devkit = "godot_devkit.cli:main"
 testpaths = ["tests"]
 markers = [
     "fuzz: a seeded differential or replay harness. Deterministic by contract — a fuzz that varies run to run is not a gate. `make fuzz` runs the slice; `make test` runs it too, because a harness that only runs when somebody remembers it does not run.",
+    "shell: the module spawns a process — bash, make, git, an installed hook corpus. DERIVED at collection by `tests/conftest.py` from what the source imports, never hand-applied; a hand-written one is a collection refusal naming the file. `make test` runs it and so does the floor interpreter in `make matrix`; the other interpreters skip it, because a `subprocess` is not something a Python version changes.",
 ]
 
 [tool.hatch.build.targets.wheel]
