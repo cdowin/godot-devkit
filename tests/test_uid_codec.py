@@ -47,6 +47,22 @@ ID_BITS = 63
 ENGINE_NONCANONICAL = 'uid://wkcycles00001'
 ENGINE_CANONICAL = 'uid://c8bmebsj60m77'
 
+# One spelling per CLAUSE of the canonicality predicate, because a corpus does
+# not carry them: real files hold what the engine emitted, and the engine emits
+# no 'z', no '9' and no leading 'a' — so a sweep over real uids alone reaches
+# the alias clauses never, and pins them not at all. Measured: dropping '9'
+# from the rule left every corpus uid and the whole encoder id space agreeing.
+PREDICATE_VECTORS = (
+    'uid://z',                    # 'z' is an alias of 0 and never emitted
+    'uid://9',                    # '9' decodes to the base and carries
+    'uid://ab',                   # a LEADING 'a' is a leading zero
+    'uid://ba',                   # ...an INTERIOR 'a' is a legitimate digit
+    'uid://0',                    # the canonical twin of 'z'
+    ENGINE_NONCANONICAL,          # 13 chars led by 'w': past 2^63, wraps
+    ENGINE_CANONICAL,
+    'uid://b0g4m1trscaffold00',   # 19 chars: overflows on width alone
+)
+
 
 HARVEST_SUFFIXES = ('.tscn', '.tres', '.uid', '.import')
 
@@ -175,9 +191,13 @@ class RealWorldDifferential(unittest.TestCase):
         must get the same verdict from both spellings."""
         sys.path.insert(0, str(REPO_ROOT / 'tools'))
         import consumer_smoke                                    # noqa: PLC0415
-        texts = sorted(_harvest(CORPUS)) + [id_to_text(uid)
-                                            for uid in EncoderProperties.IDS]
+        texts = (sorted(_harvest(CORPUS)) + list(PREDICATE_VECTORS)
+                 + [id_to_text(uid) for uid in EncoderProperties.IDS])
         self.assertGreaterEqual(len(texts), CORPUS_UID_FLOOR)
+        # The vectors must not all fall on one side, or the loop below would
+        # agree with a predicate that returns a constant.
+        verdicts = {_independently_canonical(t) for t in PREDICATE_VECTORS}
+        self.assertEqual(verdicts, {True, False})
         for text in texts:
             with self.subTest(text):
                 self.assertEqual(consumer_smoke._independently_canonical(text),
