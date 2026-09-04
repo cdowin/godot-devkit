@@ -530,6 +530,45 @@ def runners_ahead(root: Path) -> list[str]:
     return ahead
 
 
+def _worktree_paths(rows: list[str]) -> set[str]:
+    """The PATH column of `git worktree list`, resolved.
+
+    A worktree LEFT BEHIND is a path. The other two columns are the commit and
+    the branch, which move whenever anybody commits in the repo — and on a live
+    consumer somebody does: a peer agent committed in nullbound during this
+    row's own first real run, and a whole-line comparison called it a finding.
+    """
+    return {os.path.realpath(row.split()[0]) for row in rows if row.split()}
+
+
+def worktree_verdict(before: list[str], after: list[str], ours: Path,
+                     removed: subprocess.CompletedProcess) -> tuple[bool, str]:
+    """(clean, detail) for the `worktree list unchanged` row.
+
+    Three outcomes, and the middle one is why this is a function: OUR worktree
+    still listed is the failure this row exists for — loud, naming the removal
+    that did not work, never retried blind. Any OTHER path appearing or leaving
+    is still a finding, because a smoke run has no business being unable to
+    tell those apart. A list whose paths are unchanged but whose text moved is
+    somebody else's commit, and it is REPORTED rather than dropped.
+    """
+    added = sorted(_worktree_paths(after) - _worktree_paths(before))
+    gone = sorted(_worktree_paths(before) - _worktree_paths(after))
+    if os.path.realpath(ours) in added:
+        return False, (f'LEAKED a worktree into a live repo: {ours} — `git '
+                       f'worktree remove --force` exit {removed.returncode}: '
+                       f'{removed.stderr.strip()[-500:]}')
+    if added or gone:
+        return False, (f'the worktree list changed and none of it is this '
+                       f'run\'s: appeared {added}, left {gone}')
+    same = f'{len(before)} worktree(s), the same before and after'
+    if after != before:
+        return True, (f'{same} — the text moved because somebody committed '
+                      f'under the run, which is not this run\'s: '
+                      f'{sorted(set(after) ^ set(before))}')
+    return True, same
+
+
 def against_the_release_runners(root: Path, report: Report) -> None:
     """`check all` and the two censuses, in a throwaway `git worktree` of the
     consumer carrying the runners the working tree would INSTALL.
@@ -613,16 +652,9 @@ def against_the_release_runners(root: Path, report: Report) -> None:
         removed = git_run(root, 'worktree', 'remove', '--force', str(worktree))
         git_run(root, 'worktree', 'prune')
         shutil.rmtree(holder, ignore_errors=True)
-        after = git(root, 'worktree', 'list')
-        leaked = [ln for ln in after if str(worktree) in ln]
-        report.check(name, 'worktree list unchanged', after == before,
-                     f'{len(before)} worktree(s), the same before and after'
-                     if after == before else
-                     (f'LEAKED a worktree into a live repo — `git worktree '
-                      f'remove --force` exit {removed.returncode}: '
-                      f'{removed.stderr.strip()[-500:]}\n{leaked}' if leaked
-                      else f'the list changed and none of it is this run\'s: '
-                           f'{sorted(set(after) ^ set(before))}'))
+        clean, detail = worktree_verdict(
+            before, git(root, 'worktree', 'list'), worktree, removed)
+        report.check(name, 'worktree list unchanged', clean, detail)
 
 
 def smoke(root: Path, report: Report) -> None:
@@ -675,10 +707,15 @@ def smoke(root: Path, report: Report) -> None:
     defaults_elision(root, report)
 
     after = git(root, 'status', '--porcelain')
+    # The SYMMETRIC difference: a path that LEFT the dirty list matters too, and
+    # naming only the additions printed `DIRTIED the tree: []` on the run where
+    # a peer agent committed in nullbound mid-smoke. A red row that names
+    # nothing is the silence this file's own contract forbids.
     report.check(name, 'checkout unchanged', after == before,
                  'clean' if after == before
-                 else f'the smoke run DIRTIED the tree: '
-                      f'{sorted(set(after) - set(before))}')
+                 else f'the tree changed under the run — appeared '
+                      f'{sorted(set(after) - set(before))}, left '
+                      f'{sorted(set(before) - set(after))}')
 
 
 def fresh_project(report: Report) -> None:

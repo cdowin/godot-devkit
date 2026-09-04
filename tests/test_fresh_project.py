@@ -574,3 +574,38 @@ def test_an_uncommitted_runner_edit_is_not_a_census_disagreement():
     assert rows_named(report, 'runners ahead') == [
         ('ok', '0 file(s) ahead of the consumer\'s install — the consumer is '
                'current with the working tree')], report.rows
+
+
+# The `git worktree list` shapes the row has to tell apart. A live consumer
+# produced the third one on the row's first real run — a peer agent committed
+# in nullbound mid-smoke, the commit column moved, and a whole-line comparison
+# called somebody else's commit a leaked worktree.
+LISTED = '{path}  {sha} [{branch}]'
+MAIN = LISTED.format(path='/repo', sha='aaaaaaa', branch='main')
+MOVED = LISTED.format(path='/repo', sha='bbbbbbb', branch='main')
+PEER_WORKTREE = LISTED.format(path='/elsewhere/peer', sha='ccccccc',
+                              branch='peer')
+OURS = Path('/tmp/gdk/wt')
+LEAK = LISTED.format(path=OURS, sha='ddddddd', branch='detached HEAD')
+FAILED_REMOVAL = subprocess.CompletedProcess(
+    args=['git'], returncode=1, stdout='', stderr='fatal: it is dirty')
+
+
+@pytest.mark.parametrize('after, clean, says', [
+    pytest.param([MAIN], True, 'the same before and after', id='unchanged'),
+    pytest.param([MAIN, LEAK], False, 'LEAKED', id='our worktree survived'),
+    pytest.param([MAIN, PEER_WORKTREE], False, 'none of it is this run\'s',
+                 id='a peer added one'),
+    pytest.param([], False, 'left', id='the main checkout vanished'),
+    pytest.param([MOVED], True, 'somebody committed under the run',
+                 id='a peer committed mid-run'),
+])
+def test_the_worktree_row_tells_a_leak_from_somebody_elses_commit(after, clean,
+                                                                  says):
+    verdict, detail = smoke_harness().worktree_verdict(
+        [MAIN], after, OURS, FAILED_REMOVAL)
+    assert verdict is clean, detail
+    assert says in detail, detail
+    if not clean and 'LEAKED' in detail:
+        # …and it names the removal that did not work, rather than retrying it.
+        assert FAILED_REMOVAL.stderr in detail, detail
