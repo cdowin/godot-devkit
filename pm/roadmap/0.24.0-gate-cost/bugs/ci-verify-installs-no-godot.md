@@ -2,9 +2,9 @@
 id: 0.24.0/bugs/ci-verify-installs-no-godot
 milestone: "0.24.0"
 name: "the installed verify.yml runs make milestone with uv and no Godot, so a Godot consumer is red on every PR"
-status: open
+status: fixed
 caught_in: "0.24.0"
-fix_milestone:
+fix_milestone: 0.24.0
 caused_by:
 ---
 
