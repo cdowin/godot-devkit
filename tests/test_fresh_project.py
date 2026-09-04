@@ -609,3 +609,21 @@ def test_the_worktree_row_tells_a_leak_from_somebody_elses_commit(after, clean,
     if not clean and 'LEAKED' in detail:
         # …and it names the removal that did not work, rather than retrying it.
         assert FAILED_REMOVAL.stderr in detail, detail
+
+
+def test_a_worktree_that_cannot_be_added_is_a_red_row_and_not_a_fallback():
+    """The other way the mechanism can fail before any gate runs. Same rule:
+    say so, name what did not run, and never grade the checkout instead."""
+    harness = smoke_harness()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / 'not-a-repo'
+        root.mkdir()
+        report = harness.Report()
+        harness.against_the_release_runners(root, report)
+    outcome, detail = rows_named(report, 'release worktree')[0]
+    assert outcome == 'FAIL', detail
+    assert 'git worktree add' in detail, detail
+    assert rows_named(report, 'check all') == [], report.rows
+    assert rows_named(report, 'runners ahead') == [], report.rows
+    assert any('does NOT fall back' in line for line in report.skipped), \
+        report.skipped

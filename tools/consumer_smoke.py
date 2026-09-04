@@ -508,8 +508,8 @@ def runners_ahead(root: Path) -> list[str]:
     rather than read off the install's own report, because the row below
     compares the two against each other.
 
-    Asked of the WORKTREE, not of the consumer's checkout: the worktree is
-    what the install writes into, and a consumer with an uncommitted runner
+    The caller passes the WORKTREE, not the consumer's checkout: the worktree
+    is what the install writes into, and a consumer with an uncommitted runner
     edit would otherwise make the two counts disagree over a file the install
     never saw.
     """
