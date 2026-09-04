@@ -14,8 +14,16 @@
 # --all); `check test-shape` is the gate that refuses one. `--all` stays the
 # milestone gate and the gate for a change to the tier's own ground.
 #
+# THIS FILE OWNS THE ROSTER. What --all boots — the source dir minus support/,
+# the capture tools (less the keep-list) and the infra basenames — is decided
+# by the config block below and the GDK_* env, which a consumer edits and no
+# TOML reader can see. So `--list` prints it, booting nothing, and
+# `check test-shape` asks the header rule of exactly that set rather than of a
+# second census of its own.
+#
 # Usage:
 #   tools/dev/runners/integration.sh --all              # every scenario
+#   tools/dev/runners/integration.sh --list             # the roster --all would boot, boots nothing
 #   tools/dev/runners/integration.sh --smoke            # just the smoke scenario
 #   tools/dev/runners/integration.sh --system protocol  # the tests/integration/protocol/ directory
 #   tools/dev/runners/integration.sh --diff HEAD        # what the uncommitted change covers, + smoke
@@ -85,6 +93,10 @@ goes through scenario.sh, so the isolation is a process boundary rather than a
 convention.
 
   --all            every discovered scenario
+  --list           the roster: every scenario file --all would boot, one
+                   repo-relative path per line, sorted, booting nothing —
+                   what `check test-shape` asks the header rule of. An
+                   EMPTY roster is exit 1
   --smoke          just GDK_SMOKE_SCENARIO
   --system <dir>   every discovered scenario under <source dir>/<dir>/ — the
                    DIRECTORY, so `--system threads` is tests/integration/threads/.
@@ -118,10 +130,10 @@ USAGE_EOF
 }
 
 # --- discovery ---------------------------------------------------------------
-# discover_gate_files [dir] — every scenario FILE the sweep should boot, as a
-# path under dir, one per line, sorted. Takes the directory as an argument so
-# the self-test can point it at a fixture tree instead of planting probe files
-# in the real one.
+# discover_gate_files [dir] — THE ROSTER: every scenario FILE the sweep should
+# boot, as a path under dir, one per line, sorted. Takes the directory as an
+# argument so the self-test can point it at a fixture tree instead of planting
+# probe files in the real one. `--list` prints exactly this.
 discover_gate_files() {
 	local dir="${1:-$GDK_SCENARIO_SOURCE_DIR}"
 	[ -d "$dir" ] || return 0
@@ -206,12 +218,18 @@ covers_entry_defect() {
 		*[\*\?\[]*) echo "carries a glob — a covers entry is a literal prefix"; return 0 ;;
 		*[[:space:]]*) echo "carries whitespace"; return 0 ;;
 		.|..|./*|../*|*/.|*/..|*/./*|*/../*) echo "carries a dot segment"; return 0 ;;
+		# After the ONE trailing slash scenario_covers drops, a slash with
+		# nothing after it is an empty segment: `a//b`, `a//`, `a/`. Compared as
+		# a prefix it can never match a path git names; the gate refuses it by
+		# the same name, so the two cannot disagree.
+		*//*|*/) echo "carries an empty segment (a doubled slash)"; return 0 ;;
 	esac
 	return 1
 }
 
 # scenario_covers <file> — the prefixes the scenario's header declares, one per
-# line, a trailing `/` dropped. The header is the leading run of blank, comment,
+# line, ONE trailing `/` dropped (exactly one, as the gate drops it — a second
+# is an empty segment the grammar refuses). The header is the leading run of blank, comment,
 # `extends`, `class_name` and annotation lines; a `## covers:` below the first
 # statement is prose, not a declaration. Several `## covers:` lines union. An
 # entry the grammar refuses is dropped here — the gate reports it.
@@ -268,15 +286,22 @@ ref_defect() {
 	return 1
 }
 
-# touched_paths <ref> — every repo-relative path the working tree differs from
-# <ref> on (staged or not), plus every untracked file git does not ignore: a
-# new scenario is a touched scenario before it is ever added. Exit 2 when
+# touched_paths <ref> — every REPO_ROOT-relative path the working tree differs
+# from <ref> on (staged or not), plus every untracked file git does not ignore:
+# a new scenario is a touched scenario before it is ever added. Exit 2 when
 # <ref> does not name a commit.
+#
+# Relative to REPO_ROOT (the cwd), NOT the git toplevel — a covers entry is
+# repo-relative, and a project below the toplevel (game/ in a monorepo) would
+# otherwise compare `game/systems/alpha/x.gd` against `systems/alpha` and
+# match nothing. A change outside the project is dropped: nothing repo-relative
+# can name it. And the bytes, not git's C-quoting: under core.quotePath (the
+# default) a non-ASCII path prints as `"caf\303\251.gd"`, a prefix of nothing.
 touched_paths() {
 	local ref="$1"
 	git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1 || return 2
-	{ git diff --name-only "$ref" -- 2>/dev/null
-	  git ls-files --others --exclude-standard 2>/dev/null; } | sort -u
+	{ git -c core.quotePath=false diff --name-only --relative "$ref" -- 2>/dev/null
+	  git -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null; } | sort -u
 }
 
 # touched_substrate — touched paths on stdin; the ones that are the tier's own
@@ -403,7 +428,7 @@ self_test() {
 
 	# --- the covers-entry grammar ------------------------------------------
 	for bad in '' '/abs/x' '../x' 'a/../b' './x' 'a/./b' '.' '..' 'res://x' \
-		'a b' 'a\b' 'systems/*' 'a?b' 'a[b]' \
+		'a b' 'a\b' 'systems/*' 'a?b' 'a[b]' 'systems//alpha' 'systems/alpha//' 'a/' \
 		"$(printf 'a%.0s' $(seq 1 201))"; do
 		cases=$((cases + 1))
 		covers_entry_defect "$bad" >/dev/null || miss "covers admits '$bad'"
@@ -447,7 +472,18 @@ self_test() {
 	[ "$out" = "plain_gate protocol_boot thing_capture " ] \
 		|| miss "the keep-list did not restore the gate, got '$out'"
 
-	# --- --system selects the DIRECTORY ------------------------------------
+	# --- --list: the roster, for the gate that asks it ------------------------
+	cases=$((cases + 1))
+	rc=0; bash "$0" --list extra >/dev/null 2>&1 || rc=$?
+	[ "$rc" -eq 2 ] || miss "--list takes no argument, got $rc"
+	cases=$((cases + 1))
+	out="$(GDK_SCENARIO_SOURCE_DIR="$scratch" bash "$0" --list 2>/dev/null | names_of | tr '\n' ' ')"
+	[ "$out" = "plain_gate protocol_boot " ] \
+		|| miss "--list should print exactly the sweep's roster, got '$out'"
+	cases=$((cases + 1))
+	rc=0; GDK_SCENARIO_SOURCE_DIR="$scratch/tools_only" bash "$0" --list >/dev/null 2>&1 || rc=$?
+	[ "$rc" -eq 1 ] || miss "--list over an EMPTY roster must FAIL (exit 1), got $rc"
+
 	cases=$((cases + 1))
 	out="$(select_system protocol "$scratch" | names_of | tr '\n' ' ')"
 	[ "$out" = "protocol_boot " ] || miss "--system protocol should select the directory, got '$out'"
@@ -494,6 +530,16 @@ FIXTURE_EOF
 	cases=$((cases + 1))
 	out="$(scenario_covers "$scratch/plain_gate.gd" | tr '\n' ' ')"
 	[ -z "$out" ] || miss "an undeclared scenario should read as no entries, got '$out'"
+	# A doubled slash: one trailing slash is spelling, two is an empty segment.
+	# `systems/alpha//` lost ONE slash and compared `systems/alpha/` as a
+	# prefix of `systems/alpha/x.gd` — never true — while the gate's
+	# rstrip('/') passed it. Refused by name in both now.
+	mkdir -p "$scratch/dbl"
+	printf '## covers: systems/alpha//, systems//beta, systems/gamma/\n' > "$scratch/dbl/dbl_flow.gd"
+	cases=$((cases + 1))
+	out="$(scenario_covers "$scratch/dbl/dbl_flow.gd" | tr '\n' ' ')"
+	[ "$out" = "systems/gamma " ] \
+		|| miss "a doubled slash is an empty segment and dropped; one trailing slash is spelling — got '$out'"
 
 	# --- the slice ----------------------------------------------------------
 	cases=$((cases + 1))
@@ -529,6 +575,31 @@ FIXTURE_EOF
 		| touched_substrate | tr '\n' ' ')"
 	[ "$out" = "tests/support/maps/x.tscn tests/integration/scenario_base.gd tools/dev/runners/scenario.sh " ] \
 		|| miss "substrate: fixtures, the base class and the runners are ground; a system is not — got '$out'"
+
+	# --- touched_paths: REPO_ROOT-relative and literal ------------------------
+	# `git diff --name-only` names a path relative to the git TOPLEVEL and
+	# C-quotes a non-ASCII one under core.quotePath (git's default), while a
+	# covers entry is REPO_ROOT-relative and literal. A project below the
+	# toplevel (game/ in a monorepo) or a café.gd matched nothing, and --diff
+	# under-selected to smoke without a word. A change OUTSIDE the project is
+	# not a touched path of the project: nothing repo-relative can name it.
+	mono="$scratch/mono"
+	mkdir -p "$mono/game/systems/alpha" "$mono/game/tests/support"
+	: > "$mono/README.md"; : > "$mono/game/project.godot"; : > "$mono/game/tests/support/base.gd"
+	( cd "$mono" && git init -q . && git config core.quotePath true && git add -A \
+		&& git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m fixture ) >/dev/null 2>&1 \
+		|| miss "the git fixture could not be built"
+	: > "$mono/game/systems/alpha/x.gd"
+	: > "$mono/game/systems/alpha/café.gd"
+	echo change >> "$mono/README.md"
+	echo change >> "$mono/game/tests/support/base.gd"
+	cases=$((cases + 1))
+	out="$( (cd "$mono/game" && touched_paths HEAD) | tr '\n' ' ')"
+	[ "$out" = "systems/alpha/café.gd systems/alpha/x.gd tests/support/base.gd " ] \
+		|| miss "touched paths must be REPO_ROOT-relative and literal (a project under game/, a café.gd; the toplevel README is outside the project) — got '$out'"
+	cases=$((cases + 1))
+	rc=0; (cd "$mono/game" && touched_paths no-such-ref >/dev/null 2>&1) || rc=$?
+	[ "$rc" -eq 2 ] || miss "touched_paths with no such ref should return 2, got $rc"
 
 	# --- every keep-listed gate must EXIST and survive the filter ------------
 	# A renamed or deleted keep-listed capture must fail loudly here, never
@@ -567,13 +638,29 @@ case "${1:-}" in
 		self_test_rc=0; self_test || self_test_rc=$?; exit "$self_test_rc" ;;
 esac
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/$REPO_ROOT_FROM_HERE" && pwd)" || exit 2
-SCENARIO_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$GDK_SCENARIO_RUNNER"
+# Resolved before the cd: a relative $0 stops resolving once the cwd moves.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 2
+REPO_ROOT="$(cd "$SCRIPT_DIR/$REPO_ROOT_FROM_HERE" && pwd)" || exit 2
+cd "$REPO_ROOT" || exit 2
+
+# --list boots nothing and needs no scenario.sh, so it is answered before that
+# file is looked for: the gate that asks it runs where no scenario ever does.
+if [ "${1:-}" = "--list" ]; then
+	[ "$#" -eq 1 ] || { echo "[$GATE_TAG] --list takes no argument. See --help." >&2; exit 2; }
+	roster="$(discover_gate_files)"
+	if [ -z "$roster" ]; then
+		echo "[$GATE_TAG] FAIL — the roster is EMPTY: no gate under $GDK_SCENARIO_SOURCE_DIR/ (support/, capture tools and infra are not swept)" >&2
+		exit 1
+	fi
+	printf '%s\n' "$roster"
+	exit 0
+fi
+
+SCENARIO_SH="$SCRIPT_DIR/$GDK_SCENARIO_RUNNER"
 if [ ! -f "$SCENARIO_SH" ]; then
 	echo "[$GATE_TAG] scenario.sh not found at '$SCENARIO_SH' — set GDK_SCENARIO_RUNNER" >&2
 	exit 2
 fi
-cd "$REPO_ROOT" || exit 2
 
 NAMES=()
 SLICE_NOTE=""

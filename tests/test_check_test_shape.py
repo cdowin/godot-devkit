@@ -10,10 +10,13 @@ is the RELATION between a file, the cap and its ledger entry — not 300.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import unittest
+from unittest import mock
 
-from support import run_check, temp_repo
+from support import REPO_ROOT, run_check, temp_repo
 
 from godot_devkit.core.config import ConfigError
 from godot_devkit.godot.checks import test_shape
@@ -145,6 +148,22 @@ GOOD_HEADER = ('extends "res://tests/integration/support/scenario_base.gd"\n'
                'func run() -> void:\n\tpass\n')
 
 
+INTEGRATION_RUNNER = (REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
+                      / 'integration.sh')
+RUNNER_REL = 'tools/dev/runners/integration.sh'
+CAPTURE = 'tests/integration/thing_capture.gd'
+SUPPORT_STUB = 'tests/integration/support/stub.gd'
+
+
+def _runner(root, rel: str = RUNNER_REL) -> None:
+    """The header rule is asked of the roster the integration runner boots,
+    read from the runner itself — so a `header = true` repo carries one, at
+    the depth install-runners writes it."""
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(INTEGRATION_RUNNER, target)
+
+
 def _scenario(root, rel: str, body: str) -> None:
     """Write a scenario into the temp repo and stage it — the gate scans
     `git ls-files`, so an unstaged file is invisible to it."""
@@ -168,6 +187,7 @@ class TheHeaderRule(unittest.TestCase):
     def test_an_unledgered_scenario_with_no_header_fails(self) -> None:
         with temp_repo('test_shape_repo', only=SCENARIOS) as root:
             _config(root, HEADER_ON)
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn(f'NO-HEADER  {SMALL}', out)
@@ -178,6 +198,7 @@ class TheHeaderRule(unittest.TestCase):
                                                  'tests/unit/contract_test.gd']) as root:
             _scenario(root, HEADED, GOOD_HEADER)
             _config(root, HEADER_ON)
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 0, out)
         self.assertIn('every one off the header ledger says why it boots', out)
@@ -185,6 +206,7 @@ class TheHeaderRule(unittest.TestCase):
     def test_the_ledger_exempts_an_existing_scenario(self) -> None:
         with temp_repo('test_shape_repo', only=SCENARIOS) as root:
             _config(root, HEADER_ON + f'header_ledger = ["{SMALL}", "{BIG}"]\n')
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 0, out)
         self.assertIn('header ledger: 2 scenario(s) yet to say why they boot', out)
@@ -197,6 +219,7 @@ class TheHeaderRule(unittest.TestCase):
                                                  'tests/unit/contract_test.gd']) as root:
             _scenario(root, HEADED, GOOD_HEADER)
             _config(root, HEADER_ON + f'header_ledger = ["{HEADED}"]\n')
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn(f'HEADED  {HEADED} — carries its header; drop it from '
@@ -206,6 +229,7 @@ class TheHeaderRule(unittest.TestCase):
         with temp_repo('test_shape_repo', only=SCENARIOS) as root:
             _config(root, HEADER_ON + f'header_ledger = ["{SMALL}", "{BIG}", '
                     f'"tests/integration/gone.gd"]\n')
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn('STALE  tests/integration/gone.gd', out)
@@ -220,6 +244,7 @@ class TheHeaderRule(unittest.TestCase):
                                                  'tests/unit/contract_test.gd']) as root:
             _scenario(root, HEADED, body)
             _config(root, HEADER_ON)
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn(f'HEADER  {HEADED} — no `## covers:` line', out)
@@ -243,6 +268,12 @@ class TheHeaderRefusalMatrix(unittest.TestCase):
         'systems/al pha': 'carries whitespace',
         'systems/nowhere': 'is not in the tree',
         'a' * 201: 'is longer than 200 characters',
+        # A doubled slash. `rstrip('/')` read `systems/alpha//` as a directory
+        # that exists, and Path() collapsed `systems//alpha` to one that does —
+        # the gate passed both, and the runner (which strips ONE slash and
+        # compares strings) never selected on either.
+        'systems/alpha//': 'carries an empty segment',
+        'systems//alpha': 'carries an empty segment',
     }
 
     def _run(self, covers_value: str) -> tuple[int, str]:
@@ -254,6 +285,7 @@ class TheHeaderRefusalMatrix(unittest.TestCase):
                                                  'tests/unit/contract_test.gd']) as root:
             _scenario(root, HEADED, body)
             _config(root, HEADER_ON)
+            _runner(root)
             return run_check(test_shape)
 
     def test_every_hostile_covers_entry_is_refused(self) -> None:
@@ -279,6 +311,7 @@ class TheHeaderRefusalMatrix(unittest.TestCase):
         with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd']) as root:
             _scenario(root, HEADED, body)
             _config(root, HEADER_ON)
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn('names no tests/ path', out)
@@ -289,6 +322,7 @@ class TheHeaderRefusalMatrix(unittest.TestCase):
         with temp_repo('test_shape_repo', only=[*BASE, 'systems/alpha/thing.gd']) as root:
             _scenario(root, HEADED, body)
             _config(root, HEADER_ON)
+            _runner(root)
             code, out = run_check(test_shape)
         self.assertEqual(code, 1, out)
         self.assertIn('says nothing', out)
@@ -304,9 +338,114 @@ class TheHeaderConfigIsRefusedRatherThanGuessed(unittest.TestCase):
     def test_a_bare_string_header_ledger_is_refused_not_iterated(self) -> None:
         with temp_repo('test_shape_repo', only=SCENARIOS) as root:
             _config(root, HEADER_ON + f'header_ledger = "{SMALL}"\n')
+            _runner(root)
             with self.assertRaises(ConfigError):
                 run_check(test_shape)
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
+    """One roster, and the runner owns it. The gate scanned `git ls-files`
+    minus the infra basenames; the runner discovers with `find` minus
+    support/, the capture tools and its keep-list — so the header rule was
+    asked of a capture TOOL and a support stub `--diff` can never slice to.
+    The gate now reads the roster from `integration.sh --list`, which is the
+    one place the discovery rule (and a consumer's edits to it) lives."""
+
+    ROSTER_REPO = [*BASE, 'systems/alpha/thing.gd', 'tests/unit/contract_test.gd']
+
+    def test_a_capture_tool_and_a_support_stub_are_not_asked(self) -> None:
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _scenario(root, CAPTURE, 'extends Node\n')
+            _scenario(root, SUPPORT_STUB, 'extends Node\n')
+            _config(root, HEADER_ON)
+            _runner(root)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+        self.assertIn('1 the runner would boot', out)
+
+    def test_a_keep_listed_capture_is_on_the_roster_and_is_asked(self) -> None:
+        """The runner's own configuration decides — GDK_CAPTURE_GATE_RE makes
+        a capture a gate, and then it is asked. A rule re-derived in the gate
+        could not know that."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _scenario(root, CAPTURE, 'extends Node\n')
+            _scenario(root, SUPPORT_STUB, 'extends Node\n')
+            _config(root, HEADER_ON)
+            _runner(root)
+            with mock.patch.dict(os.environ, {'GDK_CAPTURE_GATE_RE': '^(thing_capture)$'}):
+                code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'NO-HEADER  {CAPTURE}', out)
+        self.assertNotIn(SUPPORT_STUB, out)
+
+    def test_a_ledger_line_naming_a_file_the_runner_does_not_boot_is_stale(self) -> None:
+        """The ledger only shrinks: a line for a capture tool is a debt that
+        was never owed, and it hides the real count."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _scenario(root, CAPTURE, 'extends Node\n')
+            _config(root, HEADER_ON + f'header_ledger = ["{CAPTURE}"]\n')
+            _runner(root)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'STALE  {CAPTURE}', out)
+
+    def test_header_true_with_no_runner_is_a_config_error_naming_the_path(self) -> None:
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 2, out)
+        self.assertIn(RUNNER_REL, out)
+        self.assertIn('install-runners', out)
+
+    def test_an_older_runner_that_answers_no_list_is_a_config_error_naming_the_remedy(self) -> None:
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON)
+            old = root / RUNNER_REL
+            old.parent.mkdir(parents=True)
+            old.write_text('#!/usr/bin/env bash\necho "unknown flag" >&2; exit 2\n',
+                           encoding='utf-8')
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 2, out)
+        self.assertIn('--force', out)
+
+    def test_a_runner_that_boots_nothing_is_a_fail_not_a_pass_over_nothing(self) -> None:
+        """A tracked tier of one capture tool: the cap census is 1, the roster
+        is 0. Rule 4 — a header rule asked of nothing must say so."""
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, CAPTURE, 'extends Node\n')
+            _config(root, HEADER_ON)
+            _runner(root)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 1, out)
+        self.assertIn('boots NOTHING', out)
+
+    def test_the_runner_path_is_configurable_and_repo_relative(self) -> None:
+        elsewhere = 'ci/dev/runners/integration.sh'
+        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+            _scenario(root, HEADED, GOOD_HEADER)
+            _config(root, HEADER_ON + f'runner = "{elsewhere}"\n')
+            _runner(root, elsewhere)
+            code, out = run_check(test_shape)
+        self.assertEqual(code, 0, out)
+
+    def test_a_runner_path_outside_the_repo_is_refused(self) -> None:
+        # A TOML literal string (single quotes), so the backslash reaches the
+        # gate as a backslash rather than failing the parse.
+        for bad in ('/usr/bin/env', '../integration.sh', 'tools/../../x.sh', '',
+                    'tools//x.sh', 'tools\\x.sh'):
+            with self.subTest(runner=bad):
+                with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
+                    _scenario(root, HEADED, GOOD_HEADER)
+                    _config(root, HEADER_ON + f"runner = '{bad}'\n")
+                    _runner(root)
+                    with self.assertRaises(ConfigError):
+                        run_check(test_shape)
