@@ -534,9 +534,10 @@ def test_this_repo_carries_what_install_ci_produces():
     The other three read `config/version` out of a project.godot — this package
     has neither, versions in pyproject.toml, and bumps at CLOSE rather than at
     merge. Installing them here would be three workflows guarding a flow this
-    repo does not run, which is the same reasoning that keeps `install-hooks`
-    un-self-hosted. What is carried must be current; what is absent is
-    legitimately absent.
+    repo does not run — the reasoning that kept `install-hooks` un-self-hosted
+    until 0.23.0 gave its corpus a job here (the ledger couriers; the hook
+    headers are then this repo's `project config`, edited on purpose). What is
+    carried must be current; what is absent is legitimately absent.
     """
     repo_root.cache_clear()
     load_config.cache_clear()

@@ -422,8 +422,9 @@ add the target.
 ```sh
 make test        # the suite on the 3.11 floor (pytest, via uv)
 make gates       # godot-devkit check all, on this repo
-make precommit   # gates + test — the per-change gate
-make milestone   # gates + matrix + smoke — the full gate, and what CI runs
+make hooks-self-test  # the self-hosted hooks that ship a corpus, replayed
+make precommit   # gates + hooks-self-test + test — the per-change gate
+make milestone   # gates + hooks-self-test + matrix + smoke — the full gate, and what CI runs
 ```
 
 `make matrix` runs the suite on every claimed interpreter and reports which one failed; `make fuzz`
