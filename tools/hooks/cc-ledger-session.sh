@@ -61,6 +61,13 @@ set -eu
 # an un-`.PHONY:`'d `pm` target is a target make considers up to date — the
 # vehicle exits 0, prints nothing, and no row is ever written. Makefile.devkit
 # declares it; a hand-rolled Makefile has to.
+#
+# AND IT MUST PASS ITS ENVIRONMENT THROUGH. Every value copied off the payload
+# travels to the verb in the environment (`GDK_LEDGER_*`), never spelled into
+# `ARGS=` — see "the argv" at the bottom of this file for why. make hands its
+# environment to a recipe unchanged, so the stock spelling needs nothing said
+# to it; a vehicle that scrubs the environment would drop the transcript path
+# and every row with it.
 MAKE_PM=(make -s pm)
 # -----------------------------------------------------------------------------
 
@@ -99,15 +106,33 @@ expand_tilde() {
 	esac
 }
 
-# mk_arg <value> — one value, safe to hand to make AND to the shell make runs.
+# env_arg <flag> <name> <value> — append one flag to ARGS and carry its value
+# to the vehicle in the ENVIRONMENT, as one call so neither can be written
+# without the other.
 #
-# ARGS= is a make variable interpolated into a recipe, so a value crosses two
-# expanders: make's (which eats `$`) and the shell's (which eats spaces and
-# quotes). `printf %q` answers the shell and `$` -> `$$` answers make. A
-# transcript path under ~/.claude/projects/ needs neither, and that is exactly
-# why this is here: the day one does, the row must still be right rather than
-# the hook silently filing half a path.
-mk_arg() { printf '%q' "$1" | sed 's/\$/$$/g'; }
+# `ARGS=` is a make variable interpolated into a recipe, so anything spelled
+# into it crosses two expanders — make's, then the recipe shell's — AND THAT
+# SHELL IS NOT THIS ONE. make runs a recipe under `/bin/sh` unless the Makefile
+# says otherwise, and a hand-rolled consumer Makefile may say dash. Values were
+# quoted here with `printf %q`, which is BASH's quoting and locale-sensitive
+# besides: in the `C` locale a non-ASCII path came back as `$'…'`, dash kept the
+# `$` as text, the verb refused "is not a file" at exit 2 — and this hook exits
+# 0 whatever happens, so the row was lost with nothing red anywhere and the
+# milestone read as cheaper than it was
+# (0.24.0/bugs/courier-path-quoting-needs-a-bash-shell).
+#
+# So no value is spelled into ARGS at all. It travels in the environment, which
+# make hands to the recipe shell untouched, and ARGS carries a FIXED reference
+# — the same bytes for every value, so nothing about a path can change how the
+# vehicle parses the word. `$$` is make's escape for a literal `$`; the double
+# quotes are POSIX, and no shell re-scans the result of a parameter expansion,
+# so the value reaches the verb byte-exact whatever is in it: space, quote,
+# `$`, newline. The one word still spelled in full is `--event`, which is the
+# constant at the top of THIS file rather than anything off the payload.
+env_arg() {
+	export "$2=$3"
+	ARGS="$ARGS $1 \"\$\$$2\""
+}
 
 # read_event — the payload's fields, NUL-terminated, in a fixed order.
 #
@@ -236,6 +261,30 @@ self_test() {
 		esac
 		self_test_says 'a payload with no ids still records' "$argv" 'exit=0' || rc=1
 
+		# THE VEHICLE'S SHELL IS NOT THIS ONE. make runs a recipe under `/bin/sh`
+		# unless the Makefile says otherwise, and a hand-rolled consumer Makefile
+		# may say dash — so a value spelled into ARGS as a BASH literal is a value
+		# the vehicle cannot decode, and the lost row is silent because this hook
+		# exits 0 either way. The path carries a non-ASCII byte and a space, and
+		# the locale is pinned to `C`: `printf %q` leaves a non-ASCII path bare
+		# under a UTF-8 locale, so an inherited locale is a case that passes for
+		# the wrong reason on the machine that happens to have one. Nothing opens
+		# this transcript — the stub prints ARGS — so what is proven is the WORD
+		# the vehicle handed on.
+		if command -v dash >/dev/null 2>&1; then
+			# shellcheck disable=SC2016  # `$(ARGS)` is MAKE's expansion, written
+			# into the stub Makefile literally.
+			printf 'SHELL := %s\npm:\n\t@printf "ARG[%%s]\\n" $(ARGS)\n' \
+				"$(command -v dash)" >"$repo/Makefile"
+			awkward="$tmp/café dir/t.jsonl"
+			argv="$(LC_ALL=C self_test_fire "$(self_test_payload \
+				"$EVENT" "$repo" 'sess-1' "$awkward")")"
+			self_test_says 'a non-bash vehicle, a path bash would escape' \
+				"$argv" "ARG[$awkward]" || rc=1
+		else
+			echo "  SKIP — dash is not on PATH; the non-bash vehicle case did not run" >&2
+		fi
+
 		# THE SILENT VEHICLE. A Makefile with no `pm` target, in a repo that
 		# has a `pm/` DIRECTORY — which every PM tree does — is make's
 		# up-to-date case: exit 0, not a word, no row. An un-`.PHONY:`'d `pm`
@@ -323,9 +372,16 @@ fi
 # is an OMITTED FLAG, never an empty string: the verb reads the ids out of the
 # transcript when the caller is silent, and a `--session-id ''` would tell it
 # the caller was not.
-ARGS="ledger record --from-transcript $(mk_arg "$TRANSCRIPT") --event $EVENT"
+#
+# EVERY VALUE TRAVELS IN THE ENVIRONMENT, not inside ARGS — `env_arg` above
+# says why, and is the only place the reference is spelled. The one word still
+# written out in full is `--event`, a constant at the top of THIS file rather
+# than anything off the payload.
+ARGS='ledger record'
+env_arg --from-transcript GDK_LEDGER_TRANSCRIPT "$TRANSCRIPT"
+ARGS="$ARGS --event $EVENT"
 if [ -n "$SESSION_ID" ]; then
-	ARGS="$ARGS --session-id $(mk_arg "$SESSION_ID")"
+	env_arg --session-id GDK_LEDGER_SESSION_ID "$SESSION_ID"
 fi
 
 # Whatever the verb returns, this hook exits 0. Its stdout joins its stderr so
