@@ -104,6 +104,14 @@
 # alphabetical list is a different lifecycle, not the same one tidied — and a
 # set that drops `building` leaves D5 with nothing to compare, which
 # `check pm` says out loud rather than passing in silence.
+#
+# 0.24.0 ONLY: the stock sets also READ the four words they replaced — todo
+# (-> ready), wip (-> building), blocked (-> building), review (-> reviewing) —
+# so a tree holding one is not a D4 finding on the day you bump the pin. The
+# verbs refuse to WRITE them, `check pm` prints a census of how many grains
+# still hold one, and 0.25.0 removes them. Rewrite yours before that bump.
+# Declaring your own set that happens to use one of those words opts out: it is
+# your vocabulary, not the window, and nothing here refuses it.
 
 # --- the read verbs -----------------------------------------------------------
 # `autoloads` cross-checks each autoload's NAME SUFFIX against what its source

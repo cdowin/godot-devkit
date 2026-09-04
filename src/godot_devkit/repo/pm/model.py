@@ -56,9 +56,67 @@ from godot_devkit.core.config import (ConfigError, config_section,
 # equality with `done`.
 LIFECYCLE = ('planning', 'ready', 'building', 'reviewing', 'accepted',
              'packaging', 'done')
-DEFAULT_MILESTONE_STATES = LIFECYCLE
-DEFAULT_FEATURE_STATES = LIFECYCLE
-DEFAULT_STORY_STATES = LIFECYCLE
+
+# --- the deprecation window (0.24.0 only) -------------------------------------
+# The four words this vocabulary REPLACED, each mapped to the word it became.
+# They ride in the stock default set for ONE release; 0.25.0 removes them
+# (pm/roadmap/0.24.0-gate-cost/bugs/the-deprecation-window-closes.md).
+#
+# Why they are here at all: a state a tree already HOLDS cannot vanish under
+# it. Every `status:` line is validated against these sets, so dropping four
+# words turned every grain holding one into a D4 finding on upgrade day —
+# measured the day before the tag on the two live consumers that pin this
+# package, 43 and 25 findings, both pre-push gates red on the pin bump alone.
+# And there is no ordering that avoids it: the unmigrated tree fails under the
+# new package, the migrated tree fails under the pinned old one. A window costs
+# one release and asks nobody to hold a red gate through a rewrite.
+#
+# READ, never WRITTEN. `deprecated_write` is the half that makes it a window
+# rather than a second vocabulary: the CLI writes the replacement, so the set
+# of files a consumer must migrate before 0.25.0 only ever shrinks.
+#
+# The POSITION is load-bearing and therefore DERIVED, never typed: each retired
+# word is spliced in immediately after the word that replaced it, so it lands
+# on the same side of `building` as its replacement and the two cannot
+# disagree. `work_started` is an index comparison, so a `wip` ordered before
+# `building` would report a story at work as not started and a `todo` after it
+# the reverse. `blocked` maps to `building` because a blocked grain's work has
+# STARTED and stopped — which also keeps it inside D2's stalled window, where a
+# feature holding it with every story done is a forgotten flip rather than a
+# silence. Hung off the END (past `done`) it would be both: invisible to D2 and
+# a claim, in the one place consumers read the order, that a blocked grain is
+# further along than a finished one.
+DEPRECATED_STATES = {'todo': 'ready', 'wip': 'building',
+                     'review': 'reviewing', 'blocked': 'building'}
+STOCK_STATES = tuple(
+    word
+    for canonical in LIFECYCLE
+    for word in (canonical, *(retired for retired, replacement
+                              in DEPRECATED_STATES.items()
+                              if replacement == canonical)))
+DEFAULT_MILESTONE_STATES = STOCK_STATES
+DEFAULT_FEATURE_STATES = STOCK_STATES
+DEFAULT_STORY_STATES = STOCK_STATES
+
+
+def deprecated_write(status: str, states: tuple[str, ...]) -> str:
+    """The word `status` was retired FOR, or `''` when it may be written.
+
+    The window READS; it does not write. A tree that already holds `wip` stays
+    green under 0.24.0, and the sanctioned tool asked to add another one
+    refuses and names `building`. Without this half the CLI is itself the thing
+    filling trees with the words the window exists to carry out, and the
+    rewrite 0.25.0 needs grows for a whole release — while `pm story wip <id>`,
+    which exits 2 today, would start succeeding again.
+
+    Armed only while the set IS the window, by VALUE. That is rule 5 (a repo
+    declaring the stock default behaves identically to one declaring nothing)
+    and it is also the escape hatch: a project whose own vocabulary uses `todo`
+    declared a different set, means it, and writes it.
+    """
+    if tuple(states) != STOCK_STATES:
+        return ''
+    return DEPRECATED_STATES.get(status, '')
 # The two words read BY NAME rather than by position, so each has one spelling
 # the gate, the CLI and the reports all reach for. `BUILDING` is the pivot: it
 # is where the shaping half ends and the work starts, which is the split D5
@@ -70,7 +128,7 @@ REVIEWING = 'reviewing'
 # D2's question — a feature holding one of these while every story is done has
 # not advanced. Derived from the pivot rather than re-listed: a re-listed tuple
 # is a second spelling of the vocabulary, and it goes stale silently.
-STALLED_IF_ALL_STORIES_DONE = LIFECYCLE[:LIFECYCLE.index(REVIEWING)]
+STALLED_IF_ALL_STORIES_DONE = STOCK_STATES[:STOCK_STATES.index(REVIEWING)]
 # Bugs have no transition graph — they are filed and they close. A DIFFERENT
 # machine, untouched by the lifecycle above. The vocabulary exists so D4 covers
 # a bug's status the way it covers every other grain's: a typo'd status is a

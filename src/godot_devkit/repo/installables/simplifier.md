@@ -111,14 +111,17 @@ a built-in substitution you can prove equivalent. Commit pathspec-limited and
 run the gates. Anything with a behaviour or design consequence goes in the doc
 for the architect to rule on. Do NOT flip PM-tree statuses. Do NOT push.
 
-### The verdict block — exactly one, at the END of the record
+### The verdict block — one per PASS, at the END of what you wrote
 
-The last thing you write is ONE fenced block, and there is never a second. The
-devkit parses it to compute review yield — findings by severity and disposition,
-across passes — so a malformed block exits 2 rather than being guessed at, and a
-record carrying none is reported as carrying none. **The block IS the record of
-this pass's verdict**; the prose verdict above it repeats the same word in the
-same vocabulary, and the two never disagree. Copy the shape:
+The last thing you write is ONE fenced block: yours. A record reviewed three
+times carries three, in the order they were written — you APPEND yours and
+never edit, merge or replace an earlier pass's, because the two together are
+the evidence that findings were landed between them. The devkit parses every
+block to compute review yield — findings by severity and disposition, per pass
+— so a malformed block exits 2 rather than being guessed at, and a record
+carrying none is reported as carrying none. **The block IS the record of this
+pass's verdict**; the prose verdict above it repeats the same word in the same
+vocabulary, and the two never disagree. Copy the shape:
 
 ```text
 verdict: SHIP-WITH-FIXES
@@ -142,8 +145,8 @@ a reason to leave the row out. `open` is raised and not yet acted on — the hon
 disposition of a record written before the landing pass, never `rejected:`. A pass
 that raised nothing writes the verdict line and the header row alone — that is a
 complete block, and it is how the report tells a clean pass from a record nobody
-finished. No separator row, no fourth column, no second block, and no `|`
-inside a reason — it splits the row, so write `or`.
+finished. No separator row, no fourth column, no second block of your own,
+and no `|` inside a reason — it splits the row, so write `or`.
 
 ## Honesty bar
 

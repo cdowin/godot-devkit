@@ -288,6 +288,23 @@ def _stamp(cfg: model.PmConfig, path: Path, row: dict) -> None:
               f'transition is NOT in the ledger', file=sys.stderr)
 
 
+def _refuse_deprecated(states: tuple[str, ...], to: str, kind: str) -> None:
+    """Exit 2 rather than WRITE a word the deprecation window only reads.
+
+    The window (`model.DEPRECATED_STATES`) keeps 0.24.0 green over trees that
+    already hold a retired word; it is not a second vocabulary to author in.
+    So the read side accepts `wip` and this side names `building` — the set of
+    files a consumer must rewrite before 0.25.0 only ever shrinks, and it never
+    grows by the hand of the sanctioned tool.
+    """
+    became = model.deprecated_write(to, states)
+    if became:
+        raise Usage(
+            f'{to!r} is retired and 0.25.0 removes it — a tree that already '
+            f'holds it stays green through 0.24.0, but the tool writes the '
+            f'word that replaced it: `pm {kind} {became} <id>`')
+
+
 def _stamp_status(cfg: model.PmConfig, path: Path, frm: str, to: str,
                   gid: str) -> None:
     """One status row for a flip that has already landed on disk."""
@@ -301,6 +318,7 @@ def cmd_story(cfg: model.PmConfig, args: list[str]) -> int:
     to, sid = args
     if to not in cfg.story_states:
         raise Usage(f'{to!r} is not a story status ({" ".join(cfg.story_states)})')
+    _refuse_deprecated(cfg.story_states, to, 'story')
     sf = model.story_file(cfg, sid)
     if sf is None:
         raise Usage(f'no story resolves from id {sid!r} '
@@ -567,6 +585,11 @@ def cmd_feature(cfg: model.PmConfig, args: list[str]) -> int:
     if sub not in cfg.feature_states:
         raise Usage(f'{sub!r} is not a feature status '
                     f'({" ".join(cfg.feature_states)})')
+    # Before the dispatch below, so `pm feature review` names `reviewing` —
+    # under the window it would otherwise reach `cmd_feature_simple` and write
+    # a retired word while silently dropping the "N stories not at review"
+    # report that only the `reviewing` branch produces.
+    _refuse_deprecated(cfg.feature_states, sub, 'feature')
     # `done` is the only verb with behaviour of its own — the cascade.
     if sub == 'done':
         return cmd_feature_done(cfg, rest)
@@ -583,6 +606,7 @@ def cmd_milestone(cfg: model.PmConfig, args: list[str]) -> int:
     if to not in cfg.milestone_states:
         raise Usage(f'{to!r} is not a milestone status '
                     f'({" ".join(cfg.milestone_states)})')
+    _refuse_deprecated(cfg.milestone_states, to, 'milestone')
     mf = model.milestone_file(cfg, mid)
     if mf is None:
         raise Usage(f'no milestone resolves from id {mid!r}')
@@ -1026,6 +1050,12 @@ def cmd_sync(cfg: model.PmConfig, args: list[str]) -> int:
     return 0
 
 
+def _retired_in(states: tuple[str, ...]) -> dict[str, str]:
+    """The window's words present in `states`, mapped to their replacement."""
+    return {word: model.deprecated_write(word, states) for word in states
+            if model.deprecated_write(word, states)}
+
+
 def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
     """Print the CLOSED sets this package knows, machine-readably with --json.
 
@@ -1054,9 +1084,14 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
     if as_json:
         import json
         print(json.dumps({
-            'grains': {g: {'states': list(states)}
+            'grains': {g: {'states': list(states),
+                           'deprecated': _retired_in(states)}
                        for g, states in grains.items()},
             'notes': {
+                'deprecated': 'the 0.24.0 window: a retired word is READ where '
+                              'a tree already holds it and never written — the '
+                              'verb refuses it and names its replacement. '
+                              '0.25.0 removes them from the vocabulary',
                 'transitions': 'there is no transition graph — any state in a '
                                'grain\'s own set is reachable directly, and '
                                '`check pm` reports an inconsistent END STATE',
@@ -1073,6 +1108,22 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
     width = max(len(g) for g in grains)
     for g, states in grains.items():
         print(f'{g:<{width}}  {" ".join(states)}')
+    # The window, said out loud HERE because this verb is where a consumer
+    # reads the vocabulary from the tool rather than from a changelog. A union
+    # printed without it reads as eleven equal words, and the four that are
+    # leaving would be the ones a new grain gets authored at.
+    retired = dict(pair for states in grains.values()
+                   for pair in _retired_in(states).items())
+    if retired:
+        print()
+        print('retired, and removed in 0.25.0 — read where a tree already')
+        print('holds one, never written (the verb names the replacement):')
+        # `replaced by`, never an arrow: `->` was the retired edge table's
+        # marker and a test refuses its return. This is a rename map — which
+        # word took over — not a claim about which state may follow which.
+        width = max(len(word) for word in retired)
+        for word, became in retired.items():
+            print(f'       {word:<{width}}  replaced by  {became}')
     print()
     print('Any state in a grain\'s own set is reachable directly — there is no')
     print('transition graph. The story cascade is OPT-IN: `pm feature done <id>`')

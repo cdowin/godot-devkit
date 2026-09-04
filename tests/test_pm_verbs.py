@@ -200,14 +200,41 @@ class StatusVerbQuartet(unittest.TestCase):
             yield root
 
     def test_any_state_in_the_vocabulary_is_reachable(self):
+        """Every state a grain may HOLD is one the tool can write — except
+        the four the 0.24.0 window is carrying out, which the tree may hold
+        and the tool refuses (the test below is that half). Without the carve
+        the CLI would spend a release re-filling the trees the window exists
+        to empty; without this half a canonical word would be reachable only
+        by hand edit."""
         for kind, gid, rel, _, _ in self.GRAINS:
             for state in self._states(kind):
+                if model.deprecated_write(state, self._states(kind)):
+                    continue
                 with self.subTest(kind=kind, state=state), \
                         self._grain_tree(kind) as root:
                     code, out = run_cli(root, kind, state, gid)
                     self.assertEqual(code, 0, out)
                     self.assertEqual(
                         model.field_of(root / rel, 'status'), state)
+
+    def test_a_retired_state_is_refused_and_names_the_word_that_replaced_it(self):
+        """The window READS. A tree already holding `wip` stays green, and the
+        tool asked to write another one exits 2 naming `building` — so the set
+        of files 0.25.0 needs rewritten only ever shrinks, and never by the
+        hand of the sanctioned tool. Bugs are a different machine and hold
+        none of these words."""
+        for kind, gid, rel, initial, _ in self.GRAINS:
+            for state, became in model.DEPRECATED_STATES.items():
+                if not model.deprecated_write(state, self._states(kind)):
+                    continue
+                with self.subTest(kind=kind, state=state), \
+                        self._grain_tree(kind) as root:
+                    code, out = run_cli(root, kind, state, gid)
+                    self.assertEqual(code, 2, out)
+                    self.assertIn('retired', out)
+                    self.assertIn(f'pm {kind} {became} <id>', out)
+                    self.assertEqual(
+                        model.field_of(root / rel, 'status'), initial)
 
     def test_a_state_outside_the_vocabulary_is_a_usage_error_naming_the_set(self):
         # The half that IS a fact: `banana` is not a status in any vocabulary.
@@ -953,9 +980,17 @@ class Vocabulary(unittest.TestCase):
                              list(model.DEFAULT_BUG_STATES))
             self.assertEqual(data['checks'], list(model.KNOWN_CHECKS))
             # The edge table is what died. Nothing may re-grow one here.
+            # `deprecated` is a RENAME map — which word took over from which,
+            # the window this release carries — and not a claim about which
+            # state may follow which; the arrow that spelled the edge table
+            # stays gone in both shapes.
             for grain in data['grains'].values():
-                self.assertEqual(list(grain), ['states'])
+                self.assertEqual(list(grain), ['states', 'deprecated'])
+            self.assertNotIn('transitions', data['grains'])
             self.assertNotIn('->', out)
+            self.assertEqual(data['grains']['story']['deprecated'],
+                             dict(model.DEPRECATED_STATES))
+            self.assertEqual(data['grains']['bug']['deprecated'], {})
 
     def test_it_reads_the_projects_OWN_vocabulary_not_the_stock_one(self):
         with tree() as root:
@@ -976,6 +1011,13 @@ class Vocabulary(unittest.TestCase):
             self.assertIn('D9', out)
             self.assertIn('D10', out)
             self.assertNotIn('->', out)
+            # The window, where a consumer reads the vocabulary FROM THE TOOL.
+            # Eleven words printed flat would make the four that are leaving
+            # look like the seven that are staying, and the next grain gets
+            # authored at one of them.
+            self.assertIn('removed in 0.25.0', out)
+            for word, became in model.DEPRECATED_STATES.items():
+                self.assertRegex(out, rf'{word}\s+replaced by\s+{became}')
 
 
 class StoryResolution(unittest.TestCase):

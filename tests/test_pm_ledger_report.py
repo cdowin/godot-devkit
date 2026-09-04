@@ -85,15 +85,15 @@ TABLE = """\
 [ledger:report] 0.1 — spend per grain — 3 dispatch row(s), 5 status row(s), 4 grain(s)
 
 -- story (2)
-grain         size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  building  reviewing  accepted  packaging  total_s
-0.1/alpha/s0                 2  1200  38500        210000     9100000          37         812         -      -       600        120         -          -      720
+grain         size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  todo  building  wip  blocked  reviewing  review  accepted  packaging  total_s
+0.1/alpha/s0                 2  1200  38500        210000     9100000          37         812         -      -     -       600    -        -        120       -         -          -      720
   developer                  1  1200  38000        210000     9100000          37         812
   reviewer                   1     -    500             -           -           -           -
-0.1/alpha/s1  m              0     -      -             -           -           -           -         -      -         -          -         -          -        -
+0.1/alpha/s1  m              0     -      -             -           -           -           -         -      -     -         -    -        -          -       -         -          -        -
 
 -- feature (1)
-grain        size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  building  reviewing  accepted  packaging  total_s
-0.1/alpha                   2  1200  38500        210000     9100000          37         812         -      -         -          -         -          -        -
+grain        size  dispatches    in    out  cache_create  cache_read  tool_calls  duration_s  planning  ready  todo  building  wip  blocked  reviewing  review  accepted  packaging  total_s
+0.1/alpha                   2  1200  38500        210000     9100000          37         812         -      -     -         -    -        -          -       -         -          -        -
   developer                 1  1200  38000        210000     9100000          37         812
   reviewer                  1     -    500             -           -           -           -
 
@@ -162,7 +162,9 @@ class Table(unittest.TestCase):
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(QUIET))
         # `size:` verbatim as a COLUMN (D5), then dashes: no zero anywhere.
-        self.assertEqual(line.split(), [QUIET, 'm', '0'] + ['-'] * 13)
+        # 10 state columns (the story vocabulary minus its terminal
+        # `done`, so four of them are the 0.24.0 window's) + total_s.
+        self.assertEqual(line.split(), [QUIET, 'm', '0'] + ['-'] * 17)
 
     def test_an_absent_usage_key_prints_a_dash_and_never_a_zero(self):
         """The reviewer row carried `output` only. A `0` under `in` would read
@@ -215,9 +217,11 @@ class Table(unittest.TestCase):
                                    'reviewing'))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
-        # planning ready building reviewing accepted packaging total_s
-        self.assertEqual(line.split()[-7:],
-                         ['-', '-', '600', '-', '-', '-', '-'])
+        # planning ready todo building wip blocked reviewing review
+        # accepted packaging total_s
+        self.assertEqual(line.split()[-11:],
+                         ['-', '-', '-', '600', '-', '-', '-', '-', '-', '-',
+                          '-'])
 
     def test_one_row_is_an_instant_and_never_a_zero_second_total(self):
         """A span needs two rows. A grain whose only row is its own terminal
@@ -254,10 +258,12 @@ class Table(unittest.TestCase):
                               tree=snapshot(stories_wip=[STORY])))
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
-        # planning ready building reviewing accepted packaging total_s —
-        # 10:00:00 -> 10:15:00, all of it in `building`.
-        self.assertEqual(line.split()[-7:],
-                         ['-', '-', '900', '-', '-', '-', '900'])
+        # planning ready todo building wip blocked reviewing review
+        # accepted packaging total_s — 10:00:00 -> 10:15:00, all of it in
+        # `building`.
+        self.assertEqual(line.split()[-11:],
+                         ['-', '-', '-', '900', '-', '-', '-', '-', '-', '-',
+                          '900'])
 
     def test_rows_out_of_time_order_never_fabricate_an_interval(self):
         """`merge=union` (D6) interleaves two branches' appends by BRANCH, so
@@ -275,10 +281,11 @@ class Table(unittest.TestCase):
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
         self.assertNotIn('-7200', line)
-        # planning ready building reviewing accepted packaging total_s —
-        # the story's real life, read in TIME order.
-        self.assertEqual(line.split()[-7:],
-                         ['-', '-', '7200', '3600', '-', '-', '10800'])
+        # planning ready todo building wip blocked reviewing review
+        # accepted packaging total_s — the story's real life, in TIME order.
+        self.assertEqual(line.split()[-11:],
+                         ['-', '-', '-', '7200', '-', '-', '3600', '-', '-',
+                          '-', '10800'])
 
     def test_an_unparseable_stamp_leaves_the_state_absent_not_zero(self):
         """A row whose `ts` will not parse contributes no arithmetic, and no
@@ -363,6 +370,16 @@ class Table(unittest.TestCase):
         self.assertIn('-- rows naming no grain (0)', out)
 
 
+# The story/feature dwell columns with nothing measured in any of them. Written
+# out rather than derived from the vocabulary: four of these ten keys are the
+# 0.24.0 deprecation window, and a golden that computes itself from the code
+# under test would keep passing if the window silently outlived its release.
+EMPTY_STATES = {'planning': None, 'ready': None, 'todo': None,
+                'building': None, 'wip': None, 'blocked': None,
+                'reviewing': None, 'review': None, 'accepted': None,
+                'packaging': None}
+
+
 class Json(unittest.TestCase):
     """The same numbers, `null` where the table prints `-`."""
 
@@ -396,23 +413,20 @@ class Json(unittest.TestCase):
                 {'grain': STORY, 'kind': 'story', 'size': None,
                  'dispatches': 2, 'usage': full, 'tool_calls': 37,
                  'duration_s': 812, 'agent_types': [dev, rev],
-                 'states': {'planning': None, 'ready': None, 'building': 600,
-                            'reviewing': 120, 'accepted': None,
-                            'packaging': None},
+                 'states': {'planning': None, 'ready': None, 'todo': None,
+                            'building': 600, 'wip': None, 'blocked': None,
+                            'reviewing': 120, 'review': None,
+                            'accepted': None, 'packaging': None},
                  'total_s': 720},
                 {'grain': QUIET, 'kind': 'story', 'size': 'm',
                  'dispatches': 0, 'usage': blank_usage(), 'tool_calls': None,
                  'duration_s': None, 'agent_types': [],
-                 'states': {'planning': None, 'ready': None,
-                            'building': None, 'reviewing': None,
-                            'accepted': None, 'packaging': None},
+                 'states': EMPTY_STATES,
                  'total_s': None},
                 {'grain': FEATURE, 'kind': 'feature', 'size': None,
                  'dispatches': 2, 'usage': full, 'tool_calls': 37,
                  'duration_s': 812, 'agent_types': [dev, rev],
-                 'states': {'planning': None, 'ready': None,
-                            'building': None, 'reviewing': None,
-                            'accepted': None, 'packaging': None},
+                 'states': EMPTY_STATES,
                  'total_s': None},
                 {'grain': BUG, 'kind': 'bug', 'size': None, 'dispatches': 0,
                  'usage': blank_usage(), 'tool_calls': None,

@@ -134,7 +134,25 @@ def run() -> int:
                   f'story against its feature across and is reporting nothing '
                   f'for this tree')
 
-    n_features, n_stories = _drift_walk(cfg, enabled, mdirs, report)
+    n_features, n_stories, retired = _drift_walk(cfg, enabled, mdirs, report)
+
+    # Rule 4 from the other side: D4 stopped REPORTING these words, so
+    # something has to keep saying they are there. The 0.24.0 window accepts a
+    # status a tree already holds and 0.25.0 removes it, so the census is the
+    # migration's own progress bar — live, because a number written into a
+    # comment or a changelog goes stale the first time somebody rewrites a
+    # file. A gate that answered the union with silence would have narrowed
+    # itself into a clean PASS over exactly the migration it exists to make
+    # visible. A NOTE, not a finding: the tree is not drifting, it is holding
+    # a word on a deadline.
+    if retired:
+        census = ', '.join(
+            f'{word} x{n} (replaced by {model.DEPRECATED_STATES[word]})'
+            for word, n in retired.items())
+        print(f'[check:pm] NOTE — {sum(retired.values())} grain(s) hold a '
+              f'status the 0.24.0 deprecation window accepts and 0.25.0 '
+              f'removes: {census}. Rewrite them before that pin bump; the '
+              f'`pm` verbs already write the replacement.')
 
     _flow_findings(cfg, enabled, report)
 
@@ -160,16 +178,28 @@ ADVANCE_IT = 'advance it (`done` is the LAST state, not the next one)'
 
 
 def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
-                report) -> tuple[int, int]:
-    """D1-D6 over every grain. Returns the (feature, story) census."""
+                report) -> tuple[int, int, dict[str, int]]:
+    """D1-D6 over every grain.
+
+    Returns the (feature, story) census plus how many grains hold each word of
+    the deprecation window — counted HERE, in the one walk that already opens
+    every grain file, rather than by a second pass with its own idea of which
+    files are grains.
+    """
     n_features = 0
     n_stories = 0
+    # Seeded from the window's own declaration order, not filled by first
+    # sighting: a census line whose order depends on which milestone the walker
+    # reached first reads differently on two runs over one tree.
+    retired = {word: 0 for word in model.DEPRECATED_STATES}
 
     for mdir in mdirs:
         mfile = mdir / model.MILESTONE_DOC
         mid = model.field_of(mfile, 'id')
         mstat = model.field_of(mfile, 'status')
 
+        if model.deprecated_write(mstat, cfg.milestone_states):
+            retired[mstat] += 1
         if 'D4' in enabled and mstat not in cfg.milestone_states:
             report(f'milestone {mid}: status {mstat!r} not in '
                    f'({" ".join(cfg.milestone_states)})  [{cfg.rel(mfile)}]')
@@ -185,6 +215,8 @@ def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
             if view.status == 'done':
                 feat_done_n += 1
 
+            if model.deprecated_write(view.status, cfg.feature_states):
+                retired[view.status] += 1
             if 'D4' in enabled and view.status not in cfg.feature_states:
                 report(f'feature {view.fid}: status {view.status!r} not in '
                        f'({" ".join(cfg.feature_states)})  [{frel}]')
@@ -203,6 +235,8 @@ def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
                 sid = model.field_of(sfile, 'id')
                 sstat = model.field_of(sfile, 'status')
                 srel = cfg.rel(sfile)
+                if model.deprecated_write(sstat, cfg.story_states):
+                    retired[sstat] += 1
                 if 'D4' in enabled and sstat not in cfg.story_states:
                     report(f'story {sid}: status {sstat!r} not in '
                            f'({" ".join(cfg.story_states)})  [{srel}]')
@@ -228,7 +262,7 @@ def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
                    f'milestone still calls itself {mstat!r}; {ADVANCE_IT}'
                    f'  [{cfg.rel(mfile)}]')
 
-    return n_features, n_stories
+    return n_features, n_stories, {word: n for word, n in retired.items() if n}
 
 
 _HOTFIX_N = re.compile(r'[1-9][0-9]*')

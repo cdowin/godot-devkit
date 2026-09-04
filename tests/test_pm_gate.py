@@ -118,8 +118,10 @@ class DriftGate(unittest.TestCase):
         with tree(feature_status='bogus') as root:
             code, out = run_gate(root)
             self.assertEqual(code, 1)
-            self.assertIn('not in (planning ready building reviewing '
-                          'accepted packaging done)', out)
+            # The set the tree is judged against, which through 0.24.0 is the
+            # canon plus the four words the deprecation window carries.
+            self.assertIn('not in (planning ready todo building wip blocked '
+                          'reviewing review accepted packaging done)', out)
 
     def test_d5_a_story_at_work_under_a_feature_that_has_not_started(self):
         # The roster entry. Both directions of the comparison, and the
@@ -166,6 +168,12 @@ class OneLifecycleAcrossGrains(unittest.TestCase):
 
     LIFECYCLE = ('planning', 'ready', 'building', 'reviewing', 'accepted',
                  'packaging', 'done')
+    # What 0.24.0 SHIPS as the default: the canon above, plus the four words it
+    # replaced, each spliced in after its replacement. Written out rather than
+    # derived from `model` — a golden that computes itself from the code under
+    # test passes whatever that code says.
+    STOCK = ('planning', 'ready', 'todo', 'building', 'wip', 'blocked',
+             'reviewing', 'review', 'accepted', 'packaging', 'done')
     GRAIN_SETS = ('DEFAULT_MILESTONE_STATES', 'DEFAULT_FEATURE_STATES',
                   'DEFAULT_STORY_STATES')
 
@@ -173,15 +181,24 @@ class OneLifecycleAcrossGrains(unittest.TestCase):
         self.assertEqual(model.LIFECYCLE, self.LIFECYCLE)
         for name in self.GRAIN_SETS:
             with self.subTest(states=name):
-                self.assertEqual(getattr(model, name), self.LIFECYCLE)
+                self.assertEqual(getattr(model, name), self.STOCK)
 
-    def test_the_retired_words_are_gone_from_every_grain(self):
-        # A word left in a set is a word a tree may still hold, so D4 would
-        # keep passing it — the migration is only real if the set refuses it.
+    def test_the_retired_words_are_read_by_every_grain_and_written_by_none(self):
+        """Was `test_the_retired_words_are_gone_from_every_grain`, and it said
+        the true thing for a release that could not ship: a word absent from
+        the set is a D4 finding for every grain already holding it, which is
+        68 findings and two red pre-push gates on the two live consumers the
+        day the pin moves. 0.24.0 carries them for one release — READ by D4,
+        refused by the verbs, and removed in 0.25.0. Both halves are asserted
+        here, because the reading half alone is just the old vocabulary back.
+        """
         for word in ('todo', 'wip', 'review', 'blocked'):
             for name in self.GRAIN_SETS:
+                states = getattr(model, name)
                 with self.subTest(word=word, states=name):
-                    self.assertNotIn(word, getattr(model, name))
+                    self.assertIn(word, states)
+                    self.assertIn(model.deprecated_write(word, states),
+                                  self.LIFECYCLE)
 
     def test_the_bug_machine_is_untouched(self):
         # Bugs are filed and they close. A different machine, not a shorter
@@ -191,22 +208,28 @@ class OneLifecycleAcrossGrains(unittest.TestCase):
     def test_the_pivot_and_the_terminal_are_IN_the_vocabulary(self):
         # Both are read by name (D5's split, the ledger's total), so a
         # vocabulary edit that dropped either would leave a live reader
-        # pointing at a word the set no longer holds.
+        # pointing at a word the set no longer holds. `done` is last in the
+        # SHIPPED set too, not only in the canon: a window word hung off the
+        # end would claim, in the one ordered list consumers read, to be past
+        # the state this package treats as terminal.
         self.assertIn(model.BUILDING, model.LIFECYCLE)
         self.assertIn(model.REVIEWING, model.LIFECYCLE)
         self.assertEqual(model.LIFECYCLE[-1], 'done')
+        self.assertEqual(model.STOCK_STATES[-1], 'done')
 
-    def test_d4_reports_every_grain_against_the_same_seven_words(self):
+    def test_d4_reports_every_grain_against_the_same_eleven_words(self):
         with tree(milestone_status='bogus', feature_status='bogus',
                   story_statuses=('bogus',)) as root:
             code, out = run_gate(root)
             self.assertEqual(code, 1, out)
-            expected = f'not in ({" ".join(self.LIFECYCLE)})'
+            expected = f'not in ({" ".join(self.STOCK)})'
             self.assertEqual(out.count(expected), 3, out)
 
     def test_every_state_in_the_vocabulary_is_writable_by_the_CLI(self):
-        # D4 and the verbs read the same set: a word the vocabulary holds that
-        # the tool refuses would be a state only a hand edit could reach.
+        # D4 and the verbs read the same set, minus the window: a CANONICAL
+        # word the vocabulary holds that the tool refuses would be a state
+        # only a hand edit could reach. (The window's four are the deliberate
+        # exception, proven in TheDeprecationWindow below.)
         for grain, gid in (('milestone', '0.1'), ('feature', '0.1/alpha'),
                            ('story', '0.1/alpha/s0')):
             for state in self.LIFECYCLE:
@@ -214,6 +237,142 @@ class OneLifecycleAcrossGrains(unittest.TestCase):
                     with tree() as root:
                         code, out = run_cli(root, grain, state, gid)
                         self.assertEqual(code, 0, out)
+
+
+class TheDeprecationWindow(unittest.TestCase):
+    """The four retired words ride in the stock set for 0.24.0 and no longer.
+
+    Why they are back at all is a measurement, not a preference: on the day
+    before the tag, `check pm` under the seven-word set returned 43 findings
+    against nullbound and 25 against trail, both of which wire it into
+    `make check` and therefore into a pre-push hook. Neither ordering of
+    pin-bump vs. tree-rewrite is green — the unmigrated tree fails under the
+    new package and the migrated one fails under the pinned old one — so the
+    only path that asks nobody to hold a red gate is a set that reads both
+    vocabularies for one release.
+
+    What keeps it a WINDOW rather than a second vocabulary is asserted here:
+    the words are read and never written, they are counted out loud where D4
+    went quiet, and their POSITION is derived from the word that replaced
+    each, so the rules that ask "has this started?" cannot answer differently
+    for `wip` than for `building`.
+    """
+
+    STOCK = ('planning', 'ready', 'todo', 'building', 'wip', 'blocked',
+             'reviewing', 'review', 'accepted', 'packaging', 'done')
+    NOTE = '[check:pm] NOTE'
+
+    def test_the_shipped_set_is_the_canon_plus_the_window_and_nothing_else(self):
+        self.assertEqual(model.STOCK_STATES, self.STOCK)
+        self.assertEqual(set(self.STOCK) - set(model.LIFECYCLE),
+                         set(model.DEPRECATED_STATES))
+        self.assertEqual(len(self.STOCK), len(set(self.STOCK)))
+
+    def test_each_retired_word_sits_beside_the_word_that_replaced_it(self):
+        """Not merely `after`: nothing canonical may come between the two, so
+        the splice cannot drift into a hand-ordered list whose author placed a
+        word by feel."""
+        for word, became in model.DEPRECATED_STATES.items():
+            with self.subTest(word=word):
+                here, there = self.STOCK.index(word), self.STOCK.index(became)
+                self.assertGreater(here, there)
+                between = self.STOCK[there + 1:here]
+                self.assertFalse(set(between) & set(model.LIFECYCLE), between)
+
+    def test_a_retired_word_is_AT_WORK_exactly_when_its_replacement_is(self):
+        """The whole reason the order is derived. `work_started` is an index
+        comparison against `building`, so a `wip` on the wrong side of the
+        pivot makes D5 report a story at work as not started — and the
+        finding it prints names two words that mean the same thing."""
+        for word, became in model.DEPRECATED_STATES.items():
+            with self.subTest(word=word):
+                self.assertEqual(
+                    model.work_started(word, model.STOCK_STATES),
+                    model.work_started(became, model.STOCK_STATES))
+
+    def test_todo_is_the_only_retired_word_before_the_pivot(self):
+        # Stated flat, because this is the fact the whole placement turns on
+        # and an index comparison is not something a reader can eyeball.
+        self.assertFalse(model.work_started('todo', model.STOCK_STATES))
+        for word in ('wip', 'blocked', 'review'):
+            with self.subTest(word=word):
+                self.assertTrue(model.work_started(word, model.STOCK_STATES))
+
+    def test_a_blocked_feature_with_every_story_done_is_still_a_D2_finding(self):
+        """THE test that placed `blocked`, rather than a preference for where
+        it reads nicely. Hung off the END of the set — past `done`, where a
+        word with no lifecycle home invites being parked — it falls outside
+        `STALLED_IF_ALL_STORIES_DONE` (which is everything before `reviewing`)
+        and a feature whose every story is done draws no finding at all. That
+        is a gate narrowed by a vocabulary edit: the exact silent PASS hard
+        rule 4 names. After `building`, where a blocked grain's work HAS
+        started and stopped, D2 still reports it."""
+        self.assertIn('blocked', model.STALLED_IF_ALL_STORIES_DONE)
+        with tree(feature_status='blocked',
+                  story_statuses=('done', 'done')) as root:
+            code, out = run_gate(root)
+        self.assertEqual(code, 1, out)
+        self.assertIn('all stories done, feature still blocked', out)
+
+    def test_a_tree_holding_every_retired_word_passes_the_gate(self):
+        """C1's ship criterion, in miniature: nothing a consumer owns has to
+        change for `check pm` to exit 0 under 0.24.0."""
+        with tree(story_statuses=('todo', 'wip', 'review', 'blocked')) as root:
+            code, out = run_gate(root)
+        self.assertEqual(code, 0, out)
+
+    def test_the_gate_counts_out_loud_what_D4_stopped_reporting(self):
+        """The other half of not narrowing. D4 no longer reports these words,
+        so the run says how many there are and what each becomes — a census,
+        one line, exit code untouched. A gate that answered the union with
+        silence would print a clean PASS over exactly the migration it exists
+        to make visible."""
+        with tree(feature_status='review',
+                  story_statuses=('todo', 'todo', 'wip')) as root:
+            code, out = run_gate(root)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f'{self.NOTE} — 4 grain(s) hold a status the 0.24.0 '
+                      f'deprecation window accepts and 0.25.0 removes: '
+                      f'todo x2 (replaced by ready), wip x1 (replaced by '
+                      f'building), review x1 (replaced by reviewing)', out)
+
+    def test_a_migrated_tree_draws_no_note_at_all(self):
+        # The census is a fact about the tree, not a banner about the release:
+        # a consumer who finished the rewrite stops hearing about it.
+        with tree(story_statuses=('ready', 'done')) as root:
+            code, out = run_gate(root)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('deprecation window', out)
+
+    def test_D5_reads_a_retired_word_against_its_parent(self):
+        """Live case, from trail's tree on the day of the bump: a story at
+        `review` under a feature at `planning`. D4 used to report the word as
+        unknown and D5 could not place it at all, so the disagreement itself
+        went unreported. Under the window the word is placeable and the
+        finding is the true one."""
+        with tree(feature_status='planning',
+                  story_statuses=('review', 'todo')) as root:
+            code, out = run_gate(root)
+        self.assertEqual(code, 1, out)
+        self.assertIn('two places in this tree disagree', out)
+        self.assertIn("is 'review' but its feature", out)
+
+    def test_a_project_that_declares_todo_ITSELF_is_not_in_the_window(self):
+        """Rule 5's escape hatch, and the reason the window is armed by VALUE
+        rather than by word. A project whose own vocabulary uses `todo`
+        declared a different set, means it, and writes it — it is not
+        migrating away from anything, and a refusal there would be this
+        package overriding a consumer's config with its own release calendar.
+        """
+        with tree(story_statuses=('todo',)) as root:
+            (root / 'devkit.toml').write_text(
+                '[pm]\nstory_states = ["todo","wip","done"]\n',
+                encoding='utf-8')
+            code, out = run_gate(root)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn('deprecation window', out)
+            code, out = run_cli(root, 'story', 'todo', '0.1/alpha/s0')
+            self.assertEqual(code, 0, out)
 
 
 class D5AStoryAheadOfItsFeature(unittest.TestCase):

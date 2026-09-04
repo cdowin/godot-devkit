@@ -12,7 +12,10 @@ finding, with the severity it was graded and what was DONE about it.
     | Q5 | QUESTION | open |
 
 That block is what makes review YIELD computable — findings by severity and
-disposition, per pass — without anyone tallying reports by hand. The four
+disposition, per pass — without anyone tallying reports by hand. ONE BLOCK PER
+PASS: a record reviewed three times carries three, in the order they were
+written, and `parse` returns them all. Nothing merges them, because a pass that
+raised two CRITICALs and a later one that found them landed are two facts. The four
 reviewer-shaped agent definitions this package installs
 (`reviewer`, `simplifier`, `milestone-reviewer`, `verification-reviewer`)
 each carry the same paragraph instructing their author to emit it.
@@ -29,9 +32,9 @@ honestly has none.
 block is DETECTED — the marker and every fixed keyword match case-insensitively,
 cells are stripped, blank lines inside the block are ignored, and CRLF is fine.
 Once detected, nothing is guessed: an unknown verdict, an unknown severity, a
-row that is not exactly three cells, a disposition outside the three forms, a
-second block, or a fence that never closes each raise `MalformedVerdict` naming
-the line number and the offending line. The alternative — quietly reporting
+row that is not exactly three cells, a disposition outside the three forms, or
+a fence that never closes each raise `MalformedVerdict` naming the line number
+and the offending line. The alternative — quietly reporting
 "no verdict" over a block that was nearly right — is rule 4's read-side sin:
 a miss that prints a clean number.
 
@@ -422,13 +425,30 @@ def _parse_block(body: list[tuple[int, str]]) -> Verdict:
     return Verdict(canonical, [_finding(lineno, line) for lineno, line in rows[2:]])
 
 
-def parse(text: str) -> Verdict:
-    """The one verdict block in a review record.
+def parse(text: str) -> list[Verdict]:
+    """Every verdict block in a review record, in the order it carries them.
 
-    Raises `NoVerdict` when the record has none and `MalformedVerdict` when it
-    has one that cannot be read correctly — including when it has TWO, because
-    "the verdict of this pass" is a single fact and picking either one of a pair
-    is the guess this parser exists not to make.
+    ONE PER PASS, and a record has as many passes as were run over it. A
+    second block used to be `MalformedVerdict` on the reasoning that "the
+    verdict of this pass" is a single fact and picking one of a pair is a
+    guess — the fact was right and the conclusion did not follow. The SDLC
+    this package ships runs three review passes over one record, so the
+    refusal made `pm ledger report` exit 2 on the record its own protocol
+    produces, and the workaround was a second file that says in its header
+    that it is a workaround.
+
+    Nothing is collapsed. A record whose first pass returned
+    RELEASE-WITH-FIXES and whose second returned RELEASE-SAFE has a HISTORY —
+    findings were landed between the two — and a single answer would report
+    the safer one over a pass that raised blockers, or the harsher one over
+    work that was done. The report renders them as separate rows for the same
+    reason: two passes are two measurements.
+
+    Raises `NoVerdict` when the record has none (a fact, not an error) and
+    `MalformedVerdict` when ANY block cannot be read correctly — a bad second
+    block is not made acceptable by a good first one, and returning the ones
+    that parsed would be the partial answer this module refuses everywhere
+    else.
     """
     lines = [line.rstrip('\r') for line in text.split('\n')]
     blocks, unterminated = _fenced_blocks(lines)
@@ -460,10 +480,4 @@ def parse(text: str) -> Verdict:
         raise NoVerdict(
             f'no verdict block: no fenced block in these {len(lines)} line(s) '
             f'opens with `{MARKER}:` ({len(blocks)} fenced block(s) read)')
-    if len(found) > 1:
-        lineno, line = _content(found[1])[0]
-        raise MalformedVerdict(
-            lineno, line,
-            f'a second verdict block — a record carries exactly one per pass, '
-            f'and the first is at line {_content(found[0])[0][0]}')
-    return _parse_block(found[0])
+    return [_parse_block(block) for block in found]
