@@ -338,10 +338,85 @@ def test_a_line_in_the_block_that_is_not_a_row_refuses(row):
 def test_a_markdown_separator_row_refuses_loudly():
     """`| --- | --- | --- |` is the habit every markdown table trains. It is
     not in the shape, so it refuses with a line number rather than becoming a
-    finding whose id is three hyphens."""
+    finding whose id is three hyphens.
+
+    And the refusal NAMES it. `unknown severity '---'` is a true sentence about
+    a row nobody meant to write: the author reads it looking for a severity
+    they never typed, when the whole row is the mistake. A refusal an LLM
+    reviewer will meet on its next pass has to say what to do about it.
+    """
     error = malformed(block('| --- | --- | --- |',
                             '| W1 | WARNING | landed 3a42f19ad |'))
-    assert "unknown severity '---'" in error.why
+    assert 'a markdown separator row is not a finding — drop it' in error.why
+    assert 'severity' not in error.why, (
+        'the refusal still blames the severity cell for a row that has none')
+
+
+@pytest.mark.parametrize('row', (
+    '|---|---|---|',                  # the tight spelling
+    '| --- | --- | --- |',            # the padded one
+    '|:---|:---:|---:|',              # column alignment
+    '| - | - | - |',                  # one hyphen is a legal separator too
+    '|---|---|',                      # the wrong width — still a separator row
+    '|---|---|---|---|',
+))
+def test_every_separator_row_spelling_is_named_as_one(row):
+    """The shape, not one string. A separator row refuses as a separator row at
+    any width, padding and alignment — including the widths where the cell
+    count is ALSO wrong, because "2 cell(s)" sends the author to add a column
+    to a row that should not exist."""
+    assert 'a markdown separator row is not a finding' in malformed(
+        block(row, '| W1 | WARNING | landed 3a42f19ad |')).why
+
+
+def why_or_blank(text: str) -> str:
+    """The refusal's sentence, or '' when the record parsed cleanly."""
+    try:
+        verdict.parse(text)
+    except verdict.MalformedVerdict as error:
+        return error.why
+    return ''
+
+
+@pytest.mark.parametrize('row', (
+    '| W1 | WARNING | landed 3a42f19ad |',    # a real finding, hyphen-free
+    '| -1 | WARNING | landed 3a42f19ad |',    # an id that merely starts with one
+    '| --- | WARNING | landed 3a42f19ad |',   # only ONE cell is separator-shaped
+))
+def test_a_row_that_is_not_a_separator_is_not_called_one(row):
+    """The other side of the shape: every cell has to be separator-shaped, so a
+    finding is never mistaken for the row above it."""
+    assert 'separator row' not in why_or_blank(block(row))
+
+
+def test_a_pipe_inside_a_reason_refuses_and_names_the_pipe():
+    """`rejected: pause regression | perf risk` is the second habit — prose in
+    a cell, written with the punctuation prose uses. It refuses as "4 cell(s)",
+    which describes the parse and not the mistake: the author counts three
+    columns in what they wrote and has nowhere to go."""
+    error = malformed(
+        block('| S3 | SUGGESTION | rejected: pause regression | perf risk |'))
+    assert '4 cell(s)' in error.why, 'the count is still the first fact'
+    assert '| inside a reason splits the row' in error.why
+    assert "write 'or'" in error.why
+
+
+def test_the_over_wide_refusal_names_the_fourth_column_too():
+    """Two causes for one shape, and the refusal does not GUESS between them:
+    `| W1 | WARNING | landed 3a42f19ad | extra |` is a fourth column, and
+    picking one reading would be a claim about intent the row does not carry."""
+    error = malformed(block('| W1 | WARNING | landed 3a42f19ad | extra |'))
+    assert 'no fourth column' in error.why
+    assert '| inside a reason splits the row' in error.why
+
+
+def test_a_short_row_is_not_told_about_pipes():
+    """The teaching is for the shape that HAS one. A two-cell row is a missing
+    column; telling its author about a stray pipe sends them looking for
+    punctuation they did not type."""
+    error = malformed(block('| S3 | rejected: no |'))
+    assert '2 cell(s)' in error.why
+    assert 'inside a reason' not in error.why
 
 
 def test_a_block_with_no_header_row_refuses():
@@ -525,6 +600,21 @@ def test_each_definition_says_the_block_is_the_record_of_the_verdict(name):
     so a reader who finds them disagreeing knows which to fix."""
     assert 'The block IS the record' in definition(name), (
         f'{name} does not say the block is the record of the verdict')
+
+
+@pytest.mark.parametrize('name', ALL_DEFINITIONS)
+def test_each_definition_forbids_a_pipe_inside_a_reason(name):
+    """The paragraph already says "No separator row" — and a reviewer who reads
+    it still writes `rejected: a | b`, because nothing told them not to. A
+    refusal that teaches is half of it; the other half is the instruction the
+    author read BEFORE writing the row, in all five files."""
+    # Whitespace-collapsed: these files are hard-wrapped at 80 and the sentence
+    # is free to land across a line break, which is a fact about the margin and
+    # not about the rule.
+    body = ' '.join(definition(name).split())
+    assert 'no `|` inside a reason' in body, (
+        f'{name} does not forbid a pipe inside a disposition reason')
+    assert 'write `or`' in body, f'{name} does not say what to write instead'
 
 
 @pytest.mark.parametrize('name', ALL_DEFINITIONS)

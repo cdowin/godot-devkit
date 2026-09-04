@@ -142,6 +142,11 @@ _OPEN = re.compile(rf'^{OPEN}(?:\s*:\s*(\S.*))?$', re.IGNORECASE)
 _DISPOSITIONS = ((_LANDED, LANDED), (_REJECTED, REJECTED), (_DEFERRED, DEFERRED),
                  (_OPEN, OPEN))
 
+# One cell of a markdown separator row: hyphens, with the optional alignment
+# colons GitHub's tables use. `---`, `:---`, `---:`, `:-:` and a bare `-` all
+# count — a reviewer writing the row is copying a table, not choosing a width.
+_SEPARATOR_CELL = re.compile(r'^:?-+:?$')
+
 _VERDICT_BY_FOLD = {value.casefold(): value for value in VERDICTS}
 _SEVERITY_BY_FOLD = {value.casefold(): value for value in SEVERITIES}
 
@@ -282,6 +287,22 @@ def _unfenced_near_miss(lines: list[str],
     return None
 
 
+def _is_separator_row(line: str) -> bool:
+    """`|---|---|---|` and every other spelling of a markdown separator row.
+
+    Recognised by SHAPE at any width: every cell is hyphens with optional
+    alignment colons. Width is deliberately not part of the test — a
+    two-column separator under a three-column header is the same mistake, and
+    answering it with a cell count sends the author to add a column to a row
+    that should not be there at all.
+    """
+    if len(line) < 2 or not (line.startswith(CELL_SEPARATOR)
+                             and line.endswith(CELL_SEPARATOR)):
+        return False
+    cells = [cell.strip() for cell in line[1:-1].split(CELL_SEPARATOR)]
+    return all(_SEPARATOR_CELL.match(cell) for cell in cells)
+
+
 def _cells(lineno: int, line: str) -> list[str]:
     """The three stripped cells of a table row, or a refusal.
 
@@ -289,7 +310,18 @@ def _cells(lineno: int, line: str) -> list[str]:
     carries exactly three cells. An empty cell survives the split (it is a
     finding about the row, decided by the caller) — which is why this slices
     the delimiters off rather than stripping them.
+
+    The two near-misses below are NAMED rather than described, because both are
+    what an LLM reviewer writes next and a refusal it will meet again has to
+    say what to do. `unknown severity '---'` was a true sentence about a row
+    nobody meant to write, and `4 cell(s)` describes the parse rather than the
+    `|` the author typed inside a sentence.
     """
+    if _is_separator_row(line):
+        raise MalformedVerdict(
+            lineno, line,
+            'a markdown separator row is not a finding — drop it; a block is '
+            'the verdict line, the header row, then one row per finding')
     if len(line) < 2 or not (line.startswith(CELL_SEPARATOR)
                              and line.endswith(CELL_SEPARATOR)):
         raise MalformedVerdict(
@@ -298,10 +330,16 @@ def _cells(lineno: int, line: str) -> list[str]:
             f'a block holds the header row and one row per finding, nothing else')
     cells = [cell.strip() for cell in line[1:-1].split(CELL_SEPARATOR)]
     if len(cells) != CELLS_PER_ROW:
-        raise MalformedVerdict(
-            lineno, line,
-            f'{len(cells)} cell(s); a row carries exactly {CELLS_PER_ROW} '
-            f'({CELL_SEPARATOR.join(HEADER_CELLS)})')
+        why = (f'{len(cells)} cell(s); a row carries exactly {CELLS_PER_ROW} '
+               f'({CELL_SEPARATOR.join(HEADER_CELLS)})')
+        if len(cells) > CELLS_PER_ROW:
+            # Two causes, and this does not GUESS between them: a `|` written
+            # inside a reason, or a fourth column. Both are named; picking one
+            # would be a claim about the author's intent the row does not
+            # carry, and the wrong half sends them looking for the other.
+            why += (f' — a {CELL_SEPARATOR} inside a reason splits the row, so '
+                    f"write 'or'; and there is no fourth column")
+        raise MalformedVerdict(lineno, line, why)
     return cells
 
 

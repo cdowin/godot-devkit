@@ -117,4 +117,5 @@ a reason to leave the row out. `open` is raised and not yet acted on — the hon
 disposition of a record written before the landing pass, never `rejected:`. A pass
 that raised nothing writes the verdict line and the header row alone — that is a
 complete block, and it is how the report tells a clean pass from a record nobody
-finished. No separator row, no fourth column, no second block.
+finished. No separator row, no fourth column, no second block, and no `|`
+inside a reason — it splits the row, so write `or`.
