@@ -352,6 +352,10 @@ Two mutants still survive and I did not write tests for them, on purpose:
   exercised.
 - **`ledger.py`, `model.py`, `verdict.py`** read for context only; not audited.
 
+## Post-review, by the orchestrator (2026-09-03)
+
+R3 (the total spanning from the first row that merely names the grain) was fixed in the same milestone rather than deferred: `ledger.total_seconds` now bounds a duration by status rows only, one home for `show` and `report`, with two tests watched failing first (`1b3b7f0`). The two DELTAs on README and CHANGELOG are corrected in `fb3fc15`. The verdict block below is the reviewer's, unedited.
+
 ```text
 verdict: SHIP-WITH-FIXES
 | id | severity | disposition |

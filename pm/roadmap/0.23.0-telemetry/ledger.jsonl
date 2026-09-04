@@ -40,3 +40,4 @@
 {"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/cost-per-shipped-unit","from":"review","to":"done"}
 {"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/retired-milestones-report-from-git","from":"review","to":"done"}
 {"ts":"2026-09-04T00:15:49Z","kind":"status","grain":"0.23.0/ledger-report/yield-rework-escapes-overhead","from":"review","to":"done"}
+{"ts":"2026-09-04T00:16:11Z","kind":"status","grain":"0.23.0","from":"building","to":"done"}
