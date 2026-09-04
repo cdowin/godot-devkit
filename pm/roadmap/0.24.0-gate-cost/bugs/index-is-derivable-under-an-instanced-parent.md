@@ -5,74 +5,112 @@ name: "a created node whose PARENT is an instanced subtree takes a derivable `in
 status: open
 caught_in: "0.24.0"
 fix_milestone:
-caused_by: 0.24.0/bugs/canonicalize-drops-index-on-a-typed-node
+caused_by:
 ---
 
 # index-is-derivable-under-an-instanced-parent
 
-## This supersedes a conclusion in its sibling
+## Verdict: the ordinal is derivable, the attribute is not — and they are different claims
 
-`bugs/canonicalize-drops-index-on-a-typed-node.md` fixed a real defect (`_instance_host` never
-considered the root) and then concluded that the remaining 12 created-node `index=` attributes are
-**authored state that no rule reproduces**, so the tool must write nothing. **That conclusion is
-wrong for 7 of them, and the corpus says so.** The fix that landed stays; this adds the restoration
-that analysis ruled out.
+Re-measured 2026-09-04 against the corpus as it stands. **The rule this bug asks for cannot
+ship**, and the sibling bug's conclusion survives, though not for the reason it gave. Everything
+below is a census, not a reading: the numbers are reproduced by `make smoke`'s
+`canonicalize invents no index` row, which landed with this investigation.
 
-The error was reading the twelve as one population. They inherit three different bases, and the
-mismatches cluster entirely in one of them.
+A created node appended under an instanced parent DOES land after that base's own children, so the
+ordinal is countable offline. Whether Godot's writer EMITS `index=` there is a separate question,
+and the corpus answers it in both directions at once.
 
-## The measurement
+## What the measurement says now — the filed numbers are stale
 
-Every trail scene carrying a root-level `index=`, against its own base's root child count:
+**trail repaired the three mismatches** at `55e52a79` ("three stale body indices against
+side_menu_modal (2 -> 3)"), the day after they were filed. So the table in this bug's own opening
+no longer describes any file: all 10 root-level created bodies are append-correct today, and there
+are no mismatches left to keep visible. Round-trip census at that HEAD, degrade -> canonicalize
+over every tracked scene:
 
-| base | root children | inheritors | index claimed | verdict |
+| | scenes | round-trip failures | authored `index=` | restored | invented | not derivable |
+|---|---|---|---|---|---|---|
+| trail | 116 | **10** | 17 | 5 | 0 | 12 |
+| nullbound | 194 | **0** | 39 | 39 | 0 | 0 |
+
+## Why no discriminator exists
+
+The bug reads the ten indexed nodes as a population and asks what rule reproduces them. Resolving
+each created node's parent THROUGH nested instances into the base tree — which the filed analysis
+did not do — turns up twice as many siblings as it knew about:
+
+| position | scenes | carries `index=` |
+|---|---|---|
+| created node directly under an inherited root, base root places 2 or 3 children | 10 | **yes**, always the append value |
+| created node directly under an inherited root, base root places 4 children | 4 | **no** (`force_resolution` ×3, `game_over` ×1) |
+| created node appending into a base container the base leaves EMPTY | 6 | **no** (all `Card/Inner/Content/Body`) |
+| created node under a node the scene itself built, inside an instanced subtree | 190 | **no** — except 2 hand-typed ones in `dossier.tscn`, whose 18 siblings carry none |
+
+Ten for, ten against, same repo, same position, nothing structural between them. And trail cannot
+arbitrate its own inconsistency: **all 116 of its scenes carry a `;` comment**, so not one has been
+through `ResourceSaver` since it was written. Every one of the 21 inherited-scenes-with-children in
+the entire reachable corpus — both consumers plus this package's own fixtures — is hand-authored.
+
+**nullbound is the engine-written half and it says no, loudly, where it can speak: 194 scenes, 1008
+created nodes, NOT ONE carrying an `index=`** — including 87 whose parent is a node the base
+provides. It has no inherited scene with a written child, so it cannot speak to the position in
+dispute, and that is the whole gap.
+
+## The rules, measured rather than argued
+
+Each was implemented against the real pipeline and run over both trees:
+
+| rule | trail failing | trail invented | nullbound failing | nullbound invented |
 |---|---|---|---|---|
-| `panel_card.tscn` | 2 | `dispatches`, `lineage_record`, `expedition`, `quartermaster`, `field_journal`, `trail_council` | `2` | **append-correct** |
-| `side_menu_modal.tscn` | 3 | `council_position_help` | `3` | **append-correct** |
-| `side_menu_modal.tscn` | 3 | `dossier`, `settlement_menu`, `settlement_menu_compound` | `2` | **mismatch — an append is 3** |
+| ship today | 10 | **0** | 0 | **0** |
+| as filed — "the parent is an instanced subtree" | 16 | 38 | **26** | 87 |
+| …with the next-free-slot fallback | — | 314 | — | 186 |
+| narrowed to inherited scenes | 3 | 4 | 0 | 0 |
+| …and to a base that places ≥1 child | 3 | 4 | 0 | 0 |
 
-So a rule reproduces **7 of the 10** exactly. The sibling bug's "no rule reproduces them" rested on
-the three mismatches and generalised from them to the whole set.
+The rule **as this bug states it** takes nullbound from 0 failing scenes to 26 and invents 125
+attributes; with the plausible fallback it invents 500, which is the 505 the sibling bug measured.
+The narrowest form buys trail 10 failures -> 3 and invents exactly the four this bug named as its
+own stop signal — `MontageView` -> `4`, `ResultsView` -> `5`, `Timer` -> `6`, `Center` -> `4`.
 
-## Root cause
+**Prediction for the four, asked for explicitly: every rule that restores the ten gives all four an
+index.** There is no version of the discriminator that separates them, so the bug's own stop
+condition is met and the restoration is refused.
 
-The discriminator is not *"is this node created?"* — it is *"is this node's parent an instanced
-subtree?"* A node the scene creates under a plain local parent has no ordinal, because no base
-places its siblings. A node the scene creates under an **instanced** parent is positioned among that
-base's own children, and the ordinal is derivable from the base.
+## What landed instead
 
-`_restore_indexes` skips on `type=`/`instance=` presence, which conflates the two.
+- `make smoke` gains **`canonicalize invents no index`**, over every tracked scene on both consumers
+  rather than the one the round-trip row picks. Green today at 310/310, and proven by mutation to
+  red on the filed rule (500 inventions), on the narrowest form (4), and to name the culprits.
+  The round-trip counts ride in that row's detail — reported, never gated, so they cannot go stale
+  again the way this bug's opening did.
+- Seven cases in `tests/test_canonicalize.py::ACreatedNodeGainsNoIndexWhateverItsParentIs`, one per
+  shape the inventions came from, each proven red under the rule it refuses, with the override in
+  both fixtures still restored so none can pass on a tool that does nothing.
+- `_restore_indexes` keeps the skip and its stated reason is now the census above; the previous
+  comment cited the three mismatches trail has since repaired.
 
-## The three mismatches are trail's data, not this package's defect
+## The one experiment that settles it, and the best file to run it on
 
-`dossier`, `settlement_menu` and `settlement_menu_compound` claim `index="2"` against a 3-child
-base. `2` is exactly the append value for `panel_card.tscn`, which strongly suggests they were
-copied from one of the six panel_card siblings and re-pointed at `side_menu_modal` without updating
-the number — `Wash` entered that base the day before `dossier.tscn` was first authored.
+Still an engine question and nothing in the corpus can answer it: **does `pack()` emit `index=` for
+a created node in an inherited scene?**
 
-Same class as `scenes/modals/rest_moment.tscn`, which trail already repaired (`77f0f051`). **Do not
-"correct" them from here** — this package does not write into a consumer, and a tool that rewrites a
-number it disagrees with is the invention failure this whole line of bugs is about. They are trail's
-to repair, and the widening waits on that.
+Re-save **`trail/scenes/moments/force_resolution.tscn`** in the Godot editor — better than one of
+the ten, because it holds all three positions at once and separates all three hypotheses in one
+save. Revert afterwards; nothing needs committing.
 
-## The one thing the corpus cannot settle
+| what the re-saved file does | what it means |
+|---|---|
+| `PaperBg`/`Payload` keep `index=`; `MontageView`/`ResultsView`/`Timer` gain `4`/`5`/`6`; the nodes under `MontageVBox` gain indexes too | the engine indexes EVERY non-root node of an inherited scene. This bug is real and much larger than filed: trail's inherited scenes are ~200 attributes short, and the tool should write all of them. |
+| the three gain `4`/`5`/`6`, deeper created nodes gain nothing | the narrowest rule is right and the four are trail data bugs. Restore, and trail repairs those two files. |
+| nothing changes | the ten indexed bodies are hand-authored noise, the tool is right as it stands, and this bug closes. |
+| `PaperBg`/`Payload` LOSE their `index=` | the sibling bug's premise is wrong too and the whole restoration needs re-deriving. |
 
-Four structurally similar nodes carry NO index — `force_resolution.tscn`'s
-`MontageView`/`ResultsView`/`Timer` and `game_over.tscn`'s `Center`. Both files are now green (the
-`_instance_host` fix), so they are not among the ten, but they are an argument that the engine does
-not *always* emit `index=` in this position.
+## The widening is still blocked, and now on one thing
 
-**Confirm before the rule ships**: re-save one of the seven append-correct scenes in the Godot editor
-and check that its `index=` survives. That is a one-minute check a human runs and neither package
-can. If it does not survive, this bug is wrong and the sibling's conclusion was right after all.
-
-## Fix
-
-Key `index=` restoration off whether the node's parent is an instanced subtree, not off whether the
-node carries `type=`/`instance=`. Correct when: the 7 append-correct files round-trip, the 3
-mismatches still fail (they are data bugs and must stay visible), nullbound's 194 stay green, and
-**nothing gains an `index=` it did not have** — the sibling bug measured a naive "next free slot"
-fallback inventing 505 attributes across the two trees, which is the failure mode to stay clear of.
-
-Then the round-trip smoke row widens to every tracked scene on both consumers, once trail's three
-land.
+`make smoke`'s `canonicalize round trip` row stays one scene per consumer. It can widen on nullbound
+(194/194) and cannot on trail, where 10 of 116 fail — all ten of them a created node's authored
+`index=`, none of them a defect this package can fix. If trail dropped those ten attributes the row
+would widen unchanged on both consumers; if the engine answer says the attribute belongs there, the
+row widens once the tool writes it. Either way it is one decision, not three.
