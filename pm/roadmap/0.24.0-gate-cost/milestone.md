@@ -35,3 +35,34 @@ interpreter; `[SMOKE]` still reports every census), no test deleted — every te
   little Python coverage; the floor keeps all of it, and the floor is the interpreter that matters.
 - The smoke's worktree install (phase 2) touches a consumer's `.git/worktrees`; the "checkout
   unchanged" row must keep proving the main checkout untouched.
+
+## Measured on the release commit — 2026-09-04
+
+`make milestone` at `ef08c3e`, quiet machine: **3:36 total**, against a criterion of under 8 minutes
+and a starting point of ~20.
+
+```
+[GATES]  4 check(s) PASS
+[HOOKS]  3 hook(s) SELF-TEST OK
+[MATRIX] PASS on 3.11 3.12 3.13 3.14
+[SMOKE]  PASS — 43 check(s) across 2 consumer(s) + the fresh project, every census matched an
+         independent count, the gates run against the release's own runners, both checkouts
+         unchanged and no worktree left behind
+```
+
+The matrix is where it went, and the shape is exactly what the milestone argued for:
+
+| interpreter | ran | wall |
+|---|---|---|
+| 3.11 (floor) | 1714 passed, 1 skipped, 3901 subtests | **172.4 s** |
+| 3.12 | 265 passed, 1450 deselected | 3.1 s |
+| 3.13 | 265 passed, 1450 deselected | 3.1 s |
+| 3.14 | 265 passed, 1450 deselected | 3.0 s |
+
+The floor carries the whole suite; the other three carry only what Python can change, and cost
+**9 seconds between them** where they used to cost ~13 minutes. The verdict line is byte-identical to
+the one this milestone opened with — a consumer sees no change except the clock.
+
+**No test was deleted**: 1714 collected on the floor, up from 1560 at the start of the milestone. The
+five modules that left `tests/` are `make smoke` rows, and the one test NAME that went missing along
+the way (grafted into a sibling) was restored at `3c9f0b4` after the review found it.
