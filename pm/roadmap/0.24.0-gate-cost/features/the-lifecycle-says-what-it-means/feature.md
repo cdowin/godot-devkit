@@ -43,6 +43,29 @@ So the release gate could not run until the milestone was flipped `done` — the
 exists to inform. Filed as `bugs/the-release-gate-cannot-run-before-the-close-it-gates`; this feature
 is its fix.
 
+## D5 is the rule that actually breaks, and D6 is only a message
+
+Scoped against `checks/pm.py`. The model's own comment says what is enforced:
+*"no rule checks an EDGE … What IS checked is END STATE, by D3/D4/D5."*
+
+- **D4** (`status in cfg.*_states`) — pure vocabulary. Extending the sets is free.
+- **D3** (`mstat == 'done' and feature != 'done'`) — survives, and gets STRONGER: a milestone cannot
+  be `done` unless every feature is, and `done` now means shipped.
+- **D5** (`sstat == 'done' and feature != 'done'`) — **breaks.** Under the new lifecycle a story
+  reaches `done` while its feature is still `reviewing` / `accepted` / `packaging`. That is the
+  normal path, and D5 would report it as drift on every feature in every tree.
+
+**D5's fix is the payoff of using ONE vocabulary for all three grains.** Today a story's `wip` and a
+feature's `building` are different words, so "is this story ahead of its feature?" cannot be asked.
+With one ordered vocabulary it becomes a well-defined comparison — a grain is drifting when it sits
+AHEAD of its parent, not when it fails to equal it. D5 becomes:
+
+> a story at `done` under a feature still at `planning` or `ready` is two places disagreeing;
+> `building` onward is not.
+
+D3 reads the same way, one grain up. Neither rule needs a transition graph — both stay end-state
+checks, which is what this package already committed to.
+
 **D6 needs no new logic.** `checks/pm.py:188` keys off the literal string:
 
 ```python
