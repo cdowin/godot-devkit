@@ -2,8 +2,8 @@
 id: 0.24.0/consumer-reads-leave-the-unit-suite
 milestone: "0.24.0"
 name: the tests that read a live consumer checkout are smoke rows, not unit tests
-status: review
-reviewed:
+status: done
+reviewed: pm/roadmap/0.24.0-gate-cost/review.md
 phase: 1
 depends_on: []
 consumed_by: []

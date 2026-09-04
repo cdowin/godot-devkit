@@ -3,7 +3,7 @@ id: 0.24.0/matrix-runs-bash-once/the-matrix-runs-the-shell-slice-once
 feature: 0.24.0/matrix-runs-bash-once
 milestone: "0.24.0"
 name: the floor interpreter runs everything; the others run not-shell
-status: review
+status: done
 owner:
 depends_on: []
 ---

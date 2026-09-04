@@ -3,7 +3,7 @@ id: 0.24.0/matrix-runs-bash-once/shell-shaped-tests-carry-a-derived-mark
 feature: 0.24.0/matrix-runs-bash-once
 milestone: "0.24.0"
 name: a test module that spawns bash or make is marked shell at collection, by construction
-status: review
+status: done
 owner:
 depends_on: []
 ---

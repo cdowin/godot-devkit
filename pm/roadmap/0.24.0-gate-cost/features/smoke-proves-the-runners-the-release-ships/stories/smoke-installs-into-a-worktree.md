@@ -3,7 +3,7 @@ id: 0.24.0/smoke-proves-the-runners-the-release-ships/smoke-installs-into-a-work
 feature: 0.24.0/smoke-proves-the-runners-the-release-ships
 milestone: "0.24.0"
 name: check all runs in a git worktree of the consumer carrying the working tree's runners
-status: review
+status: done
 owner:
 depends_on: []
 ---

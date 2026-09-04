@@ -2,8 +2,8 @@
 id: 0.24.0/smoke-proves-the-runners-the-release-ships
 milestone: "0.24.0"
 name: the consumer smoke installs the release candidate's runners into a throwaway worktree
-status: review
-reviewed:
+status: done
+reviewed: pm/roadmap/0.24.0-gate-cost/review.md
 phase: 2
 depends_on: []
 consumed_by: []
