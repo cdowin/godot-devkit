@@ -2,7 +2,7 @@
 id: 0.24.0/smoke-proves-the-runners-the-release-ships
 milestone: "0.24.0"
 name: the consumer smoke installs the release candidate's runners into a throwaway worktree
-status: planning
+status: review
 reviewed:
 phase: 2
 depends_on: []
