@@ -229,19 +229,22 @@ def strip_indexes(text: str) -> str:
                      for line in text.split('\n'))
 
 
-class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
-    def canonicalized(self, scene_text: str) -> tuple[int, str, str]:
-        with temp_repo('canon_repo') as root:
-            (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
-            (root / 'scenes/inherited.tscn').write_text(scene_text, encoding='utf-8')
-            code, out = canonicalize_in_repo('scenes/inherited.tscn')
-            text = (root / 'scenes/inherited.tscn').read_text(encoding='utf-8')
-        return code, out, text
+def over_shell(scene_text: str) -> tuple[int, str, str]:
+    """Canonicalize `scene_text` in a repo whose `res://scenes/shell.tscn` is
+    SHELL_BASE -> (exit code, report, the file as it was left)."""
+    with temp_repo('canon_repo') as root:
+        (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
+        (root / 'scenes/subject.tscn').write_text(scene_text, encoding='utf-8')
+        code, out = canonicalize_in_repo('scenes/subject.tscn')
+        text = (root / 'scenes/subject.tscn').read_text(encoding='utf-8')
+    return code, out, text
 
+
+class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
     def test_an_override_under_an_inherited_root_gets_its_index_back(self) -> None:
         """`Inner` is the SECOND child of shell.tscn's root, so index must be 1
         — and the walk has to reach the root to say so."""
-        code, out, text = self.canonicalized(strip_indexes(INHERITED))
+        code, out, text = over_shell(strip_indexes(INHERITED))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertIn('[node name="Inner" parent="." index="1"]', text)
         self.assertNotIn('UNRESOLVED', out)
@@ -250,14 +253,14 @@ class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
         """`Content` is the THIRD child of the base's `Inner` (Paper, Border,
         Content), so index must be 2. Nothing between it and the root instances
         anything, so this resolves only if the root is a candidate host."""
-        code, out, text = self.canonicalized(strip_indexes(INHERITED))
+        code, out, text = over_shell(strip_indexes(INHERITED))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertIn('[node name="Content" parent="Inner" index="2"]', text)
 
     def test_the_whole_inherited_scene_round_trips_byte_for_byte(self) -> None:
         """The smoke row's property at unit scale: strip what `save()` drops,
         restore, and get the committed bytes back — no more and no less."""
-        code, out, text = self.canonicalized(strip_indexes(INHERITED))
+        code, out, text = over_shell(strip_indexes(INHERITED))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertEqual(text, INHERITED)
 
@@ -269,7 +272,7 @@ class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
 
         A CONTROL: green before the inherited-root fix and after it, red only
         if the restoration over-corrects into inventing."""
-        _code, _out, text = self.canonicalized(strip_indexes(INHERITED))
+        _code, _out, text = over_shell(strip_indexes(INHERITED))
         self.assertIn('[node name="Body" type="VBoxContainer" '
                       'parent="Inner/Content"]\n', text)
         self.assertIn('[node name="Nested" parent="." '
@@ -281,11 +284,141 @@ class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
         of picking one."""
         orphan = INHERITED.replace('[node name="Inner" parent="." index="1"]',
                                    '[node name="Ghost" parent="."]')
-        code, out, text = self.canonicalized(strip_indexes(orphan))
+        code, out, text = over_shell(strip_indexes(orphan))
         self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS, out)
         self.assertIn('UNRESOLVED', out)
         self.assertIn('Ghost', out)
         self.assertIn('[node name="Ghost" parent="."]\n', text)
+
+
+# --- a node the scene CREATES gains no index, wherever its PARENT came from ---
+# 0.24.0/bugs/index-is-derivable-under-an-instanced-parent proposed keying the
+# restoration off "is this node's PARENT an instanced subtree?" instead of off
+# `type=`/`instance=` on the node itself, on the reading that a created node
+# under an instanced parent is positioned among that base's children and so has
+# a derivable ordinal. The ORDINAL is derivable. Whether the engine writes the
+# attribute is not, and the corpus refuses the rule in both directions:
+#
+#   * the editor-written half — nullbound, 194 scenes — has 1008 created nodes
+#     and NOT ONE carries an `index=`, including 87 whose parent is a node the
+#     base provides. It has no inherited scene with a written child, so it
+#     cannot speak to that case at all.
+#   * the hand-authored half — trail, 116 scenes, every one carrying a `;`
+#     comment and so never through ResourceSaver — contradicts itself at the
+#     one position in dispute: 10 created nodes directly under an inherited root
+#     carry an append-correct `index=` and 10 more, same repo, same position,
+#     carry none (6 appending into an empty base container, 4 after a 4-child
+#     base root). Nothing structural separates the halves.
+#
+# Measured, degrade -> canonicalize over every tracked scene, before it was
+# refused: the rule as filed invents 38 `index=` on trail and 87 on nullbound
+# and takes nullbound from 0 round-trip failures to 26. Narrowed to inherited
+# scenes it still invents 4. Each fixture below is one of those shapes, and the
+# ordinal named in each docstring is what the rule would have written.
+PLAIN_HOST = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonplain"]\n\n'
+              '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
+              ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
+              '[node name="Host" type="Node2D"]\n\n'
+              '[node name="Shell" parent="." instance=ExtResource("1_shell")]\n\n'
+              '[node name="Inner" parent="Shell" index="1"]\nvisible = false\n\n'
+              '[node name="Added" type="Label" parent="Shell"]\n\n'
+              '[node name="Deep" type="Label" parent="Shell/Inner"]\n\n'
+              '[node name="Slot0" type="Label" parent="Shell/Inner/Content"]\n\n'
+              '[node name="Slot1" type="Label" parent="Shell/Inner/Content"]\n\n'
+              '[node name="Slot2" type="Label" parent="Shell/Inner/Content"]\n')
+# The inherited half. `FirstBody`/`SecondBody` sit exactly where trail's corpus
+# splits 10-for/10-against; `Slot` appends into a base container the base leaves
+# empty (trail: 6 scenes, all `Card/Inner/Content/Body`); `Row` hangs off a node
+# this scene created, inside an instanced subtree (trail: dossier.tscn's
+# `DossierBody/Columns/Right`, where 2 of 15 siblings carry a hand-typed index).
+INHERITED_CREATES_BODIES = (
+    '[gd_scene load_steps=2 format=3 uid="uid://dcanonbodies"]\n\n'
+    '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
+    ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
+    '[node name="Shell" instance=ExtResource("1_shell")]\n\n'
+    '[node name="Inner" parent="." index="1"]\nvisible = false\n\n'
+    '[node name="FirstBody" type="VBoxContainer" parent="."]\n\n'
+    '[node name="SecondBody" type="VBoxContainer" parent="."]\n\n'
+    '[node name="Row" type="Label" parent="FirstBody"]\n\n'
+    '[node name="Slot" type="Label" parent="Inner/Content"]\n')
+
+
+class ACreatedNodeGainsNoIndexWhateverItsParentIs(unittest.TestCase):
+    """The refusal matrix for the created-node position. Every case names the
+    ordinal a parent-keyed rule would write, and asserts the node line as the
+    file spells it — bare, with no `index=` appended."""
+
+    def test_a_created_node_under_the_instance_node_itself_gains_none(self) -> None:
+        """`Added` hangs off `Shell`, which instances the base. The base root
+        places 2 children, so an append is `2`. nullbound's `game.tscn` is this
+        shape six times over and carries no index on any of them."""
+        code, out, text = over_shell(strip_indexes(PLAIN_HOST))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Added" type="Label" parent="Shell"]\n', text)
+
+    def test_a_created_node_under_a_base_child_gains_none(self) -> None:
+        """`Deep` hangs off `Shell/Inner`, a node the base provides and gives 3
+        children of its own, so an append is `3`."""
+        code, out, text = over_shell(strip_indexes(PLAIN_HOST))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Deep" type="Label" parent="Shell/Inner"]\n', text)
+
+    def test_created_siblings_gain_no_run_of_sequential_ordinals(self) -> None:
+        """`Slot0/1/2` fill a base container the base leaves empty — the shape a
+        next-free-slot fallback turns into `0`, `1`, `2`, and the shape that
+        made that fallback invent 505 attributes across the two trees. All three
+        stay bare, and none of the three numbers appears anywhere in the file."""
+        code, out, text = over_shell(strip_indexes(PLAIN_HOST))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        for name in ('Slot0', 'Slot1', 'Slot2'):
+            self.assertIn(f'[node name="{name}" type="Label" '
+                          f'parent="Shell/Inner/Content"]\n', text)
+        self.assertEqual(text.count('index="'), 1, 'only the override is indexed')
+
+    def test_a_created_body_under_an_inherited_root_gains_none(self) -> None:
+        """THE disputed position, and the one this bug was filed to restore.
+        The base root places 2 children, so an append is `2` for `FirstBody` and
+        `3` for `SecondBody` — the numbers trail's 10 indexed bodies carry and
+        its 4 unindexed ones (force_resolution, game_over) do not."""
+        code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="FirstBody" type="VBoxContainer" parent="."]\n', text)
+        self.assertIn('[node name="SecondBody" type="VBoxContainer" parent="."]\n', text)
+
+    def test_a_created_node_appending_into_an_empty_base_container_gains_none(self) -> None:
+        """`Slot` goes into `Inner/Content`, which the base leaves childless. An
+        append is `0`, and `index="0"` is no less invented for being the only
+        number available."""
+        code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Slot" type="Label" parent="Inner/Content"]\n', text)
+
+    def test_a_created_node_under_a_locally_created_parent_gains_none(self) -> None:
+        """`Row`'s parent is a node this scene built. It is inside an instanced
+        subtree — the root instances the base — so a rule that asks only "is the
+        parent within an instance?" reaches it, and no base places its siblings."""
+        code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Row" type="Label" parent="FirstBody"]\n', text)
+
+    def test_both_fixtures_round_trip_byte_for_byte(self) -> None:
+        """The whole property in one assertion: strip what `save()` drops, and
+        get the committed bytes back — no more and no less."""
+        for fixture in (PLAIN_HOST, INHERITED_CREATES_BODIES):
+            with self.subTest(fixture=fixture.split('\n')[0]):
+                code, out, text = over_shell(strip_indexes(fixture))
+                self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+                self.assertEqual(text, fixture)
+
+    def test_the_override_in_each_fixture_still_gets_its_index_back(self) -> None:
+        """The control that stops every case above from passing on a tool that
+        does nothing: `Inner` is the base root's SECOND child in both fixtures,
+        and it must come back as `1` under an instance node and under an
+        inherited root alike."""
+        _code, _out, plain = over_shell(strip_indexes(PLAIN_HOST))
+        _code, _out, inherited = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
+        self.assertIn('[node name="Inner" parent="Shell" index="1"]\n', plain)
+        self.assertIn('[node name="Inner" parent="." index="1"]\n', inherited)
 
 
 class NoMarkerIsInventedForAnOverriddenInstance(unittest.TestCase):

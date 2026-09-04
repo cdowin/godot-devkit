@@ -21,8 +21,11 @@ it leaves out are load-bearing, and all three recur on every single pass:
    scene's root is `[node name="X" instance=ExtResource(base)]`, its children
    are the base's children, and an override there is an override like any
    other. What is NOT restored is an `index=` on a node this scene CREATES
-   (`type=` / `instance=`): the base does not place it, so no ordinal exists to
-   count and writing one would invent the authored position it stands for.
+   (`type=` / `instance=`). Its ordinal often IS derivable — a created node
+   appended under an instanced parent lands after that base's own children —
+   but whether the engine WRITES the attribute there is not, and the corpus
+   contradicts itself about it, so writing one invents authored position.
+   See `_restore_indexes` for the census.
 
 **`[editable path=]` is NOT one of them, and is never written here.** The marker
 records the editor's per-instance "Editable Children" toggle and nothing else:
@@ -165,14 +168,29 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
             continue
         if 'type' in node.attrs or INSTANCE_ATTR in node.attrs:
             # This scene CREATES the node — `type=` builds it, `instance=`
-            # instantiates it — so no base places it and there is no ordinal to
-            # count. An index here would be a position nothing in the file
-            # implies. Measured over both consumer trees: 12 created nodes do
-            # carry an authored `index=`, and no rule produces them — 3 of the
-            # 12 name a slot no count reaches, while 4 structurally identical
-            # siblings (an added node under an inherited root, same repo) carry
-            # none. Restoring them is inventing authored state, which is the
-            # sibling bug this module already paid for once.
+            # instantiates it. The skip is keyed here rather than on the
+            # PARENT, which was tried and measured: keying it off "the parent
+            # is an instanced subtree" makes the ordinal derivable (an append
+            # lands after the base's own children) and makes the attribute
+            # invented, because the two are different claims.
+            #
+            # The corpus decides it, in both directions. The editor-written
+            # half — nullbound, 194 scenes — has 1008 created nodes and NOT ONE
+            # carries an `index=`, including 87 whose parent is a node the base
+            # provides; it has no inherited scene with a written child, so it
+            # cannot speak to that case. The hand-authored half — trail, 116
+            # scenes, every one carrying a `;` comment and so never through
+            # ResourceSaver — contradicts itself exactly there: 10 created
+            # nodes directly under an inherited root carry an append-correct
+            # `index=` and 10 more, same repo, same position, carry none. So a
+            # rule that reproduces the first 10 invents the second 10, and the
+            # narrowest form of it still invents 4.
+            #
+            # Restoring them is inventing authored state, which is the sibling
+            # bug this module already paid for once. Settling it needs the
+            # engine, not more reading: whether `pack()` emits `index=` for a
+            # created node in an inherited scene. Until then the tool has no
+            # evidence either way and writes nothing either way.
             continue
         host = _instance_host(doc, doc.node_path(node))
         if host is None:

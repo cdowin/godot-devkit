@@ -254,7 +254,7 @@ UID_TEXT = re.compile(r'uid://[0-9a-z]+')
 # What `ResourceSaver.save()` drops, restated from test_canonicalize.degrade:
 # no header uid, path-only refs, no `index=` on instance-child overrides.
 UID_ATTR = re.compile(r' uid="uid://[0-9a-z]+"')
-INDEX_ATTR = re.compile(r' index="\d+"')
+INDEX_ATTR = re.compile(r' index="(\d+)"')
 # The engine's uid constants, restated independently of the codec being graded.
 UID_BASE = 34
 UID_CHAR_COUNT = 25
@@ -439,6 +439,98 @@ def canonicalize_restores_a_real_scene(root: Path, report: Report) -> None:
     report.check(name, 'canonicalize round trip', not faults,
                  f'{rel}: {losses} degraded line(s) restored byte-for-byte'
                  if not faults else f'{rel}: ' + '; '.join(faults))
+
+
+# How many scenes one `canonicalize` invocation is handed. The verb takes
+# `nargs='+'`, so the whole corpus would fit in about 50KB of argv — under any
+# ARG_MAX this runs on — but a consumer's tree only grows, and a row that
+# starts failing with "argument list too long" would read as a canonicalize
+# regression. Chunking costs three spawns instead of one.
+CANON_CHUNK = 100
+
+
+def _index_attrs(text: str) -> dict[str, str | None]:
+    """`[node ...]` header (index= removed) -> its index, or None if it had none.
+
+    The header minus its index is the node's identity: `name=` + `parent=` are
+    unique within a scene, so this pairs each node before with itself after
+    without depending on line numbers, which a restored uid can shift.
+    """
+    found: dict[str, str | None] = {}
+    for line in text.split('\n'):
+        if line.startswith('[node '):
+            match = INDEX_ATTR.search(line)
+            found[INDEX_ATTR.sub('', line)] = match.group(1) if match else None
+    return found
+
+
+def canonicalize_invents_no_index(root: Path, report: Report) -> None:
+    """The INVENT direction, over EVERY tracked scene rather than the one the
+    round-trip row picks: degrade the way `save()` does, canonicalize, and count
+    the `index=` attributes that came back on a node which never had one.
+
+    This is the direction that cannot be widened away. The round-trip row is
+    pinned to one scene per consumer because a created node's authored `index=`
+    is not derivable and trail's inherited scenes disagree with each other about
+    whether the attribute is even written (0.24.0: 10 created nodes directly
+    under an inherited root carry one, 10 more at the same position carry none).
+    But "restores nothing it cannot derive" is true of every scene in both trees
+    TODAY, so it is asserted over all of them today — and a plausible-looking
+    widening of the restoration is what it exists to catch. Measured against the
+    rules proposed for that widening: keying restoration off "the parent is an
+    instanced subtree" invents 38 attributes on trail and 87 on nullbound, and
+    the narrowest form of it still invents 4.
+
+    Read-only: every degraded scene is written to a temp dir, never the
+    checkout, and the verb runs with the consumer as cwd so `res://` still
+    resolves against the real base scenes.
+    """
+    name = root.name
+    files = _tracked(root, '*.tscn')
+    if not files:
+        report.skipped.append(f'{name}: canonicalize invents no index (no tracked .tscn)')
+        return
+    authored = restored = invented = lost = 0
+    differing: list[str] = []
+    culprits: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        probes = {}
+        for rel in files:
+            probe = Path(tmp) / rel.replace('/', '__')
+            probe.write_text(degrade((root / rel).read_text(
+                encoding='utf-8', errors='replace')), encoding='utf-8')
+            probes[rel] = probe
+        ordered = list(probes)
+        for start in range(0, len(ordered), CANON_CHUNK):
+            chunk = ordered[start:start + CANON_CHUNK]
+            devkit(root, 'scene', 'canonicalize',
+                   *(str(probes[rel]) for rel in chunk))
+        for rel in ordered:
+            before = _index_attrs((root / rel).read_text(
+                encoding='utf-8', errors='replace'))
+            after = _index_attrs(probes[rel].read_text(encoding='utf-8'))
+            for header, was in before.items():
+                now = after.get(header)
+                if was is not None:
+                    authored += 1
+                    restored += now == was
+                    lost += now is None
+                elif now is not None:
+                    invented += 1
+                    if len(culprits) < 5:
+                        culprits.append(f'{rel} {header[:60]} -> index="{now}"')
+            if before != after:
+                differing.append(rel)
+    # The round-trip count is REPORTED, never gated: pinning it would be the
+    # known-fail list this package refused to write. It is here so it cannot go
+    # stale — the last census of it was wrong within a day of being taken.
+    report.check(
+        name, 'canonicalize invents no index', invented == 0,
+        f'{len(files)} scene(s): {invented} invented, {restored}/{authored} '
+        f'authored index= restored, {lost} not derivable '
+        f'({len(differing)} scene(s) not index-identical)'
+        if invented == 0 else
+        f'{invented} invented over {len(files)} scene(s): ' + '; '.join(culprits))
 
 
 def defaults_elision(root: Path, report: Report) -> None:
@@ -704,6 +796,7 @@ def smoke(root: Path, report: Report) -> None:
     scene_round_trip(root, report)
     uid_differential(root, report)
     canonicalize_restores_a_real_scene(root, report)
+    canonicalize_invents_no_index(root, report)
     defaults_elision(root, report)
 
     after = git(root, 'status', '--porcelain')
