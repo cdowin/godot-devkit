@@ -21,7 +21,6 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parent.parent
 FIXTURES = TESTS / 'fixtures'
 REPO_ROOT = TESTS.parent
-CONSUMER_REPOS = (Path.home() / 'workspace' / 'nullbound', Path.home() / 'workspace' / 'trail')
 
 sys.path.insert(0, str(REPO_ROOT / 'src'))
 
@@ -69,7 +68,3 @@ def run_check(module, **kwargs) -> tuple[int, str]:
     repo_root.cache_clear()
     load_config.cache_clear()
     return code, buffer.getvalue()
-
-
-def available_consumers() -> list[Path]:
-    return [p for p in CONSUMER_REPOS if p.is_dir()]

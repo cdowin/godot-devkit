@@ -2,11 +2,11 @@
 
 parse -> serialise with NO mutation must be byte-identical. If it is not, the
 toolkit is more dangerous than `sed`, because it silently touches lines nobody
-asked it to touch. Proven three ways: against a hermetic fixture that carries
-every awkward construct we have met in real files; against the committed corpus
-of scrubbed real consumer scenes under tests/fixtures/corpus/ (runs everywhere,
-including CI); and against every .tscn/.tres in whichever consumer checkouts
-are present (this-laptop extra assurance).
+asked it to touch. Proven two ways here: against a hermetic fixture that
+carries every awkward construct we have met in real files, and against the
+committed corpus of scrubbed real consumer scenes under tests/fixtures/corpus/.
+Both run everywhere, including CI. The sweep over every .tscn/.tres in a live
+consumer checkout is `make smoke`'s `scene round trip` row.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import FIXTURES, available_consumers
+from support import FIXTURES
 
 from godot_devkit.godot.format.tscn import parse_text
 from godot_devkit.godot.format.tscn_document import TscnDocument
@@ -67,29 +67,13 @@ class RoundTripFidelity(unittest.TestCase):
         self.assertEqual(parse_text(lf)[0].props,
                          TscnDocument(crlf).sections[0].props)
 
-    @unittest.skipUnless(available_consumers(), 'no consumer checkout available')
-    def test_every_real_scene_round_trips(self) -> None:
-        checked = 0
-        for repo in available_consumers():
-            for path in [*repo.rglob('*.tscn'), *repo.rglob('*.tres')]:
-                if '/.git/' in str(path):
-                    continue
-                try:
-                    original = path.read_text(encoding='utf-8')
-                except (OSError, UnicodeDecodeError):
-                    continue
-                checked += 1
-                if TscnDocument(original, path).text != original:
-                    self.fail(f'round trip changed {path}')
-        self.assertGreater(checked, 100, 'corpus too small to prove anything')
-
 
 # The committed corpus: real consumer scenes (nullbound = corpus/nb,
 # trail = corpus/tr), paths and structure intact, with game prose anonymized —
 # prose-carrying property values (text/description/display_name/...) and
 # comment bodies had each word replaced by a deterministic dictionary word;
 # node names, types, keys, uids, paths and every byte of punctuation stayed.
-# Unlike the live-consumer sweep below, this runs everywhere, including CI.
+# Unlike `make smoke`'s live-consumer sweep, this runs everywhere, on CI too.
 CORPUS = FIXTURES / 'corpus'
 
 # Raising this floor is part of growing the corpus; a shrinking corpus must be
@@ -134,9 +118,9 @@ def corpus_files() -> list[Path]:
 
 
 class CommittedCorpusRoundTrip(unittest.TestCase):
-    """The consumer sweep below runs on exactly one laptop; this corpus is the
-    same proof made portable, so CI exercises real-world structure rather than
-    only the hand-built kitchen_sink fixture."""
+    """`make smoke`'s consumer sweep runs on exactly one laptop; this corpus is
+    the same proof made portable, so CI exercises real-world structure rather
+    than only the hand-built kitchen_sink fixture."""
 
     def test_census_meets_the_floor_from_both_source_repos(self) -> None:
         files = corpus_files()

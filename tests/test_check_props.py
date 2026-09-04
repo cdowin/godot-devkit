@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 
-from support import REPO_ROOT, available_consumers, run_check, temp_repo
+from support import REPO_ROOT, run_check, temp_repo
 
 CLEAN = ['project.godot', 'systems/contract.gd', 'systems/contract.gd.uid', 'scenes/clean.tscn']
 DRIFTED = CLEAN + ['scenes/drift.tscn']
@@ -144,31 +144,8 @@ class ExtraPropertiesCarveOut(unittest.TestCase):
         self.assertNotIn('Traceback', proc.stderr)
 
 
-class NoFalsePositivesOnRealRepos(unittest.TestCase):
-    """The consumers are the calibration set: every finding there must be real
-    drift, so the count is pinned. If this changes, look at the diff before
-    changing the number."""
-
-    @unittest.skipUnless(available_consumers(), 'no consumer checkout available')
-    def test_findings_are_bounded(self) -> None:
-        import os
-
-        from godot_devkit.godot.checks import props
-        for repo in available_consumers():
-            previous = os.getcwd()
-            os.chdir(repo)
-            try:
-                code, out = run_check(props)
-            finally:
-                os.chdir(previous)
-            with self.subTest(repo=repo.name):
-                self.assertIn('all accounted for', out)
-                self.assertNotIn('BUG', out)
-                dead = [ln for ln in out.splitlines() if ln.startswith('  DEAD')]
-                # Real, hand-verified drift only — see the branch report.
-                self.assertLessEqual(len(dead), 30, '\n'.join(dead))
-                self.assertEqual(code, 1 if dead else 0)
-
+# The calibration set — every `check props` finding on a live consumer must be
+# real drift, the count pinned — is `make smoke`'s `check props findings` row.
 
 if __name__ == '__main__':
     unittest.main()

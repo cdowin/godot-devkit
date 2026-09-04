@@ -1,37 +1,20 @@
 """Tier 3 — restoring what `PackedScene.pack()` + `ResourceSaver.save()` drop.
 
-The strongest case here is the last one: take a REAL scene, degrade it exactly
-the way `save()` does, and check that canonicalize puts it back byte-for-byte.
-Anything the tool invents rather than derives would show up as a diff.
+Each case degrades a fixture the way `save()` does and checks that canonicalize
+puts back exactly what was lost — anything the tool invents rather than derives
+shows up as a diff. The same proof over a REAL consumer scene is `make smoke`'s
+`canonicalize round trip` row, which picks the scene the degradation costs most.
 """
 from __future__ import annotations
 
 import contextlib
 import io
-import re
 import unittest
 
-from support import available_consumers, temp_repo
+from support import temp_repo
 
 from godot_devkit.godot.write import scene_canonicalize
 from godot_devkit.core.project import repo_root
-
-QUARANTINE = 'scenes/world/maps/quarantine.tscn'
-UID_ATTR = re.compile(r' uid="uid://[0-9a-z]+"')
-INDEX_ATTR = re.compile(r' index="\d+"')
-
-
-def degrade(text: str) -> str:
-    """What `ResourceSaver.save()` writes: no header uid, path-only refs, and no
-    `index=` on instance-child overrides."""
-    lines = []
-    for line in text.split('\n'):
-        if line.startswith(('[ext_resource ', '[gd_scene ', '[gd_resource ')):
-            line = UID_ATTR.sub('', line)
-        elif line.startswith('[node '):
-            line = INDEX_ATTR.sub('', line)
-        lines.append(line)
-    return '\n'.join(lines)
 
 
 def canonicalize_in_repo(*argv: str) -> tuple[int, str]:
@@ -112,34 +95,6 @@ class RestoresWhatPackDrops(unittest.TestCase):
         self.assertIn('UNRESOLVED', out)
         self.assertIn('ghost.gd', out)
         self.assertIn('path="res://systems/ghost.gd"', text)
-
-
-class RealSceneRoundTrip(unittest.TestCase):
-    @unittest.skipUnless(any((repo / QUARANTINE).is_file() for repo in available_consumers()),
-                         'quarantine.tscn not available')
-    def test_degraded_real_scene_is_restored_byte_for_byte(self) -> None:
-        import os
-        import tempfile
-        from pathlib import Path
-
-        repo = next(r for r in available_consumers() if (r / QUARANTINE).is_file())
-        original = (repo / QUARANTINE).read_text(encoding='utf-8')
-        with tempfile.TemporaryDirectory() as tmp:
-            packed = Path(tmp) / 'packed.tscn'
-            packed.write_text(degrade(original), encoding='utf-8')
-            self.assertNotEqual(degrade(original), original, 'degradation was a no-op')
-            previous = os.getcwd()
-            os.chdir(repo)
-            try:
-                canonicalize_in_repo(str(packed))
-                restored = packed.read_text(encoding='utf-8')
-            finally:
-                os.chdir(previous)
-        # The header uid is the one loss that cannot be recovered for a file
-        # outside its own repo path — everything else must match exactly.
-        self.assertEqual(UID_ATTR.sub('', restored.split('\n')[0]), restored.split('\n')[0])
-        self.assertEqual('\n'.join(restored.split('\n')[1:]),
-                         '\n'.join(original.split('\n')[1:]))
 
 
 if __name__ == '__main__':

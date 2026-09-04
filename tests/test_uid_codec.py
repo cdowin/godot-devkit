@@ -6,18 +6,22 @@ anchored outside the module. The golden pair was adjudicated by the ENGINE
 `uid://wkcycles00001` round-trips to `uid://c8bmebsj60m77` — a pair that also
 exercises the uint64 overflow wrap, since 'w' leads a 13-char payload past
 2^63). The differential sweep runs every uid harvested from the committed
-corpus plus every live consumer checkout present, and cross-checks the
-round-trip verdict against an INDEPENDENT positional formulation of
-canonicality — two derivations of the same predicate that would disagree if
-either the base, the alphabet split, the leading-zero rule or the overflow
-mask were wrong.
+corpus and cross-checks the round-trip verdict against an INDEPENDENT
+positional formulation of canonicality — two derivations of the same predicate
+that would disagree if either the base, the alphabet split, the leading-zero
+rule or the overflow mask were wrong. The same sweep over every uid in a live
+consumer checkout is `make smoke`'s `uid codec differential` row, which carries
+its own restatement of the formulation; the last case here pins the two
+restatements to one predicate, because a smoke grading against a drifted rule
+grades against nothing.
 """
 from __future__ import annotations
 
 import re
+import sys
 import unittest
 
-from support import FIXTURES, available_consumers
+from support import FIXTURES, REPO_ROOT
 
 from godot_devkit.godot.index.uid_codec import (INVALID_ID, INVALID_TEXT,
                                                 UID_PREFIX, canonical,
@@ -138,8 +142,8 @@ class EncoderProperties(unittest.TestCase):
 
 
 class RealWorldDifferential(unittest.TestCase):
-    """Every uid this package's consumers have ever shipped, both verdict
-    formulations, zero disagreements allowed."""
+    """Every uid the committed corpus carries, both verdict formulations, zero
+    disagreements allowed."""
 
     def _sweep(self, uids: set[str]) -> int:
         noncanonical = 0
@@ -162,17 +166,22 @@ class RealWorldDifferential(unittest.TestCase):
                                 'harvest broke — corpus census below floor')
         self.assertGreaterEqual(self._sweep(uids), CORPUS_NONCANONICAL_FLOOR)
 
-    def test_every_live_consumer_checkout(self) -> None:
-        consumers = available_consumers()
-        if not consumers:
-            self.skipTest('no consumer checkout present (CI) — corpus '
-                          'differential above still ran')
-        for repo in consumers:
-            uids = _harvest(repo)
-            self.assertGreaterEqual(
-                len(uids), CORPUS_UID_FLOOR,
-                f'{repo.name}: harvest broke — census below floor')
-            self._sweep(uids)
+    def test_the_smoke_grades_against_the_SAME_independent_formulation(self) -> None:
+        """`make smoke`'s live-consumer row restates this predicate rather than
+        importing it — sharing no code with the codec is the whole point, and a
+        restatement is the one thing the codec cannot agree with by accident.
+        Two copies can drift, though, and a drifted copy still prints `ok`. So:
+        every uid the corpus carries, plus the encoder over the whole id space,
+        must get the same verdict from both spellings."""
+        sys.path.insert(0, str(REPO_ROOT / 'tools'))
+        import consumer_smoke                                    # noqa: PLC0415
+        texts = sorted(_harvest(CORPUS)) + [id_to_text(uid)
+                                            for uid in EncoderProperties.IDS]
+        self.assertGreaterEqual(len(texts), CORPUS_UID_FLOOR)
+        for text in texts:
+            with self.subTest(text):
+                self.assertEqual(consumer_smoke._independently_canonical(text),
+                                 _independently_canonical(text))
 
 
 if __name__ == '__main__':

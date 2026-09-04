@@ -19,6 +19,14 @@ WHAT IT ASSERTS, and why each is more than "it did not crash":
   * a consumer that is not checked out is SKIPPED LOUDLY and named in the
     summary. Silence about what was not run is the thing this file's own
     contract forbids.
+  * FIVE CHECKS THAT USED TO BE UNIT TESTS live here now. `test_defaults`,
+    `test_check_props`, `test_canonicalize`, `test_tscn_roundtrip` and
+    `test_uid_codec` each carried a case that walked ~/workspace behind a
+    `skipUnless`, so a tree that is not this repo's was read by four
+    interpreters per matrix run and by nothing at all on CI. They assert the
+    same things here, once, named per consumer. The two WRITE verbs among them
+    run over a `tempfile` COPY, never the checkout — same rule as everything
+    else in this file.
   * THE FRESH PROJECT is smoked too, and it is the one probe here that writes:
     an empty Godot 4 project in a temp dir, `godot-devkit init`, then the REAL
     `make doctor`. The suite proves the written file set and dry-runs every
@@ -48,6 +56,15 @@ DEVKIT = Path(__file__).resolve().parent.parent
 # of one is the drift this import removes.
 sys.path.insert(0, str(DEVKIT / 'src'))
 from godot_devkit.repo import install  # noqa: E402
+# The two moved checks that no CLI verb can ask. Round-trip fidelity is
+# `parse -> serialise == the bytes on disk`, and the uid differential grades
+# the codec against a positional restatement written below — both anchored
+# OUTSIDE the module under test, which is what the out-of-process rule above
+# is protecting. Everything with a verb still goes through `devkit()`.
+from godot_devkit.godot.format.tscn_document import TscnDocument  # noqa: E402
+from godot_devkit.godot.index.uid_codec import (INVALID_ID,  # noqa: E402
+                                                UID_PREFIX, canonical,
+                                                text_to_id)
 
 CONSUMERS = (Path.home() / 'workspace' / 'trail',
              Path.home() / 'workspace' / 'nullbound')
@@ -196,6 +213,264 @@ def _a_class_name(root: Path) -> str | None:
     return None
 
 
+# --- the five checks that used to be `skipUnless(available_consumers())` ------
+# Each number below arrived with the test it came from; none of them was
+# loosened on the way. A floor is here so a broken harvest reads as broken
+# rather than as a small repo, and the ceiling is a calibration, not a target.
+PROPS_DEAD_CEILING = 30      # test_check_props.NoFalsePositivesOnRealRepos
+ROUND_TRIP_FLOOR = 100       # test_tscn_roundtrip: `corpus too small to prove anything`
+UID_CENSUS_FLOOR = 200       # test_uid_codec.CORPUS_UID_FLOOR
+UID_HARVEST_SUFFIXES = ('.tscn', '.tres', '.uid', '.import')
+UID_TEXT = re.compile(r'uid://[0-9a-z]+')
+# What `ResourceSaver.save()` drops, restated from test_canonicalize.degrade:
+# no header uid, path-only refs, no `index=` on instance-child overrides.
+UID_ATTR = re.compile(r' uid="uid://[0-9a-z]+"')
+INDEX_ATTR = re.compile(r' index="\d+"')
+# The engine's uid constants, restated independently of the codec being graded.
+UID_BASE = 34
+UID_CHAR_COUNT = 25
+UID_ID_BITS = 63
+
+
+def degrade(text: str) -> str:
+    """A scene as `PackedScene.pack()` + `ResourceSaver.save()` would leave it."""
+    lines = []
+    for line in text.split('\n'):
+        if line.startswith(('[ext_resource ', '[gd_scene ', '[gd_resource ')):
+            line = UID_ATTR.sub('', line)
+        elif line.startswith('[node '):
+            line = INDEX_ATTR.sub('', line)
+        lines.append(line)
+    return '\n'.join(lines)
+
+
+def _independently_canonical(text: str) -> bool:
+    """Positional restatement: alphabet a-y / 0-8, no leading 'a', fits 63 bits.
+
+    Shares NO code with the codec's round trip — that is the whole point, and
+    it is why this is spelled out here rather than imported. A predicate graded
+    against itself agrees with any bug it has.
+    """
+    body = text[len(UID_PREFIX):]
+    if not body or body[0] == 'a' or any(c in 'z9' for c in body):
+        return False
+    value = 0
+    for char in body:
+        value = value * UID_BASE + (ord(char) - ord('a') if char.isalpha()
+                                    else ord(char) - ord('0') + UID_CHAR_COUNT)
+    return value < (1 << UID_ID_BITS)
+
+
+def _tracked(root: Path, *patterns: str) -> list[str]:
+    """Tracked paths outside addons/ that are on disk."""
+    return [f for f in git(root, 'ls-files', *patterns)
+            if not f.startswith(DEFAULT_EXCLUDES) and (root / f).is_file()]
+
+
+def props_findings(root: Path, report: Report) -> None:
+    """The consumers are the calibration set: every finding here must be real
+    drift, so the count is pinned. If this row changes, look at the diff before
+    changing the number."""
+    name = root.name
+    code, out = devkit(root, 'check', 'props')
+    dead = [ln for ln in out.splitlines() if ln.startswith('  DEAD')]
+    faults = []
+    if 'all accounted for' not in out:
+        faults.append('no `all accounted for` line in the output')
+    if 'BUG' in out:
+        faults.append('the gate reported a BUG')
+    if len(dead) > PROPS_DEAD_CEILING:
+        faults.append(f'{len(dead)} DEAD finding(s), ceiling {PROPS_DEAD_CEILING}')
+    if code != (1 if dead else 0):
+        faults.append(f'exit {code} with {len(dead)} DEAD finding(s)')
+    report.check(name, 'check props findings', not faults,
+                 f'{len(dead)} DEAD, ceiling {PROPS_DEAD_CEILING}, exit {code}'
+                 if not faults
+                 else '; '.join(faults) + f'\n{chr(10).join(dead[:10])}')
+
+
+def scene_round_trip(root: Path, report: Report) -> None:
+    """parse -> serialise with NO mutation, byte-identical, over the whole tree.
+
+    If it is not, the toolkit is more dangerous than `sed`, because it silently
+    touches lines nobody asked it to touch.
+    """
+    name = root.name
+    checked = 0
+    changed: list[str] = []
+    for path in (*root.rglob('*.tscn'), *root.rglob('*.tres')):
+        if '/.git/' in str(path):
+            continue
+        try:
+            original = path.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
+            continue
+        checked += 1
+        if TscnDocument(original, path).text != original:
+            changed.append(str(path))
+    if changed:
+        detail = (f'round trip CHANGED {len(changed)} of {checked} file(s): '
+                  + ', '.join(changed[:5]))
+    elif checked <= ROUND_TRIP_FLOOR:
+        detail = (f'{checked} file(s) read — at or below the floor of '
+                  f'{ROUND_TRIP_FLOOR}; too small to prove anything')
+    else:
+        detail = (f'{checked} .tscn/.tres parsed and re-serialised '
+                  f'byte-identical (floor {ROUND_TRIP_FLOOR})')
+    report.check(name, 'scene round trip',
+                 not changed and checked > ROUND_TRIP_FLOOR, detail)
+
+
+def uid_differential(root: Path, report: Report) -> None:
+    """Every uid this checkout ships, both verdict formulations, zero
+    disagreements allowed — and every repair target itself stable, or `--fix`
+    churns."""
+    name = root.name
+    uids: set[str] = set()
+    for path in root.rglob('*'):
+        if (not path.is_file() or path.suffix not in UID_HARVEST_SUFFIXES
+                or '.git' in path.parts or '.godot' in path.parts):
+            continue
+        try:
+            uids.update(UID_TEXT.findall(
+                path.read_text(encoding='utf-8', errors='replace')))
+        except OSError:
+            continue
+    undecodable, disagreed, unstable = [], [], []
+    noncanonical = 0
+    for text in sorted(uids):
+        if text_to_id(text) == INVALID_ID:
+            undecodable.append(text)
+            continue
+        round_tripped = canonical(text)
+        if (round_tripped == text) != _independently_canonical(text):
+            disagreed.append(text)
+        if round_tripped != text:
+            noncanonical += 1
+            if canonical(round_tripped) != round_tripped:
+                unstable.append(text)
+    faults = [*(f'undecodable: {t}' for t in undecodable[:3]),
+              *(f'the two formulations disagree on {t}' for t in disagreed[:3]),
+              *(f'repair target for {t} is not itself stable' for t in unstable[:3])]
+    if faults:
+        detail = '; '.join(faults)
+    elif len(uids) < UID_CENSUS_FLOOR:
+        detail = (f'harvest broke — {len(uids)} uid(s), below the floor of '
+                  f'{UID_CENSUS_FLOOR}')
+    else:
+        detail = (f'{len(uids)} uid(s) (floor {UID_CENSUS_FLOOR}), '
+                  f'{noncanonical} non-canonical, both formulations agreed '
+                  f'on every one')
+    report.check(name, 'uid codec differential',
+                 not faults and len(uids) >= UID_CENSUS_FLOOR, detail)
+
+
+def canonicalize_restores_a_real_scene(root: Path, report: Report) -> None:
+    """Degrade a REAL scene exactly the way `save()` does, then check that
+    canonicalize puts it back byte-for-byte. Anything the tool invents rather
+    than derives shows up as a diff.
+
+    The scene is the one the degradation costs the MOST lines — a rule rather
+    than a name, decided before any restoration is attempted, so the pick
+    cannot be a pick that passes. (On nullbound it selects
+    scenes/world/maps/quarantine.tscn, which is the file the unit test named.)
+    The header uid is the one loss unrecoverable for a file outside its own
+    repo path, so it must still be ABSENT: inventing one would be worse than
+    the missing ref.
+    """
+    name = root.name
+    best, losses = None, 0
+    for rel in _tracked(root, '*.tscn'):
+        original = (root / rel).read_text(encoding='utf-8', errors='replace')
+        damaged = degrade(original)
+        cost = sum(1 for a, b in zip(original.split('\n'), damaged.split('\n'))
+                   if a != b)
+        if cost > losses:
+            best, losses = (rel, original, damaged), cost
+    if best is None:
+        report.skipped.append(
+            f'{name}: canonicalize round trip (no tracked .tscn that '
+            f'`save()` would degrade)')
+        return
+    rel, original, damaged = best
+    with tempfile.TemporaryDirectory() as tmp:
+        packed = Path(tmp) / 'packed.tscn'
+        packed.write_text(damaged, encoding='utf-8')
+        devkit(root, 'scene', 'canonicalize', str(packed))
+        restored = packed.read_text(encoding='utf-8')
+    head, *body = restored.split('\n')
+    faults = []
+    if UID_ATTR.sub('', head) != head:
+        faults.append(f'a header uid was invented for a file outside the repo: {head}')
+    if body != original.split('\n')[1:]:
+        differing = [i + 2 for i, (a, b) in
+                     enumerate(zip(body, original.split('\n')[1:])) if a != b]
+        faults.append(f'restored != original at line(s) '
+                      f'{differing[:5] or "[length]"}')
+    report.check(name, 'canonicalize round trip', not faults,
+                 f'{rel}: {losses} degraded line(s) restored byte-for-byte'
+                 if not faults else f'{rel}: ' + '; '.join(faults))
+
+
+def defaults_elision(root: Path, report: Report) -> None:
+    """Over a real repo `--elide-defaults` must stay a pure, stable deletion.
+
+    A WRITE verb, so the corpus is copied into a throwaway git repo first and
+    the checkout is never opened for writing. A consumer already canonical
+    exercises nothing, which is reported rather than counted as proof.
+    """
+    name = root.name
+    tracked = _tracked(root, '*.tres', '*.gd', '*.gd.uid')
+    files = [rel for rel in tracked if rel.endswith('.tres')]
+    if not files:
+        report.skipped.append(f'{name}: defaults elision (no .tres tracked)')
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / 'repo'
+        copy.mkdir()
+        # The consumer's OWN project.godot: the point of this row is a real
+        # tree, and repo_root() needs the marker file to find one.
+        shutil.copy2(root / 'project.godot', copy / 'project.godot')
+        for rel in tracked:
+            target = copy / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / rel, target)
+        subprocess.run(['git', 'init', '-q'], cwd=copy, check=True,
+                       capture_output=True)
+        subprocess.run(['git', 'add', '-A'], cwd=copy, check=True,
+                       capture_output=True)
+        read = {rel: (copy / rel).read_text(encoding='utf-8', errors='replace')
+                for rel in files}
+        code, out = devkit(copy, 'scene', 'canonicalize', '--elide-defaults', *files)
+        once = {rel: (copy / rel).read_text(encoding='utf-8', errors='replace')
+                for rel in files}
+        devkit(copy, 'scene', 'canonicalize', '--elide-defaults', *files)
+        twice = {rel: (copy / rel).read_text(encoding='utf-8', errors='replace')
+                 for rel in files}
+    faults = []
+    if code != 0:
+        faults.append(f'exit {code}\n{out[-1200:]}')
+    if once != twice:
+        moved = sorted(rel for rel in files if once[rel] != twice[rel])
+        faults.append(f'not idempotent over {len(moved)} file(s): {moved[:5]}')
+    changed = 0
+    for rel in files:
+        old, new = read[rel].split('\n'), once[rel].split('\n')
+        if old != new:
+            changed += 1
+        # Deletion only: every surviving line is an original line, in order.
+        if new != [line for line in old if line in new] or len(new) > len(old):
+            faults.append(f'not a pure deletion: {rel}')
+            break
+    if not changed:
+        report.skipped.append(
+            f'{name}: defaults elision changed NOTHING — the corpus is already '
+            f'canonical, so this row exercised the fixer on no file')
+    report.check(name, 'defaults elision', not faults,
+                 f'{len(files)} .tres copied, {changed} elided, deletion-only '
+                 f'and idempotent' if not faults else '; '.join(faults))
+
+
 def smoke(root: Path, report: Report) -> None:
     name = root.name
     before = git(root, 'status', '--porcelain')
@@ -251,6 +526,12 @@ def smoke(root: Path, report: Report) -> None:
         code, out = devkit(root, *argv)
         report.check(name, ' '.join(argv), code == 0,
                      f'exit {code}' + ('' if code == 0 else f'\n{out[-1500:]}'))
+
+    props_findings(root, report)
+    scene_round_trip(root, report)
+    uid_differential(root, report)
+    canonicalize_restores_a_real_scene(root, report)
+    defaults_elision(root, report)
 
     after = git(root, 'status', '--porcelain')
     report.check(name, 'checkout unchanged', after == before,

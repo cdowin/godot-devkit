@@ -16,7 +16,7 @@ import contextlib
 import io
 import unittest
 
-from support import FIXTURES, available_consumers, run_check, temp_repo
+from support import FIXTURES, run_check, temp_repo
 
 from godot_devkit.godot.write import scene_canonicalize
 from godot_devkit.godot.checks import defaults as defaults_check
@@ -217,64 +217,9 @@ class Fixer(unittest.TestCase):
             self.assertEqual((root / REDUNDANT).read_text(encoding='utf-8'), before)
 
 
-class ConsumerCorpus(unittest.TestCase):
-    """Over a real repo the transform must stay a pure, stable deletion.
-
-    Write verbs never touch a live consumer checkout — the corpus is copied into
-    the throwaway repo first.
-    """
-
-    def test_deletion_only_and_idempotent_over_a_real_tree(self) -> None:
-        consumers = available_consumers()
-        if not consumers:
-            self.skipTest('no consumer checkout present')
-        # Try each consumer and keep the first that still has something to
-        # elide. A consumer that has ALREADY been canonicalized exercises
-        # nothing, and asserting against that turns "the fixer did its job"
-        # into a permanent red — which is what happened here.
-        for source in consumers:
-            outcome = self._elide_over(source)
-            if outcome is not None:
-                return
-        self.skipTest('every consumer corpus is already canonical — nothing to '
-                      'elide, so this case cannot exercise the fixer')
-
-    def _elide_over(self, source):
-        """Run the corpus case against one consumer. None if it changed nothing."""
-        import shutil
-        import subprocess
-        tracked = subprocess.run(
-            ['git', 'ls-files', '*.tres', '*.gd', '*.gd.uid'], cwd=source,
-            capture_output=True, text=True, check=False).stdout.split()
-        if not tracked:
-            return None
-        with temp_repo('defaults_repo', only=['project.godot']) as root:
-            for rel in tracked:
-                if rel.startswith('addons/'):
-                    continue
-                target = root / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source / rel, target)
-            subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
-            files = [rel for rel in tracked
-                     if rel.endswith('.tres') and not rel.startswith('addons/')]
-            before = {rel: (root / rel).read_text(encoding='utf-8') for rel in files}
-            code, _ = canonicalize_in_repo('--elide-defaults', *files)
-            self.assertEqual(code, scene_canonicalize.EXIT_OK)
-            once = {rel: (root / rel).read_text(encoding='utf-8') for rel in files}
-            canonicalize_in_repo('--elide-defaults', *files)
-            twice = {rel: (root / rel).read_text(encoding='utf-8') for rel in files}
-        self.assertEqual(once, twice, 'not idempotent over the consumer corpus')
-        changed = 0
-        for rel in files:
-            old, new = before[rel].split('\n'), once[rel].split('\n')
-            if old != new:
-                changed += 1
-            # Deletion only: every surviving line is an original line, in order.
-            self.assertEqual(new, [line for line in old if line in new], rel)
-            self.assertLessEqual(len(new), len(old), rel)
-        return changed or None
-
+# Over a real consumer tree the transform must stay a pure, stable deletion
+# — that is `make smoke`'s `defaults elision` row, which copies the corpus
+# into a throwaway repo before the write verb ever runs.
 
 class ParserSharing(unittest.TestCase):
     def test_the_analyzer_reads_the_same_sections_the_document_edits(self) -> None:

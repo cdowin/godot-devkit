@@ -52,9 +52,9 @@ UNMARKED_MODULES = (
     'test_verdict.py',
 )
 
-# The `tests/support` names whose use means a spawn. Five of the package's 24
+# The `tests/support` names whose use means a spawn. Five of the package's 23
 # helpers: `temp_repo` and `tree` (`git init` a scratch repo), `git`, and
-# `commit`/`porcelain`, which reach it through `git`. The other nineteen —
+# `commit`/`porcelain`, which reach it through `git`. The other eighteen —
 # `run_check`, `run_cli`, `run_gate`, the ledger line builders — run in
 # process, which is exactly why the derivation reads the call graph instead of
 # the module's import list.
