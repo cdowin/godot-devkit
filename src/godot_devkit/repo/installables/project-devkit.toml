@@ -150,3 +150,9 @@
 # cap           = 300
 # infra         = []
 # ledger        = { "tests/integration/boot/test_boot.gd" = 412 }
+# Opt-in: every scenario says why it boots and what it covers. The rule is
+# asked of the roster `runner --list` prints — the integration runner owns
+# discovery — so header = true needs that file where install-runners put it.
+# header        = false
+# header_ledger = []
+# runner        = "tools/dev/runners/integration.sh"

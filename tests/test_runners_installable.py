@@ -582,9 +582,9 @@ def _slice_fixture(tmp_path: Path, git_root: Path | None = None) -> Path:
     return runner
 
 
-def _slice(runner: Path, *argv: str) -> subprocess.CompletedProcess:
+def _slice(runner: Path, *argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(['bash', str(runner), *argv], cwd=runner.parents[3],
-                          text=True, capture_output=True, env=SLICE_ENV)
+                          text=True, capture_output=True, env={**SLICE_ENV, **(env or {})})
 
 
 def _ran(done: subprocess.CompletedProcess) -> set[str]:
@@ -798,3 +798,45 @@ def test_a_doubled_slash_entry_is_undeclared_not_a_silent_never_match(tmp_path):
     assert _ran(done) == {'smoke'}, done.stdout
     assert 'UNDECLARED: 3 scenario(s)' in done.stdout, done.stdout
     assert '    alpha_flow' in done.stdout, 'a doubled-slash entry read as a declaration that never matches'
+
+
+# --- --list: the roster, owned here and read by the gate ---------------------
+# `check test-shape` scanned `git ls-files` minus infra basenames while this
+# runner discovers with find minus support/, the capture tools and its
+# keep-list — two rosters, and the header rule was asked of files --diff can
+# never slice to. The runner owns discovery (its config is in this file and in
+# GDK_* env, where no TOML reader can see it), so it prints the roster and the
+# gate asks.
+ROSTER = {'tests/integration/alpha/alpha_flow.gd', 'tests/integration/beta/beta_flow.gd',
+          'tests/integration/smoke.gd'}
+
+
+def test_list_prints_the_roster_the_sweep_would_boot_and_boots_nothing(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert set(done.stdout.split('\n')) - {''} == ROSTER, done.stdout
+    assert done.stdout.split('\n')[:-1] == sorted(ROSTER), 'the roster is sorted'
+    assert _ran(done) == set(), 'listing the roster booted something'
+
+
+def test_list_honours_the_runners_own_keep_list(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list', env={'GDK_CAPTURE_GATE_RE': '^(eyes_capture)$'})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert set(done.stdout.split('\n')) - {''} == ROSTER | {'tests/integration/tools_only/eyes_capture.gd'}
+
+
+def test_list_takes_no_argument(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list', 'extra')
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert _ran(done) == set()
+
+
+def test_an_empty_roster_is_a_fail_naming_the_directory(tmp_path):
+    runner = _slice_fixture(tmp_path)
+    done = _slice(runner, '--list', env={'GDK_SCENARIO_SOURCE_DIR': 'tests/integration/tools_only'})
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'EMPTY' in done.stderr and 'tests/integration/tools_only' in done.stderr, done.stderr
+    assert done.stdout == ''

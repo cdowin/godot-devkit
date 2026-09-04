@@ -14,8 +14,16 @@
 # --all); `check test-shape` is the gate that refuses one. `--all` stays the
 # milestone gate and the gate for a change to the tier's own ground.
 #
+# THIS FILE OWNS THE ROSTER. What --all boots — the source dir minus support/,
+# the capture tools (less the keep-list) and the infra basenames — is decided
+# by the config block below and the GDK_* env, which a consumer edits and no
+# TOML reader can see. So `--list` prints it, booting nothing, and
+# `check test-shape` asks the header rule of exactly that set rather than of a
+# second census of its own.
+#
 # Usage:
 #   tools/dev/runners/integration.sh --all              # every scenario
+#   tools/dev/runners/integration.sh --list             # the roster --all would boot, boots nothing
 #   tools/dev/runners/integration.sh --smoke            # just the smoke scenario
 #   tools/dev/runners/integration.sh --system protocol  # the tests/integration/protocol/ directory
 #   tools/dev/runners/integration.sh --diff HEAD        # what the uncommitted change covers, + smoke
@@ -85,6 +93,10 @@ goes through scenario.sh, so the isolation is a process boundary rather than a
 convention.
 
   --all            every discovered scenario
+  --list           the roster: every scenario file --all would boot, one
+                   repo-relative path per line, sorted, booting nothing —
+                   what `check test-shape` asks the header rule of. An
+                   EMPTY roster is exit 1
   --smoke          just GDK_SMOKE_SCENARIO
   --system <dir>   every discovered scenario under <source dir>/<dir>/ — the
                    DIRECTORY, so `--system threads` is tests/integration/threads/.
@@ -118,10 +130,10 @@ USAGE_EOF
 }
 
 # --- discovery ---------------------------------------------------------------
-# discover_gate_files [dir] — every scenario FILE the sweep should boot, as a
-# path under dir, one per line, sorted. Takes the directory as an argument so
-# the self-test can point it at a fixture tree instead of planting probe files
-# in the real one.
+# discover_gate_files [dir] — THE ROSTER: every scenario FILE the sweep should
+# boot, as a path under dir, one per line, sorted. Takes the directory as an
+# argument so the self-test can point it at a fixture tree instead of planting
+# probe files in the real one. `--list` prints exactly this.
 discover_gate_files() {
 	local dir="${1:-$GDK_SCENARIO_SOURCE_DIR}"
 	[ -d "$dir" ] || return 0
@@ -460,7 +472,18 @@ self_test() {
 	[ "$out" = "plain_gate protocol_boot thing_capture " ] \
 		|| miss "the keep-list did not restore the gate, got '$out'"
 
-	# --- --system selects the DIRECTORY ------------------------------------
+	# --- --list: the roster, for the gate that asks it ------------------------
+	cases=$((cases + 1))
+	rc=0; bash "$0" --list extra >/dev/null 2>&1 || rc=$?
+	[ "$rc" -eq 2 ] || miss "--list takes no argument, got $rc"
+	cases=$((cases + 1))
+	out="$(GDK_SCENARIO_SOURCE_DIR="$scratch" bash "$0" --list 2>/dev/null | names_of | tr '\n' ' ')"
+	[ "$out" = "plain_gate protocol_boot " ] \
+		|| miss "--list should print exactly the sweep's roster, got '$out'"
+	cases=$((cases + 1))
+	rc=0; GDK_SCENARIO_SOURCE_DIR="$scratch/tools_only" bash "$0" --list >/dev/null 2>&1 || rc=$?
+	[ "$rc" -eq 1 ] || miss "--list over an EMPTY roster must FAIL (exit 1), got $rc"
+
 	cases=$((cases + 1))
 	out="$(select_system protocol "$scratch" | names_of | tr '\n' ' ')"
 	[ "$out" = "protocol_boot " ] || miss "--system protocol should select the directory, got '$out'"
@@ -615,13 +638,29 @@ case "${1:-}" in
 		self_test_rc=0; self_test || self_test_rc=$?; exit "$self_test_rc" ;;
 esac
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/$REPO_ROOT_FROM_HERE" && pwd)" || exit 2
-SCENARIO_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$GDK_SCENARIO_RUNNER"
+# Resolved before the cd: a relative $0 stops resolving once the cwd moves.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 2
+REPO_ROOT="$(cd "$SCRIPT_DIR/$REPO_ROOT_FROM_HERE" && pwd)" || exit 2
+cd "$REPO_ROOT" || exit 2
+
+# --list boots nothing and needs no scenario.sh, so it is answered before that
+# file is looked for: the gate that asks it runs where no scenario ever does.
+if [ "${1:-}" = "--list" ]; then
+	[ "$#" -eq 1 ] || { echo "[$GATE_TAG] --list takes no argument. See --help." >&2; exit 2; }
+	roster="$(discover_gate_files)"
+	if [ -z "$roster" ]; then
+		echo "[$GATE_TAG] FAIL — the roster is EMPTY: no gate under $GDK_SCENARIO_SOURCE_DIR/ (support/, capture tools and infra are not swept)" >&2
+		exit 1
+	fi
+	printf '%s\n' "$roster"
+	exit 0
+fi
+
+SCENARIO_SH="$SCRIPT_DIR/$GDK_SCENARIO_RUNNER"
 if [ ! -f "$SCENARIO_SH" ]; then
 	echo "[$GATE_TAG] scenario.sh not found at '$SCENARIO_SH' — set GDK_SCENARIO_RUNNER" >&2
 	exit 2
 fi
-cd "$REPO_ROOT" || exit 2
 
 NAMES=()
 SLICE_NOTE=""
