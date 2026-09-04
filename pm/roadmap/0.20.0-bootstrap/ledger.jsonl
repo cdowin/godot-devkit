@@ -1,0 +1,4 @@
+{"ts":"2026-09-04T18:42:27Z","kind":"status","grain":"0.20.0/makefile-include/projects-extend-not-fork","from":"todo","to":"ready"}
+{"ts":"2026-09-04T18:42:27Z","kind":"status","grain":"0.20.0/generic-runners/consumers-delete-their-runners","from":"todo","to":"ready"}
+{"ts":"2026-09-04T18:42:28Z","kind":"status","grain":"0.20.0/ci-set/consumers-adopt-and-delete-duplicates","from":"todo","to":"ready"}
+{"ts":"2026-09-04T18:42:28Z","kind":"status","grain":"0.20.0/generic-scans/consumers-delete-their-copies","from":"todo","to":"ready"}
