@@ -609,16 +609,17 @@ class GitSource(Source):
         A pointer spelled ABSOLUTE resolves to nothing here and its record is
         listed as absent rather than read off today's disk — an absolute path
         is in no rev, and answering it from the working tree would put a file
-        the milestone never shipped with into a report about history.
+        the milestone never shipped with into a report about history. That
+        holds when the path happens to fall INSIDE the root too: relativising
+        it would read whatever sits at that path in the rev, and the pointer
+        never named that — it named a place on one machine's disk.
         """
         ffile = self.feature_file(cfg, fid)
         if ffile is None:
             return None
         pointer = model.unquote(self.field_of(ffile, 'reviewed'))
-        if pointer and pointer != 'null':
-            target = (Path(pointer) if pointer.startswith('/')
-                      else cfg.root / pointer)
-            if self.is_file(target):
+        if pointer and pointer != 'null' and not pointer.startswith('/'):
+            if self.is_file(cfg.root / pointer):
                 return pointer
         if cfg.review_slug_fallback:
             slug = fid.partition('/')[2]

@@ -278,9 +278,15 @@ class AtARev(unittest.TestCase):
             outside = root / 'todays-record.md'
             outside.write_text(RECORD.replace('SHIP-WITH-FIXES', 'HOLD'),
                                encoding='utf-8')
+            # Resolved: the pointer must be spelled the way git names the
+            # root (`rev-parse --show-toplevel` follows symlinks; a macOS
+            # tempdir is one), or the mismatch alone hides the file from the
+            # rev read and the case passes for the wrong reason. `commit`
+            # adds `-A`, so the record IS in the rev — an absolute pointer
+            # must still not reach it.
             write(root / f'{MILESTONE_DIR}/features/alpha/feature.md',
                   {'id': FEATURE, 'milestone': '"0.1"', 'name': 'Alpha',
-                   'status': 'done', 'reviewed': str(outside)})
+                   'status': 'done', 'reviewed': str(outside.resolve())})
             commit(root, 'an absolute pointer')
             git(root, 'tag', TAG)
             code, out = report(root, '0.1', '--from', TAG)
