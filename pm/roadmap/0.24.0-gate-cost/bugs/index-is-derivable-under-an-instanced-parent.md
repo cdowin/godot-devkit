@@ -97,7 +97,7 @@ Still an engine question and nothing in the corpus can answer it: **does `pack()
 a created node in an inherited scene?**
 
 Re-save **`trail/scenes/moments/force_resolution.tscn`** in the Godot editor — better than one of
-the ten, because it holds all three positions at once and separates all three hypotheses in one
+the ten, because it holds all three positions at once and separates all four outcomes in one
 save. Revert afterwards; nothing needs committing.
 
 | what the re-saved file does | what it means |
