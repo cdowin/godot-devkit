@@ -183,6 +183,73 @@ def test_force_overwrites_every_entry(command):
                     == install.body_of(name)), rel
 
 
+# --- what a release is allowed to TELL a consumer to do -----------------------
+# `--force` is whole-set (the test above pins it) and there is no per-file
+# option, so a consumer who edited one file of a plan loses it. Measured
+# read-only on the live consumers when this was found: trail's `verify.yml`
+# differs from the installable by 177 lines and is a deliberate two-job sharded
+# workflow whose own header says why it does not run `make milestone`, and
+# nullbound's `auto-tag.yml` differs by one path filter. The release notes said
+# "`install-ci --diff` then `--force`, re-applying nothing", which told the
+# first of those to delete its CI.
+#
+# The trigger is the paragraph that IS the instruction — the one carrying
+# "follow-up" — never prose that merely mentions the flag. CHANGELOG.md is
+# scoped to `## Unreleased`: a released section is a RECORD and is never
+# rewritten to satisfy a rule written after it.
+INSTRUCTION_SITES = ('CHANGELOG.md', '.claude/skills/release/SKILL.md')
+INSTRUCTION_MARKER = 'follow-up'
+# The cost, in any of the words somebody would reach for. A closed list, so
+# what the gate accepts is reviewable rather than guessed at.
+NAMES_THE_COST = ('per-file', 'per file', 'PER FILE', 'whole-set', 'whole set',
+                  'all four')
+# Claims that are FALSE of a whole-set --force, in the spellings this package
+# has actually used. Closed, and each one earns its place by having shipped.
+COST_FREE_CLAIMS = ('re-applying nothing', 're-applies nothing',
+                    'nothing to re-apply')
+
+
+def unreleased(text: str) -> str:
+    """The section that becomes the next release's notes."""
+    at = text.index('## Unreleased')
+    rest = text[at + len('## Unreleased'):]
+    end = rest.find('\n## ')
+    return rest if end < 0 else rest[:end]
+
+
+def test_no_shipped_instruction_offers_force_without_naming_what_it_costs():
+    """A release note is read once, acted on, and not re-read. So the sentence
+    that sends a consumer to `--force` has to carry the one fact that decides
+    whether they should: the verb writes a SET, and a file they edited on
+    purpose is in it."""
+    whole_set = {verb for verb, entries in install.PLANS.items()
+                 if len(entries) > 1}
+    assert whole_set, 'no verb writes a set — this rule has no subject'
+    checked = 0
+    for rel in INSTRUCTION_SITES:
+        text = (REPO_ROOT / rel).read_text(encoding='utf-8')
+        body = unreleased(text) if rel.endswith('CHANGELOG.md') else text
+        for number, para in enumerate(body.split('\n'), 1):
+            named = [verb for verb in whole_set
+                     if verb in para or 'install-*' in para]
+            if '--force' not in para or not named:
+                continue
+            if INSTRUCTION_MARKER not in para.lower():
+                continue
+            checked += 1
+            where = f'{rel} (paragraph {number}), naming {sorted(named)}'
+            assert '--diff' in para, (
+                f'{where}: sends a consumer to --force without --diff first')
+            assert any(word in para for word in NAMES_THE_COST), (
+                f'{where}: `--force` is whole-set and has no per-file option, '
+                f'so this has to say so — one of {NAMES_THE_COST}')
+            for claim in COST_FREE_CLAIMS:
+                assert claim not in para, (
+                    f'{where}: "{claim}" is false of a whole-set --force')
+    assert checked, ('no consumer follow-up instruction was found in '
+                     f'{INSTRUCTION_SITES} — the rule scanned nothing')
+
+
 @pytest.mark.parametrize('command', VERBS)
 def test_diff_prints_a_unified_diff_and_writes_nothing(command):
     first = DESTINATIONS[command][0]
