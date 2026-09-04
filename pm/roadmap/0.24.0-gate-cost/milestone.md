@@ -1,7 +1,7 @@
 ---
 id: "0.24.0"
 name: gate-cost
-status: building
+status: done
 depends_on: []
 branch: milestone/0.24.0-gate-cost
 ---
