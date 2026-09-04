@@ -3,7 +3,7 @@ id: 0.24.0/consumer-reads-leave-the-unit-suite/real-tree-tests-become-smoke-rows
 feature: 0.24.0/consumer-reads-leave-the-unit-suite
 milestone: "0.24.0"
 name: the two real-consumer-tree tests move into consumer_smoke.py
-status: wip
+status: todo
 owner:
 depends_on: []
 ---
