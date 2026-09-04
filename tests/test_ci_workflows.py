@@ -17,17 +17,23 @@ the include does not define.
 """
 from __future__ import annotations
 
+import contextlib
+import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from support import REPO_ROOT  # noqa: E402
+from support import REPO_ROOT, run_check  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT / 'src'))
+from godot_devkit.core.project import load_config, repo_root  # noqa: E402
 from godot_devkit.repo import install  # noqa: E402
+from godot_devkit.repo.checks import hooks as check_hooks  # noqa: E402
 
 INCLUDE = REPO_ROOT / 'src/godot_devkit/repo/installables/Makefile.devkit'
 WORKFLOWS = tuple((name, rel) for name, rel in install.PLANS['install-ci'])
@@ -347,19 +353,28 @@ def test_the_compare_step_ignores_an_unclosed_fence_and_strips_trailing_space(tm
 
 VERIFY = 'ci-verify.yml'
 GODOT_GUARD = "hashFiles('project.godot') != ''"
-KNOWN_GUARDS = ('', GODOT_GUARD, 'failure()')
+# `core.hooksPath` is repo-LOCAL git config: nothing tracked carries it and a
+# fresh `actions/checkout` has never had it set, so a repo that runs `check
+# hooks` in its full gate is UNARMED on every CI run however armed the
+# developer's tree is. The arming step is guarded the same way the engine steps
+# are — a repo with no `tools/setup-hooks.sh` has no corpus to arm.
+HOOKS_GUARD = "hashFiles('tools/setup-hooks.sh') != ''"
+ARM_STEP = 'Arm the tracked git hooks'
+KNOWN_GUARDS = ('', GODOT_GUARD, HOOKS_GUARD, 'failure()')
 # The `config/features` line a real Godot 4 project carries, verbatim from the
 # consumer whose hand edit this fix promotes. The engine line is the FIRST
 # entry; the patch level is nowhere in the file, which is why it is the knob.
 CONSUMER_FEATURES = 'config/features=PackedStringArray("4.6", "Forward Plus")\n'
 
 
-def steps_of(text: str) -> list[tuple[str, str]]:
-    """(label, guard) for every step of the job, in order.
+def steps_of(text: str) -> list[tuple[str, str, str]]:
+    """(label, guard, script) for every step of the job, in order.
 
     The same indentation reader the rest of this file uses: a step is a `- ` at
-    the list's indent, its keys sit one level in, and a `run: |` body is deeper
-    still and never read as structure.
+    the list's indent, its keys sit one level in, and a `run:` body is deeper
+    still — read as SCRIPT, never as structure, so a case can EXECUTE what the
+    file says instead of restating it. A blank line inside a body is dropped,
+    which is a no-op line in a shell script and a no-op here.
     """
     lines = text.splitlines()
     at = next(i for i, line in enumerate(lines) if line.strip() == 'steps:')
@@ -381,33 +396,47 @@ def steps_of(text: str) -> list[tuple[str, str]]:
     out = []
     for block in blocks:
         keys: dict[str, str] = {}
+        script: list[str] = []
+        in_script = False
         for number, line in enumerate(block):
             indent = len(line) - len(line.lstrip(' '))
             if number == 0:
                 body_line = line.lstrip()[2:]
+            elif in_script and indent > step_indent + 2:
+                script.append(line[step_indent + 4:])
+                continue
             elif indent == step_indent + 2 and not line.lstrip().startswith('#'):
+                in_script = False
                 body_line = line.lstrip()
             else:
                 continue
             key, _, value = body_line.partition(':')
-            keys.setdefault(key.strip(), value.strip())
-        out.append((keys.get('name') or keys.get('uses', '?'), keys.get('if', '')))
+            key, value = key.strip(), value.strip()
+            keys.setdefault(key, value)
+            if key == 'run':
+                in_script = value in BLOCK_SCALAR
+                if not in_script:
+                    script.append(value)
+        out.append((keys.get('name') or keys.get('uses', '?'),
+                    keys.get('if', ''), '\n'.join(script)))
     return out
 
 
-def would_run(text: str, *, project_godot: bool) -> list[str]:
-    """The step labels GitHub schedules on a green run, with/without the file.
+def would_run(text: str, *, project_godot: bool,
+              setup_hooks: bool = True) -> list[str]:
+    """The step labels GitHub schedules on a green run, with/without the files.
 
     An `if:` this reader does not know is REFUSED rather than assumed to run:
     a future edit to some other guard fails here instead of quietly listing a
     step that would skip.
     """
+    present = {GODOT_GUARD: project_godot, HOOKS_GUARD: setup_hooks}
     out = []
-    for label, guard in steps_of(text):
+    for label, guard, _ in steps_of(text):
         assert guard in KNOWN_GUARDS, f'{label}: unreadable guard {guard!r}'
         if guard == 'failure()':
             continue
-        if guard == GODOT_GUARD and not project_godot:
+        if guard and not present[guard]:
             continue
         out.append(label)
     return out
@@ -434,7 +463,90 @@ def test_a_tree_with_no_project_godot_still_runs_the_gate_on_uv_alone():
     The list is asserted whole: a new unguarded step here is a step every
     non-Godot consumer pays for."""
     assert would_run(body(VERIFY), project_godot=False) == [
+        'actions/checkout@v4', ARM_STEP, 'astral-sh/setup-uv@v5',
+        'make milestone']
+    # And a tree with neither file is back to the three-step run: both
+    # additions this release makes are guarded, neither is a tax on a repo
+    # that ships neither.
+    assert would_run(body(VERIFY), project_godot=False,
+                     setup_hooks=False) == [
         'actions/checkout@v4', 'astral-sh/setup-uv@v5', 'make milestone']
+
+
+def test_the_checkout_is_ARMED_before_the_gate_that_asks_whether_it_is():
+    """A checkout is not a developer's tree.
+
+    `core.hooksPath` is repo-local git config; `actions/checkout` produces a
+    tree that has never had it set, so a repo whose full gate runs `check
+    hooks` was red on EVERY clean run — the gate reporting a true fact about
+    the runner, and the release protocol unable to complete because of it.
+    The same shape as the engine steps: the gate assumes a prepared tree, and
+    preparing it is what the steps ahead of it are for.
+    """
+    ran = would_run(body(VERIFY), project_godot=True)
+    assert ARM_STEP in ran, f'nothing arms the checkout: {ran}'
+    assert ran.index(ARM_STEP) < ran.index('make milestone'), (
+        f'the checkout is armed after the gate that reads it: {ran}')
+    script = next(s for label, _, s in steps_of(body(VERIFY))
+                  if label == ARM_STEP)
+    assert script.strip() == 'bash tools/setup-hooks.sh', script
+
+
+@contextlib.contextmanager
+def a_fresh_checkout():
+    """A repo as `actions/checkout` hands one over: the corpus tracked and on
+    disk, and NO repo-local git config, because none is tracked and the runner
+    has never run anything in it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / 'checkout'
+        root.mkdir()
+        subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=root, check=True)
+        previous = Path.cwd()
+        os.chdir(root)
+        repo_root.cache_clear()
+        load_config.cache_clear()
+        try:
+            assert install.main('install-hooks', []) == 0
+            yield root
+        finally:
+            os.chdir(previous)
+            repo_root.cache_clear()
+            load_config.cache_clear()
+
+
+def test_running_the_workflows_own_steps_is_what_turns_the_gate_green():
+    """The defect end to end, in a checkout rather than in the file's shape.
+
+    The scripts are READ OUT of the workflow and executed, so a step that stops
+    arming — or arms with something that does not work — reds here. `make
+    milestone` is the step under test and is not run.
+    """
+    with a_fresh_checkout() as root:
+        assert not subprocess.run(
+            ['git', 'config', '--get', 'core.hooksPath'], cwd=root,
+            capture_output=True, text=True).stdout.strip(), (
+                'a fresh checkout came with core.hooksPath already set')
+        unarmed, said = run_check(check_hooks)
+        assert unarmed == 1 and 'UNARMED' in said, said
+
+        for label, guard, script in steps_of(body(VERIFY)):
+            if not script or label == 'make milestone':
+                continue
+            assert guard in KNOWN_GUARDS, f'{label}: unreadable guard {guard!r}'
+            if guard == HOOKS_GUARD and not (root / 'tools/setup-hooks.sh').exists():
+                continue
+            if guard in (GODOT_GUARD, 'failure()'):
+                continue
+            done = subprocess.run(['bash', '-c', script], cwd=root,
+                                  capture_output=True, text=True)
+            assert done.returncode == 0, f'{label}: {done.stderr}'
+
+        assert subprocess.run(
+            ['git', 'config', '--get', 'core.hooksPath'], cwd=root,
+            capture_output=True, text=True).stdout.strip() == check_hooks.HOOKS_DIR
+        armed, said = run_check(check_hooks)
+    assert armed == 0, said
+    assert '[check:hooks] PASS' in said, said
 
 
 def test_the_engine_version_is_derived_and_only_the_patch_is_written_down():
