@@ -202,7 +202,7 @@ REWORK_TABLE = """\
 feature    story         reopens  after_review
 0.1/alpha  0.1/alpha/s0        1             2
 0.1/alpha  0.1/alpha/s1        -             -
-0.1/beta   0.1/beta/s0         0             -
+0.1/beta   0.1/beta/s0         -             -
 
 -- verdict distribution (2)
 verdict          records
@@ -335,9 +335,17 @@ class Rework(unittest.TestCase):
         self.assertEqual(row, [ALPHA, A_S1, '-', '-'])
 
     def test_a_story_that_never_reached_review_has_no_after_count(self):
-        """`0`, not `-`, for reopens: its rows WERE read and none was one."""
+        """`-` in BOTH columns, and they are one observation, not two.
+
+        This row used to read `0  -`: no reopens, unknown dispatches after
+        review, in one line. The `0` was reasoned from a review state the same
+        row admits it never saw — and it is indistinguishable from a story
+        whose review WAS recorded, under the spelling a pre-bump ledger uses
+        (`Vocabulary` below). Nothing in these rows can tell the two apart, so
+        neither column says anything about review here.
+        """
         row = row_of(seeded_report(self), REWORK, 'story (3)', BETA)
-        self.assertEqual(row, [BETA, B_S0, '0', '-'])
+        self.assertEqual(row, [BETA, B_S0, '-', '-'])
 
 
 class Escapes(unittest.TestCase):
@@ -453,6 +461,65 @@ class Vocabulary(unittest.TestCase):
             out = report(root, '0.1')[1]
         self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2], '1')
 
+    def test_a_legacy_history_dashes_reopens_though_the_config_is_stock(self):
+        """The guard above is against a renamed CONFIG. The miss arrives
+        through HISTORY: every ledger row written before a consumer's pin bump
+        spells the pair `wip`/`review`, and the config it is read under is the
+        new stock set — so `reopenable` is true and the column fills with a
+        number over a machine this rule still cannot read. Two real reopens,
+        reported as `0`, is the read-side cardinal sin with a column header on
+        it (rule 4)."""
+        with tree(story_statuses=('building',)) as root:
+            put_ledger(root,
+                       status_line('2026-09-01T10:00:00Z', A_S0, 'wip',
+                                   'review'),
+                       status_line('2026-09-02T10:00:00Z', A_S0, 'review',
+                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', A_S0, 'wip',
+                                   'review'),
+                       status_line('2026-09-04T10:00:00Z', A_S0, 'review',
+                                   'wip'))
+            out = report(root, '0.1')[1]
+        self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2], '-')
+        self.assertIn('- reopen(s)', section_of(out, REWORK))
+
+    def test_a_migrated_story_beside_a_legacy_one_does_not_re_arm_the_column(self):
+        """The guard is PER STORY, because the ledger it has to be right about
+        holds both spellings at once. One day after the bump, `s1` has a
+        `to: reviewing` row and `s0`'s history is still entirely legacy — a
+        ledger-WIDE test would find s1's row, re-arm the column, and print
+        s0's false `0` again. s1 keeps a real `0`: its rows WERE read in the
+        vocabulary the rule counts in, and none of them was a reopen."""
+        with tree(story_statuses=('building', 'building')) as root:
+            put_ledger(root,
+                       status_line('2026-09-01T10:00:00Z', A_S0, 'wip',
+                                   'review'),
+                       status_line('2026-09-02T10:00:00Z', A_S0, 'review',
+                                   'wip'),
+                       status_line('2026-09-05T10:00:00Z', A_S1, 'building',
+                                   'reviewing'))
+            out = report(root, '0.1')[1]
+        cells = {r[1]: r[-2] for r in block_rows(out, REWORK, 'story (2)')}
+        self.assertEqual(cells, {A_S0: '-', A_S1: '0'})
+
+    def test_the_column_is_armed_by_a_ROW_and_not_by_a_readable_timestamp(self):
+        """`reopens` and `after_review` read the same rows for two different
+        facts, and only one of them needs the clock. The arrival row here is
+        unreadable as a TIME and perfectly readable as a TRANSITION: the reopen
+        beneath it was seen and counts, while `after_review` — which can only
+        be measured from a moment — stays `-`. Collapsing the two onto the
+        parsed timestamp would drop a reopen this ledger states outright."""
+        with tree(story_statuses=('building',)) as root:
+            put_ledger(root,
+                       json.dumps({'ts': 'not-a-timestamp', 'kind': 'status',
+                                   'grain': A_S0, 'from': 'building',
+                                   'to': 'reviewing'}),
+                       status_line('2026-09-02T10:00:00Z', A_S0, 'reviewing',
+                                   'building'))
+            out = report(root, '0.1')[1]
+        self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2:],
+                         ['1', '-'])
+
 
 class NoData(unittest.TestCase):
     """A section with nothing in it prints ONE line, never a table of zeros."""
@@ -533,7 +600,7 @@ class Json(unittest.TestCase):
                  'after_review': 2},
                 {'grain': A_S1, 'feature': ALPHA, 'reopens': None,
                  'after_review': None},
-                {'grain': B_S0, 'feature': BETA, 'reopens': 0,
+                {'grain': B_S0, 'feature': BETA, 'reopens': None,
                  'after_review': None},
             ],
             'verdicts': [{'verdict': 'SHIP-WITH-FIXES', 'records': 1},

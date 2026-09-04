@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -304,6 +305,65 @@ class D5AStoryAheadOfItsFeature(unittest.TestCase):
             self.assertEqual(code, 1, out)
             self.assertIn(self.MSG, out)
             self.assertNotIn('D5 cannot place', out)
+
+    # The split is an INDEX comparison inside each grain's own set, so a custom
+    # set authored in a different order moves the pivot for one grain and not
+    # the other. What that must never produce is a finding whose two halves
+    # hold the SAME WORD: "the story is at work and the feature says it has
+    # not started", said of `planning` and `planning`, is not a disagreement
+    # any reader can act on — and D5's whole claim is that two places in this
+    # tree disagree. Both sets below hold the same seven words in a different
+    # ORDER, so D4 stays silent and the case is about ordering alone.
+    SORTED_STORY_SET = ('[pm]\nstory_states = '
+                        + json.dumps(sorted(model.LIFECYCLE))
+                        + '\nchecks = ["D4","D5"]\n')
+    # The same override on the PARENT instead. The claim is about identity, so
+    # it cannot be about which of the two sets was the one re-ordered — and
+    # this direction moves the pivot the other way, so it trips on a different
+    # word than the child-side case does.
+    SORTED_FEATURE_SET = ('[pm]\nfeature_states = '
+                          + json.dumps(sorted(model.LIFECYCLE))
+                          + '\nchecks = ["D4","D5"]\n')
+    # The set the review reproduced with, verbatim: alphabetical, and short of
+    # the stock seven. Kept beside the sorted one because a consumer hand-
+    # writing a union block writes exactly this shape.
+    REVIEW_REPRO = ('[pm]\nstory_states = ["blocked","building","done",'
+                    '"planning","ready","reviewing"]\nchecks = ["D5"]\n')
+
+    def _gate_with(self, config, feature_status, story_statuses):
+        with tree(milestone_status='building', feature_status=feature_status,
+                  story_statuses=story_statuses) as root:
+            (root / 'devkit.toml').write_text(config, encoding='utf-8')
+            return run_gate(root)
+
+    def test_one_word_on_both_sides_is_never_a_disagreement(self):
+        # Every word the two grains share is walked under BOTH overrides, not
+        # just the one that happens to trip the index today: the child-side
+        # re-order fires on `planning`/`ready`, the parent-side one on
+        # `accepted`, and a case list built from either alone would have read
+        # as complete.
+        for config in (self.SORTED_STORY_SET, self.SORTED_FEATURE_SET):
+            for status in model.LIFECYCLE:
+                with self.subTest(config=config.split('\n')[1], status=status):
+                    code, out = self._gate_with(config, status,
+                                                (status, status))
+                    self.assertNotIn(self.MSG, out)
+                    self.assertEqual(code, 0, out)
+
+    def test_the_alphabetical_set_the_review_reproduced_with_is_quiet_too(self):
+        code, out = self._gate_with(self.REVIEW_REPRO, 'planning',
+                                    ('planning', 'planning'))
+        self.assertNotIn(self.MSG, out)
+        self.assertEqual(code, 0, out)
+
+    def test_the_rule_still_fires_when_the_two_words_really_differ(self):
+        # The other half: the guard is about IDENTITY, not about muting D5
+        # under a custom set. Same config, a genuine disagreement, still a
+        # finding — otherwise the case above would pass over a dead rule.
+        code, out = self._gate_with(self.SORTED_STORY_SET, 'planning',
+                                    ('building', 'ready'))
+        self.assertEqual(code, 1, out)
+        self.assertIn(self.MSG, out)
 
 
 class D6SaysWhatIsActuallyWrong(unittest.TestCase):

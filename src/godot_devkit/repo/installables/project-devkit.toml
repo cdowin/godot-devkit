@@ -98,9 +98,12 @@
 # milestone_states / feature_states / story_states are overridable the same way.
 # All three default to ONE ordered vocabulary — planning, ready, building,
 # reviewing, accepted, packaging, done — and a grain skips the states it does
-# not need. D5 compares a story against its feature across `building`, where
-# the shaping half ends; a custom set that drops that word leaves D5 with
-# nothing to compare, and `check pm` says so rather than passing in silence.
+# not need. A custom set's ORDER is its lifecycle order: D5 places "at work" by
+# index within each grain's own set, at `building`, where the shaping half
+# ends. So list the states in the order the work moves through them — an
+# alphabetical list is a different lifecycle, not the same one tidied — and a
+# set that drops `building` leaves D5 with nothing to compare, which
+# `check pm` says out loud rather than passing in silence.
 
 # --- the read verbs -----------------------------------------------------------
 # `autoloads` cross-checks each autoload's NAME SUFFIX against what its source

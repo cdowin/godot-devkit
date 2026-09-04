@@ -414,15 +414,20 @@ def usage_row(kind: str, **fields: object) -> dict:
 # prints a first-row-to-terminal-row total only once that row exists.
 #
 # `done` is NAMED here rather than read as `cfg.<kind>_states[-1]`, and that is
-# the whole point of this constant: the stock story vocabulary is
-# `todo wip review done blocked`, so `[-1]` is `blocked` — a story that finished
-# would have printed no total and a story that stalled would have printed one.
-# The vocabulary is a closed SET with no ordering contract (there is no
-# transition graph in this package, on purpose), and its ORDER is `pm
-# vocabulary`'s output, which consumers read — so the fix is to name the state,
-# not to reorder the tuple. `done` is also the state every drift rule in
-# model.py already treats as terminal (D2, D3, D5), so this agrees with the
-# gate rather than inventing a second opinion about what "finished" means.
+# the whole point of this constant. The stock lifecycle ends at `done`, so the
+# two agree by default and part company the moment a project overrides a set:
+# `[-1]` is wherever that list happens to stop — a `blocked` or a `parked`
+# hung off the end, or a hand-written union carrying two vocabularies at once
+# — and a grain that finished would print no total while one that stalled
+# printed one. `done` is also the state every drift rule in model.py already
+# treats as terminal (D2, D3, D5), so this agrees with the gate rather than
+# inventing a second opinion about what "finished" means.
+#
+# The ORDER of a set IS load-bearing — model.py's LIFECYCLE says why: D5 places
+# "at work" by index within each grain's own set — and it is separately what
+# `pm vocabulary` prints for consumers to read. Neither of those makes the LAST
+# entry a terminal state, which is why the answer here is to name the state and
+# not to reason from a position.
 TERMINAL_STATE = 'done'
 
 # Bugs are the exception, and they are configured rather than named: their

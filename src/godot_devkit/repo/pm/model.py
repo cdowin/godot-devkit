@@ -584,9 +584,9 @@ def story_file(cfg: PmConfig, sid: str) -> Path | None:
     never disagree about what a story is. They did: this resolver globbed one
     directory level while the walk went recursive, so a story at
     `stories/parked/s2.md` was SEEN by every rule in `check pm` and addressable
-    by none of them. The gate reported a story `pm story wip <id>` then said did
-    not exist, which is the worst possible pair of answers: each is defensible
-    alone and together they leave nothing to do.
+    by none of them. The gate reported a story that `pm story building <id>`
+    then said did not exist, which is the worst possible pair of answers: each
+    is defensible alone and together they leave nothing to do.
 
     With `story_ordinal_prefix`, a story FILE may carry an ordering prefix
     (`01-the-state.md`) that its ID does not — the number sequences the build,
@@ -1009,7 +1009,19 @@ def drift_ahead_of_parent(child: str, child_states: tuple[str, ...],
     for the set it kept — and `False` when either side is unreadable, which
     `split_blind_vocabularies` reports so the silence is never mistaken for a
     clean tree.
+
+    Two grains holding the SAME WORD are never a disagreement, whatever the
+    two sets say about where that word sits. This is a real config, not a
+    hypothetical: the split is an index comparison, so a custom set authored
+    in a different order (alphabetically, or as a hand-written union during a
+    vocabulary migration) moves the pivot for one grain and not the other, and
+    the finding that fell out said "the story is at work and the feature says
+    it has not started" about `planning` and `planning`. A finding whose two
+    halves are the same word cannot be acted on, and D5's whole claim is that
+    two places in this tree disagree.
     """
+    if child == parent:
+        return False
     return (work_started(child, child_states) is True
             and work_started(parent, parent_states) is False)
 

@@ -1213,6 +1213,24 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     a zero there would say "nothing was reopened" about a machine this rule
     cannot see (hard rule 4).
 
+    That guard is against a renamed CONFIG, and the same miss arrives through
+    HISTORY: every row a consumer wrote before its pin bump spells the pair the
+    way its old vocabulary did, so a story reviewed and sent back twice holds
+    no row this rule can read while the config it is read under is perfectly
+    stock. So the column is armed PER STORY, by whether that story's own rows
+    NAME the review state at all — in either direction, since a reopen row is
+    itself proof the vocabulary is readable here, and a ledger opened mid-flight
+    can hold the departure without the arrival. Never by the ledger as a whole:
+    one migrated story is enough to re-arm the column for every legacy one
+    beside it, which is the exact ledger a consumer has the day after the bump.
+    `-` covers two worlds the rows cannot tell apart — "never reached review"
+    and "reached it under a spelling this rule cannot read" — and a `0` would
+    be picking one of them by guess. What stays invisible is one story that
+    straddles the bump AND was reopened on both sides of it: the older reopen
+    is not counted and the column is armed by the newer one. Reading that out
+    would mean testing each row's words against `story_states`, which answers
+    wrong under exactly the union set a migration lands there.
+
     "After review" counts DISPATCH rows, by D3's snapshot and the same
     `named_grains` rule section 1 attributes by — so the two sections cannot
     disagree about which dispatches were a story's. The moment compared against
@@ -1230,14 +1248,16 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     for grain in sorted((g for g in grains if g.kind == KIND_STORY),
                         key=lambda g: g.gid):
         mine = [r for r in status if r.data.get('grain') == grain.gid]
+        entered = [r for r in mine if r.data.get('to') == model.REVIEWING]
+        named = entered or [r for r in mine
+                            if r.data.get('from') == model.REVIEWING]
         reopens = None
-        if mine and reopenable:
+        if named and reopenable:
             reopens = sum(1 for r in mine
                           if r.data.get('from') == model.REVIEWING
                           and r.data.get('to') == model.BUILDING)
         moment = next((ts for ts in
-                       (ledger.parse_ts(r.data.get('ts')) for r in mine
-                        if r.data.get('to') == model.REVIEWING)
+                       (ledger.parse_ts(r.data.get('ts')) for r in entered)
                        if ts is not None), None)
         after = None if moment is None else sum(
             1 for r in dispatch

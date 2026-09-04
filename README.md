@@ -344,9 +344,11 @@ version_file    = "project.godot"               # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
 # milestone_states / feature_states / story_states are overridable too — what D4
 # holds a grain to, and what the status verbs accept. All three default to the
-# ONE seven-state lifecycle above; D5 compares a story against its feature
-# across `building`, so a custom set that drops that word leaves D5 nothing to
-# compare and `check pm` says so rather than passing in silence.
+# ONE seven-state lifecycle above. A custom set's ORDER is its lifecycle order:
+# D5 places "at work" by index within each grain's own set, at `building`, so
+# list the states in the order the work moves through them — an alphabetical
+# list is a different lifecycle, not the same one tidied. Drop `building` and
+# D5 has nothing to compare; `check pm` says so rather than passing in silence.
 ```
 
 `godot-devkit pm vocabulary` prints the rule ids in full. `bugs/` and `stories/` are walked
