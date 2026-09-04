@@ -49,6 +49,10 @@ GDK_SCENARIO_RESULT_RE="${GDK_SCENARIO_RESULT_RE:-\[SCENARIO\]}"
 GDK_REPORT_RETENTION_DAYS="${GDK_REPORT_RETENTION_DAYS:-7}"
 # Env: GDK_SCENARIO_HARD_TIMEOUT  seconds bounding one scenario (default 60)
 #      GDK_GODOT                  the engine binary (default `godot`)
+#      GDK_SCENARIO_IN_SWEEP      set by integration.sh: this run has PEERS
+#                                 booting in the same tree, so the cache
+#                                 recovery below reports its last remedy
+#                                 instead of performing it on them.
 # -----------------------------------------------------------------------------
 
 GATE_TAG="SCENARIO"
@@ -62,6 +66,11 @@ ENGINE_ERROR_PATTERN='^(SCRIPT ERROR|SCRIPT WARNING|USER ERROR|USER WARNING|ERRO
 # On an otherwise PASSING run that is a cache problem, not a scenario problem.
 COLD_CACHE_PATTERN='invalid UID.*using text path instead'
 FAILED_ASSERTION_PATTERN='\[fail\]'
+# The engine's import cache, which the recovery below may REMOVE. A literal,
+# never a configurable: it is the argument to an `rm -rf` inside a directory
+# holding somebody's project, and a name that can be set from outside is a name
+# that can be aimed.
+IMPORT_DIR=".godot"
 
 usage() {
 	cat <<'USAGE_EOF'
@@ -72,8 +81,9 @@ Boots the project headless in a sandboxed HOME and runs ONE scenario, reading
 the engine's own stream for errors your in-process runner cannot see.
 
   --verbose|-v  stream the whole transcript to the console
-  --self-test   prove the argument handling, the report-freshness rules and
-                the allowlist builder, booting nothing
+  --self-test   prove the argument handling, the report-freshness rules, the
+                allowlist builder and what the cache recovery fires on,
+                booting nothing
   --help        this message
 
 Env: GDK_SCENARIO_SOURCE_DIR       where scenario scripts live
@@ -82,6 +92,7 @@ Env: GDK_SCENARIO_SOURCE_DIR       where scenario scripts live
      GDK_SCENARIO_USER_ARG         the user arg carrying the scenario name
      GDK_SCENARIO_RESULT_RE        how your runner spells its verdict line
      GDK_SCENARIO_HARD_TIMEOUT     seconds bounding the run (default 60)
+     GDK_SCENARIO_IN_SWEEP         this run has peers in the same tree
      GDK_REPORT_RETENTION_DAYS     transcript retention (default 7)
      GDK_RUNNERS_LIB               path to gdk_runners.sh, relative to this file
      GDK_GODOT                     the engine binary (default `godot`)
@@ -194,6 +205,20 @@ reap_stale_scenario_reports() {
 			*) echo "$GATE_TAG: refusing to reap non-report path '$entry'" >&2 ;;
 		esac
 	done < <(stale_scenario_reports "$dir" "$live")
+}
+
+# --- the import-cache recovery's one question --------------------------------
+# cold_cache_only <report> <engine exit> — true when this transcript says the
+# tree is what is broken and the scenario is not: it carries the uid class, the
+# scenario reported its own PASS, and the run did not hang. Pure over its two
+# arguments so the corpus can fire it at fake transcripts — the conjunct that
+# refuses to retry a REAL failure is the one worth proving.
+cold_cache_only() {
+	local report="${1:?usage: cold_cache_only <report> <engine exit>}"
+	local code="${2:?usage: cold_cache_only <report> <engine exit>}"
+	grep -qE "$COLD_CACHE_PATTERN" "$report" \
+		&& grep -qE "$GDK_SCENARIO_RESULT_RE.*PASS" "$report" \
+		&& ! gdk_timeout_is_hang "$code"
 }
 
 # allowlist_regex <file> — OR-join every non-blank, non-comment entry. EMPTY
@@ -316,6 +341,36 @@ self_test() {
 	[ -z "$out" ] \
 		|| { echo "  MISS — a comments-only allowlist produced '$out'" >&2; failures=$((failures + 1)); }
 
+	# --- what the cache recovery is allowed to fire on ----------------------
+	# Three conjuncts, one case each. Two of them are the ONLY thing standing
+	# between a real failure and an engine reboot it cannot fix — and rung 2
+	# of that ladder removes a directory.
+	printf 'WARNING: invalid UID "uid://c" - using text path instead\n[SCENARIO] a PASS steps=1 errors=0\n' \
+		> "$scratch/cold_pass.log"
+	printf 'WARNING: invalid UID "uid://c" - using text path instead\n[SCENARIO] a FAIL steps=1 errors=2\n' \
+		> "$scratch/cold_fail.log"
+	printf '[SCENARIO] a PASS steps=1 errors=0\n' > "$scratch/clean_pass.log"
+
+	cases=$((cases + 1))
+	rc=0; cold_cache_only "$scratch/cold_pass.log" 0 || rc=$?
+	[ "$rc" -eq 0 ] \
+		|| { echo "  MISS — the uid class on a PASSING run is the recovery's case" >&2; failures=$((failures + 1)); }
+
+	cases=$((cases + 1))
+	rc=0; cold_cache_only "$scratch/cold_fail.log" 1 || rc=$?
+	[ "$rc" -ne 0 ] \
+		|| { echo "  MISS — a genuinely FAILING scenario must never be retried" >&2; failures=$((failures + 1)); }
+
+	cases=$((cases + 1))
+	rc=0; cold_cache_only "$scratch/clean_pass.log" 0 || rc=$?
+	[ "$rc" -ne 0 ] \
+		|| { echo "  MISS — a transcript with no uid class is not a cache problem" >&2; failures=$((failures + 1)); }
+
+	cases=$((cases + 1))
+	rc=0; cold_cache_only "$scratch/cold_pass.log" "$GDK_EXIT_SIGKILL_TIMEOUT" || rc=$?
+	[ "$rc" -ne 0 ] \
+		|| { echo "  MISS — a HUNG run's truncated transcript must not trigger a rebuild" >&2; failures=$((failures + 1)); }
+
 	rm -rf "$scratch"
 
 	if [ "$failures" -eq 0 ]; then
@@ -425,19 +480,56 @@ run_scenario() {
 
 run_scenario
 
-# --- cold-cache auto-recovery (rebuild the import cache, retry ONCE) ---------
+# --- import-cache auto-recovery: two rungs, then it is a real failure --------
 # A cold/stale .godot makes the engine warn `invalid UID … using text path
 # instead` and re-stamp the uid — noise that upgraded an otherwise-PASSING
 # scenario to FAIL. When the report carries that class AND the scenario itself
-# passed and did not hang, the run is healthy and only the cache is cold:
-# rebuild it (sandboxed HOME already exported) and retry exactly once. A
-# genuine failure has no PASS line and is NOT retried — it still fails fast.
-if grep -qE "$COLD_CACHE_PATTERN" "$RUN_REPORT" \
-		&& grep -qE "$GDK_SCENARIO_RESULT_RE.*PASS" "$RUN_REPORT" \
-		&& ! gdk_timeout_is_hang "$godot_exit"; then
+# passed and did not hang, the run is healthy and the TREE is what is wrong.
+#
+# COLD and STALE are different defects with different remedies, which is why
+# this escalates instead of retrying the same one:
+#   cold  — .godot is absent, or has no entry for a file that is NEW. An import
+#           pass against the existing directory mints it. Rung 1.
+#   stale — the uid INDEX is missing entries for tracked files it already knew
+#           about. The import pass does not rebuild those: measured three times
+#           in a consumer, including once after deleting uid_cache.bin alone,
+#           each run left 1780 entries and the same 56 missing. Removing the
+#           directory and rebuilding gave 1822. Rung 2.
+# Before the second rung existed, a stale tree cost every scenario a rebuild
+# that could not work and a retry that re-failed: 147 of 147 green inside and
+# red outside, 147 times.
+#
+# The ladder is two rungs of straight-line code, deliberately NOT a loop. A
+# third failure is a real failure and stays fast — a retry re-evaluating its
+# own condition would reboot the engine forever on a tree that is genuinely
+# broken, and each reboot is an engine start plus an editor import.
+#
+# Rung 2 removes a directory a local editor owns, so it says so BEFORE it acts,
+# and it declines inside a sweep: integration.sh runs N scenarios in ONE tree,
+# and removing .godot under peers that are mid-boot converts one cache defect
+# into a scatter of failures that look like real ones. There the run names the
+# repair instead of performing it — the operator runs it once, serially.
+if cold_cache_only "$RUN_REPORT" "$godot_exit"; then
 	echo "[$GATE_TAG] $SCENARIO_NAME — cold import cache on a passing run; rebuilding and retrying once" >&2
 	gdk_rebuild_import_cache "$HARD_TIMEOUT_SECONDS"
 	run_scenario
+fi
+
+if cold_cache_only "$RUN_REPORT" "$godot_exit"; then
+	echo "[$GATE_TAG] $SCENARIO_NAME — the uid index is STALE, not cold: the rebuild did not repair it." >&2
+	if [ -n "${GDK_SCENARIO_IN_SWEEP:-}" ]; then
+		echo "[$GATE_TAG] A sweep shares one $IMPORT_DIR/ with every peer still booting, so this run will" >&2
+		echo "[$GATE_TAG] not remove it. Repair the tree ONCE, serially, then re-run the sweep:" >&2
+		echo "[$GATE_TAG]   rm -rf $IMPORT_DIR && make import-cache" >&2
+	else
+		echo "[$GATE_TAG] REMOVING $IMPORT_DIR/ — a local editor's cache state, rebuilt from the tree —" >&2
+		echo "[$GATE_TAG] then rebuilding and retrying a final time." >&2
+		# The cwd is the project root: nothing above refused a tree without a
+		# $GDK_PROJECT_FILE in it, and the operand is a literal.
+		rm -rf "./$IMPORT_DIR"
+		gdk_rebuild_import_cache "$HARD_TIMEOUT_SECONDS"
+		run_scenario
+	fi
 fi
 
 # A timeout kill means the run hung — the documented exit-3 verdict. The report

@@ -1187,17 +1187,19 @@ def test_the_ledger_hooks_replay_their_own_corpus(tmp_path, hook):
 # u64 id, a u32 length and the raw path — because what the check does is search
 # that binary, and a text stand-in would prove the search against a file the
 # engine never writes.
-def fake_uid_cache(paths: tuple[str, ...]) -> bytes:
+def fake_uid_cache(paths: tuple[str, ...], *, uid: int | None = None) -> bytes:
     body = struct.pack('<I', len(paths))
     for index, path in enumerate(paths):
         raw = path.encode('utf-8')
-        body += struct.pack('<QI', 0x7F00000000000000 + index, len(raw)) + raw
+        ident = uid if uid is not None else 0x7F00000000000000 + index
+        body += struct.pack('<QI', ident, len(raw)) + raw
     return body
 
 
 def godot_repo(tmp_path: Path, sidecars: tuple[str, ...],
                indexed: tuple[str, ...], *, gdignore: tuple[str, ...] = (),
-               cache: bool = True) -> tuple[Path, Path]:
+               cache: bool = True,
+               uid: int | None = None) -> tuple[Path, Path]:
     """A ready corpus repo that is ALSO a Godot project: `sidecars` are tracked
     `.uid` files, `indexed` are the res:// paths the binary index names."""
     root, stub_bin = ready_repo(tmp_path)
@@ -1215,7 +1217,8 @@ def godot_repo(tmp_path: Path, sidecars: tuple[str, ...],
                    capture_output=True)
     if cache:
         (root / '.godot').mkdir(exist_ok=True)
-        (root / '.godot' / 'uid_cache.bin').write_bytes(fake_uid_cache(indexed))
+        (root / '.godot' / 'uid_cache.bin').write_bytes(
+            fake_uid_cache(indexed, uid=uid))
     return root, stub_bin
 
 
@@ -1303,3 +1306,19 @@ def test_doctor_says_nothing_about_uids_in_a_repo_that_is_not_a_godot_project(tm
     done = run_doctor(root, stub_bin)
     assert done.returncode == 0, done.stdout
     assert 'uid' not in done.stdout.lower(), done.stdout
+
+
+def test_doctor_finds_a_path_the_next_entrys_id_glued_printable_bytes_onto(tmp_path):
+    """The extraction turns non-printable bytes into separators, so a path
+    lands at the start of a token — but the bytes AFTER it are the next
+    entry's 64-bit id, and roughly a third of those are printable ASCII. On a
+    1800-entry cache that is hundreds of tokens carrying trailing junk, so
+    membership is decided by PREFIX and never by equality. Here every id is
+    0x4141… — eight `A`s glued to every path."""
+    root, stub_bin = godot_repo(
+        tmp_path, ('systems/alpha.gd',),
+        ('res://systems/alpha.gd', 'res://scenes/hub.tscn'),
+        uid=0x4141414141414141)
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert 'uid index covers 1 tracked .uid sidecar' in done.stdout, done.stdout

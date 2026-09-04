@@ -125,6 +125,8 @@ Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_SMOKE_SCENARIO         the scenario --smoke runs and every --diff carries
      GDK_SCENARIO_SUBSTRATE_RE  repo-relative paths that are the tier's ground
      GDK_JOBS                   parallelism (default: cores - 2, floor 1)
+Sets: GDK_SCENARIO_IN_SWEEP=1 on every job — the runner's import-cache
+     recovery must not remove a .godot its peers are booting in.
 Exit: 0 all passed | 1 any failed, or a slice selecting nothing | 2 usage/harness error
 USAGE_EOF
 }
@@ -749,10 +751,19 @@ trap 'rm -rf "$TMP"' EXIT
 # directly returned 126 from every scenario, and `Permission denied` matches
 # nothing in FAILURE_SUMMARY_RE, so the FAILURES block named each scenario and
 # printed nothing under it.
+#
+# GDK_SCENARIO_IN_SWEEP tells each job it has PEERS. The runner's import-cache
+# recovery ends in removing .godot, which in a sweep would be done TO the peers
+# still booting in it — a scatter of failures that look like real ones. Told it
+# is in a sweep, the runner reports that repair instead of performing it.
+#
+# The body is SINGLE-quoted, so nothing inside it may carry an apostrophe: the
+# quote ends the string and the sweep stops parsing.
 # shellcheck disable=SC2016
 printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
 	name="$1"; tmp="$2"
 	export GDK_HEADLESS_HOME="$tmp/home-$name"
+	export GDK_SCENARIO_IN_SWEEP=1
 	out="$(bash "'"$SCENARIO_SH"'" "$name" 2>&1)"; code=$?
 	printf "%s\n" "$out" > "$tmp/$name.log"
 	printf "%s\t%s\n" "$name" "$code" >> "$tmp/results"
