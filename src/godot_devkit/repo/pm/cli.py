@@ -1708,11 +1708,9 @@ def cmd_ledger_show(cfg: model.PmConfig, args: list[str]) -> int:
             previous = row
         print(line.rstrip())
     status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
-    if status and status[-1].data.get('to') == ledger.terminal_state(
-            cfg, _grain_kind(gid)):
-        total = _gap(rows[0], status[-1])
-        if total is not None:
-            print(f'first row → terminal row: {total}s')
+    total = ledger.total_seconds(cfg, _grain_kind(gid), status)
+    if total is not None:
+        print(f'first row → terminal row: {total}s')
     return 0
 
 

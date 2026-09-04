@@ -422,6 +422,40 @@ def terminal_state(cfg, grain_kind: str) -> str:
     """
     return cfg.bug_states[-1] if grain_kind == GRAIN_BUG else TERMINAL_STATE
 
+
+def total_seconds(cfg, grain_kind: str, status: list) -> int | None:
+    """First STATUS row -> terminal STATUS row, or None while still in flight.
+
+    ONE home, shared by `pm ledger show`'s total line and `pm ledger report`'s
+    `total_s` column, because one grain must not have two durations depending
+    on which verb asked.
+
+    What it measures is STATUS rows and nothing else. A `decision` row and a
+    `dispatch` row both NAME a grain — `row_names` says so, and the report
+    needs that breadth to attribute spend — but neither MOVES it, so neither
+    can bound how long it took. Measuring from the first row that merely
+    mentioned the grain billed a decision logged before work started: on this
+    repo's own tree `0.23.0/ledger` totalled 4222s against 1799s of measured
+    status time, a number its own state columns contradicted (R3).
+
+    Two rows, or nothing. A grain whose first status row IS its terminal one
+    has an instant and no duration, and the `0` a subtraction produces there
+    reads as "finished in no time at all" — a measurement nobody made, in the
+    one column a reader compares grains by. A stamp that will not parse
+    contributes no arithmetic for the same reason: a fabricated interval is
+    worse than a missing one.
+    """
+    if not status or status[-1].data.get('to') != terminal_state(
+            cfg, grain_kind):
+        return None
+    first, last = status[0], status[-1]
+    if first is last:
+        return None
+    start, end = parse_ts(first.data.get('ts')), parse_ts(last.data.get('ts'))
+    if start is None or end is None:
+        return None
+    return int((end - start).total_seconds())
+
 def row_names(row: dict, names: set[str]) -> bool:
     """True when this row names the grain — in `grain`, or anywhere in `tree`.
 

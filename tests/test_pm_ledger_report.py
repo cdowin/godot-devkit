@@ -33,9 +33,9 @@ from __future__ import annotations
 import json
 import unittest
 
-from support.pm import (LEDGER_REL, bug, dispatch_line, ledger_lines,
-                        put_ledger, run_cli, section_of, snapshot, status_line,
-                        tree, write)
+from support.pm import (LEDGER_REL, bug, decision_line, dispatch_line,
+                        ledger_lines, put_ledger, run_cli, section_of,
+                        snapshot, status_line, tree, write)
 
 from godot_devkit.repo.pm import ledger
 
@@ -230,6 +230,30 @@ class Table(unittest.TestCase):
             out = report(root, '0.1')[1]
         line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
         self.assertEqual(line.split()[-5:], ['-', '-', '-', '-', '-'])
+
+    def test_only_status_rows_bound_the_total(self):
+        """R3: a `decision` row NAMES a grain but does not move it.
+
+        `total_s` is the span from a grain's first STATUS row to its terminal
+        one. Measuring from "the first row that mentions it" bills the total
+        for a decision logged before work started — on this repo's own tree
+        that read 4222s against 1799s of measured status time, a number the
+        state columns contradict and a reader compares grains by.
+        """
+        with tree(story_statuses=('done', 'todo')) as root:
+            put_ledger(
+                root,
+                decision_line('2026-09-03T09:00:00Z', STORY, 'D1'),
+                status_line('2026-09-03T10:00:00Z', STORY, 'todo', 'wip'),
+                status_line('2026-09-03T10:15:00Z', STORY, 'wip', 'done'),
+                # After the terminal row, and no more able to extend the span
+                # than the decision was to start it early.
+                dispatch_line('2026-09-03T11:00:00Z',
+                              tree=snapshot(stories_wip=[STORY])))
+            out = report(root, '0.1')[1]
+        line = next(ln for ln in out.splitlines() if ln.startswith(STORY))
+        # todo, wip, review, blocked, total_s — 10:00:00 -> 10:15:00.
+        self.assertEqual(line.split()[-5:], ['-', '900', '-', '-', '900'])
 
     def test_rows_out_of_time_order_never_fabricate_an_interval(self):
         """`merge=union` (D6) interleaves two branches' appends by BRANCH, so

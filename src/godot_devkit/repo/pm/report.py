@@ -878,32 +878,6 @@ def state_seconds(rows: list) -> dict[str, int]:
     return seconds
 
 
-def total_seconds(cfg: model.PmConfig, kind: str, rows: list,
-                  status: list) -> int | None:
-    """First row → terminal row, or None while the grain is still in flight.
-
-    The same subtraction `pm ledger show` prints as its total line, over the
-    same row set (every row that NAMES the grain, `show`'s rule), so one grain
-    cannot have two durations depending on which verb asked.
-    """
-    if not rows or not status:
-        return None
-    if status[-1].data.get('to') != ledger.terminal_state(cfg, kind):
-        return None
-    # A span needs TWO rows. When the grain's first row IS its terminal row —
-    # a story flipped straight to `done` — there is an instant and no
-    # duration, and the `0` that subtraction produces would read as "finished
-    # in no time at all": a measurement nobody made, in the one column a
-    # reader compares grains by. Same rule the state columns already keep.
-    if rows[0] is status[-1]:
-        return None
-    start = ledger.parse_ts(rows[0].data.get('ts'))
-    end = ledger.parse_ts(status[-1].data.get('ts'))
-    if start is None or end is None:
-        return None
-    return int((end - start).total_seconds())
-
-
 # --- section 1: spend per grain -----------------------------------------------
 def spend_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                rows: list) -> dict:
@@ -932,7 +906,6 @@ def spend_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     for grain in sorted(grains, key=lambda g: (KIND_ORDER.index(g.kind),
                                                g.gid)):
         names = {grain.gid}
-        mine = [r for r in rows if ledger.row_names(r.data, names)]
         my_status = [r for r in status if r.data.get('grain') in names]
         seconds = state_seconds(my_status)
         out.append({
@@ -945,7 +918,7 @@ def spend_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
                                 key=lambda kv: (kv[0] is None, kv[0] or ''))],
             'states': {state: seconds.get(state)
                        for state in state_columns(cfg, grain.kind)},
-            'total_s': total_seconds(cfg, grain.kind, mine, my_status),
+            'total_s': ledger.total_seconds(cfg, grain.kind, my_status),
         })
     return {'section': SECTION_SPEND, 'grains': out,
             'unattributed': unattributed,

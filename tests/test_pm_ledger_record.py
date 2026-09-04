@@ -392,6 +392,40 @@ class Show(unittest.TestCase):
         self.assertIn('first row → terminal row: 1200s', done_out)
         self.assertNotIn('terminal row', blocked_out)
 
+    def test_only_status_rows_bound_the_total(self):
+        """R3: a `decision` row names a grain; it does not move one.
+
+        The total is the grain's first STATUS row to its terminal one. A
+        decision logged before work started, or a dispatch that stopped after
+        it closed, are both rows ABOUT the grain and neither is a transition —
+        counting them would print a duration the per-row gaps above contradict.
+        """
+        with tree() as root:
+            put_ledger(root,
+                       ledger.dumps(ledger.decision_row(
+                           STORY, 'D1', 'why', ts='2026-09-03T09:00:00Z')),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
+                                   'wip'),
+                       status_line('2026-09-03T10:15:00Z', STORY, 'wip',
+                                   'done'))
+            out = run_cli(root, 'ledger', 'show', STORY)[1]
+        self.assertIn('first row → terminal row: 900s', out)
+        self.assertNotIn('4500s', out)
+
+    def test_a_dispatch_after_the_terminal_row_does_not_extend_the_total(self):
+        with tree() as root:
+            put_ledger(root,
+                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
+                                   'wip'),
+                       status_line('2026-09-03T10:15:00Z', STORY, 'wip',
+                                   'done'))
+            before = run_cli(root, 'ledger', 'show', STORY)[1]
+            self.assertEqual(record(root, '--grain', STORY,
+                                    '--duration-s', '30')[0], 0)
+            after = run_cli(root, 'ledger', 'show', STORY)[1]
+        self.assertIn('first row → terminal row: 900s', before)
+        self.assertIn('first row → terminal row: 900s', after)
+
     def test_a_bug_ends_at_its_configured_last_state(self):
         """The one kind D8 leaves to the config: `[pm] bug_states[-1]`."""
         with tree() as root:
