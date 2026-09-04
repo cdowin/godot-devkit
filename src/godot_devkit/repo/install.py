@@ -3,8 +3,9 @@
 Three verbs, one relationship, and it is deliberately the whole relationship:
 
     install-ci      the four workflows a Godot project runs on a push:
-                    verify.yml (checkout, uv, `make milestone`), uid-guard.yml,
-                    semver-gate.yml and auto-tag.yml. Each was forked in both
+                    verify.yml (checkout, uv, the Godot toolchain a tree with
+                    a project.godot asks for, `make milestone`),
+                    uid-guard.yml, semver-gate.yml and auto-tag.yml. Each was forked in both
                     consumers, drifting on a project name and on which fix each
                     fork got. They carry no gate of their own and no way to
                     parameterize one: a project that wants something else edits
@@ -192,8 +193,10 @@ USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
        godot-devkit install-runners [--force] [--diff]
 
 install-ci      four workflows under .github/workflows/: verify.yml
-                (checkout, uv, `make milestone` — it ASSUMES that target is
-                your full gate), uid-guard.yml (`make uid-scan` on a PR and on
+                (checkout, uv, then — only where a project.godot sits — the
+                engine `config/features` declares plus gdlint and
+                shellcheck, then `make milestone`, which it ASSUMES is your
+                full gate), uid-guard.yml (`make uid-scan` on a PR and on
                 a push to staging), semver-gate.yml (a merge to main must bump
                 config/version) and auto-tag.yml (tag the mainline, then
                 dispatch RELEASE_WORKFLOW if you have one). A project without
