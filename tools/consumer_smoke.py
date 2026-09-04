@@ -507,6 +507,11 @@ def runners_ahead(root: Path) -> list[str]:
     ways the installer has something to write, restated here from the disk
     rather than read off the install's own report, because the row below
     compares the two against each other.
+
+    Asked of the WORKTREE, not of the consumer's checkout: the worktree is
+    what the install writes into, and a consumer with an uncommitted runner
+    edit would otherwise make the two counts disagree over a file the install
+    never saw.
     """
     ahead = []
     for name, rel in install.PLANS[RUNNERS]:
@@ -552,7 +557,6 @@ def against_the_release_runners(root: Path, report: Report) -> None:
     """
     name = root.name
     before = git(root, 'worktree', 'list')
-    ahead = runners_ahead(root)
     holder = tempfile.mkdtemp(prefix=WORKTREE_PREFIX)
     worktree = Path(holder) / WORKTREE_DIR
     try:
@@ -567,6 +571,7 @@ def against_the_release_runners(root: Path, report: Report) -> None:
                 f'run does NOT fall back to the consumer\'s own runners')
             return
 
+        ahead = runners_ahead(worktree)
         code, out = devkit(worktree, RUNNERS, FORCE)
         wrote = WROTE_RE.findall(out)
         if code != 0:

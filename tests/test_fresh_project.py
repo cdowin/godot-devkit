@@ -555,3 +555,22 @@ def test_a_failing_install_is_a_red_row_naming_the_file_and_never_a_fallback():
     # …and the worktree still went away.
     assert rows_named(report, 'worktree list unchanged')[0][0] == 'ok', \
         report.rows
+
+
+def test_an_uncommitted_runner_edit_is_not_a_census_disagreement():
+    """The worktree carries HEAD, so the census grading the install is asked of
+    the WORKTREE too. Asked of the checkout instead, a consumer mid-edit
+    reports a file the install never saw and the row reddens over somebody
+    else's work in progress — which is what both live consumers were doing
+    the first time this ran."""
+    harness = smoke_harness()
+    with scratch_consumer() as root:
+        edited = root / HEADER_EDITED_RUNNER
+        edited.write_text(edited.read_text(encoding='utf-8')
+                          .replace(*HEADER_EDIT), encoding='utf-8')
+        assert harness.git(root, 'status', '--porcelain'), 'the edit did not land'
+        report = harness.Report()
+        harness.against_the_release_runners(root, report)
+    assert rows_named(report, 'runners ahead') == [
+        ('ok', '0 file(s) ahead of the consumer\'s install — the consumer is '
+               'current with the working tree')], report.rows
