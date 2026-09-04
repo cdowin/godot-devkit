@@ -277,6 +277,10 @@ class TranscriptRow(unittest.TestCase):
                     enumerate([self.assistant(name)], 1))
                 self.assertEqual(summary['model'], name)
 
+    def test_a_dispatch_that_never_wrote_reports_its_whole_tool_count(self):
+        """`tool_calls_before_first_write` is the whole count when no write ever
+        happened — not zero. A read-only dispatch did all of its work before a
+        write that never came, and a 0 there would read as 'wrote immediately'."""
         summary = ledger.transcript_summary(enumerate([
             {'type': 'assistant', 'timestamp': '2026-09-03T10:00:00Z',
              'message': {'content': [{'type': 'tool_use', 'name': 'Read'},
