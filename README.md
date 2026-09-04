@@ -223,21 +223,27 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 Milestones → features → stories, as markdown with YAML frontmatter under `pm/roadmap/`. The CLI writes
 ONE line and touches nothing else — no line endings, no adjacent fields, no file the caller did not name.
 
-**Closed states, open transitions.** The state you ask for is validated against that grain's
+**One vocabulary, closed states, open transitions.** Milestone, feature and story all hold
+`planning` `ready` `building` `reviewing` `accepted` `packaging` `done`, and each grain uses the
+states it needs and skips the rest — packaging a feature is a different act from packaging a
+milestone, and a story routinely skips packaging. `done` does not mean SHIPPED and cannot: the flip
+is itself a commit that has not shipped when it is written. It means everything inside the tree's
+authority is finished — changelog written, reviews closed, findings landed, gates green. Bugs are a
+different machine (`open` `fixed` `closed`). The state you ask for is validated against that grain's
 vocabulary: `pm milestone butterfly 0.1` is exit 2 naming the set. The state the file currently holds
 is never validated — it is read for the message — so `pm milestone done 0.1` works from any state,
 including a hand-edited `status: wombat`, which it prints as `wombat -> done` and repairs. There is no
 transition graph and nothing checks an EDGE; a graph would only tax whoever used the sanctioned tool
 while a `sed` of the same line reached the state it refused. **The verbs report what they noticed and
-refuse nothing on process** — stories not at review, features not done, named in the output.
+refuse nothing on process** — stories not at `reviewing`, features not done, named in the output.
 `check pm` catches an invalid state from any route, hand-edit included.
 
 | Command | What it does |
 |---|---|
 | `pm init` · `pm new <milestone\|feature\|story\|bug> …` | Stand up a tree; scaffold a grain — its own frontmatter file and nothing else. **No directory and no shared doc is minted**: git stores no empty directory, and a shared doc appears on first WRITE. `new milestone`/`new feature` are idempotent — re-run to fill gaps. Every failure out is a refusal, never a stack trace |
 | `pm story\|bug\|feature\|milestone <status> <id>` | Set a grain's status to any value in its vocabulary; anything else is exit 2 naming the set. A bug id is `<milestone>/bugs/<slug>`. Appends one timestamped row to the milestone's `ledger.jsonl` — after the write lands, never before, and even for a no-op flip |
-| `pm feature review <id>` | Move to `review` and REPORT the stories that are not there |
-| `pm feature done <id> [--cascade] [--review-record <path>]` | Close the feature. **Touches no story file** unless `--cascade`, which also closes that feature's stories at `review`. A `--review-record` naming no file IS refused, whole — stamping a pointer to nothing is the drift D1 reports |
+| `pm feature reviewing <id>` | Move to `reviewing` and REPORT the stories that are not there |
+| `pm feature done <id> [--cascade] [--review-record <path>]` | Close the feature. **Touches no story file** unless `--cascade`, which also closes that feature's stories at `reviewing`. A `--review-record` naming no file IS refused, whole — stamping a pointer to nothing is the drift D1 reports |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm list [--status <s>[,<s>…]] [--owner <n>] [--milestone <id>]` | One tab-separated `<story-id> <status> <owner> <feature-id>` per story, filtered. Deliberately **no `pm next`**: a verb that picks THE next thing is the tool having an opinion about your priorities. Rows to stdout, census to stderr |
 | `pm validate` | Frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic. A ref into a milestone no longer in the tree is UNVERIFIABLE, never failed — git history is the archive |
@@ -337,7 +343,10 @@ bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file    = "project.godot"               # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
 # milestone_states / feature_states / story_states are overridable too — what D4
-# holds a grain to, and what the status verbs accept.
+# holds a grain to, and what the status verbs accept. All three default to the
+# ONE seven-state lifecycle above; D5 compares a story against its feature
+# across `building`, so a custom set that drops that word leaves D5 nothing to
+# compare and `check pm` says so rather than passing in silence.
 ```
 
 `godot-devkit pm vocabulary` prints the rule ids in full. `bugs/` and `stories/` are walked

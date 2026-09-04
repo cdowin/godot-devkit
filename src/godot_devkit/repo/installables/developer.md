@@ -64,7 +64,7 @@ Verification, Out of scope, and a commit prefix.
 4. Review the story critically: do the gotchas + scope make sense given the
    code you just read? Has the codebase shifted since it was written?
 5. Blocking issues: **stop and report.** Don't guess.
-6. Clean: claim the story through the pm CLI (`story wip`) — never a
+6. Clean: claim the story through the pm CLI (`story building`) — never a
    hand-edited `status:` line.
 
 ### Step 2 — implement
@@ -86,13 +86,13 @@ Verification, Out of scope, and a commit prefix.
 
 1. Run the story's Verification block and the per-change gate. Never run the
    project's full gate per change — that is the orchestrator's close gate.
-2. Flip the story to `review` through the pm CLI. `review` is the story
+2. Flip the story to `reviewing` through the pm CLI. `reviewing` is the story
    terminal — the orchestrator closes the feature, which cascades.
 3. Report: commits (hashes + messages), verification results, deviations from
    the story and why, story-vs-reality mismatches (wrong APIs, outdated line
    numbers) so the next story is better, and your token cost.
 4. Go idle. If fixes come back, apply in place and recommit — the story stays
-   at `review`.
+   at `reviewing`.
 
 ### When to stop and ask
 

@@ -62,10 +62,17 @@ these plus the rule ids `[pm] checks` may name, which is what to read after a pi
 
 | Grain | States |
 |---|---|
-| Milestone | `planning` `ready` `building` `done` |
-| Feature | `planning` `ready` `building` `review` `done` |
-| Story | `todo` `wip` `review` `done` `blocked` |
-| Bug | `open` `fixed` `closed` (override with `[pm] bug_states`) |
+| Milestone | `planning` `ready` `building` `reviewing` `accepted` `packaging` `done` |
+| Feature | the same seven |
+| Story | the same seven |
+| Bug | `open` `fixed` `closed` (override with `[pm] bug_states`) — a different machine |
+
+One vocabulary, three grains, and a grain uses the states it needs and SKIPS the
+rest: packaging a feature is a different act from packaging a milestone, and a story
+routinely skips packaging altogether. `done` does not mean SHIPPED — the flip is
+itself a commit that has not shipped when it is written. It means everything inside
+the tree's authority is finished: changelog written, reviews closed, findings landed,
+gates green. Branch, PR, merge and tag are git events, outside the tree, after `done`.
 
 A status outside its set is a `check pm` D4 finding, on every grain kind including
 bugs. Move a status with the `pm` CLI rather than an editor — see the auto-loaded

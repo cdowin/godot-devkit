@@ -140,12 +140,10 @@ VERDICT_TITLE = 'verdict'
 SEVERITY_TITLE = 'findings by severity'
 DEFERRED_TITLE = 'deferred to'
 
-# Section 3's. The two story states a reopen is made of are NAMED, and checked
-# against the configured vocabulary before the column is filled: a project that
-# renamed either gets `-`, because a `0` would say "nothing was reopened" about
-# a transition this rule cannot see.
-REVIEW_STATE = 'review'
-WIP_STATE = 'wip'
+# Section 3's. The two story states a reopen is made of come from the ONE
+# vocabulary in `model`, and are checked against the configured set before the
+# column is filled: a project that renamed either gets `-`, because a `0` would
+# say "nothing was reopened" about a transition this rule cannot see.
 STORY_COLUMN = 'story'
 REOPENS_COLUMN = 'reopens'
 AFTER_REVIEW_COLUMN = 'after_review'
@@ -1225,8 +1223,8 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     kinds = {g.gid: g.kind for g in grains}
     status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
     dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
-    reopenable = (REVIEW_STATE in cfg.story_states
-                  and WIP_STATE in cfg.story_states)
+    reopenable = (model.REVIEWING in cfg.story_states
+                  and model.BUILDING in cfg.story_states)
     feature_of = {sid: fid for fid, sids in owned.items() for sid in sids}
     out = []
     for grain in sorted((g for g in grains if g.kind == KIND_STORY),
@@ -1235,11 +1233,11 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
         reopens = None
         if mine and reopenable:
             reopens = sum(1 for r in mine
-                          if r.data.get('from') == REVIEW_STATE
-                          and r.data.get('to') == WIP_STATE)
+                          if r.data.get('from') == model.REVIEWING
+                          and r.data.get('to') == model.BUILDING)
         moment = next((ts for ts in
                        (ledger.parse_ts(r.data.get('ts')) for r in mine
-                        if r.data.get('to') == REVIEW_STATE)
+                        if r.data.get('to') == model.REVIEWING)
                        if ts is not None), None)
         after = None if moment is None else sum(
             1 for r in dispatch

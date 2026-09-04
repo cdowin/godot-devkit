@@ -96,6 +96,11 @@
 # version_file    = "project.godot"               # D8: where the version lives
 # version_pattern = '^config/version="(.*)"$'     # D8: the line carrying it
 # milestone_states / feature_states / story_states are overridable the same way.
+# All three default to ONE ordered vocabulary — planning, ready, building,
+# reviewing, accepted, packaging, done — and a grain skips the states it does
+# not need. D5 compares a story against its feature across `building`, where
+# the shaping half ends; a custom set that drops that word leaves D5 with
+# nothing to compare, and `check pm` says so rather than passing in silence.
 
 # --- the read verbs -----------------------------------------------------------
 # `autoloads` cross-checks each autoload's NAME SUFFIX against what its source

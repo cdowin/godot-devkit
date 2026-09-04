@@ -59,7 +59,7 @@ stay out of.
   subagents misreport pre-existing state);
 - runs the one authoritative full gate (`make milestone`) itself;
 - commits per feature by **explicit pathspec**;
-- moves every status through the pm CLI (`pm story wip/review`,
+- moves every status through the pm CLI (`pm story building/reviewing`,
   `pm feature done`, …) — `check pm` is the drift gate;
 - applies proposed shared-doc wording, appends decisions, opens the close.
 

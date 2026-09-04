@@ -272,7 +272,7 @@ orphans: ## Possible-orphan detector (.gd/.tscn/.tres with zero inbound refs)
 autoloads: ## Autoload census + suffix/heuristic cross-check
 	@$(DEVKIT) autoloads
 
-pm: ## PM-tree CLI (the ONLY sanctioned status transition):  make pm ARGS="story wip <id>"
+pm: ## PM-tree CLI (the ONLY sanctioned status transition):  make pm ARGS="story building <id>"
 	@$(DEVKIT) pm $(if $(ARGS),$(ARGS),--help)
 
 # --- Aggregate gates ----------------------------------------------------------

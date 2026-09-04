@@ -83,8 +83,8 @@ The architect sends you a shipped commit range + the story path(s) it covered.
 2. Match: say so. Drift (missed gotcha, unsanctioned scope): do NOT flip
    anything; report and let the architect arbitrate.
 3. Status transitions go through the pm CLI, never a frontmatter edit. The
-   developer claims (`story wip`) and flips its own story to `review`;
-   `review` is the story terminal — the ORCHESTRATOR closes the feature,
+   developer claims (`story building`) and flips its own story to `reviewing`;
+   `reviewing` is the story terminal — the ORCHESTRATOR closes the feature,
    which cascades stories to `done`. You own at most the initial feature
    `planning -> building` flip; when the project reserves even that for the
    orchestrator, report instead.

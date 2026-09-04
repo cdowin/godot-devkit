@@ -45,8 +45,8 @@ USAGE = """usage: godot-devkit pm <command>
   feature <status> <feature-id>           (any status in [pm] feature_states)
   feature done <feature-id> [--cascade] [--review-record <path>]
                                           (--cascade also closes that feature's
-                                           stories that are at `review`; without
-                                           it, no story file is touched)
+                                           stories at `reviewing`; without it,
+                                           no story file is touched)
   milestone <status> <milestone-id>       (any state; reports features not done)
   retire <milestone-id> [<summary...>] [--dry-run]
                                           (removes the milestone directory and
@@ -380,25 +380,26 @@ def cmd_feature_simple(cfg: model.PmConfig, to: str, args: list[str]) -> int:
     return 0
 
 
-def cmd_feature_review(cfg: model.PmConfig, args: list[str]) -> int:
+def cmd_feature_reviewing(cfg: model.PmConfig, args: list[str]) -> int:
     if len(args) != 1:
         raise Usage(USAGE)
     fid = args[0]
     ff, cur = _feature_or_usage(cfg, fid)
-    if cur == 'review':
-        _ok(f'feature {fid} already review (no-op)')
-        _stamp_status(cfg, ff, cur, 'review', fid)
+    if cur == model.REVIEWING:
+        _ok(f'feature {fid} already {model.REVIEWING} (no-op)')
+        _stamp_status(cfg, ff, cur, model.REVIEWING, fid)
         return 0
     pending = [f'{p.name}({st})' for p, st in _story_states(cfg, fid)
-               if st not in ('review', 'done')]
-    _set_status(cfg, ff, 'review')
-    _ok(f'feature {fid}: {cur} -> review')
-    _stamp_status(cfg, ff, cur, 'review', fid)
+               if st not in (model.REVIEWING, 'done')]
+    _set_status(cfg, ff, model.REVIEWING)
+    _ok(f'feature {fid}: {cur} -> {model.REVIEWING}')
+    _stamp_status(cfg, ff, cur, model.REVIEWING, fid)
     # Reported, never refused. "A feature cannot be under review while its own
     # work is unfinished" is a claim about how a team works; which stories are
     # where is a fact, and it is the caller's to act on.
     if pending:
-        _ok(f'  {len(pending)} story/ies not at review: {" ".join(pending)}')
+        _ok(f'  {len(pending)} story/ies not at {model.REVIEWING}: '
+            f'{" ".join(pending)}')
     return 0
 
 
@@ -443,7 +444,7 @@ def _take_flags(args: list[str], flags: tuple[str, ...],
 def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     """Close a feature. Touches the feature's own `status:` and nothing else.
 
-    `--cascade` additionally moves that feature's stories that are at `review`
+    `--cascade` additionally moves that feature's stories at `reviewing`
     to `done`, in the same run. It is OPT-IN: writing to files the caller did
     not name is the tool acting on its own initiative, and a story flipped by a
     command aimed at a feature is exactly that. With the flag, it was asked for.
@@ -456,7 +457,7 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     idempotent part; the cascade, the record stamp and the report each run on
     their own terms, so the two-step (close, then re-run with `--cascade`) does
     what the first run said it would. Run twice with the same flags and the
-    second is a no-op, because there is nothing left at `review` to move.
+    second is a no-op, because there is nothing left at `reviewing` to move.
     """
     pairs, rest = _take_flags(args, ('--review-record',), noun='a path')
     rec = ''
@@ -487,13 +488,14 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     ff, cur = _feature_or_usage(cfg, fid)
     # NOT short-circuited on `cur == 'done'`. An early return there made the
     # two-step this verb's own output recommends — close, read "--cascade
-    # closes the ones at `review`", re-run with the flag — print
+    # closes the ones at `reviewing`", re-run with the flag — print
     # "already done (no-op)" at exit 0 and touch nothing, with the untouched
     # stories no longer even reported. The feature flip is what is idempotent;
     # the cascade and the report are computed either way, so every run answers
     # for the whole tree it was pointed at.
     states = _story_states(cfg, fid)
-    to_close = [p for p, st in states if st == 'review'] if cascade else []
+    to_close = ([p for p, st in states if st == model.REVIEWING]
+                if cascade else [])
     # What it noticed, said out loud. Never a refusal: the caller asked for a
     # feature to be closed, and this is a fact about its stories.
     untouched = [f'{p.name}({st})' for p, st in states
@@ -530,8 +532,8 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
                         're-run the same command to finish (it is idempotent).')
             story_rows.append(ledger.status_row(
                 _ledger_id(p, f'{fid}/{model.story_slug_of(cfg, p.stem)}'),
-                'review', 'done'))
-            _ok(f'  story {p.name}: review -> done')
+                model.REVIEWING, 'done'))
+            _ok(f'  story {p.name}: {model.REVIEWING} -> done')
         if cur == 'done':
             _ok(f'feature {fid} already done (no-op)')
         else:
@@ -548,7 +550,8 @@ def cmd_feature_done(cfg: model.PmConfig, args: list[str]) -> int:
     if untouched:
         _ok(f'  {len(untouched)} story/ies not done and NOT touched: '
             f'{" ".join(untouched)}'
-            + ('' if cascade else ' (--cascade closes the ones at `review`)'))
+            + ('' if cascade
+               else ' (--cascade closes the ones at `reviewing`)'))
     return 0
 
 
@@ -557,7 +560,7 @@ def cmd_feature(cfg: model.PmConfig, args: list[str]) -> int:
         raise Usage(USAGE)
     sub, rest = args[0], args[1:]
     # The TARGET state is validated against the closed vocabulary before ANY
-    # dispatch — `done` and `review` used to dispatch first, so a project whose
+    # dispatch — `done` and `reviewing` used to dispatch first, so a project
     # custom `feature_states` excluded them had the sanctioned tool writing the
     # exact out-of-vocabulary status D4 reports. (The CURRENT state is still
     # never gated on — repair from any state stays.)
@@ -567,8 +570,8 @@ def cmd_feature(cfg: model.PmConfig, args: list[str]) -> int:
     # `done` is the only verb with behaviour of its own — the cascade.
     if sub == 'done':
         return cmd_feature_done(cfg, rest)
-    if sub == 'review':
-        return cmd_feature_review(cfg, rest)
+    if sub == model.REVIEWING:
+        return cmd_feature_reviewing(cfg, rest)
     return cmd_feature_simple(cfg, sub, rest)
 
 
@@ -1060,9 +1063,9 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
                 'feature_done': 'the story cascade is OPT-IN: `pm feature '
                                 'done <id>` touches the feature only, and '
                                 '`--cascade` additionally moves that feature\'s '
-                                'stories at `review` to `done`. Either way the '
-                                'stories it did not touch are reported, never '
-                                'refused',
+                                'stories at `reviewing` to `done`. Either '
+                                'way the stories it did not touch are '
+                                'reported, never refused',
             },
             'checks': list(model.KNOWN_CHECKS),
         }, indent=2))
@@ -1074,9 +1077,9 @@ def cmd_vocabulary(cfg: model.PmConfig, args: list[str]) -> int:
     print('Any state in a grain\'s own set is reachable directly — there is no')
     print('transition graph. The story cascade is OPT-IN: `pm feature done <id>`')
     print('touches the feature only, and `--cascade` additionally moves that')
-    print('feature\'s stories at `review` to `done`. Either way the stories it did')
-    print('not touch are reported, never refused. A tree whose statuses')
-    print('contradict each other is what `check pm` reports.')
+    print('feature\'s stories at `reviewing` to `done`. Either way the')
+    print('stories it did not touch are reported, never refused. A tree whose')
+    print('statuses contradict each other is what `check pm` reports.')
     print()
     print(f'rules  {" ".join(model.KNOWN_CHECKS)}')
     return 0
@@ -1421,13 +1424,6 @@ LEDGER_FLAGS = ('--from-transcript', '--event', '--agent-id', '--agent-type',
                 '--session-id', '--grain', '--tokens-in', '--tokens-out',
                 '--tool-calls', '--duration-s')
 
-# The statuses D3's snapshot buckets by. Literals rather than `cfg.*_states[i]`:
-# the BUCKET NAMES on the row are `features_building` / `stories_wip`, so the
-# state each names is part of the row's shape, not a per-project setting. A tree
-# with a renamed vocabulary records empty lists — a true statement about a tree
-# whose states this row shape cannot name — rather than a mislabelled one.
-TREE_BUILDING, TREE_REVIEW, TREE_WIP = 'building', 'review', 'wip'
-
 DIGITS = frozenset('0123456789')
 
 # `--json` is the one ledger flag that takes no value, so it never reaches
@@ -1493,6 +1489,14 @@ def _tree_snapshot(cfg: model.PmConfig) -> dict:
     excluded here for the same reason it is there: an archived milestone is not
     something a dispatch can have been working on. A grain whose frontmatter
     carries no `id:` is left out — an unnamed grain cannot be named.
+
+    The bucket KEYS are frozen and the states they match follow the vocabulary.
+    `stories_wip` collects stories at `building` and `features_review` features
+    at `reviewing` because a key is part of a ROW's shape: renaming them to
+    match the lifecycle would leave every row already written, in every tree,
+    unattributable by `pm ledger report` — a report that silently counts less.
+    A project with a genuinely renamed vocabulary records empty lists, which is
+    a true statement about a tree whose states this row shape cannot name.
     """
     snap: dict[str, list[str]] = {
         'milestones_building': [], 'features_building': [], 'features_review': [],
@@ -1506,19 +1510,19 @@ def _tree_snapshot(cfg: model.PmConfig) -> dict:
 
     for mdir in model.milestone_dirs(cfg):
         mfile = mdir / model.MILESTONE_DOC
-        if model.field_of(mfile, 'status') == TREE_BUILDING:
+        if model.field_of(mfile, 'status') == model.BUILDING:
             add('milestones_building', mfile)
         for ffile in model.feature_files(mdir):
             fstat = model.field_of(ffile, 'status')
-            if fstat == TREE_BUILDING:
+            if fstat == model.BUILDING:
                 add('features_building', ffile)
-            elif fstat == TREE_REVIEW:
+            elif fstat == model.REVIEWING:
                 add('features_review', ffile)
             for sfile in model.story_files(ffile):
                 sstat = model.field_of(sfile, 'status')
-                if sstat == TREE_WIP:
+                if sstat == model.BUILDING:
                     add('stories_wip', sfile)
-                elif sstat == TREE_REVIEW:
+                elif sstat == model.REVIEWING:
                     add('stories_review', sfile)
     return {bucket: sorted(ids) for bucket, ids in snap.items()}
 
