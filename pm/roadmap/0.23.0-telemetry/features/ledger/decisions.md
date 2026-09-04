@@ -33,3 +33,28 @@ vocabulary is `todo wip review done blocked`, whose last entry is `blocked`.
 Reordering the tuple would change `pm vocabulary` output, a consumer contract.
 **Rejected:** `[-1]` as built; reordering `DEFAULT_STORY_STATES`; a new config key.
 **Costs:** a consumer whose story vocabulary lacks `done` never sees a total line.
+
+## D3 — 2026-09-04 — `<synthetic>` is dropped from the model list at record time — a spelling, not a judgement
+
+**Decision:** `transcript_summary` skips `message.model == "<synthetic>"` when it builds the model
+list. The record is otherwise untouched: it counts as a `messages`, its `usage` sums, its blocks
+count. A transcript whose ONLY assistant records are synthetic has no `model` key on its row — the
+absence rule already in force for every field the source did not state. The exact token, never the
+`<…>` shape.
+**Because:** D4 ("the transcript is the raw record; never interpret `message.model`") is about not
+second-guessing a real model identifier. `<synthetic>` is not one: Claude Code writes it on an
+assistant record IT generated rather than received — an API-error notice, carrying an all-zero
+`usage` and `isApiErrorMessage: true`. A bracketed pseudo-name is a spelling artifact, so excluding
+it is not a judgement about which model ran, and it spares every future by-model consumer from
+having to know the pseudo-name. Caught by the v0.23.0 release review (n2): a real orchestrator
+transcript summed to `model: ["claude-fable-5-1", "<synthetic>"]`.
+**Rejected:** keeping it raw and teaching a future by-model grouping to skip it (every consumer then
+has to know the pseudo-name, and the first one that forgets reports a model that never ran).
+Dropping the `<…>` SHAPE — a census of 734 real transcripts under `~/.claude/projects` found
+`<synthetic>` (31 records) and no other bracketed value in this position, and a shape rule would
+make the next pseudo-name vanish from the one field that would have reported it: narrowing the
+census instead of reading it. Also rejected: dropping the whole RECORD, which would make a session's
+`messages` quietly short.
+**Costs:** one string this module knows by name, coupled to a Claude Code spelling — the same
+coupling D4 already accepted, and the fixture pins it. A NEW pseudo-name will appear in a `model`
+list until someone decides it here.

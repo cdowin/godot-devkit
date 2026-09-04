@@ -31,8 +31,10 @@ THE FIXTURES (tests/fixtures/transcripts/):
     record keeps the whole `usage` subtree the API sends — that one record is
     what proves the extra keys are ignored rather than copied.
   * `main-session.jsonl` — the Stop shape, written by hand: `isSidechain:
-    false`, no `agentId`, two models across the session and one assistant
-    record with no `usage` at all.
+    false`, no `agentId`, two models across the session, one assistant
+    record with no `usage` at all, and one `<synthetic>` API-error record —
+    the shape Claude Code writes when it generates an assistant turn itself
+    (`isApiErrorMessage`, an all-zero `usage`, `model: "<synthetic>"`).
 """
 from __future__ import annotations
 
@@ -173,14 +175,19 @@ class TranscriptRow(unittest.TestCase):
         self.assertEqual(stamped(row), {
             'kind': 'session',
             'session_id': '11111111-2222-3333-4444-555555555555',
-            # Two models in one session is a LIST, raw — never a pick.
+            # Two models in one session is a LIST, raw — never a pick. The
+            # fixture's `<synthetic>` record is not a third: it is Claude
+            # Code's marker for an assistant turn IT generated, not a model
+            # identifier (0.23.0/ledger D3).
             'model': ['claude-opus-5', 'claude-sonnet-5'],
             'started_at': '2026-09-03T10:00:00Z',
             'ended_at': '2026-09-03T10:07:36Z',
             'duration_s': 456,
-            # Three assistant records, one of which carries no `usage` at all:
-            # it counts as a message and adds zero.
-            'messages': 3,
+            # Four assistant records: one carries no `usage` at all and the
+            # `<synthetic>` one carries an all-zero usage. Both count as a
+            # message and add zero — dropped from `model`, counted everywhere
+            # else, because the record HAPPENED.
+            'messages': 4,
             'tool_calls': 3,
             'tools': {'Read': 1, 'Edit': 1, 'Bash': 1},
             'tool_calls_before_first_write': 1,
@@ -195,7 +202,81 @@ class TranscriptRow(unittest.TestCase):
                                     str(MAIN_SESSION), '--event', 'Stop')[0], 0)
             self.assertNotIn('agent_id', only_row(root))
 
-    def test_a_dispatch_that_never_wrote_reports_its_whole_tool_count(self):
+    # --- `<synthetic>` is not a model (0.23.0/ledger D3) ----------------------
+    # A spelling, not a judgement: Claude Code writes `model: "<synthetic>"` on
+    # an assistant record IT generated (an API-error notice, with an all-zero
+    # `usage`). D4's "never interpret `message.model`" is about not
+    # second-guessing a real identifier; a bracketed pseudo-name is not one.
+    def assistant(self, model: str, ts: str = '2026-09-03T10:00:00Z') -> dict:
+        return {'type': 'assistant', 'timestamp': ts,
+                'message': {'model': model,
+                            'usage': {'input_tokens': 1, 'output_tokens': 2}}}
+
+    def test_the_synthetic_pseudo_name_is_dropped_from_the_model_list(self):
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('claude-fable-5-1'),
+            self.assistant('<synthetic>', '2026-09-03T10:00:30Z'),
+        ], 1))
+        self.assertEqual(summary['model'], 'claude-fable-5-1')
+
+    def test_the_synthetic_record_still_counts_as_a_message_and_its_usage(self):
+        """Dropped from ONE field, not from the row. The record happened; a
+        summary that also stopped counting it would answer "what did this
+        session cost" with a number that is quietly short (hard rule 4)."""
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('claude-fable-5-1'),
+            self.assistant('<synthetic>', '2026-09-03T10:00:30Z'),
+        ], 1))
+        self.assertEqual(summary['messages'], 2)
+        self.assertEqual(summary['usage']['input'], 2)
+        self.assertEqual(summary['usage']['output'], 4)
+
+    def test_a_transcript_of_only_synthetic_records_carries_no_model_key(self):
+        """No model ran, so the row says nothing about one. `None` is what
+        `usage_row` omits — the absence rule already in force for every field
+        the source did not state, never a placeholder."""
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('<synthetic>')], 1))
+        self.assertIsNone(summary['model'])
+        self.assertEqual(summary['messages'], 1)
+        self.assertNotIn('model', ledger.usage_row('session', **summary))
+
+    def test_a_genuine_model_name_is_never_dropped(self):
+        """Every model identifier the corpus actually carries, each proven to
+        survive. The rule removes ONE non-value; a rule that also swallowed a
+        real name would silently rewrite the answer to "which model ran"."""
+        for name in ('claude-opus-5', 'claude-sonnet-5', 'claude-fable-5',
+                     'claude-fable-5-1', 'claude-opus-4-8',
+                     'claude-haiku-4-5-20251001'):
+            with self.subTest(model=name):
+                summary = ledger.transcript_summary(enumerate([
+                    self.assistant('<synthetic>'),
+                    self.assistant(name, '2026-09-03T10:00:30Z'),
+                ], 1))
+                self.assertEqual(summary['model'], name)
+
+    def test_another_bracketed_pseudo_name_is_still_carried_raw(self):
+        """The rule is the ONE string, not the `<…>` shape, and that is the
+        decision (D3): a census of 734 real transcripts found `<synthetic>` and
+        no other bracketed value in this position. Dropping the shape would
+        make the next pseudo-name — whatever Claude Code invents — vanish from
+        the one field that would have reported it, which is narrowing the
+        census instead of reading it. So an unknown one comes through raw, and
+        gets decided the same way `<synthetic>` was."""
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('<compaction>')], 1))
+        self.assertEqual(summary['model'], '<compaction>')
+
+    def test_only_the_exact_token_is_the_pseudo_name(self):
+        """Substring, prefix, suffix and case-folding are all wrong readings of
+        an exact token. Each name below is one a looser rule would swallow."""
+        for name in ('<synthetic', 'synthetic>', 'x<synthetic>y',
+                     'claude-synthetic-5', '<SYNTHETIC>'):
+            with self.subTest(model=name):
+                summary = ledger.transcript_summary(
+                    enumerate([self.assistant(name)], 1))
+                self.assertEqual(summary['model'], name)
+
         summary = ledger.transcript_summary(enumerate([
             {'type': 'assistant', 'timestamp': '2026-09-03T10:00:00Z',
              'message': {'content': [{'type': 'tool_use', 'name': 'Read'},
