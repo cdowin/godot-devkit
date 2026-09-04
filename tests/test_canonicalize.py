@@ -186,6 +186,108 @@ class EditableMarkersAreAuthoredNotDerived(unittest.TestCase):
         self.assertEqual(editable_paths(text), ['Panel'], text)
 
 
+# --- an INHERITED scene's root IS an instancing ancestor ----------------------
+# 0.24.0/bugs/canonicalize-drops-index-on-a-typed-node. An inherited scene's
+# root is written `[node name="X" instance=ExtResource(base)]`, so its children
+# ARE the base's children and an override there is an instance-child override
+# like any other. `_instance_host` walked ancestors down to depth 1 and stopped,
+# so it never reached the root: every override directly under an inherited root
+# lost its `index=` and got a "no instancing ancestor was found" refusal instead
+# of the ordinal the base plainly gives it. Measured on trail before the fix:
+# 3 such overrides across 2 scenes (scenes/moments/force_resolution.tscn,
+# scenes/moments/game_over.tscn).
+#
+# The other direction is the trap, and it is the sibling bug's: a node the scene
+# CREATES (`type=` / `instance=`) is not placed by any base, so no ordinal
+# exists to count and writing one invents authored position. Both directions are
+# asserted below.
+SHELL_BASE = ('[gd_scene format=3 uid="uid://dcanonshell"]\n\n'
+              '[node name="Shell" type="Control"]\n\n'
+              '[node name="Frame" type="Panel" parent="."]\n\n'
+              '[node name="Inner" type="Control" parent="."]\n\n'
+              '[node name="Paper" type="ColorRect" parent="Inner"]\n\n'
+              '[node name="Border" type="Panel" parent="Inner"]\n\n'
+              '[node name="Content" type="Control" parent="Inner"]\n')
+# The inherited scene, canonical. Two overrides — one of a base child of the
+# root, one of a base GRANDchild whose only instancing ancestor is the root —
+# and two nodes this scene creates, which carry no index and must not gain one.
+INHERITED = ('[gd_scene load_steps=2 format=3 uid="uid://dcanoninherit"]\n\n'
+             '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
+             ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
+             '[node name="Shell" instance=ExtResource("1_shell")]\n\n'
+             '[node name="Inner" parent="." index="1"]\nvisible = false\n\n'
+             '[node name="Content" parent="Inner" index="2"]\n'
+             'mouse_filter = 2\n\n'
+             '[node name="Body" type="VBoxContainer" parent="Inner/Content"]\n\n'
+             '[node name="Nested" parent="." instance=ExtResource("1_shell")]\n')
+INDEX_ATTR = re.compile(r' index="\d+"')
+
+
+def strip_indexes(text: str) -> str:
+    """The `index=` half of `make smoke`'s degradation, on the node lines."""
+    return '\n'.join(INDEX_ATTR.sub('', line) if line.startswith('[node ') else line
+                     for line in text.split('\n'))
+
+
+class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
+    def canonicalized(self, scene_text: str) -> tuple[int, str, str]:
+        with temp_repo('canon_repo') as root:
+            (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
+            (root / 'scenes/inherited.tscn').write_text(scene_text, encoding='utf-8')
+            code, out = canonicalize_in_repo('scenes/inherited.tscn')
+            text = (root / 'scenes/inherited.tscn').read_text(encoding='utf-8')
+        return code, out, text
+
+    def test_an_override_under_an_inherited_root_gets_its_index_back(self) -> None:
+        """`Inner` is the SECOND child of shell.tscn's root, so index must be 1
+        — and the walk has to reach the root to say so."""
+        code, out, text = self.canonicalized(strip_indexes(INHERITED))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Inner" parent="." index="1"]', text)
+        self.assertNotIn('UNRESOLVED', out)
+
+    def test_an_override_of_a_base_grandchild_counts_through_the_root(self) -> None:
+        """`Content` is the THIRD child of the base's `Inner` (Paper, Border,
+        Content), so index must be 2. Nothing between it and the root instances
+        anything, so this resolves only if the root is a candidate host."""
+        code, out, text = self.canonicalized(strip_indexes(INHERITED))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertIn('[node name="Content" parent="Inner" index="2"]', text)
+
+    def test_the_whole_inherited_scene_round_trips_byte_for_byte(self) -> None:
+        """The smoke row's property at unit scale: strip what `save()` drops,
+        restore, and get the committed bytes back — no more and no less."""
+        code, out, text = self.canonicalized(strip_indexes(INHERITED))
+        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        self.assertEqual(text, INHERITED)
+
+    def test_a_node_the_scene_creates_gains_no_index(self) -> None:
+        """The invent direction, and the one the sibling bug was. `Body` is
+        built by this scene (`type=`) and `Nested` is instanced by it; no base
+        places either, so neither has an ordinal to count and neither may gain
+        one — not even the plausible 'next free slot'.
+
+        A CONTROL: green before the inherited-root fix and after it, red only
+        if the restoration over-corrects into inventing."""
+        _code, _out, text = self.canonicalized(strip_indexes(INHERITED))
+        self.assertIn('[node name="Body" type="VBoxContainer" '
+                      'parent="Inner/Content"]\n', text)
+        self.assertIn('[node name="Nested" parent="." '
+                      'instance=ExtResource("1_shell")]\n', text)
+
+    def test_an_override_the_base_does_not_place_is_refused_not_guessed(self) -> None:
+        """A type-less node under an inherited root IS an override — but if the
+        base has no such child there is no ordinal, and the run says so instead
+        of picking one."""
+        orphan = INHERITED.replace('[node name="Inner" parent="." index="1"]',
+                                   '[node name="Ghost" parent="."]')
+        code, out, text = self.canonicalized(strip_indexes(orphan))
+        self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS, out)
+        self.assertIn('UNRESOLVED', out)
+        self.assertIn('Ghost', out)
+        self.assertIn('[node name="Ghost" parent="."]\n', text)
+
+
 class NoMarkerIsInventedForAnOverriddenInstance(unittest.TestCase):
     def test_the_packed_fixture_gains_no_editable_section(self) -> None:
         """`canon_repo/scenes/packed.tscn` instances `panel.tscn` and overrides

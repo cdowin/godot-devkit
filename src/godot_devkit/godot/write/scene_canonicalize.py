@@ -17,7 +17,12 @@ it leaves out are load-bearing, and all three recur on every single pass:
 3. **`index=` on instance-child overrides.** An override without it does not
    reload as an override: Godot creates a NEW SIBLING, and the base scene's real
    child leaks as an orphan on EVERY load. That is what stack-overflowed an
-   unrelated unit test.
+   unrelated unit test. The instancing ancestor may be the ROOT — an inherited
+   scene's root is `[node name="X" instance=ExtResource(base)]`, its children
+   are the base's children, and an override there is an override like any
+   other. What is NOT restored is an `index=` on a node this scene CREATES
+   (`type=` / `instance=`): the base does not place it, so no ordinal exists to
+   count and writing one would invent the authored position it stands for.
 
 **`[editable path=]` is NOT one of them, and is never written here.** The marker
 records the editor's per-instance "Editable Children" toggle and nothing else:
@@ -100,8 +105,16 @@ class BaseScenes:
 
 
 def _instance_host(doc: TscnDocument, path: tuple[str, ...]) -> tuple[Section, tuple] | None:
-    """The nearest ancestor of `path` that instances another scene."""
-    for cut in range(len(path) - 1, 0, -1):
+    """The nearest ancestor of `path` that instances another scene, ROOT included.
+
+    An INHERITED scene's root IS an instancing ancestor — it is written
+    `[node name="X" instance=ExtResource(base)]` and its children are the
+    base's children. Stopping the walk one level short of it (`range(…, 0, -1)`)
+    made every direct child of an inherited root unresolvable, so an override
+    there lost its `index=` and got a "no instancing ancestor was found"
+    refusal instead of the ordinal the base plainly gives it.
+    """
+    for cut in range(len(path) - 1, -1, -1):
         for node in doc.nodes:
             if doc.node_path(node) == path[:cut] and INSTANCE_ATTR in node.attrs:
                 return node, path[cut:]
@@ -148,7 +161,18 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
     fixed = []
     ext = doc.ext_resources()
     for node in list(doc.nodes):
-        if 'type' in node.attrs or INSTANCE_ATTR in node.attrs or 'index' in node.attrs:
+        if 'index' in node.attrs:
+            continue
+        if 'type' in node.attrs or INSTANCE_ATTR in node.attrs:
+            # This scene CREATES the node — `type=` builds it, `instance=`
+            # instantiates it — so no base places it and there is no ordinal to
+            # count. An index here would be a position nothing in the file
+            # implies. Measured over both consumer trees: 12 created nodes do
+            # carry an authored `index=`, and no rule produces them — 3 of the
+            # 12 name a slot no count reaches, while 4 structurally identical
+            # siblings (an added node under an inherited root, same repo) carry
+            # none. Restoring them is inventing authored state, which is the
+            # sibling bug this module already paid for once.
             continue
         host = _instance_host(doc, doc.node_path(node))
         if host is None:
