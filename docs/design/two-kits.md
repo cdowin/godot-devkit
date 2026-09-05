@@ -66,16 +66,37 @@ not a private third package, and not a dependency edge between the two kits.
 the pattern for that — the hook corpora self-test rather than trusting that two copies agree. Whatever
 form it takes, the copies must be asserted identical by something that runs, not by intention.
 
-## The open question, and it decides how clean the split is
+## The open question — ANSWERED 2026-09-04, and it was the wrong question
 
-**Can `[checks] all` compose a check from another package?** The whole value of the split rests on it: the
-agentic kit provides the gate framework and the runner, the Godot utilities provide Godot gates, and a
-consumer's `devkit.toml` composes both into one roster. The config-driven roster and `[gates] extra`
-already look like the right seam, but **this has not been verified** — nothing has ever registered a check
-from outside the package.
+It was asked as *"can `[checks] all` compose a check from another package?"* It does not need to.
 
-If it cannot, the split still works but the halves each grow their own runner, which is a second name for
-the same fact and would want arguing before it ships.
+**`godot-devkit` becomes a CONSUMER of the agentic kit**, exactly as nullbound and trail are. Its eight
+Godot checks become its own gates, registered through `[gates] extra` — the shipped, proven mechanism
+nullbound already uses for **14** of its own scans. Nothing registers a check across a package boundary.
+
+**The distinction that keeps this clean, and it is the whole point:**
+
+- **A library dependency** — `godot_devkit.godot` importing the agentic package — is the cross-wiring
+  rule 8 bans. A scene parser must not drag in a PM tree, hooks and installables.
+- **A consumer pin** — godot-devkit's *repository* using the agentic kit for its own SDLC, hooks, PM
+  tree, CI and release — is dogfooding, and it is correct. It is the same relationship every other
+  consumer has, and it is what makes the kit answer for itself.
+
+Chris, 2026-09-04: *"we probably need to now pin the 0.1.0 sdlc to devkit too when it's ready."* So
+godot-devkit grows a pin at `agentic-sdlc v0.1.0` and keeps its own `Makefile` gates.
+
+## Versions — ruled 2026-09-04
+
+**`godot-devkit` 0.25.0**, not a patch. Removing the agentic half is breaking: consumers lose `pm`,
+`check pm`, every `install-*`, the hooks, the runners and the CI installables, and each must add a
+second pin and rewire. Hard rule 7 — *major is anything a consumer Makefile/hook must edit to survive* —
+and under 0.x the minor slot carries breaks. A patch version would promise an identical interface.
+
+**`agentic-sdlc` 0.1.0** for the extraction — the inherited 0.24.0 was another artifact's number, and
+this kit has never shipped. **Its 0.2.0 is the conveyor**, which moves across with the code: a
+release-protocol feature belongs to the kit that owns the release protocol, not to a Godot scene
+toolkit. `0.25.0-the-conveyor` and its filed window-closure bug leave this repo's PM tree, and
+godot-devkit's own 0.25.0 becomes "the Godot kit alone".
 
 ## What the split does NOT change
 
