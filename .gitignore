@@ -8,3 +8,6 @@ uv.lock
 
 # Per-worktree scope marker tools/dev/agent-worktree.sh plants for the hooks to read.
 .agent-scope
+
+# Hook-local grants: absolute machine paths, never shared.
+tools/hooks/*.local
