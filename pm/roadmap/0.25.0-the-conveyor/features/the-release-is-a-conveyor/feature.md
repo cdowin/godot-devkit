@@ -146,6 +146,38 @@ Two steps in there are ones a human list keeps forgetting, and both have bitten:
 subtraction. On the numbers above the scoped set is seconds rather than minutes, and the consumer's own
 gates run when the consumer changes its own code, which is what they are for.
 
+## A third conveyor: `change` — the inner loop, which is where the time actually goes
+
+Chris, 2026-09-04, on the 31-minute greening:
+
+> *"That test suite should be literally built into the SDLC belt. Right?"*
+
+Right, and `release` and `adopt` do not reach it. Both are OUTER operations, run once. **The inner loop
+— edit, verify, edit — runs dozens of times per session, and it is where the hours go.** Measured that
+day: a full suite at 154 s against a single module at 0.9 s, run eleven times because the dispatch named
+only the wide command. 31 minutes to do 13 seconds of checking.
+
+So the belt needs a third list, and its shape is different from the other two:
+
+```toml
+[change]
+narrow = "what verifies THIS edit"     # the loop: seconds
+wide   = "what verifies the WHOLE"     # the close: run once, at the end
+```
+
+**`release` and `adopt` are sequences; `change` is a PAIR.** It does not walk steps — it answers one
+question, *"I touched X, what proves it?"*, and it answers with two commands and their measured costs so
+the caller can tell which is the loop and which is the close.
+
+The scoping mechanism already exists per-consumer and is not generalised: one tree slices unit tests by
+system (`unit SYS=<x>`) and picks integration scenarios by what they declare they cover
+(`integration-diff` reading a `## covers:` header). Those are the right idea invented twice, locally,
+with no way for a dispatch to discover them. The belt should be able to answer "what is the narrow
+command here" from config, the way it answers "what are the release steps".
+
+**This is the piece that makes the whole conveyor pay for itself.** A release happens weekly; the inner
+loop happens continuously, and it is the one an agent runs unattended.
+
 ## The first slice, and why it is that one
 
 **`review-landed` then `gate`, in that order, with the disposition check.** It needs no new parsing —
