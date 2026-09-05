@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.24.0 — 2026-09-04
+
 - **At the pin bump — the consolidated list, because three review passes asked for it separately.** In
   order, and the first item is the one that has bitten before: **bump `DEVKIT_VERSION` only AFTER the tag
   exists** — a consumer that commits content needing runners only an untagged devkit carries has two pins

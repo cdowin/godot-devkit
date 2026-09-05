@@ -84,3 +84,5 @@
 {"ts":"2026-09-05T02:43:14Z","kind":"session","session_id":"4e17d422-2448-4959-abe5-187d3dc4c09f","model":"claude-opus-5","started_at":"2026-09-04T19:09:13Z","ended_at":"2026-09-05T02:43:12Z","duration_s":27239,"messages":443,"tool_calls":196,"tools":{"Bash":168,"Agent":21,"Write":4,"Edit":3},"tool_calls_before_first_write":29,"usage":{"input":886,"output":721810,"cache_creation":2290031,"cache_read":136526753},"tree":{"milestones_building":["0.24.0"],"features_building":[],"features_review":["0.24.0/the-lifecycle-says-what-it-means"],"stories_wip":[],"stories_review":[]}}
 {"ts":"2026-09-05T12:53:16Z","kind":"status","grain":"0.24.0/the-lifecycle-says-what-it-means","from":"reviewing","to":"done"}
 {"ts":"2026-09-05T12:53:32Z","kind":"status","grain":"0.24.0","from":"building","to":"reviewing"}
+{"ts":"2026-09-05T14:25:24Z","kind":"status","grain":"0.24.0","from":"reviewing","to":"accepted"}
+{"ts":"2026-09-05T14:25:24Z","kind":"status","grain":"0.24.0","from":"accepted","to":"packaging"}

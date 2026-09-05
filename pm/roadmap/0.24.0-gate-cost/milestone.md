@@ -1,7 +1,7 @@
 ---
 id: "0.24.0"
 name: gate-cost
-status: reviewing
+status: packaging
 depends_on: []
 branch: milestone/0.24.0-gate-cost
 ---
