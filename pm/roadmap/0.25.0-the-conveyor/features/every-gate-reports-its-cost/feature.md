@@ -73,6 +73,34 @@ repos or across a year of growth).
 is a gate people disable. This REPORTS; whether a ceiling is ever enforced is a separate decision with
 its own argument.
 
+## The second consumer of this telemetry is the DISPATCH BAR, and it is where the cost actually lands
+
+Measured 2026-09-04, greening a suite after an extraction: **the full suite is 154 s; a single test
+module is 0.9 s. 170x.** An agent asked to fix eleven failures ran the full suite after each one and
+took **31 minutes**. Re-checking the same five modules afterwards took **13 seconds**.
+
+**The dispatch was the cause, not the agent.** It said *"VERIFY: `pytest tests/ -q` — target is 0
+failed"*, naming the slow command as the verification and never mentioning that a module can be run
+alone. An agent given one command uses it as its inner loop, because nothing told it there was another.
+
+So the rule this feature has to make enforceable, rather than hope for:
+
+> **Name the narrow command for the loop and the wide one for the close.** A dispatch that names only
+> the full gate teaches the full gate as the inner loop. State both, with their measured costs, and say
+> which is which.
+
+**This is exactly what the telemetry is for.** Once `gdk_gate` records duration per gate, a dispatch can
+carry real numbers instead of an author's guess, and the numbers stay true as the suite grows. Without
+them, "run the narrow thing first" is advice; with them it is a fact an agent can act on.
+
+Two things fall out for scope:
+
+- The recorded row should make the **narrow-vs-wide ratio** derivable, not just the wall time — that
+  ratio is what makes the rule obvious. A 1.2x ratio does not warrant a two-command dispatch; a 170x one
+  does.
+- The stock agent definitions this kit installs should carry the rule, so every consumer's agents inherit
+  it rather than each orchestrator re-learning it by burning half an hour.
+
 ## Risks
 
 1. **Timing the funnel changes the funnel.** `gdk_gate` is on the path of every gate in every consumer;
