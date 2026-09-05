@@ -104,6 +104,48 @@ ordering error becomes structurally impossible rather than a thing to remember.
 | `.claude/skills/release/SKILL.md` | SHRINK | becomes "run this verb", not a protocol to follow |
 | `SDLC.md` § Close protocol | GENERATED | stops being hand-maintained prose that drifts |
 
+## A second conveyor: `adopt`
+
+Chris, 2026-09-04, on what a pin bump actually costs a consumer:
+
+> *"Pinning 24 should be simple. Upgrade the pin, inspect what new install verbs came in, decide what to
+> take, update/check configs, lint (to make sure the pm tree is still good against the new version) and
+> go. What am I missing?"*
+
+**Almost nothing — the list is right. What is missing is that nothing scopes verification to the
+operation.** Measured on the live consumers: this package's entire `check all` is **2.6 s** and
+`check pm` is **0.3 s**, while a consumer's `make check` also runs its OWN gates — twenty of them in one
+tree — and that is where the minutes go. Those gates verify the CONSUMER'S code against the CONSUMER'S
+rules; **a version bump here cannot change their verdict.** Running them during adoption re-verifies the
+game, not the adoption.
+
+`make check` is one gate answering one question — *is everything fine?* — for every operation, so
+adoption, a one-line edit and a release all pay the price of the most expensive thing anyone might need.
+That is the same shape as the ordering incidents above: one blunt instrument standing in for several
+scoped ones.
+
+**So `adopt` is a step list too**, and its postconditions are the operation's, not the project's:
+
+```toml
+[adopt]
+steps = ["pin-bumped", "installables-diffed", "installable-decisions-recorded",
+         "config-updated", "hooks-self-test", "runner-targets-resolve",
+         "checks-pass", "pm-validates"]
+```
+
+Two steps in there are ones a human list keeps forgetting, and both have bitten:
+
+- **`hooks-self-test`** — `install-hooks` rewrites guard scripts, and a guard that fails OPEN is not
+  there. This package has already shipped a hook that was installed, executable, and stopping nothing;
+  a config diff cannot show that.
+- **`runner-targets-resolve`** — `install-runners --force` rewrites `Makefile.devkit`, which defines the
+  targets every later gate runs through. Broken there, every subsequent gate fails for the wrong reason
+  and the operator debugs the wrong thing.
+
+**`checks-pass` means THIS package's checks, not the consumer's whole gate set** — that is the
+subtraction. On the numbers above the scoped set is seconds rather than minutes, and the consumer's own
+gates run when the consumer changes its own code, which is what they are for.
+
 ## The first slice, and why it is that one
 
 **`review-landed` then `gate`, in that order, with the disposition check.** It needs no new parsing —
