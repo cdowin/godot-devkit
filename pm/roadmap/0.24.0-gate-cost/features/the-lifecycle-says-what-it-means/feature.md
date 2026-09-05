@@ -2,7 +2,7 @@
 id: 0.24.0/the-lifecycle-says-what-it-means
 milestone: "0.24.0"
 name: A grain says which half of its life it is in
-status: reviewing
+status: done
 reviewed: pm/roadmap/0.24.0-gate-cost/review.md
 phase: 3
 depends_on: []
