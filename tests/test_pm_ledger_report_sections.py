@@ -98,34 +98,34 @@ def seeded(root) -> None:
     found, both exercised, and both printed as the path that answered.
     """
     (root / ALPHA_RECORD).write_text(ALPHA_BLOCK, encoding='utf-8')
-    feature(root, BETA, 'building', BETA_BLOCK, (('s0', 'wip'),))
+    feature(root, BETA, 'building', BETA_BLOCK, (('s0', 'building'),))
     feature(root, GAMMA, 'planning')
-    feature(root, DELTA, 'review', NO_BLOCK)
+    feature(root, DELTA, 'reviewing', NO_BLOCK)
     bug(root, 'crash', 'open', caused_by=ALPHA)
     bug(root, 'wobble', 'closed', caused_by=BETA)
     bug(root, 'quiet', 'open')
     put_ledger(
         root,
-        status_line('2026-09-03T10:00:00Z', A_S0, 'todo', 'wip'),
+        status_line('2026-09-03T10:00:00Z', A_S0, 'ready', 'building'),
         dispatch_line('2026-09-03T10:05:00Z', agent_type='developer',
                       tool_calls=37, tool_calls_before_first_write=12,
                       tree=snapshot(stories_wip=[A_S0])),
-        status_line('2026-09-03T10:10:00Z', A_S0, 'wip', 'review'),
+        status_line('2026-09-03T10:10:00Z', A_S0, 'building', 'reviewing'),
         dispatch_line('2026-09-03T10:11:00Z', agent_type='reviewer',
                       tool_calls_before_first_write=3,
                       tree=snapshot(stories_review=[A_S0])),
         # The reopen: `review` back to `wip`, one row, nothing inferred.
-        status_line('2026-09-03T10:12:00Z', A_S0, 'review', 'wip'),
+        status_line('2026-09-03T10:12:00Z', A_S0, 'reviewing', 'building'),
         # No `tool_calls_before_first_write`: absent, so it is neither in the
         # sum nor in the list.
         dispatch_line('2026-09-03T10:13:00Z', agent_type='developer',
                       tree=snapshot(stories_wip=[A_S0])),
-        status_line('2026-09-03T10:20:00Z', A_S0, 'wip', 'done'),
+        status_line('2026-09-03T10:20:00Z', A_S0, 'building', 'done'),
         # A feature-grained decision with no status row of alpha's after it,
         # and a milestone-grained one whose scope is every grain here.
         decision_line('2026-09-03T10:21:00Z', ALPHA, 'D1'),
         decision_line('2026-09-03T10:22:00Z', '0.1', 'D2'),
-        status_line('2026-09-03T10:25:00Z', B_S0, 'todo', 'wip'),
+        status_line('2026-09-03T10:25:00Z', B_S0, 'ready', 'building'),
         session_line('2026-09-03T11:00:00Z', session_id='sess-1',
                      tool_calls=10, usage={'output': 1000}),
         session_line('2026-09-03T11:05:00Z', session_id='sess-1',
@@ -163,7 +163,7 @@ def row_of(out: str, title: str, block: str, first: str) -> list[str]:
 
 
 def seeded_report(test, *argv) -> str:
-    with tree(feature_status='done', story_statuses=('done', 'todo')) as root:
+    with tree(feature_status='done', story_statuses=('done', 'ready')) as root:
         seeded(root)
         code, out = report(root, '0.1', *argv)
     test.assertEqual(code, 0, out)
@@ -171,43 +171,43 @@ def seeded_report(test, *argv) -> str:
 
 
 YIELD_TABLE = """\
-[ledger:report] 0.1 — yield per review pass — 3 record(s), 7 finding(s)
+[ledger:report] 0.1 — yield per review pass — 3 record(s), 2 pass(es), 7 finding(s)
 
 -- verdict (3)
-feature    record                                        verdict           findings  landed  rejected  deferred  open
-0.1/alpha  docs/reviews/alpha.md                         SHIP-WITH-FIXES          4       2         1         1     0
-0.1/beta   pm/roadmap/0.1-demo/features/beta/review.md   HOLD                     3       0         0         2     1
-0.1/delta  pm/roadmap/0.1-demo/features/delta/review.md  no verdict block         -       -         -         -     -
+feature    record                                        pass  verdict           findings  landed  rejected  deferred  open
+0.1/alpha  docs/reviews/alpha.md                            1  SHIP-WITH-FIXES          4       2         1         1     0
+0.1/beta   pm/roadmap/0.1-demo/features/beta/review.md      1  HOLD                     3       0         0         2     1
+0.1/delta  pm/roadmap/0.1-demo/features/delta/review.md     -  no verdict block         -       -         -         -     -
 
 -- findings by severity (7)
-feature    severity  findings
-0.1/alpha  MAJOR            1
-0.1/alpha  MINOR            1
-0.1/alpha  NIT              1
-0.1/alpha  QUESTION         1
-0.1/beta   CRITICAL         1
-0.1/beta   MAJOR            1
-0.1/beta   WARNING          1
+feature    pass  severity  findings
+0.1/alpha     1  MAJOR            1
+0.1/alpha     1  MINOR            1
+0.1/alpha     1  NIT              1
+0.1/alpha     1  QUESTION         1
+0.1/beta      1  CRITICAL         1
+0.1/beta      1  MAJOR            1
+0.1/beta      1  WARNING          1
 
 -- deferred to (3)
-target     feature    findings
-0.1/beta   0.1/alpha         1
-0.1/beta   0.1/beta          1
-0.1/gamma  0.1/beta          1"""
+target     feature    pass  findings
+0.1/beta   0.1/alpha     1         1
+0.1/beta   0.1/beta      1         1
+0.1/gamma  0.1/beta      1         1"""
 
 REWORK_TABLE = """\
-[ledger:report] 0.1 — rework — 3 story(s), 1 reopen(s), 2 record(s) with a verdict
+[ledger:report] 0.1 — rework — 3 story(s), 1 reopen(s), 2 pass(es) with a verdict
 
 -- story (3)
 feature    story         reopens  after_review
 0.1/alpha  0.1/alpha/s0        1             2
 0.1/alpha  0.1/alpha/s1        -             -
-0.1/beta   0.1/beta/s0         0             -
+0.1/beta   0.1/beta/s0         -             -
 
 -- verdict distribution (2)
-verdict          records
-SHIP-WITH-FIXES        1
-HOLD                   1"""
+verdict          passes
+SHIP-WITH-FIXES       1
+HOLD                  1"""
 
 ESCAPES_TABLE = """\
 [ledger:report] 0.1 — escapes — 2 bug(s) naming a cause, 2 feature(s)
@@ -263,7 +263,7 @@ class Tables(unittest.TestCase):
 
     def test_the_report_never_writes(self):
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             before = {p: p.read_bytes() for p in sorted(root.rglob('*'))
                       if p.is_file()}
@@ -281,7 +281,7 @@ class Yield(unittest.TestCase):
         """A2 is `landed in-place`, A1 is `landed <hash>`; the column is the
         DISPOSITION KIND, so a reviewer who fixed in place and never committed
         (SDLC § 2) is not counted as having landed nothing."""
-        parsed = verdict.parse(ALPHA_BLOCK)
+        parsed, = verdict.parse(ALPHA_BLOCK)
         kinds = [f.disposition_kind for f in parsed.findings]
         self.assertEqual(kinds.count(verdict.LANDED), 2)
         self.assertNotEqual(*[f.disposition_value for f in parsed.findings
@@ -299,8 +299,10 @@ class Yield(unittest.TestCase):
 
     def test_a_record_with_no_block_is_listed_and_never_counted_as_zero(self):
         row = row_of(seeded_report(self), YIELD, 'verdict (3)', DELTA)
-        self.assertEqual(row[2:], ['no', 'verdict', 'block', '-', '-', '-',
-                                   '-', '-'])
+        # `-` in the PASS column too: a record with no block is not pass 1 of
+        # anything, and numbering it would count a pass nobody ran.
+        self.assertEqual(row[2:], ['-', 'no', 'verdict', 'block', '-', '-',
+                                   '-', '-', '-'])
 
     def test_a_feature_with_no_record_at_all_is_not_a_review_pass(self):
         """`gamma` has no record: there was no pass, so there is no row."""
@@ -310,15 +312,110 @@ class Yield(unittest.TestCase):
     def test_deferrals_group_by_the_target_the_finding_names(self):
         out = section_of(seeded_report(self), YIELD)
         rows = block_rows(out, YIELD, 'deferred to (3)')
-        self.assertEqual(rows, [['0.1/beta', ALPHA, '1'],
-                                ['0.1/beta', BETA, '1'],
-                                ['0.1/gamma', BETA, '1']])
+        self.assertEqual(rows, [['0.1/beta', ALPHA, '1', '1'],
+                                ['0.1/beta', BETA, '1', '1'],
+                                ['0.1/gamma', BETA, '1', '1']])
 
     def test_the_pointer_is_read_first_and_the_slot_beside_it_second(self):
         """Both paths PRINT, so a reader never has to ask which one answered."""
         out = section_of(seeded_report(self), YIELD)
         self.assertIn(ALPHA_RECORD, out)
         self.assertIn(BETA_RECORD, out)
+
+
+class ThreePassesOverOneRecord(unittest.TestCase):
+    """The record this package's own SDLC produces, end to end.
+
+    The re-ordered protocol runs three review passes over one feature record,
+    each appending its block. Before M2 the second block was
+    `MalformedVerdict`, `parsed_records` mapped that to `RecordError`, and
+    `pm ledger report` exited 2 on a well-formed record — which is why 0.24.0
+    carried a second review file whose header said it existed to work around
+    this. So the first assertion here is the exit code.
+
+    Nothing is collapsed into one answer. `C1` was raised open in pass 1 and
+    landed in pass 2; a merged view would print either "1 open" or "1 landed"
+    and lose the transition, which is the only thing three passes are
+    evidence of.
+    """
+
+    RECORD = '''# alpha — reviewed three times
+
+```text
+verdict: RELEASE-WITH-FIXES
+| id | severity | disposition |
+| C1 | CRITICAL | open |
+| m1 | MINOR | deferred: 0.1/beta |
+```
+
+Prose between the passes, which is where the fixes went in.
+
+```text
+verdict: RELEASE-WITH-FIXES
+| id | severity | disposition |
+| C1 | CRITICAL | landed 3a42f19ad |
+```
+
+```text
+verdict: RELEASE-SAFE
+| id | severity | disposition |
+```
+'''
+
+    def _report(self, *argv):
+        with tree(feature_status='done', story_statuses=('done',)) as root:
+            (root / ALPHA_RECORD).write_text(self.RECORD, encoding='utf-8')
+            put_ledger(root, status_line('2026-09-03T10:00:00Z', A_S0,
+                                         'building', 'done'))
+            code, out = report(root, '0.1', *argv)
+        self.assertEqual(code, 0, out)
+        return out
+
+    def test_each_pass_is_its_own_row_numbered_in_document_order(self):
+        rows = block_rows(self._report(), YIELD, 'verdict (3)')
+        self.assertEqual([r[2] for r in rows], ['1', '2', '3'])
+        self.assertEqual([r[3] for r in rows], ['RELEASE-WITH-FIXES',
+                                                'RELEASE-WITH-FIXES',
+                                                'RELEASE-SAFE'])
+        # findings landed rejected deferred open, per pass: the second pass
+        # landed the CRITICAL the first one raised, and the third raised none.
+        self.assertEqual([r[-5:] for r in rows],
+                         [['2', '0', '0', '1', '1'],
+                          ['1', '1', '0', '0', '0'],
+                          ['0', '0', '0', '0', '0']])
+
+    def test_the_census_counts_records_and_passes_separately(self):
+        self.assertIn('yield per review pass — 1 record(s), 3 pass(es), '
+                      '3 finding(s)', self._report())
+
+    def test_severities_and_deferrals_carry_the_pass_that_raised_them(self):
+        out = self._report()
+        self.assertEqual(block_rows(out, YIELD, 'findings by severity (3)'),
+                         [[ALPHA, '1', 'CRITICAL', '1'],
+                          [ALPHA, '1', 'MINOR', '1'],
+                          [ALPHA, '2', 'CRITICAL', '1']])
+        self.assertEqual(block_rows(out, YIELD, 'deferred to (1)'),
+                         [[BETA, ALPHA, '1', '1']])
+
+    def test_the_verdict_distribution_counts_passes_not_records(self):
+        """One record, three passes, two verdicts — and the distribution says
+        2 and 1. Counting records would have to pick one of the three."""
+        out = self._report()
+        self.assertIn('3 pass(es) with a verdict', out)
+        # In `verdict.VERDICTS` order, which is the closed set's own, not the
+        # order the passes ran in — the distribution is a tally, not a history.
+        self.assertEqual(block_rows(out, REWORK, 'verdict distribution (2)'),
+                         [['RELEASE-SAFE', '1'], ['RELEASE-WITH-FIXES', '2']])
+
+    def test_the_json_nests_the_passes_under_the_one_record(self):
+        data = json.loads(self._report('--json'))['yield']
+        self.assertEqual(len(data['records']), 1)
+        passes = data['records'][0]['passes']
+        self.assertEqual([one['pass'] for one in passes], [1, 2, 3])
+        self.assertEqual(passes[0]['dispositions']['open'], 1)
+        self.assertEqual(passes[1]['dispositions']['landed'], 1)
+        self.assertEqual(data['totals'],
+                         {'records': 1, 'passes': 3, 'findings': 3})
 
 
 class Rework(unittest.TestCase):
@@ -335,9 +432,17 @@ class Rework(unittest.TestCase):
         self.assertEqual(row, [ALPHA, A_S1, '-', '-'])
 
     def test_a_story_that_never_reached_review_has_no_after_count(self):
-        """`0`, not `-`, for reopens: its rows WERE read and none was one."""
+        """`-` in BOTH columns, and they are one observation, not two.
+
+        This row used to read `0  -`: no reopens, unknown dispatches after
+        review, in one line. The `0` was reasoned from a review state the same
+        row admits it never saw — and it is indistinguishable from a story
+        whose review WAS recorded, under the spelling a pre-bump ledger uses
+        (`Vocabulary` below). Nothing in these rows can tell the two apart, so
+        neither column says anything about review here.
+        """
         row = row_of(seeded_report(self), REWORK, 'story (3)', BETA)
-        self.assertEqual(row, [BETA, B_S0, '0', '-'])
+        self.assertEqual(row, [BETA, B_S0, '-', '-'])
 
 
 class Escapes(unittest.TestCase):
@@ -357,7 +462,7 @@ class Escapes(unittest.TestCase):
         """A retired or mistyped cause is a fact `pm validate` reports; the
         report prints the row with `-` rather than dropping the bug."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             bug(root, 'ghost', 'open', caused_by='0.9/vanished')
             out = report(root, '0.1')[1]
@@ -392,7 +497,7 @@ class Overhead(unittest.TestCase):
         """A cumulative total with nothing to subtract from it is not a delta,
         and the census still says the row is there."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             put_ledger(root, session_line('2026-09-03T11:00:00Z',
                                           session_id='sess-1', tool_calls=10,
@@ -405,7 +510,7 @@ class Overhead(unittest.TestCase):
     def test_a_delta_needs_both_ends_measured(self):
         """One end absent is not a delta of the other end minus zero."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             put_ledger(
                 root,
@@ -422,7 +527,7 @@ class Vocabulary(unittest.TestCase):
     """A rule that cannot SEE a transition prints `-`, never `0` (rule 4)."""
 
     def test_a_renamed_story_vocabulary_dashes_reopens_rather_than_zeroing(self):
-        """A reopen is `review -> wip`, and both names are the STOCK ones. A
+        """A reopen is `reviewing -> building`, both STOCK names. A
         project that renamed either has a machine this rule cannot read, and a
         `0` there would say "nothing was reopened" about transitions nobody
         looked for — the read-side sin with a column header on it."""
@@ -444,14 +549,73 @@ class Vocabulary(unittest.TestCase):
         """The other half of the same claim: where the rule CAN see the
         transition, it counts it, so the `-` above is about the vocabulary and
         not about the column being broken."""
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', A_S0, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:30:00Z', A_S0, 'review',
-                                   'wip'))
+                       status_line('2026-09-03T10:00:00Z', A_S0, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:30:00Z', A_S0, 'reviewing',
+                                   'building'))
             out = report(root, '0.1')[1]
         self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2], '1')
+
+    def test_a_legacy_history_dashes_reopens_though_the_config_is_stock(self):
+        """The guard above is against a renamed CONFIG. The miss arrives
+        through HISTORY: every ledger row written before a consumer's pin bump
+        spells the pair `wip`/`review`, and the config it is read under is the
+        new stock set — so `reopenable` is true and the column fills with a
+        number over a machine this rule still cannot read. Two real reopens,
+        reported as `0`, is the read-side cardinal sin with a column header on
+        it (rule 4)."""
+        with tree(story_statuses=('building',)) as root:
+            put_ledger(root,
+                       status_line('2026-09-01T10:00:00Z', A_S0, 'wip',
+                                   'review'),
+                       status_line('2026-09-02T10:00:00Z', A_S0, 'review',
+                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', A_S0, 'wip',
+                                   'review'),
+                       status_line('2026-09-04T10:00:00Z', A_S0, 'review',
+                                   'wip'))
+            out = report(root, '0.1')[1]
+        self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2], '-')
+        self.assertIn('- reopen(s)', section_of(out, REWORK))
+
+    def test_a_migrated_story_beside_a_legacy_one_does_not_re_arm_the_column(self):
+        """The guard is PER STORY, because the ledger it has to be right about
+        holds both spellings at once. One day after the bump, `s1` has a
+        `to: reviewing` row and `s0`'s history is still entirely legacy — a
+        ledger-WIDE test would find s1's row, re-arm the column, and print
+        s0's false `0` again. s1 keeps a real `0`: its rows WERE read in the
+        vocabulary the rule counts in, and none of them was a reopen."""
+        with tree(story_statuses=('building', 'building')) as root:
+            put_ledger(root,
+                       status_line('2026-09-01T10:00:00Z', A_S0, 'wip',
+                                   'review'),
+                       status_line('2026-09-02T10:00:00Z', A_S0, 'review',
+                                   'wip'),
+                       status_line('2026-09-05T10:00:00Z', A_S1, 'building',
+                                   'reviewing'))
+            out = report(root, '0.1')[1]
+        cells = {r[1]: r[-2] for r in block_rows(out, REWORK, 'story (2)')}
+        self.assertEqual(cells, {A_S0: '-', A_S1: '0'})
+
+    def test_the_column_is_armed_by_a_ROW_and_not_by_a_readable_timestamp(self):
+        """`reopens` and `after_review` read the same rows for two different
+        facts, and only one of them needs the clock. The arrival row here is
+        unreadable as a TIME and perfectly readable as a TRANSITION: the reopen
+        beneath it was seen and counts, while `after_review` — which can only
+        be measured from a moment — stays `-`. Collapsing the two onto the
+        parsed timestamp would drop a reopen this ledger states outright."""
+        with tree(story_statuses=('building',)) as root:
+            put_ledger(root,
+                       json.dumps({'ts': 'not-a-timestamp', 'kind': 'status',
+                                   'grain': A_S0, 'from': 'building',
+                                   'to': 'reviewing'}),
+                       status_line('2026-09-02T10:00:00Z', A_S0, 'reviewing',
+                                   'building'))
+            out = report(root, '0.1')[1]
+        self.assertEqual(row_of(out, REWORK, 'story (1)', ALPHA)[-2:],
+                         ['1', '-'])
 
 
 class NoData(unittest.TestCase):
@@ -476,8 +640,9 @@ class NoData(unittest.TestCase):
 
     def test_the_censuses_still_say_what_was_counted(self):
         out = self.quiet()
-        self.assertIn('yield per review pass — 0 record(s), 0 finding(s)', out)
-        self.assertIn('rework — 0 story(s), - reopen(s), 0 record(s)', out)
+        self.assertIn('yield per review pass — 0 record(s), 0 pass(es), '
+                      '0 finding(s)', out)
+        self.assertIn('rework — 0 story(s), - reopen(s), 0 pass(es)', out)
         self.assertIn('escapes — 0 bug(s) naming a cause, 0 feature(s)', out)
         self.assertIn('overhead shape — 0 dispatch row(s), 0 decision row(s), '
                       '0 session row(s)', out)
@@ -503,28 +668,30 @@ class Json(unittest.TestCase):
         return json.loads(out)
 
     def test_section_two_yield(self):
-        blank = {kind: None for kind in verdict.DISPOSITION_KINDS}
+        """One entry per RECORD, and inside it one entry per PASS. The
+        nesting is the shape of the fact: a record is a file, a pass is a
+        review, and a record reviewed three times has one path and three
+        verdicts. `delta` carries no block at all — an empty `passes` list,
+        never a pass numbered 1 with nothing in it."""
         self.assertEqual(self.payload()['yield'], {
             'records': [
-                {'feature': ALPHA, 'record': ALPHA_RECORD,
-                 'verdict': 'SHIP-WITH-FIXES', 'findings': 4,
-                 'severities': {'MAJOR': 1, 'MINOR': 1, 'NIT': 1,
-                                'QUESTION': 1},
-                 'deferred': [{'target': BETA, 'findings': 1}],
-                 'dispositions': {'landed': 2, 'rejected': 1, 'deferred': 1,
-                                  'open': 0}},
-                {'feature': BETA, 'record': BETA_RECORD, 'verdict': 'HOLD',
-                 'findings': 3,
-                 'severities': {'CRITICAL': 1, 'MAJOR': 1, 'WARNING': 1},
-                 'deferred': [{'target': BETA, 'findings': 1},
-                              {'target': GAMMA, 'findings': 1}],
-                 'dispositions': {'landed': 0, 'rejected': 0, 'deferred': 2,
-                                  'open': 1}},
-                {'feature': DELTA, 'record': DELTA_RECORD, 'verdict': None,
-                 'findings': None, 'severities': {}, 'deferred': [],
-                 'dispositions': blank},
+                {'feature': ALPHA, 'record': ALPHA_RECORD, 'passes': [
+                    {'pass': 1, 'verdict': 'SHIP-WITH-FIXES', 'findings': 4,
+                     'severities': {'MAJOR': 1, 'MINOR': 1, 'NIT': 1,
+                                    'QUESTION': 1},
+                     'deferred': [{'target': BETA, 'findings': 1}],
+                     'dispositions': {'landed': 2, 'rejected': 1,
+                                      'deferred': 1, 'open': 0}}]},
+                {'feature': BETA, 'record': BETA_RECORD, 'passes': [
+                    {'pass': 1, 'verdict': 'HOLD', 'findings': 3,
+                     'severities': {'CRITICAL': 1, 'MAJOR': 1, 'WARNING': 1},
+                     'deferred': [{'target': BETA, 'findings': 1},
+                                  {'target': GAMMA, 'findings': 1}],
+                     'dispositions': {'landed': 0, 'rejected': 0,
+                                      'deferred': 2, 'open': 1}}]},
+                {'feature': DELTA, 'record': DELTA_RECORD, 'passes': []},
             ],
-            'totals': {'records': 3, 'findings': 7}})
+            'totals': {'records': 3, 'passes': 2, 'findings': 7}})
 
     def test_section_three_rework(self):
         self.assertEqual(self.payload()['rework'], {
@@ -533,12 +700,12 @@ class Json(unittest.TestCase):
                  'after_review': 2},
                 {'grain': A_S1, 'feature': ALPHA, 'reopens': None,
                  'after_review': None},
-                {'grain': B_S0, 'feature': BETA, 'reopens': 0,
+                {'grain': B_S0, 'feature': BETA, 'reopens': None,
                  'after_review': None},
             ],
-            'verdicts': [{'verdict': 'SHIP-WITH-FIXES', 'records': 1},
-                         {'verdict': 'HOLD', 'records': 1}],
-            'totals': {'stories': 3, 'reopens': 1, 'records': 2}})
+            'verdicts': [{'verdict': 'SHIP-WITH-FIXES', 'passes': 1},
+                         {'verdict': 'HOLD', 'passes': 1}],
+            'totals': {'stories': 3, 'reopens': 1, 'passes': 2}})
 
     def test_section_four_escapes(self):
         self.assertEqual(self.payload()['escapes'], {
@@ -584,7 +751,7 @@ class Refusals(unittest.TestCase):
 
     def malformed(self, *argv) -> str:
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             (root / ALPHA_RECORD).write_text(BAD_BLOCK, encoding='utf-8')
             code, out = report(root, '0.1', *argv)
@@ -610,7 +777,7 @@ class Refusals(unittest.TestCase):
         """`NoVerdict` is a fact about the pass. Mapping it to exit 2 would
         turn "we have not measured this" into "the tooling is broken"."""
         with tree(feature_status='done',
-                  story_statuses=('done', 'todo')) as root:
+                  story_statuses=('done', 'ready')) as root:
             seeded(root)
             (root / ALPHA_RECORD).write_text(NO_BLOCK, encoding='utf-8')
             code, out = report(root, '0.1')

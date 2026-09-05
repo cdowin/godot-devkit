@@ -35,17 +35,114 @@ from godot_devkit.core.config import (ConfigError, config_section,
                                        section_declared, flag, str_tuple, text)
 
 # --- stock policy -------------------------------------------------------------
-# The VOCABULARY, and nothing more. There is no transition graph: nothing here
-# decides which move is allowed next, because a `sed` of the `status:` line
-# reaches any state the CLI would have refused and no rule checks an EDGE — so
-# the graph taxed whoever used the sanctioned tool and stopped nobody else.
-# What IS checked is END STATE, by D3/D4/D5, on the tree as it stands.
-DEFAULT_MILESTONE_STATES = ('planning', 'ready', 'building', 'done')
-DEFAULT_FEATURE_STATES = ('planning', 'ready', 'building', 'review', 'done')
-DEFAULT_STORY_STATES = ('todo', 'wip', 'review', 'done', 'blocked')
-# Bugs have no transition graph — they are filed and they close. The vocabulary
-# exists so D4 covers a bug's status the way it covers every other grain's: a
-# typo'd status is a finding rather than a silent "closed" (rule 4).
+# ONE vocabulary, in order, for milestone / feature / story. There is still no
+# transition graph: nothing here decides which move is allowed next, because a
+# `sed` of the `status:` line reaches any state the CLI would have refused and
+# no rule checks an EDGE — so the graph taxed whoever used the sanctioned tool
+# and stopped nobody else. What IS checked is END STATE, by D3/D4/D5, on the
+# tree as it stands. A grain uses the states it needs and SKIPS the rest:
+# packaging a feature is a different act from packaging a milestone, and a
+# story routinely skips packaging altogether.
+#
+# `done` does not mean SHIPPED and cannot: the flip is itself a commit that has
+# not shipped at the moment it is written, so a tree can never observe its own
+# release. It means everything inside this tree's authority is finished —
+# changelog written, reviews closed, findings landed, gates green. Branch, PR,
+# merge and tag are git events, outside the tree, after `done`.
+#
+# The ORDER is load-bearing, and it is what one shared vocabulary buys: while a
+# story said `wip` and a feature said `building`, "is this story ahead of its
+# feature?" was not a question that could be asked, and D5 could only test
+# equality with `done`.
+LIFECYCLE = ('planning', 'ready', 'building', 'reviewing', 'accepted',
+             'packaging', 'done')
+
+# --- the deprecation window (0.24.0 only) -------------------------------------
+# The four words this vocabulary REPLACED, each mapped to the word it became.
+# They ride in the stock default set for ONE release; 0.25.0 removes them
+# (pm/roadmap/0.24.0-gate-cost/bugs/the-deprecation-window-closes.md).
+#
+# Why they are here at all: a state a tree already HOLDS cannot vanish under
+# it. Every `status:` line is validated against these sets, so dropping four
+# words turned every grain holding one into a D4 finding on upgrade day —
+# measured the day before the tag on the two live consumers that pin this
+# package, 43 and 25 findings, both pre-push gates red on the pin bump alone.
+# And there is no ordering that avoids it: the unmigrated tree fails under the
+# new package, the migrated tree fails under the pinned old one. A window costs
+# one release and asks nobody to hold a red gate through a rewrite.
+#
+# READ, never WRITTEN. `deprecated_write` is the half that makes it a window
+# rather than a second vocabulary: the CLI writes the replacement, so the set
+# of files a consumer must migrate before 0.25.0 only ever shrinks.
+#
+# The POSITION is load-bearing and therefore DERIVED, never typed: each retired
+# word is spliced in immediately after the word that replaced it, so it lands
+# on the same side of `building` as its replacement and the two cannot
+# disagree. `work_started` is an index comparison, so a `wip` ordered before
+# `building` would report a story at work as not started and a `todo` after it
+# the reverse. `blocked` maps to `building` because a blocked grain's work has
+# STARTED and stopped — which also keeps it inside D2's stalled window, where a
+# feature holding it with every story done is a forgotten flip rather than a
+# silence. Hung off the END (past `done`) it would be both: invisible to D2 and
+# a claim, in the one place consumers read the order, that a blocked grain is
+# further along than a finished one.
+DEPRECATED_STATES = {'todo': 'ready', 'wip': 'building',
+                     'review': 'reviewing', 'blocked': 'building'}
+
+# Of those four, the ones that were REMOVED rather than renamed. `todo`, `wip`
+# and `review` each have a synonym in the new vocabulary and the map above
+# names it. `blocked` does not: it was a first-class story state carrying the
+# one fact this vocabulary cannot express, and its entry above is a POSITION
+# (where the read side places a grain still holding it), not a replacement.
+# The write side must say so, because a refusal that names `building` as the
+# replacement tells the user the word was renamed and loses the distinction
+# on the way out.
+REMOVED_STATES = ('blocked',)
+STOCK_STATES = tuple(
+    word
+    for canonical in LIFECYCLE
+    for word in (canonical, *(retired for retired, replacement
+                              in DEPRECATED_STATES.items()
+                              if replacement == canonical)))
+DEFAULT_MILESTONE_STATES = STOCK_STATES
+DEFAULT_FEATURE_STATES = STOCK_STATES
+DEFAULT_STORY_STATES = STOCK_STATES
+
+
+def deprecated_write(status: str, states: tuple[str, ...]) -> str:
+    """The word `status` was retired FOR, or `''` when it may be written.
+
+    The window READS; it does not write. A tree that already holds `wip` stays
+    green under 0.24.0, and the sanctioned tool asked to add another one
+    refuses and names `building`. Without this half the CLI is itself the thing
+    filling trees with the words the window exists to carry out, and the
+    rewrite 0.25.0 needs grows for a whole release — while `pm story wip <id>`,
+    which exits 2 today, would start succeeding again.
+
+    Armed only while the set IS the window, by VALUE. That is rule 5 (a repo
+    declaring the stock default behaves identically to one declaring nothing)
+    and it is also the escape hatch: a project whose own vocabulary uses `todo`
+    declared a different set, means it, and writes it.
+    """
+    if tuple(states) != STOCK_STATES:
+        return ''
+    return DEPRECATED_STATES.get(status, '')
+# The two words read BY NAME rather than by position, so each has one spelling
+# the gate, the CLI and the reports all reach for. `BUILDING` is the pivot: it
+# is where the shaping half ends and the work starts, which is the split D5
+# compares a story against its feature across. `REVIEWING` is the one state the
+# feature verb has behaviour of its own for (it reports the stories not there
+# yet, and `--cascade` closes the ones that are).
+BUILDING = 'building'
+REVIEWING = 'reviewing'
+# D2's question — a feature holding one of these while every story is done has
+# not advanced. Derived from the pivot rather than re-listed: a re-listed tuple
+# is a second spelling of the vocabulary, and it goes stale silently.
+STALLED_IF_ALL_STORIES_DONE = STOCK_STATES[:STOCK_STATES.index(REVIEWING)]
+# Bugs have no transition graph — they are filed and they close. A DIFFERENT
+# machine, untouched by the lifecycle above. The vocabulary exists so D4 covers
+# a bug's status the way it covers every other grain's: a typo'd status is a
+# finding rather than a silent "closed" (rule 4).
 DEFAULT_BUG_STATES = ('open', 'fixed', 'closed')
 
 # D8/D9/D10 encode the branch-per-milestone / bump-at-start flow. They are OFF
@@ -555,9 +652,9 @@ def story_file(cfg: PmConfig, sid: str) -> Path | None:
     never disagree about what a story is. They did: this resolver globbed one
     directory level while the walk went recursive, so a story at
     `stories/parked/s2.md` was SEEN by every rule in `check pm` and addressable
-    by none of them. The gate reported a story `pm story wip <id>` then said did
-    not exist, which is the worst possible pair of answers: each is defensible
-    alone and together they leave nothing to do.
+    by none of them. The gate reported a story that `pm story building <id>`
+    then said did not exist, which is the worst possible pair of answers: each
+    is defensible alone and together they leave nothing to do.
 
     With `story_ordinal_prefix`, a story FILE may carry an ordering prefix
     (`01-the-state.md`) that its ID does not — the number sequences the build,
@@ -936,14 +1033,76 @@ def drift_dangling_record(cfg: PmConfig, fid: str) -> str | None:
 def drift_stalled(fstat: str, done_n: int, total: int) -> str | None:
     """D2 — every story done, but the feature never advanced (a forgotten flip).
 
-    A feature at `review`/`done` with all-done stories is the valid closed
-    state, not drift.
+    A feature at `reviewing` or later with all-done stories is the valid state
+    of a feature that HAS advanced — its remaining work is review, acceptance
+    and packaging, none of which a story tracks.
     """
     if total == 0 or done_n != total:
         return None
-    if fstat in ('planning', 'ready', 'building'):
+    if fstat in STALLED_IF_ALL_STORIES_DONE:
         return f'all stories done, feature still {fstat}'
     return None
+
+
+def work_started(status: str, states: tuple[str, ...]) -> bool | None:
+    """Is `status` at or past `BUILDING` within `states`? `None` = unreadable.
+
+    The one question D5 is built out of, asked inside ONE vocabulary so it is
+    always an index comparison in a single ordered list rather than a guess
+    across two. `None` when this set cannot place the pivot at all (a project
+    renamed its vocabulary and dropped `building`) or does not contain the
+    status (which is D4's finding, already reported) — never `False`, because a
+    "no" here reads as "this grain has not started" and saying that about a
+    grain whose position is unknown is the invented measurement rule 4 bans.
+    """
+    if BUILDING not in states or status not in states:
+        return None
+    return states.index(status) >= states.index(BUILDING)
+
+
+def drift_ahead_of_parent(child: str, child_states: tuple[str, ...],
+                          parent: str, parent_states: tuple[str, ...]) -> bool:
+    """D5 — the child is at work while its parent says it has not started.
+
+    NOT "the child is further along than its parent". A story reaching `done`
+    while its feature is still `reviewing`, `accepted` or `packaging` is the
+    NORMAL path — the feature's remaining work is not story work — and a rule
+    that reported it would fire on every feature in every tree. What is a
+    genuine disagreement is a story at work under a feature that says it is
+    still being shaped: the work has started in one place and not the other.
+
+    So the comparison is across the ONE split each vocabulary carries, not
+    across every state. Both halves are read inside their own grain's set, so
+    a project that renamed one set and not the other still gets a true answer
+    for the set it kept — and `False` when either side is unreadable, which
+    `split_blind_vocabularies` reports so the silence is never mistaken for a
+    clean tree.
+
+    Two grains holding the SAME WORD are never a disagreement, whatever the
+    two sets say about where that word sits. This is a real config, not a
+    hypothetical: the split is an index comparison, so a custom set authored
+    in a different order (alphabetically, or as a hand-written union during a
+    vocabulary migration) moves the pivot for one grain and not the other, and
+    the finding that fell out said "the story is at work and the feature says
+    it has not started" about `planning` and `planning`. A finding whose two
+    halves are the same word cannot be acted on, and D5's whole claim is that
+    two places in this tree disagree.
+    """
+    if child == parent:
+        return False
+    return (work_started(child, child_states) is True
+            and work_started(parent, parent_states) is False)
+
+
+def split_blind_vocabularies(cfg: PmConfig) -> list[str]:
+    """The `[pm]` state sets D5 cannot place `BUILDING` in — what it CANNOT see.
+
+    A rule that reports nothing must say why, or its silence reads as a clean
+    tree (rule 4). Named as config keys because that is what the reader edits.
+    """
+    return [name for name, states in (('story_states', cfg.story_states),
+                                      ('feature_states', cfg.feature_states))
+            if BUILDING not in states]
 
 
 @dataclass

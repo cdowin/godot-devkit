@@ -76,12 +76,12 @@ def seeded(root) -> None:
     """
     write(root / MILESTONE_DIR / 'features/alpha/stories/s1.md',
           {'id': QUIET, 'feature': FEATURE, 'milestone': '"0.1"', 'name': 'S1',
-           'status': 'todo', 'size': 'm'})
+           'status': 'ready', 'size': 'm'})
     bug(root, 'crash', 'closed', caused_by=FEATURE)
     (root / RECORD_REL).write_text(RECORD, encoding='utf-8')
     put_ledger(
         root,
-        status_line('2026-09-03T10:00:00Z', STORY, 'todo', 'wip'),
+        status_line('2026-09-03T10:00:00Z', STORY, 'ready', 'building'),
         dispatch_line('2026-09-03T10:05:00Z', agent_type='developer',
                       tool_calls=37, duration_s=812,
                       tool_calls_before_first_write=9,
@@ -89,12 +89,12 @@ def seeded(root) -> None:
                              'cache_creation': 210000, 'cache_read': 9100000},
                       tree=snapshot(stories_wip=[STORY],
                                     features_building=[FEATURE])),
-        status_line('2026-09-03T10:10:00Z', STORY, 'wip', 'review'),
+        status_line('2026-09-03T10:10:00Z', STORY, 'building', 'reviewing'),
         dispatch_line('2026-09-03T10:11:00Z', agent_type='reviewer',
                       usage={'output': 500},
                       tree=snapshot(stories_review=[STORY])),
-        status_line('2026-09-03T10:12:00Z', STORY, 'review', 'wip'),
-        status_line('2026-09-03T10:14:00Z', STORY, 'wip', 'done'),
+        status_line('2026-09-03T10:12:00Z', STORY, 'reviewing', 'building'),
+        status_line('2026-09-03T10:14:00Z', STORY, 'building', 'done'),
         status_line('2026-09-03T10:20:00Z', BUG, 'open', 'closed'),
         dispatch_line('2026-09-03T10:30:00Z', usage={'input': 5},
                       tool_calls=2),
@@ -128,7 +128,7 @@ class AtARev(unittest.TestCase):
         return code, out
 
     def test_the_table_at_the_tag_is_the_table_before_the_retire(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             roadmap(root)
             _, live = self.capture(root, '0.1')
@@ -146,7 +146,7 @@ class AtARev(unittest.TestCase):
         self.assertEqual(stripped(at_tag), live)
 
     def test_the_json_at_the_tag_is_the_json_before_the_retire(self):
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             roadmap(root)
             _, live = self.capture(root, '0.1', '--json')
@@ -170,7 +170,7 @@ class AtARev(unittest.TestCase):
         and a rev read that matched the directory NAME would answer "no such
         milestone" for every milestone anybody ever renamed.
         """
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             _, live = self.capture(root, '0.1')
             commit(root, 'as 0.1-demo')
@@ -197,7 +197,7 @@ class AtARev(unittest.TestCase):
 
     def test_the_archive_is_searched_after_the_active_tree(self):
         """`model.milestone_dir`'s two places, in its order, out of git."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             _, live = self.capture(root, '0.1')
             archive = root / 'pm/roadmap/zz_archive'
@@ -219,7 +219,7 @@ class AtARev(unittest.TestCase):
         holds one of each, and the assertion is still the byte comparison —
         the same one that catches a whole section going missing.
         """
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             base = root / MILESTONE_DIR
             # In scope, and only the recursive walk finds it.
@@ -255,7 +255,7 @@ class AtARev(unittest.TestCase):
         for the object TYPE for exactly that reason, and a `reviewed:` pointing
         at a directory must resolve to no record rather than to a yield built
         out of `git ls-tree` output."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             (root / 'docs/reviews/alpha.md').unlink()
             write(root / 'docs/reviews/alpha.md/inside.md',
@@ -273,7 +273,7 @@ class AtARev(unittest.TestCase):
         """An absolute path is in no rev. Answering it from the working tree
         would put a file the milestone never shipped with into a report about
         history — the live tree leaking into a historical read."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             outside = root / 'todays-record.md'
             outside.write_text(RECORD.replace('SHIP-WITH-FIXES', 'HOLD'),
@@ -299,7 +299,7 @@ class AtARev(unittest.TestCase):
         reader `ledger.read_rows` uses — translates. A ledger and a record
         whose terminators are CRLF must still produce ONE table either way, or
         the same milestone has two reports and nothing says which is which."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             for rel in (LEDGER_REL, RECORD_REL):
                 path = root / rel
@@ -314,7 +314,7 @@ class AtARev(unittest.TestCase):
 
     def test_the_verb_writes_nothing_and_checks_nothing_out(self):
         """The claim in the docstring, asserted against the tree itself."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             roadmap(root)
             commit(root, 'seed')
@@ -385,7 +385,7 @@ class Refusals(unittest.TestCase):
         """The defect this case was written against: an empty value read as
         "no rev", and the verb answered from the working tree at exit 0 —
         a live report standing in for a question about history."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             seeded(root)
             commit(root, 'seed')
             self.refuses(root, '0.1', '--from', needle='needs a rev')
@@ -423,10 +423,10 @@ class Refusals(unittest.TestCase):
     def test_a_ledger_line_that_will_not_parse_at_the_rev(self):
         """Still by LINE NUMBER, and now naming `<rev>:<path>` — the string a
         reader can paste after `git show` to see the line for themselves."""
-        with tree(story_statuses=('done', 'todo')) as root:
+        with tree(story_statuses=('done', 'ready')) as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
                        '{not json')
             commit(root, 'a ledger with a bad line')
             git(root, 'tag', TAG)

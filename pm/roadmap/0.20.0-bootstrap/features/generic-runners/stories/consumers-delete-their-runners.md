@@ -3,7 +3,7 @@ id: 0.20.0/generic-runners/consumers-delete-their-runners
 feature: 0.20.0/generic-runners
 milestone: "0.20.0"
 name: nullbound and trail delete the runners they no longer own
-status: todo
+status: ready
 owner:
 depends_on: []
 ---

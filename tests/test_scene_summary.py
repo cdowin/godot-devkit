@@ -1,7 +1,7 @@
 """scene (read) — structural [resource]/[sub_resource] property values.
 
-The consumer contract (trail's content_schema_lint.py SEAM note): `scene
---props` must expose sub_resource/resource property VALUES, not just names —
+The consumer contract, as a real content-schema linter stated it at its SEAM:
+`scene --props` must expose sub_resource/resource property VALUES, not names —
 structurally enough to answer questions like "does this `next` StringName
 resolve to a graph member?" without reading the raw file. Read output is write
 input: the sub_resource id printed is the exact address the future
@@ -31,13 +31,13 @@ from godot_devkit.godot.read import scene_summary
 
 CORPUS = FIXTURES / 'corpus'
 # A scrubbed real consumer .tres: [resource] body + 10 typed sub_resources.
-JOB_TRES = CORPUS / 'tr' / 'data' / 'jobs' / 'forager.tres'
+JOB_TRES = CORPUS / 'hand_authored' / 'data' / 'jobs' / 'forager.tres'
 # AnimationLibrary: sub_resources whose track keys carry PackedFloat32Arrays.
-ANIM_TRES = CORPUS / 'nb' / 'data' / 'animations' / 'door_base.tres'
+ANIM_TRES = CORPUS / 'editor_written' / 'data' / 'animations' / 'door_base.tres'
 # The heaviest corpus file (521 raw lines, 31 sub_resources).
-THEME_TRES = CORPUS / 'nb' / 'resources' / 'themes' / 'menu_theme.tres'
+THEME_TRES = CORPUS / 'editor_written' / 'resources' / 'themes' / 'menu_theme.tres'
 # A .tscn with sub_resources, to prove the scene path renders values too.
-SCENE_TSCN = CORPUS / 'tr' / 'scenes' / 'modals' / 'rest_moment.tscn'
+SCENE_TSCN = CORPUS / 'hand_authored' / 'scenes' / 'modals' / 'rest_moment.tscn'
 
 
 def summarize(path, *flags: str) -> str:

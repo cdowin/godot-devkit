@@ -17,7 +17,30 @@ it leaves out are load-bearing, and all three recur on every single pass:
 3. **`index=` on instance-child overrides.** An override without it does not
    reload as an override: Godot creates a NEW SIBLING, and the base scene's real
    child leaks as an orphan on EVERY load. That is what stack-overflowed an
-   unrelated unit test.
+   unrelated unit test. The instancing ancestor may be the ROOT — an inherited
+   scene's root is `[node name="X" instance=ExtResource(base)]`, its children
+   are the base's children, and an override there is an override like any
+   other — unless the base is ITSELF an inherited scene, whose file lists only
+   the nodes it writes rather than its children; an ordinal counted there is
+   too small, and a too-small `index=` is read by Godot as a POSITION and
+   REORDERS the node on load, so that case is refused rather than guessed.
+   What is NOT restored is an `index=` on a node this scene CREATES
+   (`type=` / `instance=`). Its ordinal often IS derivable — a created node
+   appended under an instanced parent lands after that base's own children —
+   but whether the engine WRITES the attribute there is not, and the corpus
+   contradicts itself about it, so writing one invents authored position.
+   See `_restore_indexes` for the census.
+
+**`[editable path=]` is NOT one of them, and is never written here.** The marker
+records the editor's per-instance "Editable Children" toggle and nothing else:
+the engine emits it from the live `is_editable_instance(node)` flag, and applies
+it on load LAST, after every node and property already exists, by calling
+`set_editable_instance()`. Overrides on an instance's children neither require
+it nor imply it. Deriving one from the node tree therefore invents authored
+state — it hands a human a sub-tree the scene never said was editable, and the
+next editor save writes the marker out for good. Both consumers' trees show the
+two facts are independent in both directions: markers on hosts with no
+overridden child, and overridden children under hosts with no marker.
 
 `--elide-defaults` adds the fourth, and it SUBTRACTS instead of restoring: a
 hand-authored `.tres` spells out properties whose value equals the script's
@@ -53,7 +76,6 @@ TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
 SCENE_HEADER_KINDS = ('gd_scene', RESOURCE_HEADER_KIND)
 INSTANCE_ATTR = 'instance'
-EDITABLE_KIND = 'editable'
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
@@ -74,10 +96,33 @@ class BaseScenes:
                 if res_path.startswith(RES_PREFIX) and file.is_file() else ())
         return self._parsed[res_path]
 
+    def root_is_instanced(self, res_path: str) -> bool:
+        """True when the base is ITSELF an inherited scene.
+
+        A `.tscn` holds only the sections that file WRITES. When its root
+        carries `instance=`, its own base's children are not among them — so
+        the file is not a listing of that scene's children, it is a listing of
+        the ones it overrides or adds.
+        """
+        root = next((s for s in self._sections(res_path)
+                     if s.kind == 'node' and s.attrs.get('parent') is None),
+                    None)
+        return root is not None and INSTANCE_ATTR in root.attrs
+
     def child_index(self, res_path: str, parent: list[str], name: str) -> int | None:
-        """The ordinal of `name` among the children of `parent` in `res_path`."""
+        """The ordinal of `name` among the children of `parent` in `res_path`.
+
+        `None` when the count would be a GUESS rather than a reading. A base
+        whose own root is instanced is the case that matters: counting the
+        `[node]` sections it writes yields an ordinal that is too small,
+        because the ones its base contributes are not in the file. Godot reads
+        `index=` as the child's POSITION, so a too-small ordinal does not
+        merely fail to help — it reorders the node on every load, which is
+        worse than the missing attribute it replaced. A verb that cannot
+        guarantee a correct result refuses and says why.
+        """
         sections = self._sections(res_path)
-        if not sections:
+        if not sections or self.root_is_instanced(res_path):
             return None
         wanted = ['.'] if not parent else parent
         siblings = [s for s in sections if s.kind == 'node'
@@ -90,8 +135,16 @@ class BaseScenes:
 
 
 def _instance_host(doc: TscnDocument, path: tuple[str, ...]) -> tuple[Section, tuple] | None:
-    """The nearest ancestor of `path` that instances another scene."""
-    for cut in range(len(path) - 1, 0, -1):
+    """The nearest ancestor of `path` that instances another scene, ROOT included.
+
+    An INHERITED scene's root IS an instancing ancestor — it is written
+    `[node name="X" instance=ExtResource(base)]` and its children are the
+    base's children. Stopping the walk one level short of it (`range(…, 0, -1)`)
+    made every direct child of an inherited root unresolvable, so an override
+    there lost its `index=` and got a "no instancing ancestor was found"
+    refusal instead of the ordinal the base plainly gives it.
+    """
+    for cut in range(len(path) - 1, -1, -1):
         for node in doc.nodes:
             if doc.node_path(node) == path[:cut] and INSTANCE_ATTR in node.attrs:
                 return node, path[cut:]
@@ -138,7 +191,45 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
     fixed = []
     ext = doc.ext_resources()
     for node in list(doc.nodes):
-        if 'type' in node.attrs or INSTANCE_ATTR in node.attrs or 'index' in node.attrs:
+        if 'index' in node.attrs:
+            continue
+        if 'type' in node.attrs or INSTANCE_ATTR in node.attrs:
+            # This scene CREATES the node — `type=` builds it, `instance=`
+            # instantiates it. The skip is keyed here rather than on the
+            # PARENT, which was tried and measured: keying it off "the parent
+            # is an instanced subtree" makes the ordinal derivable (an append
+            # lands after the base's own children) and makes the attribute
+            # invented, because the two are different claims.
+            #
+            # A real-world corpus decided it, in both directions. RECORDED
+            # here, not re-runnable: the measurement was taken over two whole
+            # game checkouts, and nothing in this package reaches outside its
+            # own tree (CLAUDE.md rule 8). What is committed is a scrubbed
+            # SAMPLE of each half, under `tests/fixtures/corpus/`: 22 `.tscn`
+            # in `editor_written` and 14 `.tscn` in `hand_authored`. So the
+            # counts below cannot be reproduced from this checkout, and finding
+            # fewer scenes here than the numbers name is the sample, not
+            # staleness.
+            #
+            # The EDITOR-WRITTEN half — 194 scenes, every one round-tripped
+            # through ResourceSaver — had 1008 created nodes and NOT ONE
+            # carried an `index=`, including 87 whose parent is a node the base
+            # provides; it held no inherited scene with a written child, so it
+            # cannot speak to that case. The HAND-AUTHORED half — 116 scenes,
+            # every one carrying a `;` comment and so never through
+            # ResourceSaver — contradicts itself exactly there: 10 created
+            # nodes directly under an inherited root carry an append-correct
+            # `index=` and 10 more, same tree, same position, carry none. So a
+            # rule that reproduces the first 10 invents the second 10, and the
+            # narrowest form of it still invents 4. The behaviour those numbers
+            # bought is pinned by fixtures in `tests/test_canonicalize.py`,
+            # which carries the same record and the shapes it argues from.
+            #
+            # Restoring them is inventing authored state, which is the sibling
+            # bug this module already paid for once. Settling it needs the
+            # engine, not more reading: whether `pack()` emits `index=` for a
+            # created node in an inherited scene. Until then the tool has no
+            # evidence either way and writes nothing either way.
             continue
         host = _instance_host(doc, doc.node_path(node))
         if host is None:
@@ -150,39 +241,20 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
         base = ext[match.group(1)].attrs.get('path') if match and match.group(1) in ext else None
         ordinal = bases.child_index(base, list(inner[:-1]), inner[-1]) if base else None
         if ordinal is None:
-            fixed.append(f'  UNRESOLVED  cannot count {node_own_path(node)} in {base or "?"} '
-                         f'— index= left off (this node WILL reload as a new sibling)')
+            why = (f'{base} is itself an inherited scene, so its file lists '
+                   f'only the nodes IT writes and an ordinal counted there is '
+                   f'too SMALL — which Godot reads as a POSITION and reorders '
+                   f'the node on load'
+                   if base and bases.root_is_instanced(base)
+                   else f'cannot count {node_own_path(node)} in {base or "?"}')
+            fixed.append(f'  UNRESOLVED  {why} — index= left off for '
+                         f'{node_own_path(node)} (this node WILL reload as a '
+                         f'new sibling)')
             continue
         line = doc.lines[node.header_line]
         doc.lines[node.header_line] = line[:-1] + f' index="{ordinal}"]'
         fixed.append(f'  INDEX  {node_own_path(node)} -> index="{ordinal}"')
     return fixed
-
-
-def _restore_editable_markers(doc: TscnDocument) -> list[str]:
-    """An instance whose children are overridden is an editable instance; Godot
-    writes the marker, `pack()` does not."""
-    declared = {s.attrs.get('path') for s in doc.sections if s.kind == EDITABLE_KIND}
-    missing: list[str] = []
-    for node in doc.nodes:
-        if 'type' in node.attrs or INSTANCE_ATTR in node.attrs:
-            continue
-        host = _instance_host(doc, doc.node_path(node))
-        if host is None:
-            continue
-        host_path = '/'.join(doc.node_path(host[0]))
-        if host_path not in declared:
-            declared.add(host_path)
-            missing.append(host_path)
-    if not missing:
-        return []
-    end = len(doc.lines)
-    while end > 0 and not doc.lines[end - 1].strip():
-        end -= 1                                     # keep the file's trailing newline
-    markers = [line for host in missing for line in ('', f'[{EDITABLE_KIND} path="{host}"]')]
-    doc.lines[end:end] = markers
-    doc._reparse()
-    return [f'  EDITABLE  added [editable path="{host}"]' for host in missing]
 
 
 def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> list[str]:
@@ -205,7 +277,6 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
     report = _restore_ref_uids(doc, uids)
     report += _restore_header_uid(doc, rel, uids)
     report += _restore_indexes(doc, bases)
-    report += _restore_editable_markers(doc)
     if analyzer is not None:
         report += _elide_redundant_defaults(doc, analyzer)
     return doc.text, report

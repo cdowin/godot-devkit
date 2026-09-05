@@ -54,7 +54,7 @@ all pure text parsing, none of it boots Godot:
 
 - **The PM tree is `pm/roadmap/`** — milestones, features, stories and bugs as
   markdown with frontmatter. Status moves through the CLI and never through a
-  hand edit (`make pm ARGS="story wip <id>"`); `make pm-scan` is the drift
+  hand edit (`make pm ARGS="story building <id>"`); `make pm-scan` is the drift
   gate. The execution loop auto-loads from `.claude/rules/pm-execution.md`,
   and the operations manual is `.claude/skills/pm-operations/SKILL.md`.
 - **The agent roster is `.claude/agents/`.** Each file opens with a `Project

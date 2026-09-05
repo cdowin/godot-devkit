@@ -2,11 +2,12 @@
 
 parse -> serialise with NO mutation must be byte-identical. If it is not, the
 toolkit is more dangerous than `sed`, because it silently touches lines nobody
-asked it to touch. Proven three ways: against a hermetic fixture that carries
-every awkward construct we have met in real files; against the committed corpus
-of scrubbed real consumer scenes under tests/fixtures/corpus/ (runs everywhere,
-including CI); and against every .tscn/.tres in whichever consumer checkouts
-are present (this-laptop extra assurance).
+asked it to touch. Proven two ways here: against a hermetic fixture that
+carries every awkward construct we have met in real files, and against the
+committed corpus of scrubbed real-world scenes under tests/fixtures/corpus/.
+Both run everywhere, including CI, and both are entirely inside this checkout:
+a corpus that needs a particular repo cloned on a particular laptop proves
+something different on every machine.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import FIXTURES, available_consumers
+from support import FIXTURES
 
 from godot_devkit.godot.format.tscn import parse_text
 from godot_devkit.godot.format.tscn_document import TscnDocument
@@ -67,29 +68,17 @@ class RoundTripFidelity(unittest.TestCase):
         self.assertEqual(parse_text(lf)[0].props,
                          TscnDocument(crlf).sections[0].props)
 
-    @unittest.skipUnless(available_consumers(), 'no consumer checkout available')
-    def test_every_real_scene_round_trips(self) -> None:
-        checked = 0
-        for repo in available_consumers():
-            for path in [*repo.rglob('*.tscn'), *repo.rglob('*.tres')]:
-                if '/.git/' in str(path):
-                    continue
-                try:
-                    original = path.read_text(encoding='utf-8')
-                except (OSError, UnicodeDecodeError):
-                    continue
-                checked += 1
-                if TscnDocument(original, path).text != original:
-                    self.fail(f'round trip changed {path}')
-        self.assertGreater(checked, 100, 'corpus too small to prove anything')
 
-
-# The committed corpus: real consumer scenes (nullbound = corpus/nb,
-# trail = corpus/tr), paths and structure intact, with game prose anonymized —
-# prose-carrying property values (text/description/display_name/...) and
-# comment bodies had each word replaced by a deterministic dictionary word;
-# node names, types, keys, uids, paths and every byte of punctuation stayed.
-# Unlike the live-consumer sweep below, this runs everywhere, including CI.
+# The committed corpus: real-world scenes, VENDORED, in two slices that fail
+# differently — `editor_written/` came out of Godot's own editor via
+# ResourceSaver, `hand_authored/` was typed by hand and never round-tripped
+# (every file in it carries a `;` comment the editor would have eaten). Paths
+# and structure are intact, with game prose anonymized: prose-carrying property
+# values (text/description/display_name/...) and comment bodies had each word
+# replaced by a deterministic dictionary word; node names, types, keys, uids,
+# paths and every byte of punctuation stayed. It is committed, so it runs
+# everywhere, on CI too — and growing coverage means vendoring another scrubbed
+# file here, never reaching for a tree outside this checkout (CLAUDE.md rule 8).
 CORPUS = FIXTURES / 'corpus'
 
 # Raising this floor is part of growing the corpus; a shrinking corpus must be
@@ -134,17 +123,18 @@ def corpus_files() -> list[Path]:
 
 
 class CommittedCorpusRoundTrip(unittest.TestCase):
-    """The consumer sweep below runs on exactly one laptop; this corpus is the
-    same proof made portable, so CI exercises real-world structure rather than
-    only the hand-built kitchen_sink fixture."""
+    """Real-world structure, vendored: CI exercises scenes an engine and a
+    human actually wrote, not only the hand-built kitchen_sink fixture."""
 
-    def test_census_meets_the_floor_from_both_source_repos(self) -> None:
+    def test_census_meets_the_floor_from_both_slices(self) -> None:
         files = corpus_files()
         self.assertGreaterEqual(len(files), CORPUS_FLOOR,
                                 'corpus shrank — a deleted file must lower the floor here, deliberately')
-        for repo in ('nb', 'tr'):
-            self.assertTrue(any(f.is_relative_to(CORPUS / repo) for f in files),
-                            f'no corpus files from {repo} — source diversity lost')
+        for slice_name in ('editor_written', 'hand_authored'):
+            self.assertTrue(
+                any(f.is_relative_to(CORPUS / slice_name) for f in files),
+                f'no corpus files under {slice_name}/ — the two halves fail '
+                f'differently, and one of them just stopped being proven')
 
     def test_every_corpus_file_round_trips_in_memory(self) -> None:
         for path in corpus_files():

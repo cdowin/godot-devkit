@@ -3,7 +3,7 @@ id: 0.20.0/generic-scans/consumers-delete-their-copies
 feature: 0.20.0/generic-scans
 milestone: "0.20.0"
 name: both consumers delete the shell copies and keep only their own scans
-status: todo
+status: ready
 owner:
 depends_on: []
 ---

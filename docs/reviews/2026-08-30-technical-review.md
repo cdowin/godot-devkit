@@ -320,7 +320,7 @@ load-bearing in all three places. The CUT list is exactly findings 2, 3, 15, 17 
 - `templates/__init__.py` `scaffold` (131-266, 136L): long but strictly
   refuse-before-first-byte phased; a 3-way phase split is available but optional — the
   linearity IS the safety argument here.
-- `tools/consumer_smoke.py` (236): fine.
+- `tools/consumer_smoke.py` (236): fine. *(DELETED in 0.24.0 under CLAUDE.md rule 8 — a dated observation, not current state: the file made two consumer checkouts a precondition for this package's tag.)*
 
 ## Counts by classification
 

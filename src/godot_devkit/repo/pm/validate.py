@@ -329,17 +329,17 @@ def _graph_findings(graph: dict[str, list[str]]) -> list[str]:
     WHITE, GREY, BLACK = 0, 1, 2
     colour = {k: WHITE for k in graph}
 
-    def walk(node: str, trail: list[str]) -> None:
+    def walk(node: str, so_far: list[str]) -> None:
         colour[node] = GREY
         for dep in graph.get(node, []):
             if dep not in colour:
                 continue
             if colour[dep] == GREY:
-                loop = trail[trail.index(dep):] if dep in trail else [dep]
+                loop = so_far[so_far.index(dep):] if dep in so_far else [dep]
                 out.append(f'dependency CYCLE among features: '
                            f'{" -> ".join([*loop, node, dep])}')
             elif colour[dep] == WHITE:
-                walk(dep, [*trail, node])
+                walk(dep, [*so_far, node])
         colour[node] = BLACK
 
     for node in sorted(graph):

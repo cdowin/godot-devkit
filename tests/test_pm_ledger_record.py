@@ -31,8 +31,10 @@ THE FIXTURES (tests/fixtures/transcripts/):
     record keeps the whole `usage` subtree the API sends — that one record is
     what proves the extra keys are ignored rather than copied.
   * `main-session.jsonl` — the Stop shape, written by hand: `isSidechain:
-    false`, no `agentId`, two models across the session and one assistant
-    record with no `usage` at all.
+    false`, no `agentId`, two models across the session, one assistant
+    record with no `usage` at all, and one `<synthetic>` API-error record —
+    the shape Claude Code writes when it generates an assistant turn itself
+    (`isApiErrorMessage`, an all-zero `usage`, `model: "<synthetic>"`).
 """
 from __future__ import annotations
 
@@ -102,7 +104,7 @@ class TranscriptRow(unittest.TestCase):
     """The scrubbed fixture in, one exact row out — every key asserted."""
 
     def test_the_subagent_fixture_produces_this_exact_dispatch_row(self):
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             code, out = record(root, '--from-transcript', str(SUBAGENT),
                                '--event', 'SubagentStop',
                                '--agent-type', 'developer')
@@ -173,14 +175,19 @@ class TranscriptRow(unittest.TestCase):
         self.assertEqual(stamped(row), {
             'kind': 'session',
             'session_id': '11111111-2222-3333-4444-555555555555',
-            # Two models in one session is a LIST, raw — never a pick.
+            # Two models in one session is a LIST, raw — never a pick. The
+            # fixture's `<synthetic>` record is not a third: it is Claude
+            # Code's marker for an assistant turn IT generated, not a model
+            # identifier (0.23.0/ledger D3).
             'model': ['claude-opus-5', 'claude-sonnet-5'],
             'started_at': '2026-09-03T10:00:00Z',
             'ended_at': '2026-09-03T10:07:36Z',
             'duration_s': 456,
-            # Three assistant records, one of which carries no `usage` at all:
-            # it counts as a message and adds zero.
-            'messages': 3,
+            # Four assistant records: one carries no `usage` at all and the
+            # `<synthetic>` one carries an all-zero usage. Both count as a
+            # message and add zero — dropped from `model`, counted everywhere
+            # else, because the record HAPPENED.
+            'messages': 4,
             'tool_calls': 3,
             'tools': {'Read': 1, 'Edit': 1, 'Bash': 1},
             'tool_calls_before_first_write': 1,
@@ -195,7 +202,85 @@ class TranscriptRow(unittest.TestCase):
                                     str(MAIN_SESSION), '--event', 'Stop')[0], 0)
             self.assertNotIn('agent_id', only_row(root))
 
+    # --- `<synthetic>` is not a model (0.23.0/ledger D3) ----------------------
+    # A spelling, not a judgement: Claude Code writes `model: "<synthetic>"` on
+    # an assistant record IT generated (an API-error notice, with an all-zero
+    # `usage`). D4's "never interpret `message.model`" is about not
+    # second-guessing a real identifier; a bracketed pseudo-name is not one.
+    def assistant(self, model: str, ts: str = '2026-09-03T10:00:00Z') -> dict:
+        return {'type': 'assistant', 'timestamp': ts,
+                'message': {'model': model,
+                            'usage': {'input_tokens': 1, 'output_tokens': 2}}}
+
+    def test_the_synthetic_pseudo_name_is_dropped_from_the_model_list(self):
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('claude-fable-5-1'),
+            self.assistant('<synthetic>', '2026-09-03T10:00:30Z'),
+        ], 1))
+        self.assertEqual(summary['model'], 'claude-fable-5-1')
+
+    def test_the_synthetic_record_still_counts_as_a_message_and_its_usage(self):
+        """Dropped from ONE field, not from the row. The record happened; a
+        summary that also stopped counting it would answer "what did this
+        session cost" with a number that is quietly short (hard rule 4)."""
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('claude-fable-5-1'),
+            self.assistant('<synthetic>', '2026-09-03T10:00:30Z'),
+        ], 1))
+        self.assertEqual(summary['messages'], 2)
+        self.assertEqual(summary['usage']['input'], 2)
+        self.assertEqual(summary['usage']['output'], 4)
+
+    def test_a_transcript_of_only_synthetic_records_carries_no_model_key(self):
+        """No model ran, so the row says nothing about one. `None` is what
+        `usage_row` omits — the absence rule already in force for every field
+        the source did not state, never a placeholder."""
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('<synthetic>')], 1))
+        self.assertIsNone(summary['model'])
+        self.assertEqual(summary['messages'], 1)
+        self.assertNotIn('model', ledger.usage_row('session', **summary))
+
+    def test_a_genuine_model_name_is_never_dropped(self):
+        """Every model identifier the corpus actually carries, each proven to
+        survive. The rule removes ONE non-value; a rule that also swallowed a
+        real name would silently rewrite the answer to "which model ran"."""
+        for name in ('claude-opus-5', 'claude-sonnet-5', 'claude-fable-5',
+                     'claude-fable-5-1', 'claude-opus-4-8',
+                     'claude-haiku-4-5-20251001'):
+            with self.subTest(model=name):
+                summary = ledger.transcript_summary(enumerate([
+                    self.assistant('<synthetic>'),
+                    self.assistant(name, '2026-09-03T10:00:30Z'),
+                ], 1))
+                self.assertEqual(summary['model'], name)
+
+    def test_another_bracketed_pseudo_name_is_still_carried_raw(self):
+        """The rule is the ONE string, not the `<…>` shape, and that is the
+        decision (D3): a census of 734 real transcripts found `<synthetic>` and
+        no other bracketed value in this position. Dropping the shape would
+        make the next pseudo-name — whatever Claude Code invents — vanish from
+        the one field that would have reported it, which is narrowing the
+        census instead of reading it. So an unknown one comes through raw, and
+        gets decided the same way `<synthetic>` was."""
+        summary = ledger.transcript_summary(enumerate([
+            self.assistant('<compaction>')], 1))
+        self.assertEqual(summary['model'], '<compaction>')
+
+    def test_only_the_exact_token_is_the_pseudo_name(self):
+        """Substring, prefix, suffix and case-folding are all wrong readings of
+        an exact token. Each name below is one a looser rule would swallow."""
+        for name in ('<synthetic', 'synthetic>', 'x<synthetic>y',
+                     'claude-synthetic-5', '<SYNTHETIC>'):
+            with self.subTest(model=name):
+                summary = ledger.transcript_summary(
+                    enumerate([self.assistant(name)], 1))
+                self.assertEqual(summary['model'], name)
+
     def test_a_dispatch_that_never_wrote_reports_its_whole_tool_count(self):
+        """`tool_calls_before_first_write` is the whole count when no write ever
+        happened — not zero. A read-only dispatch did all of its work before a
+        write that never came, and a 0 there would read as 'wrote immediately'."""
         summary = ledger.transcript_summary(enumerate([
             {'type': 'assistant', 'timestamp': '2026-09-03T10:00:00Z',
              'message': {'content': [{'type': 'tool_use', 'name': 'Read'},
@@ -221,13 +306,13 @@ class TreeSnapshot(unittest.TestCase):
         beta = root / 'pm/roadmap/0.1-demo/features/beta'
         write(beta / 'feature.md',
               {'id': '0.1/beta', 'milestone': '"0.1"', 'name': 'Beta',
-               'status': 'review', 'reviewed': ''})
+               'status': 'reviewing', 'reviewed': ''})
         write(beta / 'stories/b0.md',
               {'id': '0.1/beta/b0', 'feature': '0.1/beta', 'milestone': '"0.1"',
-               'name': 'B0', 'status': 'review'})
+               'name': 'B0', 'status': 'reviewing'})
 
     def test_one_wip_one_review_one_building_feature_one_review_feature(self):
-        with tree(story_statuses=('wip', 'done')) as root:
+        with tree(story_statuses=('building', 'done')) as root:
             self.build(root)
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
@@ -241,7 +326,7 @@ class TreeSnapshot(unittest.TestCase):
         })
 
     def test_every_bucket_is_present_and_empty_rather_than_absent(self):
-        with tree(story_statuses=('todo',)) as root:
+        with tree(story_statuses=('ready',)) as root:
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
             snap = only_row(root)['tree']
@@ -264,7 +349,7 @@ class TreeSnapshot(unittest.TestCase):
         self.assertEqual(snap, fresh())
 
     def test_the_ids_are_sorted_so_two_rows_of_one_state_compare(self):
-        with tree(story_statuses=('wip', 'wip', 'wip')) as root:
+        with tree(story_statuses=('building', 'building', 'building')) as root:
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
             wip = only_row(root)['tree']['stories_wip']
@@ -276,7 +361,7 @@ class HandEntry(unittest.TestCase):
     """`--grain`: the same row shape, from a person, for a dispatch no hook saw."""
 
     def test_a_hand_row_round_trips_with_exactly_the_keys_given(self):
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             code, out = record(root, '--grain', STORY, '--agent-type',
                                'reviewer', '--tokens-in', '1200',
                                '--tokens-out', '38000', '--tool-calls', '37',
@@ -335,9 +420,9 @@ class Show(unittest.TestCase):
     def timeline(self, root, last_to: str = 'done') -> None:
         one, two, three = self.TIMELINE
         put_ledger(root,
-                   status_line(one, STORY, 'todo', 'wip'),
-                   status_line(two, STORY, 'wip', 'review'),
-                   status_line(three, STORY, 'review', last_to))
+                   status_line(one, STORY, 'ready', 'building'),
+                   status_line(two, STORY, 'building', 'reviewing'),
+                   status_line(three, STORY, 'reviewing', last_to))
 
     def test_the_human_form_is_one_line_per_row_with_the_gap_after_the_first(self):
         with tree() as root:
@@ -345,9 +430,9 @@ class Show(unittest.TestCase):
             code, out = run_cli(root, 'ledger', 'show', STORY)
         self.assertEqual(code, 0, out)
         self.assertEqual(out.strip().splitlines(), [
-            '2026-09-03T10:00:00Z  status    todo -> wip',
-            '2026-09-03T10:13:32Z  status    wip -> review  +812s',
-            '2026-09-03T10:20:00Z  status    review -> done  +388s',
+            '2026-09-03T10:00:00Z  status    ready -> building',
+            '2026-09-03T10:13:32Z  status    building -> reviewing  +812s',
+            '2026-09-03T10:20:00Z  status    reviewing -> done  +388s',
             # `done` is terminal for a story, so the run ends with the total.
             'first row → terminal row: 1200s',
         ])
@@ -404,9 +489,9 @@ class Show(unittest.TestCase):
             put_ledger(root,
                        ledger.dumps(ledger.decision_row(
                            STORY, 'D1', 'why', ts='2026-09-03T09:00:00Z')),
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:15:00Z', STORY, 'wip',
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:15:00Z', STORY, 'building',
                                    'done'))
             out = run_cli(root, 'ledger', 'show', STORY)[1]
         self.assertIn('first row → terminal row: 900s', out)
@@ -415,9 +500,9 @@ class Show(unittest.TestCase):
     def test_a_dispatch_after_the_terminal_row_does_not_extend_the_total(self):
         with tree() as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
-                       status_line('2026-09-03T10:15:00Z', STORY, 'wip',
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
+                       status_line('2026-09-03T10:15:00Z', STORY, 'building',
                                    'done'))
             before = run_cli(root, 'ledger', 'show', STORY)[1]
             self.assertEqual(record(root, '--grain', STORY,
@@ -453,7 +538,7 @@ class Show(unittest.TestCase):
         self.assertEqual(out.strip().splitlines(), expected)
 
     def test_a_dispatch_row_is_found_through_the_tree_snapshot(self):
-        with tree(story_statuses=('wip',)) as root:
+        with tree(story_statuses=('building',)) as root:
             self.assertEqual(record(root, '--from-transcript', str(SUBAGENT),
                                     '--event', 'SubagentStop')[0], 0)
             story_out = run_cli(root, 'ledger', 'show', STORY)[1]
@@ -480,11 +565,11 @@ class Show(unittest.TestCase):
     def test_a_malformed_ledger_line_refuses_and_names_the_line(self):
         with tree() as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
                        '{not json',
-                       status_line('2026-09-03T10:01:00Z', STORY, 'wip',
-                                   'review'))
+                       status_line('2026-09-03T10:01:00Z', STORY, 'building',
+                                   'reviewing'))
             code, out = run_cli(root, 'ledger', 'show', STORY)
         self.assertEqual(code, 2, out)
         self.assertIn('line 2', out)
@@ -506,8 +591,8 @@ class RowsThisVersionNeverWrote(unittest.TestCase):
     def show(self, *rows: str, grain: str = STORY):
         with tree() as root:
             put_ledger(root,
-                       status_line('2026-09-03T10:00:00Z', STORY, 'todo',
-                                   'wip'),
+                       status_line('2026-09-03T10:00:00Z', STORY, 'ready',
+                                   'building'),
                        *rows)
             return run_cli(root, 'ledger', 'show', grain)
 
@@ -516,21 +601,21 @@ class RowsThisVersionNeverWrote(unittest.TestCase):
             '{"ts":"2026-09-03T10:01:00Z","kind":"dispatch",'
             '"tree":{"stories_wip":[{"id":"' + STORY + '"}]}}')
         self.assertEqual(code, 0, out)
-        self.assertIn('todo -> wip', out)
+        self.assertIn('ready -> building', out)
 
     def test_a_tree_bucket_holding_a_list_or_null_does_not_crash(self):
         code, out = self.show(
             '{"ts":"2026-09-03T10:01:00Z","kind":"dispatch",'
             '"tree":{"stories_wip":[null,3,["' + STORY + '"]]}}')
         self.assertEqual(code, 0, out)
-        self.assertIn('todo -> wip', out)
+        self.assertIn('ready -> building', out)
 
     def test_a_grain_key_that_is_not_a_string_does_not_crash(self):
         code, out = self.show(
             '{"ts":"2026-09-03T10:01:00Z","kind":"status",'
             '"grain":{"id":"' + STORY + '"},"from":"a","to":"b"}')
         self.assertEqual(code, 0, out)
-        self.assertIn('todo -> wip', out)
+        self.assertIn('ready -> building', out)
 
     def test_such_a_row_does_not_become_this_grains_row(self):
         """Not crashing is half of it: the match must still be False.

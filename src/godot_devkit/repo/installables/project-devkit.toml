@@ -96,6 +96,28 @@
 # version_file    = "project.godot"               # D8: where the version lives
 # version_pattern = '^config/version="(.*)"$'     # D8: the line carrying it
 # milestone_states / feature_states / story_states are overridable the same way.
+# All three default to ONE ordered vocabulary — planning, ready, building,
+# reviewing, accepted, packaging, done — and a grain skips the states it does
+# not need. A custom set's ORDER is its lifecycle order: D5 places "at work" by
+# index within each grain's own set, at `building`, where the shaping half
+# ends. So list the states in the order the work moves through them — an
+# alphabetical list is a different lifecycle, not the same one tidied — and a
+# set that drops `building` leaves D5 with nothing to compare, which
+# `check pm` says out loud rather than passing in silence.
+#
+# 0.24.0 ONLY: the stock sets also READ the four words they replaced — todo
+# (-> ready), wip (-> building), blocked (-> building), review (-> reviewing) —
+# so a tree holding one is not a D4 finding on the day you bump the pin. The
+# verbs refuse to WRITE them, `check pm` prints a census of how many grains
+# still hold one, and 0.25.0 removes them. Rewrite yours before that bump.
+# Declaring your own set that happens to use one of those words opts out: it is
+# your vocabulary, not the window, and nothing here refuses it.
+#
+# Run `godot-devkit check pm` BY HAND once while you are on 0.24.0 and read its
+# NOTE: `make check` summarises this gate as a PASS count, so the census line
+# lands in the transcript under .gate-reports/ and never on your console
+# (VERBOSE=1 streams it), and a project that stays green through 0.24.0 without
+# ever reading it meets the 0.25.0 red with no warning shot.
 
 # --- the read verbs -----------------------------------------------------------
 # `autoloads` cross-checks each autoload's NAME SUFFIX against what its source

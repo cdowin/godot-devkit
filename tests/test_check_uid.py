@@ -333,9 +333,9 @@ class Canonicality(unittest.TestCase):
     comes from the ported codec, never from the engine (rule 2)."""
 
     def test_the_fail_line_carries_the_census_like_the_pass_line(self) -> None:
-        # Rule 4 both ways: the smoke harness greps `across N file(s)` on
-        # PASS and FAIL alike — a failing verdict with no census is a gate
-        # that stopped disclosing what it scanned the moment it mattered.
+        # Rule 4 both ways: a consumer greps `across N file(s)` on PASS and
+        # FAIL alike — a failing verdict with no census is a gate that stopped
+        # disclosing what it scanned the moment it mattered.
         with temp_repo('uid_repo', only=NONCANON):
             code, out = run_check(uid)
         self.assertEqual(code, 1, out)

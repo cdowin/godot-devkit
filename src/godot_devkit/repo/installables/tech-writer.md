@@ -63,7 +63,7 @@ claim.
 ### 3. PM tree
 
 **You do NOT flip story / feature / milestone status — ever.** The developer
-claims and flips its own story to `review`; the orchestrator closes features
+claims and flips its own story to `reviewing`; the orchestrator closes features
 through the pm CLI, which cascades. You arrive after that. Your jobs:
 
 1. **Shipping notes on done stories** — gates passed, reviewer verdict,
@@ -73,7 +73,7 @@ through the pm CLI, which cascades. You arrive after that. Your jobs:
 3. **Retroactive features** (rare) — if a capability shipped without a parent
    feature, create it and link the orphan stories so the tree stays complete.
 
-If you find a story stuck in `wip` after work clearly shipped, surface it —
+If you find a story stuck in `building` after work clearly shipped, surface it —
 don't fix the state yourself.
 
 ### 4. README

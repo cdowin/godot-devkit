@@ -11,9 +11,9 @@ expand its recipe, run NOTHING. That catches every way the include and the
 installed runners can fail to line up — a target naming a runner the install
 does not write, a variable the include never declares, a recipe that will not
 expand — and it cannot catch a runner that expands fine and fails on contact
-with the engine. The real boot is `make smoke` (tools/consumer_smoke.py), which
-carries the fresh-project probe that runs the real `make doctor` and the real
-`make check` where Godot is on PATH, and says so loudly where it is not.
+with the engine. That last mile has NO gate here and is stated rather than
+implied: a runner's contact with a real engine is proven where an engine
+exists, which is a consuming project's own gate, in its own repo.
 
 `make check` IS run for real here, and that is not a hedge — the gate roster is
 pure parse and boots nothing, so a dry run of it was never the best this file
@@ -248,17 +248,16 @@ def test_a_project_gate_joins_check_through_devkit_toml_not_a_fork():
     assert roster.stdout.split() == ['my-scan'], roster.stdout
 
 
-# --- the hook census: doctor's count, the install roster, and the smoke probe -
-# `make smoke`'s fresh-project probe asserts that the number of hooks doctor
-# reports armed equals the number `install-hooks` ships. It carried that number
-# as the literal `TRACKED_HOOKS = 6`, and the two 0.22.0 ledger couriers turned
-# it into `FAIL  make doctor: hook census  8 tracked hook(s) armed, 6
-# installed` on the day they landed — a red smoke run about a roster, not about
+# --- the hook census: doctor's count vs the install roster --------------------
+# The number of hooks `doctor.sh` reports armed must equal the number
+# `install-hooks` ships. A gate once carried that number as a hand-written
+# literal, and the two 0.22.0 ledger couriers turned it into `8 tracked hook(s)
+# armed, 6 installed` on the day they landed — red about a roster, not about
 # behaviour. doctor.sh itself was never wrong: it counts what is IN
 # tools/hooks/ precisely so a hook added after it was written is still covered.
-# The literal was the only roster in the loop, so it is now derived, and these
-# two tests are the reason it cannot come back: the census is proven HERE, in
-# the suite, instead of first in a gate that needs two consumer checkouts.
+# The literal was the only roster in the loop, so the census is asked of the
+# install PLAN here, in the suite, where a new hook cannot be discovered by a
+# gate first.
 HOOKS_DIR = 'tools/hooks'
 DOCTOR_ARMED = re.compile(r'tracked hook \S+ present \+ executable')
 
@@ -272,23 +271,10 @@ def installed_hook_roster() -> list[str]:
             and not rel.endswith('.local')]
 
 
-def test_the_smoke_probes_hook_census_is_derived_from_the_install_roster():
-    """The number `make smoke` compares against must BE the roster, not a copy
-    of it. A copy is only ever correct until the next hook."""
-    sys.path.insert(0, str(REPO_ROOT / 'tools'))
-    import consumer_smoke                                       # noqa: PLC0415
-    assert consumer_smoke.TRACKED_HOOKS == len(installed_hook_roster()), (
-        f'consumer_smoke.TRACKED_HOOKS = {consumer_smoke.TRACKED_HOOKS} but '
-        f'install-hooks ships {len(installed_hook_roster())} hooks under '
-        f'{HOOKS_DIR}/: {installed_hook_roster()}')
-
-
 def test_doctor_arms_and_reports_every_hook_the_install_verb_ships():
     """The coupling itself, on a real `init`'d tree: doctor's census is asked
     of the DIRECTORY, so it must come back equal to the roster that filled it.
-    This is the assertion `make smoke` makes with two consumer checkouts and a
-    host toolchain; making it here means a new hook can never be discovered by
-    the gate first."""
+    Asked of a tree this file builds, so it holds on CI and on any machine."""
     roster = installed_hook_roster()
     with initialized_project() as root:
         armed = subprocess.run(['bash', 'tools/setup-hooks.sh'], cwd=root,

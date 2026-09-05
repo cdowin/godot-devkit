@@ -160,6 +160,19 @@ USAGE_FIELDS = (('input', 'input_tokens'),
 TYPE_ASSISTANT = 'assistant'
 TYPE_TOOL_USE = 'tool_use'
 
+# Not a model. Claude Code writes this as the `model` of an assistant record IT
+# generated rather than received — an API-error notice, carrying an all-zero
+# `usage`. D4 ("never interpret `message.model`") is about not second-guessing
+# a real identifier; a bracketed pseudo-name is not one, so dropping it from
+# the model list is a SPELLING rule and not a judgement (0.23.0/ledger D3).
+#
+# The exact token, never the `<…>` shape: a census of 734 real transcripts
+# found this value and no other bracketed one in this position, and a shape
+# rule would make the NEXT pseudo-name vanish from the one field that would
+# have reported it. An unknown one comes through raw and gets decided the same
+# way this one was.
+SYNTHETIC_MODEL = '<synthetic>'
+
 # Every key a usage row may carry, in the order feature.md writes them. A row
 # omits the ones it has no value for — `usage_row` never emits a key with None
 # behind it — so this is a key ORDER, not a schema with required fields.
@@ -292,7 +305,11 @@ def transcript_summary(records: Iterable[tuple[int, dict]]) -> dict:
         half of it: a dispatch's wall-clock starts at the prompt.
       * `model` — the assistant records' `message.model`, first-seen order; a
         string when there is one, the LIST when a session switched models. Raw
-        either way, because "which model" is the report's question to ask.
+        either way, because "which model" is the report's question to ask —
+        except `SYNTHETIC_MODEL`, which is not an identifier at all and is
+        dropped as a spelling. It still counts as a message and its usage
+        still sums: the record happened, only its `model` says nothing. A
+        transcript with no other model has no `model` key on its row.
 
     A file with NO assistant record raises: there is nothing to sum, and a row
     of zeros is indistinguishable afterwards from a dispatch that really cost
@@ -316,7 +333,8 @@ def transcript_summary(records: Iterable[tuple[int, dict]]) -> dict:
         message = record.get('message')
         message = message if isinstance(message, dict) else {}
         model = message.get('model')
-        if isinstance(model, str) and model and model not in models:
+        if (isinstance(model, str) and model and model != SYNTHETIC_MODEL
+                and model not in models):
             models.append(model)
         seen = message.get('usage')
         seen = seen if isinstance(seen, dict) else {}
@@ -396,15 +414,20 @@ def usage_row(kind: str, **fields: object) -> dict:
 # prints a first-row-to-terminal-row total only once that row exists.
 #
 # `done` is NAMED here rather than read as `cfg.<kind>_states[-1]`, and that is
-# the whole point of this constant: the stock story vocabulary is
-# `todo wip review done blocked`, so `[-1]` is `blocked` — a story that finished
-# would have printed no total and a story that stalled would have printed one.
-# The vocabulary is a closed SET with no ordering contract (there is no
-# transition graph in this package, on purpose), and its ORDER is `pm
-# vocabulary`'s output, which consumers read — so the fix is to name the state,
-# not to reorder the tuple. `done` is also the state every drift rule in
-# model.py already treats as terminal (D2, D3, D5), so this agrees with the
-# gate rather than inventing a second opinion about what "finished" means.
+# the whole point of this constant. The stock lifecycle ends at `done`, so the
+# two agree by default and part company the moment a project overrides a set:
+# `[-1]` is wherever that list happens to stop — a `blocked` or a `parked`
+# hung off the end, or a hand-written union carrying two vocabularies at once
+# — and a grain that finished would print no total while one that stalled
+# printed one. `done` is also the state every drift rule in model.py already
+# treats as terminal (D2, D3, D5), so this agrees with the gate rather than
+# inventing a second opinion about what "finished" means.
+#
+# The ORDER of a set IS load-bearing — model.py's LIFECYCLE says why: D5 places
+# "at work" by index within each grain's own set — and it is separately what
+# `pm vocabulary` prints for consumers to read. Neither of those makes the LAST
+# entry a terminal state, which is why the answer here is to name the state and
+# not to reason from a position.
 TERMINAL_STATE = 'done'
 
 # Bugs are the exception, and they are configured rather than named: their

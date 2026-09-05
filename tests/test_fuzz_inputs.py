@@ -297,7 +297,7 @@ def _build_pm(outer: Path, root: Path) -> None:
     for fid, sslug in (('alpha', 's0'), ('alpha', 's1'), ('beta', 'b0')):
         _grain_front(m / 'features' / fid / 'stories' / f'{sslug}.md',
                      {'id': f'0.1/{fid}/{sslug}', 'feature': f'0.1/{fid}',
-                      'milestone': '"0.1"', 'name': sslug, 'status': 'todo'})
+                      'milestone': '"0.1"', 'name': sslug, 'status': 'ready'})
     _grain_front(m / 'bugs' / 'crash.md',
                  {'id': '0.1/bugs/crash', 'milestone': '"0.1"', 'status': 'open'})
     _grain_front(m / 'bugs' / 'sub' / 'nested.md',
@@ -309,7 +309,7 @@ def _pm_argv(rng: random.Random, verb: str,
              gid: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """(argv, the caller-supplied grain ids inside it)."""
     if verb == 'story':
-        return ('pm', 'story', 'wip', gid), (gid,)
+        return ('pm', 'story', 'building', gid), (gid,)
     if verb == 'bug':
         return ('pm', 'bug', 'fixed', gid), (gid,)
     if verb == 'feature':

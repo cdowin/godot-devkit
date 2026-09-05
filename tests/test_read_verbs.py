@@ -191,8 +191,8 @@ class RefsScope(unittest.TestCase):
     def test_a_receiverless_same_file_call_counts(self) -> None:
         """Every call-site alternative required a leading `.`, so a method
         called only from inside its own script reported ZERO references — and
-        zero references is the answer that gets a method deleted. (Found in
-        nullbound: progression_manager.gd, two same-file callers.)"""
+        zero references is the answer that gets a method deleted. (Found in the
+        wild: a manager script with two same-file callers.)"""
         with temp_repo('read_repo') as root:
             (root / 'systems/progression.gd').write_text(self.SAME_FILE,
                                                          encoding='utf-8')

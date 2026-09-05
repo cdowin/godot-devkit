@@ -14,7 +14,13 @@
 # `check uid|tres|props` still run here on demand and still say exactly what
 # they scanned. The repo-family two apply, and `shell` joined them when the
 # repo started self-hosting its own hook corpus under tools/ (0.23.0).
-all = ["doc", "pm", "shell"]
+#
+# `hooks` is the other half of that self-hosting, and it is here because the
+# sentence was not enough: `core.hooksPath` was unset in every checkout of this
+# repo for two releases while CLAUDE.md said the corpus was armed, and no target
+# looked. It is stock-OFF for consumers — arming is a decision each makes once —
+# and on for the repo that told them to.
+all = ["doc", "pm", "shell", "hooks"]
 
 # The deliberately-drifted Godot corpus under tests/fixtures/ is the INPUT to
 # this package's tests, not content this repo maintains: a stale uid and a

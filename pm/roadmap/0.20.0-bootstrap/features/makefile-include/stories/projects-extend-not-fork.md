@@ -3,7 +3,7 @@ id: 0.20.0/makefile-include/projects-extend-not-fork
 feature: 0.20.0/makefile-include
 milestone: "0.20.0"
 name: a project Makefile is an include plus its own targets, extra gates come from devkit.toml
-status: todo
+status: ready
 owner:
 depends_on: []
 ---

@@ -193,9 +193,9 @@ verdict: RELEASE-WITH-FIXES
 | M1 | MAJOR | landed c006c69 |
 | M2 | MAJOR | landed 8305bb4 |
 | M3 | MAJOR | landed 8305bb4 |
-| m1 | MINOR | open |
-| m2 | MINOR | open |
-| n1 | NIT | open |
-| n2 | NIT | open |
-| n3 | NIT | open |
+| m1 | MINOR | deferred: 0.24.0/bugs/install-hooks-refuses-whole-on-header-edited-consumers |
+| m2 | MINOR | deferred: 0.24.0/bugs/self-hosting-has-no-arm-or-verify-target |
+| n1 | NIT | deferred: 0.24.0/bugs/verdict-refusals-do-not-name-the-separator-row-or-a-pipe-in-a-reason |
+| n2 | NIT | deferred: 0.24.0/bugs/ledger-model-list-carries-synthetic |
+| n3 | NIT | deferred: 0.24.0/bugs/courier-path-quoting-needs-a-bash-shell |
 ```

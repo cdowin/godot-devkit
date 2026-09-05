@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "godot-devkit"
-version = "0.23.0"
+version = "0.24.0"
 description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads/tiles) + surgical scene and TileMapLayer edits + static repo gates (uid, tres-format, props, defaults, doc, shell, repo-hygiene) + a PM-tree tracker with its own drift gate."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,7 @@ godot-devkit = "godot_devkit.cli:main"
 testpaths = ["tests"]
 markers = [
     "fuzz: a seeded differential or replay harness. Deterministic by contract — a fuzz that varies run to run is not a gate. `make fuzz` runs the slice; `make test` runs it too, because a harness that only runs when somebody remembers it does not run.",
+    "shell: the module spawns a process — bash, make, git, an installed hook corpus. DERIVED at collection by `tests/conftest.py` from what the source imports, never hand-applied; a hand-written one is a collection refusal naming the file. `make test` runs it and so does the floor interpreter in `make matrix`; the other interpreters skip it, because a `subprocess` is not something a Python version changes.",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -63,6 +63,19 @@ def block(*rows: str, verdict_line: str = 'verdict: SHIP-WITH-FIXES',
         ''))
 
 
+def one(text: str) -> verdict.Verdict:
+    """The single pass a one-block fixture carries — and a check that it IS one.
+
+    `parse` returns a list because a record has as many verdict blocks as it
+    had review passes. Every fixture below that means "the block" says so here
+    rather than by indexing `[0]`, which would read a first block out of a
+    record that grew a second one and call the difference nothing.
+    """
+    passes = verdict.parse(text)
+    assert len(passes) == 1, passes
+    return passes[0]
+
+
 def malformed(text: str) -> verdict.MalformedVerdict:
     with pytest.raises(verdict.MalformedVerdict) as caught:
         verdict.parse(text)
@@ -74,7 +87,7 @@ def malformed(text: str) -> verdict.MalformedVerdict:
 def test_every_verdict_in_the_closed_set_parses(name):
     """All six, each proven — a set with an untested member is a set with a
     typo in it, and the typo surfaces the day a reviewer uses that verdict."""
-    parsed = verdict.parse(block(verdict_line=f'verdict: {name}'))
+    parsed = one(block(verdict_line=f'verdict: {name}'))
     assert parsed.verdict == name
     assert parsed.findings == []
 
@@ -82,14 +95,14 @@ def test_every_verdict_in_the_closed_set_parses(name):
 def test_a_pass_that_raised_nothing_is_a_verdict_with_no_rows():
     """The header row alone is a complete block. A clean pass must not be
     indistinguishable from a record that never wrote one."""
-    parsed = verdict.parse(block(verdict_line='verdict: SHIP'))
+    parsed = one(block(verdict_line='verdict: SHIP'))
     assert parsed == verdict.Verdict('SHIP', [])
 
 
 def test_every_disposition_kind_and_its_raw_value():
     """The story's own example, field for field. `disposition_value` is the
     RAW thing (D5): the hash, the reason, the grain id — nothing inferred."""
-    parsed = verdict.parse(block(
+    parsed = one(block(
         '| W1 | WARNING | landed 3a42f19ad |',
         '| S3 | SUGGESTION | rejected: pause regression |',
         '| D2 | DELTA | deferred: 0.90.3/throwable-as-behavior |',
@@ -109,7 +122,7 @@ def test_every_severity_in_the_closed_set_parses(severity):
     """The set is the union of the four definitions' grades. A severity an
     installed agent is told to assign and this parser rejects would be a
     parser that exits 2 on its own tooling's correct output."""
-    parsed = verdict.parse(block(f'| F1 | {severity} | landed 3a42f19ad |'))
+    parsed = one(block(f'| F1 | {severity} | landed 3a42f19ad |'))
     assert parsed.findings[0].severity == severity
 
 
@@ -119,7 +132,7 @@ def test_the_block_is_found_with_prose_and_other_fenced_blocks_around_it():
     text = ('# Review\n\nEvidence:\n\n```console\n$ make precommit\n'
             'PASS\n```\n\nMore prose.\n\n' + block('| N1 | NIT | rejected: taste |')
             + '\n```python\nverdict = "not this one"\n```\n')
-    parsed = verdict.parse(text)
+    parsed = one(text)
     assert parsed.verdict == 'SHIP-WITH-FIXES'
     assert [f.id for f in parsed.findings] == ['N1']
 
@@ -127,7 +140,7 @@ def test_the_block_is_found_with_prose_and_other_fenced_blocks_around_it():
 def test_whitespace_in_the_cells_is_tolerated_and_the_shape_is_not():
     """Tolerant on the cells, strict on the shape — the one rule the module
     states. Ragged column padding is how a human edits a markdown table."""
-    parsed = verdict.parse(block(
+    parsed = one(block(
         '|   W1    |   WARNING   |   landed 3a42f19ad   |',
         '',
         '|D2|DELTA|deferred: 0.22.0/review-record-shape|'))
@@ -140,7 +153,7 @@ def test_the_fixed_keywords_fold_case_and_the_closed_set_values_come_back_canoni
     """Detection is generous so nothing is silently missed; the stored value is
     canonical so the report groups `Warning` and `WARNING` as one severity
     instead of two rows in its own output."""
-    parsed = verdict.parse(block('| w1 | Warning | LANDED 3A42F19AD |',
+    parsed = one(block('| w1 | Warning | LANDED 3A42F19AD |',
                                  verdict_line='Verdict: ship-with-fixes'))
     assert parsed.verdict == 'SHIP-WITH-FIXES'
     assert parsed.findings[0].severity == 'WARNING'
@@ -160,7 +173,7 @@ def test_a_tilde_fence_carries_a_block_too():
     """`core.markdown` owns the fence rules; this module must not have quietly
     re-implemented half of them as 'a line of three backticks'."""
     text = '# R\n\n~~~\nverdict: HOLD\n' + HEADER_ROW + '\n~~~\n'
-    assert verdict.parse(text).verdict == 'HOLD'
+    assert one(text).verdict == 'HOLD'
 
 
 # --- what it refuses: no block is a FACT, not a failure -----------------------
@@ -191,15 +204,52 @@ def test_NoVerdict_says_how_much_it_read():
 
 
 # --- what it refuses: a block that cannot be read correctly -------------------
-def test_two_blocks_refuse_and_name_the_second():
-    """"The verdict of this pass" is a single fact. Taking the first, the last,
-    or the "better" one is the guess this parser exists not to make."""
+def test_two_blocks_are_two_passes_in_the_order_the_record_carries_them():
+    """Was `test_two_blocks_refuse_and_name_the_second`, which encoded a
+    reading that made the package unable to parse the record its own SDLC
+    produces: three review passes append three blocks to one record, and the
+    refusal turned `pm ledger report` into exit 2 at the moment the third
+    landed. "The verdict of this pass" is still a single fact — this returns
+    one Verdict per PASS and merges nothing, so a record that went
+    SHIP-WITH-FIXES and then HOLD reports both in that order rather than
+    either one of them alone.
+    """
     text = block('| W1 | WARNING | landed 3a42f19ad |') + '\n' + block(
         verdict_line='verdict: HOLD')
+    passes = verdict.parse(text)
+    assert [p.verdict for p in passes] == ['SHIP-WITH-FIXES', 'HOLD']
+    assert [len(p.findings) for p in passes] == [1, 0]
+    assert passes[0].findings[0].id == 'W1'
+
+
+def test_a_malformed_LATER_block_refuses_the_whole_record():
+    """A good first pass does not make a bad third one readable. Returning the
+    two that parsed would print a yield number over a pass nobody counted —
+    the read-side sin, arriving through a record that grew."""
+    text = (block('| W1 | WARNING | landed 3a42f19ad |') + '\n'
+            + block('| S3 | WHATEVER | rejected: no |',
+                    verdict_line='verdict: HOLD'))
     error = malformed(text)
-    assert 'second verdict block' in error.why
-    assert error.line == 'verdict: HOLD'
-    assert text.split('\n')[error.lineno - 1] == 'verdict: HOLD'
+    assert 'unknown severity' in error.why
+    assert error.line == '| S3 | WHATEVER | rejected: no |'
+
+
+def test_three_passes_over_one_record_each_keep_their_own_findings():
+    """The shape the re-ordered protocol produces: raised, landed, cleared.
+    Flattening these loses the fact that findings were acted on BETWEEN
+    passes — the one thing a multi-pass record is evidence of."""
+    text = '\n'.join((
+        block('| C1 | CRITICAL | open |', '| m1 | MINOR | open |',
+              verdict_line='verdict: RELEASE-WITH-FIXES'),
+        block('| C1 | CRITICAL | landed 3a42f19ad |',
+              verdict_line='verdict: RELEASE-WITH-FIXES'),
+        block(verdict_line='verdict: RELEASE-SAFE')))
+    passes = verdict.parse(text)
+    assert [p.verdict for p in passes] == [
+        'RELEASE-WITH-FIXES', 'RELEASE-WITH-FIXES', 'RELEASE-SAFE']
+    assert [len(p.findings) for p in passes] == [2, 1, 0]
+    assert [f.disposition_kind for f in passes[0].findings] == ['open', 'open']
+    assert passes[1].findings[0].disposition_kind == 'landed'
 
 
 def test_a_row_with_two_cells_refuses_with_its_line_number():
@@ -286,18 +336,18 @@ def test_a_rejected_with_no_reason_refuses():
 # Without a kind for that, an honest author misfiles them as `rejected:` (this
 # repo's own 0.23.0 records did) and the yield column reads a lie.
 def test_open_parses_as_its_own_kind_with_no_value():
-    parsed = verdict.parse(block('| C1 | CRITICAL | open |'))
+    parsed = one(block('| C1 | CRITICAL | open |'))
     assert parsed.findings == [verdict.Finding('C1', 'CRITICAL', 'open', '')]
 
 
 def test_open_with_a_note_carries_the_note_raw():
-    parsed = verdict.parse(block('| M1 | MAJOR | open: awaiting the landing pass |'))
+    parsed = one(block('| M1 | MAJOR | open: awaiting the landing pass |'))
     assert parsed.findings == [
         verdict.Finding('M1', 'MAJOR', 'open', 'awaiting the landing pass')]
 
 
 def test_open_is_a_fixed_token_and_folds_case():
-    parsed = verdict.parse(block('| M1 | MAJOR | OPEN |'))
+    parsed = one(block('| M1 | MAJOR | OPEN |'))
     assert parsed.findings[0].disposition_kind == verdict.OPEN
 
 
@@ -338,10 +388,85 @@ def test_a_line_in_the_block_that_is_not_a_row_refuses(row):
 def test_a_markdown_separator_row_refuses_loudly():
     """`| --- | --- | --- |` is the habit every markdown table trains. It is
     not in the shape, so it refuses with a line number rather than becoming a
-    finding whose id is three hyphens."""
+    finding whose id is three hyphens.
+
+    And the refusal NAMES it. `unknown severity '---'` is a true sentence about
+    a row nobody meant to write: the author reads it looking for a severity
+    they never typed, when the whole row is the mistake. A refusal an LLM
+    reviewer will meet on its next pass has to say what to do about it.
+    """
     error = malformed(block('| --- | --- | --- |',
                             '| W1 | WARNING | landed 3a42f19ad |'))
-    assert "unknown severity '---'" in error.why
+    assert 'a markdown separator row is not a finding — drop it' in error.why
+    assert 'severity' not in error.why, (
+        'the refusal still blames the severity cell for a row that has none')
+
+
+@pytest.mark.parametrize('row', (
+    '|---|---|---|',                  # the tight spelling
+    '| --- | --- | --- |',            # the padded one
+    '|:---|:---:|---:|',              # column alignment
+    '| - | - | - |',                  # one hyphen is a legal separator too
+    '|---|---|',                      # the wrong width — still a separator row
+    '|---|---|---|---|',
+))
+def test_every_separator_row_spelling_is_named_as_one(row):
+    """The shape, not one string. A separator row refuses as a separator row at
+    any width, padding and alignment — including the widths where the cell
+    count is ALSO wrong, because "2 cell(s)" sends the author to add a column
+    to a row that should not exist."""
+    assert 'a markdown separator row is not a finding' in malformed(
+        block(row, '| W1 | WARNING | landed 3a42f19ad |')).why
+
+
+def why_or_blank(text: str) -> str:
+    """The refusal's sentence, or '' when the record parsed cleanly."""
+    try:
+        verdict.parse(text)
+    except verdict.MalformedVerdict as error:
+        return error.why
+    return ''
+
+
+@pytest.mark.parametrize('row', (
+    '| W1 | WARNING | landed 3a42f19ad |',    # a real finding, hyphen-free
+    '| -1 | WARNING | landed 3a42f19ad |',    # an id that merely starts with one
+    '| --- | WARNING | landed 3a42f19ad |',   # only ONE cell is separator-shaped
+))
+def test_a_row_that_is_not_a_separator_is_not_called_one(row):
+    """The other side of the shape: every cell has to be separator-shaped, so a
+    finding is never mistaken for the row above it."""
+    assert 'separator row' not in why_or_blank(block(row))
+
+
+def test_a_pipe_inside_a_reason_refuses_and_names_the_pipe():
+    """`rejected: pause regression | perf risk` is the second habit — prose in
+    a cell, written with the punctuation prose uses. It refuses as "4 cell(s)",
+    which describes the parse and not the mistake: the author counts three
+    columns in what they wrote and has nowhere to go."""
+    error = malformed(
+        block('| S3 | SUGGESTION | rejected: pause regression | perf risk |'))
+    assert '4 cell(s)' in error.why, 'the count is still the first fact'
+    assert '| inside a reason splits the row' in error.why
+    assert "write 'or'" in error.why
+
+
+def test_the_over_wide_refusal_names_the_fourth_column_too():
+    """Two causes for one shape, and the refusal does not GUESS between them:
+    `| W1 | WARNING | landed 3a42f19ad | extra |` is a fourth column, and
+    picking one reading would be a claim about intent the row does not carry."""
+    error = malformed(block('| W1 | WARNING | landed 3a42f19ad | extra |'))
+    assert 'no fourth column' in error.why
+    assert '| inside a reason splits the row' in error.why
+
+
+def test_a_short_row_is_not_told_about_pipes():
+    """The teaching is for the shape that HAS one. A two-cell row is a missing
+    column; telling its author about a stray pipe sends them looking for
+    punctuation they did not type."""
+    error = malformed(block('| S3 | rejected: no |'))
+    assert '2 cell(s)' in error.why
+    assert 'inside a reason' not in error.why
 
 
 def test_a_block_with_no_header_row_refuses():
@@ -448,7 +573,7 @@ def test_the_example_block_in_each_definition_is_one_this_parser_accepts(name):
     """The strongest form of the assertion above: the shipped example is fed to
     the shipped parser. A definition demonstrating a block the parser rejects
     is how every review record in a consumer starts exiting 2."""
-    parsed = verdict.parse(installable(name))
+    parsed = one(installable(name))
     assert parsed.verdict == 'SHIP-WITH-FIXES'
     assert {f.disposition_kind for f in parsed.findings} == set(verdict.DISPOSITION_KINDS)
 
@@ -528,6 +653,21 @@ def test_each_definition_says_the_block_is_the_record_of_the_verdict(name):
 
 
 @pytest.mark.parametrize('name', ALL_DEFINITIONS)
+def test_each_definition_forbids_a_pipe_inside_a_reason(name):
+    """The paragraph already says "No separator row" — and a reviewer who reads
+    it still writes `rejected: a | b`, because nothing told them not to. A
+    refusal that teaches is half of it; the other half is the instruction the
+    author read BEFORE writing the row, in all five files."""
+    # Whitespace-collapsed: these files are hard-wrapped at 80 and the sentence
+    # is free to land across a line break, which is a fact about the margin and
+    # not about the rule.
+    body = ' '.join(definition(name).split())
+    assert 'no `|` inside a reason' in body, (
+        f'{name} does not forbid a pipe inside a disposition reason')
+    assert 'write `or`' in body, f'{name} does not say what to write instead'
+
+
+@pytest.mark.parametrize('name', ALL_DEFINITIONS)
 def test_the_repo_local_reviewer_carries_the_same_paragraph(name):
     """Five files, one paragraph. `code-reviewer.md` has no installable, so
     nothing else in the suite would notice it drifting away from the other
@@ -551,17 +691,17 @@ def test_landed_in_place_parses_as_a_landed_disposition():
     the record is written a landed fix HAS no hash. `landed <hex>` alone
     under-counts exactly the findings that were acted on — the disposition the
     yield number most wants to see."""
-    parsed = verdict.parse(block('| M4 | MAJOR | landed in-place |'))
+    parsed = one(block('| M4 | MAJOR | landed in-place |'))
     assert parsed.findings == [verdict.Finding('M4', 'MAJOR', 'landed', 'in-place')]
 
 
 def test_landed_in_place_is_a_fixed_token_and_folds_case():
-    parsed = verdict.parse(block('| M4 | MAJOR | LANDED In-Place |'))
+    parsed = one(block('| M4 | MAJOR | LANDED In-Place |'))
     assert parsed.findings[0].disposition_value == verdict.IN_PLACE
 
 
 def test_landed_in_place_and_a_hash_coexist_in_one_block():
-    parsed = verdict.parse(block('| W1 | WARNING | landed 3a42f19ad |',
+    parsed = one(block('| W1 | WARNING | landed 3a42f19ad |',
                                  '| M4 | MAJOR | landed in-place |'))
     assert [f.disposition_value for f in parsed.findings] == ['3a42f19ad', 'in-place']
 
@@ -586,7 +726,7 @@ def test_each_definition_shows_a_landed_in_place_row(name):
     example has to demonstrate it — an agent copies the shape it is shown."""
     body = definition(name)
     assert f'landed {verdict.IN_PLACE}' in body, f'{name} shows no in-place row'
-    parsed = verdict.parse(body)
+    parsed = one(body)
     assert verdict.IN_PLACE in [f.disposition_value for f in parsed.findings]
 
 
@@ -631,7 +771,7 @@ def test_a_properly_fenced_block_is_not_disturbed_by_an_unfenced_near_miss():
     a refusal there would redden every record that documents the shape."""
     text = block('| W1 | WARNING | landed in-place |') + (
         '\nFor reference the shape is\n\nverdict: HOLD\n' + HEADER_ROW + '\n')
-    assert verdict.parse(text).verdict == 'SHIP-WITH-FIXES'
+    assert one(text).verdict == 'SHIP-WITH-FIXES'
 
 
 def test_the_corpus_prose_verdict_line_is_still_NoVerdict():

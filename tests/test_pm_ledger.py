@@ -59,8 +59,8 @@ class RowShape(unittest.TestCase):
     """One row, exactly the five keys, in order, compact, UTC to the second."""
 
     def test_a_story_flip_writes_one_compact_line_with_the_five_keys(self):
-        with tree(story_statuses=('todo',)) as root:
-            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+        with tree(story_statuses=('ready',)) as root:
+            code, out = run_cli(root, 'story', 'building', '0.1/alpha/s0')
             self.assertEqual(code, 0, out)
             lines = ledger_lines(root)
             self.assertEqual(len(lines), 1, lines)
@@ -68,8 +68,8 @@ class RowShape(unittest.TestCase):
             self.assertEqual(list(row), ['ts', 'kind', 'grain', 'from', 'to'])
             self.assertEqual(row['kind'], 'status')
             self.assertEqual(row['grain'], '0.1/alpha/s0')
-            self.assertEqual(row['from'], 'todo')
-            self.assertEqual(row['to'], 'wip')
+            self.assertEqual(row['from'], 'ready')
+            self.assertEqual(row['to'], 'building')
             # Compact and key-ordered, byte for byte — a report reads these
             # with `wc -l` and `readline`, so one row is one line and there
             # are no spaces after the separators.
@@ -77,7 +77,7 @@ class RowShape(unittest.TestCase):
 
     def test_the_timestamp_is_full_utc_to_the_second_and_ends_in_Z(self):
         with tree() as root:
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'building', '0.1/alpha/s0')[0], 0)
             ts = only_row(root)['ts']
         self.assertTrue(ts.endswith('Z'), ts)
         self.assertEqual(len(ts), len('2026-09-03T21:40:12Z'), ts)
@@ -90,17 +90,17 @@ class RowShape(unittest.TestCase):
 
     def test_rows_land_in_order_and_earlier_bytes_are_never_rewritten(self):
         with tree() as root:
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'building', '0.1/alpha/s0')[0], 0)
             first = ledger_lines(root)[0]
-            self.assertEqual(run_cli(root, 'story', 'review', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'reviewing', '0.1/alpha/s0')[0], 0)
             self.assertEqual(run_cli(root, 'story', 'done', '0.1/alpha/s0')[0], 0)
             lines = ledger_lines(root)
         self.assertEqual(len(lines), 3, lines)
         self.assertEqual(lines[0], first, 'an earlier row was rewritten')
         self.assertEqual([json.loads(ln)['to'] for ln in lines],
-                         ['wip', 'review', 'done'])
+                         ['building', 'reviewing', 'done'])
         self.assertEqual([json.loads(ln)['from'] for ln in lines],
-                         ['todo', 'wip', 'review'])
+                         ['ready', 'building', 'reviewing'])
 
     def test_a_foreign_row_already_on_disk_survives_byte_identical(self):
         """Append-only means append-only: a row this version cannot parse —
@@ -110,7 +110,7 @@ class RowShape(unittest.TestCase):
             path = root / 'pm/roadmap/0.1-demo' / ledger.LEDGER_FILE_NAME
             foreign = '{"ts":"2020-01-01T00:00:00Z","kind":"dispatch","x":[1,2]}'
             path.write_text(foreign + '\n', encoding='utf-8')
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'building', '0.1/alpha/s0')[0], 0)
             lines = ledger_lines(root)
         self.assertEqual(lines[0], foreign)
         self.assertEqual(len(lines), 2, lines)
@@ -120,12 +120,12 @@ class EveryStatusVerb(unittest.TestCase):
     """One test per verb. Each writes to the grain's OWN milestone directory."""
 
     def test_story(self):
-        with tree(story_statuses=('todo',)) as root:
-            self.assertEqual(run_cli(root, 'story', 'review', '0.1/alpha/s0')[0], 0)
+        with tree(story_statuses=('ready',)) as root:
+            self.assertEqual(run_cli(root, 'story', 'reviewing', '0.1/alpha/s0')[0], 0)
             self.assertEqual(
                 only_row(root),
                 {'ts': only_row(root)['ts'], 'kind': 'status',
-                 'grain': '0.1/alpha/s0', 'from': 'todo', 'to': 'review'})
+                 'grain': '0.1/alpha/s0', 'from': 'ready', 'to': 'reviewing'})
 
     def test_bug(self):
         with tree() as root:
@@ -146,19 +146,19 @@ class EveryStatusVerb(unittest.TestCase):
 
     def test_feature_review(self):
         with tree(feature_status='building') as root:
-            code, out = run_cli(root, 'feature', 'review', '0.1/alpha')
+            code, out = run_cli(root, 'feature', 'reviewing', '0.1/alpha')
             self.assertEqual(code, 0, out)
             row = only_row(root)
         self.assertEqual((row['grain'], row['from'], row['to']),
-                         ('0.1/alpha', 'building', 'review'))
+                         ('0.1/alpha', 'building', 'reviewing'))
 
     def test_feature_done(self):
-        with tree(feature_status='review') as root:
+        with tree(feature_status='reviewing') as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha')
             self.assertEqual(code, 0, out)
             row = only_row(root)
         self.assertEqual((row['grain'], row['from'], row['to']),
-                         ('0.1/alpha', 'review', 'done'))
+                         ('0.1/alpha', 'reviewing', 'done'))
 
     def test_milestone(self):
         with tree(milestone_status='ready') as root:
@@ -175,29 +175,29 @@ class EveryStatusVerb(unittest.TestCase):
             other = root / 'pm/roadmap/0.2-next'
             write(other / 'milestone.md',
                   {'id': '"0.2"', 'name': 'Next', 'status': 'planning'})
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'building', '0.1/alpha/s0')[0], 0)
             self.assertEqual(len(ledger_rows(root)), 1)
             self.assertFalse((other / ledger.LEDGER_FILE_NAME).exists())
 
     def test_the_verbs_output_and_exit_code_are_unchanged(self):
         """Hard rule 6: the shipped line shapes are a contract. The ledger is
         a side effect on disk and never a line on stdout."""
-        with tree(story_statuses=('todo',)) as root:
-            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+        with tree(story_statuses=('ready',)) as root:
+            code, out = run_cli(root, 'story', 'building', '0.1/alpha/s0')
         self.assertEqual(code, 0)
-        self.assertEqual(out, '[pm] story 0.1/alpha/s0: todo -> wip\n')
+        self.assertEqual(out, '[pm] story 0.1/alpha/s0: ready -> building\n')
 
 
 class ANoOpIsAFact(unittest.TestCase):
     """Same-status flips append too (D2's cost note, carried by D8)."""
 
     def test_a_story_no_op_appends_a_from_equals_to_row(self):
-        with tree(story_statuses=('wip',)) as root:
-            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+        with tree(story_statuses=('building',)) as root:
+            code, out = run_cli(root, 'story', 'building', '0.1/alpha/s0')
             self.assertEqual(code, 0, out)
-            self.assertIn('already wip (no-op)', out)
+            self.assertIn('already building (no-op)', out)
             row = only_row(root)
-        self.assertEqual((row['from'], row['to']), ('wip', 'wip'))
+        self.assertEqual((row['from'], row['to']), ('building', 'building'))
 
     def test_a_feature_no_op_appends(self):
         with tree(feature_status='building') as root:
@@ -205,10 +205,10 @@ class ANoOpIsAFact(unittest.TestCase):
             self.assertEqual(only_row(root)['from'], 'building')
 
     def test_a_feature_review_no_op_appends(self):
-        with tree(feature_status='review') as root:
-            self.assertEqual(run_cli(root, 'feature', 'review', '0.1/alpha')[0], 0)
+        with tree(feature_status='reviewing') as root:
+            self.assertEqual(run_cli(root, 'feature', 'reviewing', '0.1/alpha')[0], 0)
             row = only_row(root)
-        self.assertEqual((row['from'], row['to']), ('review', 'review'))
+        self.assertEqual((row['from'], row['to']), ('reviewing', 'reviewing'))
 
     def test_a_feature_done_no_op_appends(self):
         with tree(feature_status='done') as root:
@@ -234,21 +234,21 @@ class Cascade(unittest.TestCase):
     """`feature done --cascade`: the feature's row, then one per closed story."""
 
     def test_the_feature_row_comes_first_then_one_row_per_closed_story(self):
-        with tree(feature_status='review',
-                  story_statuses=('review', 'review', 'todo')) as root:
+        with tree(feature_status='reviewing',
+                  story_statuses=('reviewing', 'reviewing', 'ready')) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')
             self.assertEqual(code, 0, out)
             rows = ledger_rows(root)
         self.assertEqual(len(rows), 3, rows)
         self.assertEqual((rows[0]['grain'], rows[0]['from'], rows[0]['to']),
-                         ('0.1/alpha', 'review', 'done'))
+                         ('0.1/alpha', 'reviewing', 'done'))
         self.assertEqual([(r['grain'], r['from'], r['to']) for r in rows[1:]],
-                         [('0.1/alpha/s0', 'review', 'done'),
-                          ('0.1/alpha/s1', 'review', 'done')])
+                         [('0.1/alpha/s0', 'reviewing', 'done'),
+                          ('0.1/alpha/s1', 'reviewing', 'done')])
 
     def test_a_story_the_cascade_did_not_touch_gets_no_row(self):
-        with tree(feature_status='review',
-                  story_statuses=('review', 'todo')) as root:
+        with tree(feature_status='reviewing',
+                  story_statuses=('reviewing', 'ready')) as root:
             self.assertEqual(
                 run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')[0], 0)
             grains = [r['grain'] for r in ledger_rows(root)]
@@ -256,21 +256,21 @@ class Cascade(unittest.TestCase):
         self.assertEqual(grains, ['0.1/alpha', '0.1/alpha/s0'])
 
     def test_without_the_flag_only_the_feature_gets_a_row(self):
-        with tree(feature_status='review', story_statuses=('review',)) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing',)) as root:
             self.assertEqual(run_cli(root, 'feature', 'done', '0.1/alpha')[0], 0)
             self.assertEqual([r['grain'] for r in ledger_rows(root)],
                              ['0.1/alpha'])
 
     def test_the_second_cascade_run_adds_only_its_own_no_op_row(self):
-        with tree(feature_status='review', story_statuses=('review',)) as root:
+        with tree(feature_status='reviewing', story_statuses=('reviewing',)) as root:
             self.assertEqual(
                 run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')[0], 0)
             self.assertEqual(
                 run_cli(root, 'feature', 'done', '0.1/alpha', '--cascade')[0], 0)
             rows = ledger_rows(root)
         self.assertEqual([(r['grain'], r['from'], r['to']) for r in rows],
-                         [('0.1/alpha', 'review', 'done'),
-                          ('0.1/alpha/s0', 'review', 'done'),
+                         [('0.1/alpha', 'reviewing', 'done'),
+                          ('0.1/alpha/s0', 'reviewing', 'done'),
                           ('0.1/alpha', 'done', 'done')])
 
 
@@ -278,7 +278,7 @@ class ARefusedFlipAppendsNothing(unittest.TestCase):
     """The row records a write that LANDED. No write, no row — ever."""
 
     def test_a_review_record_naming_no_file_refuses_and_writes_no_row(self):
-        with tree(feature_status='review', with_record=False) as root:
+        with tree(feature_status='reviewing', with_record=False) as root:
             code, out = run_cli(root, 'feature', 'done', '0.1/alpha',
                                 '--review-record', 'docs/reviews/nope.md')
             self.assertEqual(code, 1, out)
@@ -292,7 +292,7 @@ class ARefusedFlipAppendsNothing(unittest.TestCase):
 
     def test_an_id_that_resolves_to_nothing_writes_no_row(self):
         with tree() as root:
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/ghost')[0], 2)
+            self.assertEqual(run_cli(root, 'story', 'building', '0.1/alpha/ghost')[0], 2)
             self.assertEqual(run_cli(root, 'feature', 'done', '0.1/ghost')[0], 2)
             self.assertEqual(run_cli(root, 'milestone', 'done', '9.9')[0], 2)
             self.assertEqual(run_cli(root, 'bug', 'fixed', '0.1/bugs/ghost')[0], 2)
@@ -305,7 +305,7 @@ class ARefusedFlipAppendsNothing(unittest.TestCase):
         with tree() as root:
             damage(root / 'pm/roadmap/0.1-demo/features/alpha/stories/s0.md',
                    'no-closing-fence')
-            code, out = run_cli(root, 'story', 'wip', '0.1/alpha/s0')
+            code, out = run_cli(root, 'story', 'building', '0.1/alpha/s0')
             self.assertEqual(code, 2, out)
             self.assertEqual(ledger_lines(root), [])
 
@@ -313,8 +313,8 @@ class ARefusedFlipAppendsNothing(unittest.TestCase):
         """The half that DID land is a fact. The cascade aborts on the
         unwritable story, and the story it already closed keeps its row — with
         no row for the feature, whose own flip never happened."""
-        with tree(feature_status='review',
-                  story_statuses=('review', 'review')) as root:
+        with tree(feature_status='reviewing',
+                  story_statuses=('reviewing', 'reviewing')) as root:
             blocked = root / 'pm/roadmap/0.1-demo/features/alpha/stories/s1.md'
             blocked.chmod(0o444)
             try:
@@ -325,7 +325,7 @@ class ARefusedFlipAppendsNothing(unittest.TestCase):
             self.assertEqual(code, 2, out)
             rows = ledger_rows(root)
         self.assertEqual([(r['grain'], r['from'], r['to']) for r in rows],
-                         [('0.1/alpha/s0', 'review', 'done')])
+                         [('0.1/alpha/s0', 'reviewing', 'done')])
 
 
 class Decide(unittest.TestCase):
@@ -400,11 +400,11 @@ class NotAGrainDoc(unittest.TestCase):
     that walks the tree must be byte-identical with it and without it."""
 
     def test_validate_and_the_gate_and_status_are_unchanged_by_the_ledger(self):
-        with tree(story_statuses=('wip',), feature_status='building',
+        with tree(story_statuses=('building',), feature_status='building',
                   milestone_status='building') as root:
             before = (run_cli(root, 'validate'), run_gate(root),
                       run_cli(root, 'status'))
-            self.assertEqual(run_cli(root, 'story', 'wip', '0.1/alpha/s0')[0], 0)
+            self.assertEqual(run_cli(root, 'story', 'building', '0.1/alpha/s0')[0], 0)
             self.assertTrue(
                 (root / 'pm/roadmap/0.1-demo' / ledger.LEDGER_FILE_NAME).is_file())
             after = (run_cli(root, 'validate'), run_gate(root),

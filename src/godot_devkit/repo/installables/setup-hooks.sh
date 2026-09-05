@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Activate the tracked git hooks under tools/hooks/ by pointing git at them via
-# core.hooksPath. Run once after cloning (or `make hooks`).
+# core.hooksPath. Run once after cloning: `bash tools/setup-hooks.sh`.
 #
 # We use core.hooksPath (not symlinks into .git/hooks) so the hooks are
 # version-controlled, apply across every worktree, and stay in sync with the

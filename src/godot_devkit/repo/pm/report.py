@@ -132,6 +132,11 @@ NO_GRAIN_TITLE = 'rows naming no grain'
 # rather than being counted into nothing.
 FEATURE_COLUMN = 'feature'
 RECORD_COLUMN = 'record'
+# One record, N passes. The ordinal is a COLUMN rather than a suffix on the
+# record path, because the rows of two passes over one record are otherwise
+# indistinguishable — and a table whose rows cannot be told apart is where a
+# reader starts assuming one of them is a duplicate.
+PASS_COLUMN = 'pass'
 VERDICT_COLUMN = 'verdict'
 FINDINGS_COLUMN = 'findings'
 SEVERITY_COLUMN = 'severity'
@@ -140,16 +145,14 @@ VERDICT_TITLE = 'verdict'
 SEVERITY_TITLE = 'findings by severity'
 DEFERRED_TITLE = 'deferred to'
 
-# Section 3's. The two story states a reopen is made of are NAMED, and checked
-# against the configured vocabulary before the column is filled: a project that
-# renamed either gets `-`, because a `0` would say "nothing was reopened" about
-# a transition this rule cannot see.
-REVIEW_STATE = 'review'
-WIP_STATE = 'wip'
+# Section 3's. The two story states a reopen is made of come from the ONE
+# vocabulary in `model`, and are checked against the configured set before the
+# column is filled: a project that renamed either gets `-`, because a `0` would
+# say "nothing was reopened" about a transition this rule cannot see.
 STORY_COLUMN = 'story'
 REOPENS_COLUMN = 'reopens'
 AFTER_REVIEW_COLUMN = 'after_review'
-RECORDS_COLUMN = 'records'
+PASSES_COLUMN = 'passes'
 REOPEN_TITLE = 'story'
 DISTRIBUTION_TITLE = 'verdict distribution'
 
@@ -1066,7 +1069,11 @@ def review_records(src: Source, cfg: model.PmConfig, mid: str,
 
 def parsed_records(src: Source, cfg: model.PmConfig, mid: str,
                    mdir: Path) -> list[tuple[str, str, object]]:
-    """Every record, parsed: `None` in the third slot when it carries no block.
+    """Every record, parsed: its PASSES, or `None` when it carries no block.
+
+    The third slot is the list `verdict.parse` returns — one entry per verdict
+    block, in the order the record carries them — and `None` only for a record
+    with none at all, which stays a fact the table lists rather than a zero.
 
     Sections 2 and 3 both call this and both parse the same handful of files.
     That is the registry's shape holding — one section is one pair of functions
@@ -1141,61 +1148,73 @@ def yield_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     """
     records = []
     for fid, rel, parsed in parsed_records(src, cfg, mid, mdir):
-        entry = {'feature': fid, 'record': rel, 'verdict': None,
-                 'findings': None, 'severities': {}, 'deferred': [],
-                 'dispositions': {kind: None
-                                  for kind in verdict.DISPOSITION_KINDS}}
-        if parsed is not None:
-            found = parsed.findings
-            entry['verdict'] = parsed.verdict
-            entry['findings'] = len(found)
-            entry['severities'] = {
-                sev: n for sev, n in
-                sorted(_tally(f.severity for f in found).items(),
-                       key=lambda kv: verdict.SEVERITIES.index(kv[0]))}
-            entry['dispositions'] = {
-                kind: sum(1 for f in found if f.disposition_kind == kind)
-                for kind in verdict.DISPOSITION_KINDS}
-            entry['deferred'] = [
-                {'target': target, 'findings': n} for target, n in
-                sorted(_tally(f.disposition_value for f in found
-                              if f.disposition_kind == verdict.DEFERRED
-                              ).items())]
-        records.append(entry)
+        passes = []
+        for ordinal, one in enumerate(parsed or [], 1):
+            found = one.findings
+            passes.append({
+                'pass': ordinal,
+                'verdict': one.verdict,
+                'findings': len(found),
+                'severities': {
+                    sev: n for sev, n in
+                    sorted(_tally(f.severity for f in found).items(),
+                           key=lambda kv: verdict.SEVERITIES.index(kv[0]))},
+                'dispositions': {
+                    kind: sum(1 for f in found if f.disposition_kind == kind)
+                    for kind in verdict.DISPOSITION_KINDS},
+                'deferred': [
+                    {'target': target, 'findings': n} for target, n in
+                    sorted(_tally(f.disposition_value for f in found
+                                  if f.disposition_kind == verdict.DEFERRED
+                                  ).items())]})
+        records.append({'feature': fid, 'record': rel, 'passes': passes})
     return {SECTION_YIELD: {
         'records': records,
         'totals': {'records': len(records),
-                   'findings': sum(r['findings'] or 0 for r in records)}}}
+                   'passes': sum(len(r['passes']) for r in records),
+                   'findings': sum(one['findings'] for r in records
+                                   for one in r['passes'])}}}
 
 
 def yield_lines(cfg: model.PmConfig, data: dict) -> list[str]:
     """Section 2 as lines: the pass, its severities, and where it deferred."""
     section = data[SECTION_YIELD]
     records = section['records']
-    passes = [(r['feature'], r['record'], r['verdict'] or NO_VERDICT,
-               _cell(r['findings']),
-               *(_cell(r['dispositions'][kind])
+    # A record with no block keeps its one row — a pass nobody measured is
+    # still a record this milestone carries, and dropping it would make the
+    # table read as if every record had been reviewed.
+    passes = [(r['feature'], r['record'], str(one['pass']), one['verdict'],
+               _cell(one['findings']),
+               *(_cell(one['dispositions'][kind])
                  for kind in verdict.DISPOSITION_KINDS))
-              for r in records]
-    severities = [(r['feature'], sev, str(n))
-                  for r in records for sev, n in r['severities'].items()]
-    deferred = sorted((d['target'], r['feature'], str(d['findings']))
-                      for r in records for d in r['deferred'])
+              if one else
+              (r['feature'], r['record'], DASH, NO_VERDICT, _cell(None),
+               *(_cell(None) for _ in verdict.DISPOSITION_KINDS))
+              for r in records for one in (r['passes'] or [None])]
+    severities = [(r['feature'], str(one['pass']), sev, str(n))
+                  for r in records for one in r['passes']
+                  for sev, n in one['severities'].items()]
+    deferred = sorted((d['target'], r['feature'], str(one['pass']),
+                       str(d['findings']))
+                      for r in records for one in r['passes']
+                      for d in one['deferred'])
     totals = section['totals']
     return _section(
         heading_id(data), YIELD_TITLE,
-        f'{totals["records"]} record(s), {totals["findings"]} finding(s)',
+        f'{totals["records"]} record(s), {totals["passes"]} pass(es), '
+        f'{totals["findings"]} finding(s)',
         [(f'{VERDICT_TITLE} ({len(passes)})',
-          (FEATURE_COLUMN, RECORD_COLUMN, VERDICT_COLUMN, FINDINGS_COLUMN,
-           *verdict.DISPOSITION_KINDS),
-          (LEFT, LEFT, LEFT) + (RIGHT,) * (1 + len(verdict.DISPOSITION_KINDS)),
+          (FEATURE_COLUMN, RECORD_COLUMN, PASS_COLUMN, VERDICT_COLUMN,
+           FINDINGS_COLUMN, *verdict.DISPOSITION_KINDS),
+          (LEFT, LEFT, RIGHT, LEFT)
+          + (RIGHT,) * (1 + len(verdict.DISPOSITION_KINDS)),
           passes),
          (f'{SEVERITY_TITLE} ({len(severities)})',
-          (FEATURE_COLUMN, SEVERITY_COLUMN, FINDINGS_COLUMN),
-          (LEFT, LEFT, RIGHT), severities),
+          (FEATURE_COLUMN, PASS_COLUMN, SEVERITY_COLUMN, FINDINGS_COLUMN),
+          (LEFT, RIGHT, LEFT, RIGHT), severities),
          (f'{DEFERRED_TITLE} ({len(deferred)})',
-          (TARGET_COLUMN, FEATURE_COLUMN, FINDINGS_COLUMN),
-          (LEFT, LEFT, RIGHT), deferred)])
+          (TARGET_COLUMN, FEATURE_COLUMN, PASS_COLUMN, FINDINGS_COLUMN),
+          (LEFT, LEFT, RIGHT, RIGHT), deferred)])
 
 
 # --- section 3: rework --------------------------------------------------------
@@ -1215,6 +1234,24 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     a zero there would say "nothing was reopened" about a machine this rule
     cannot see (hard rule 4).
 
+    That guard is against a renamed CONFIG, and the same miss arrives through
+    HISTORY: every row a consumer wrote before its pin bump spells the pair the
+    way its old vocabulary did, so a story reviewed and sent back twice holds
+    no row this rule can read while the config it is read under is perfectly
+    stock. So the column is armed PER STORY, by whether that story's own rows
+    NAME the review state at all — in either direction, since a reopen row is
+    itself proof the vocabulary is readable here, and a ledger opened mid-flight
+    can hold the departure without the arrival. Never by the ledger as a whole:
+    one migrated story is enough to re-arm the column for every legacy one
+    beside it, which is the exact ledger a consumer has the day after the bump.
+    `-` covers two worlds the rows cannot tell apart — "never reached review"
+    and "reached it under a spelling this rule cannot read" — and a `0` would
+    be picking one of them by guess. What stays invisible is one story that
+    straddles the bump AND was reopened on both sides of it: the older reopen
+    is not counted and the column is armed by the newer one. Reading that out
+    would mean testing each row's words against `story_states`, which answers
+    wrong under exactly the union set a migration lands there.
+
     "After review" counts DISPATCH rows, by D3's snapshot and the same
     `named_grains` rule section 1 attributes by — so the two sections cannot
     disagree about which dispatches were a story's. The moment compared against
@@ -1225,21 +1262,23 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
     kinds = {g.gid: g.kind for g in grains}
     status = [r for r in rows if r.data.get('kind') == ledger.KIND_STATUS]
     dispatch = [r for r in rows if r.data.get('kind') == ledger.KIND_DISPATCH]
-    reopenable = (REVIEW_STATE in cfg.story_states
-                  and WIP_STATE in cfg.story_states)
+    reopenable = (model.REVIEWING in cfg.story_states
+                  and model.BUILDING in cfg.story_states)
     feature_of = {sid: fid for fid, sids in owned.items() for sid in sids}
     out = []
     for grain in sorted((g for g in grains if g.kind == KIND_STORY),
                         key=lambda g: g.gid):
         mine = [r for r in status if r.data.get('grain') == grain.gid]
+        entered = [r for r in mine if r.data.get('to') == model.REVIEWING]
+        named = entered or [r for r in mine
+                            if r.data.get('from') == model.REVIEWING]
         reopens = None
-        if mine and reopenable:
+        if named and reopenable:
             reopens = sum(1 for r in mine
-                          if r.data.get('from') == REVIEW_STATE
-                          and r.data.get('to') == WIP_STATE)
+                          if r.data.get('from') == model.REVIEWING
+                          and r.data.get('to') == model.BUILDING)
         moment = next((ts for ts in
-                       (ledger.parse_ts(r.data.get('ts')) for r in mine
-                        if r.data.get('to') == REVIEW_STATE)
+                       (ledger.parse_ts(r.data.get('ts')) for r in entered)
                        if ts is not None), None)
         after = None if moment is None else sum(
             1 for r in dispatch
@@ -1247,17 +1286,19 @@ def rework_data(src: Source, cfg: model.PmConfig, mid: str, mdir: Path,
             and _after(r, moment))
         out.append({'grain': grain.gid, 'feature': feature_of.get(grain.gid),
                     'reopens': reopens, 'after_review': after})
-    spread = _tally(parsed.verdict
+    # Every PASS's verdict, not every record's: a record reviewed twice gave
+    # two verdicts, and counting it once would have to pick one of them.
+    spread = _tally(one.verdict
                     for _, _, parsed in parsed_records(src, cfg, mid, mdir)
-                    if parsed is not None)
+                    if parsed is not None for one in parsed)
     reopened = [e['reopens'] for e in out if e['reopens'] is not None]
     return {SECTION_REWORK: {
         'stories': out,
-        'verdicts': [{'verdict': name, 'records': spread[name]}
+        'verdicts': [{'verdict': name, 'passes': spread[name]}
                      for name in verdict.VERDICTS if name in spread],
         'totals': {'stories': len(out),
                    'reopens': sum(reopened) if reopened else None,
-                   'records': sum(spread.values())}}}
+                   'passes': sum(spread.values())}}}
 
 
 def rework_lines(cfg: model.PmConfig, data: dict) -> list[str]:
@@ -1265,17 +1306,17 @@ def rework_lines(cfg: model.PmConfig, data: dict) -> list[str]:
     section = data[SECTION_REWORK]
     stories = [(e['feature'] or DASH, e['grain'], _cell(e['reopens']),
                 _cell(e['after_review'])) for e in section['stories']]
-    spread = [(v['verdict'], str(v['records'])) for v in section['verdicts']]
+    spread = [(v['verdict'], str(v['passes'])) for v in section['verdicts']]
     totals = section['totals']
     return _section(
         heading_id(data), REWORK_TITLE,
         f'{totals["stories"]} story(s), {_cell(totals["reopens"])} reopen(s), '
-        f'{totals["records"]} record(s) with a verdict',
+        f'{totals["passes"]} pass(es) with a verdict',
         [(f'{REOPEN_TITLE} ({len(stories)})',
           (FEATURE_COLUMN, STORY_COLUMN, REOPENS_COLUMN, AFTER_REVIEW_COLUMN),
           (LEFT, LEFT, RIGHT, RIGHT), stories),
          (f'{DISTRIBUTION_TITLE} ({len(spread)})',
-          (VERDICT_COLUMN, RECORDS_COLUMN), (LEFT, RIGHT), spread)])
+          (VERDICT_COLUMN, PASSES_COLUMN), (LEFT, RIGHT), spread)])
 
 
 # --- section 4: escapes -------------------------------------------------------
@@ -1536,7 +1577,7 @@ def beyond_ledger(data: dict) -> bool:
     and not a measurement, and a milestone nobody has recorded anything for
     keeps its one quiet line.
     """
-    return (any(record['verdict'] for record in data[SECTION_YIELD]['records'])
+    return (any(record['passes'] for record in data[SECTION_YIELD]['records'])
             or bool(data[SECTION_ESCAPES]['totals']['bugs']))
 
 

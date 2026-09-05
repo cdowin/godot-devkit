@@ -24,7 +24,7 @@ from support import FIXTURES, temp_repo
 
 from godot_devkit import cli
 
-CORPUS_NB = FIXTURES / 'corpus' / 'nb'
+CORPUS_NB = FIXTURES / 'corpus' / 'editor_written'
 OLD = 'res://scripts/old_helper.gd'
 NEW = 'res://scripts/new_helper.gd'
 CENSUS = re.compile(r'\[refs:retarget\] (\d+) file\(s\) scanned, '

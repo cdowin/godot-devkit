@@ -15,8 +15,8 @@ length and charset yet decode to the same id.
 `text_to_id` / `id_to_text` mirror ResourceUID::text_to_id / id_to_text
 exactly (including the uint64 overflow wrap and the 63-bit mask); `canonical`
 is the round trip `check uid` judges spellings by. Ported so canonicality is
-a pure-parse verdict — nullbound's resource_uid_scan.sh booted a sandboxed
-Godot for exactly this, and this package never boots the engine.
+a pure-parse verdict: the shell scans this replaces booted a sandboxed Godot to
+ask the engine, and this package never boots the engine.
 """
 from __future__ import annotations
 

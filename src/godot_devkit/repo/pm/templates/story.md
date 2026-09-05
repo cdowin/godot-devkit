@@ -3,7 +3,7 @@ id: {id}
 feature: {feature}
 milestone: "{milestone}"
 name: {name}
-status: todo
+status: planning
 owner:
 depends_on: []
 ---

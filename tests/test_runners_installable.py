@@ -403,6 +403,165 @@ def test_an_empty_census_fails_and_names_what_it_looked_in(tmp_path, argv, tier)
     assert expected in done.stdout, done.stdout
 
 
+# --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
+# 0.24.0/bugs/import-cache-rebuild-does-not-repair-a-stale-uid-index. In a
+# consumer, 147 of 147 scenarios FAILED on the `invalid UID … using text path
+# instead` sweep while every one of them printed its own
+# `[SCENARIO] <name> PASS steps=N errors=0`. The recovery detected the class
+# precisely and then applied a remedy that cannot work: an import pass against
+# an EXISTING .godot/ mints sidecars for files that are NEW, and does not
+# rebuild the uid index for tracked files already missing from it. Measured
+# three times in that tree — including once after deleting uid_cache.bin alone
+# — 1780 entries and the same 56 missing every time; `rm -rf .godot` then a
+# rebuild gave 1822 in 21 s. So the runner retried the same failure once per
+# scenario, 147 times.
+#
+# The stub below IS that distinction, and it is the whole fixture: its rebuild
+# branch rewrites the cache file and leaves `.godot/stale` alone, so only a run
+# that REMOVES the directory can clear it. Nothing here boots an engine.
+STALE_MARKER = '.godot/stale'
+SCENARIO_STUB = """#!/usr/bin/env bash
+case " $* " in
+	*" --editor "*)
+		echo rebuild >> "$GDK_STUB_LOG"
+		mkdir -p .godot && : > .godot/uid_cache.bin
+		exit 0 ;;
+esac
+echo boot >> "$GDK_STUB_LOG"
+{warn}
+echo "[SCENARIO] alpha {result} steps=1 errors=0"
+exit 0
+"""
+UID_WARNING = ('echo \'WARNING: invalid UID "uid://cabc" - using text path'
+               ' instead: res://alpha.gd\'')
+# The repairable tree: the warning stops exactly when the directory goes.
+WARN_WHILE_STALE = f'if [ -f {STALE_MARKER} ]; then {UID_WARNING}; fi'
+# The tree no remedy repairs — what proves the ladder has a last rung.
+WARN_ALWAYS = UID_WARNING
+# What rung 2 says before it removes anything.
+REMOVAL_NOTICE = 'REMOVING .godot/'
+
+
+def _scenario_fixture(tmp_path: Path, warn: str,
+                      result: str = 'PASS') -> tuple[Path, dict, Path]:
+    """A Godot project carrying scenario.sh at stock depth, a `.godot` whose
+    index is stale, and a `godot` that reports the uid class per `warn`."""
+    root = tmp_path / 'repo'
+    (root / 'tools' / 'dev' / 'runners').mkdir(parents=True)
+    (root / 'tests' / 'integration').mkdir(parents=True)
+    (root / 'tests' / 'integration' / 'alpha.gd').write_text('extends Node\n',
+                                                             encoding='utf-8')
+    (root / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    shutil.copy2(LIBRARY, root / 'tools' / 'dev' / 'gdk_runners.sh')
+    shutil.copy2(SCENARIO, root / 'tools' / 'dev' / 'runners' / 'scenario.sh')
+    (root / '.godot').mkdir()
+    (root / '.godot' / 'uid_cache.bin').write_text('', encoding='utf-8')
+    (root / STALE_MARKER).write_text('56 tracked sidecars missing\n',
+                                     encoding='utf-8')
+
+    stub = tmp_path / 'bin'
+    stub.mkdir()
+    (stub / 'godot').write_text(
+        SCENARIO_STUB.format(warn=warn, result=result), encoding='utf-8')
+    # See _unit_fixture: the library BOUNDS every engine run and refuses
+    # outright without a timeout binary, and macOS ships neither.
+    (stub / 'timeout').write_text('#!/usr/bin/env bash\nshift 2\nexec "$@"\n',
+                                  encoding='utf-8')
+    for name in ('godot', 'timeout'):
+        (stub / name).chmod(0o755)
+
+    log = tmp_path / 'stub.log'
+    log.write_text('', encoding='utf-8')
+    env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
+           'GDK_STUB_LOG': str(log)}
+    return root, env, log
+
+
+def _run_scenario(root: Path, env: dict, *argv: str,
+                  merged: bool = False) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ['bash', 'tools/dev/runners/scenario.sh', *argv, 'alpha'], cwd=root,
+        text=True, env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merged else subprocess.PIPE)
+
+
+def _engine_runs(log: Path) -> tuple[int, int]:
+    """(boots, rebuilds) — every engine invocation the run actually made."""
+    lines = log.read_text(encoding='utf-8').split()
+    return lines.count('boot'), lines.count('rebuild')
+
+
+def test_a_stale_uid_index_survives_the_rebuild_and_the_run_removes_the_cache(tmp_path):
+    """The bug, end to end. Rung 1 rebuilds and changes nothing; rung 2 removes
+    `.godot/` and rebuilds, and the third boot is clean. Before the escalation
+    the run stopped after rung 1 and reported FAIL over a scenario that had
+    passed twice."""
+    root, env, log = _scenario_fixture(tmp_path, WARN_WHILE_STALE)
+    done = _run_scenario(root, env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[SCENARIO] alpha PASS' in done.stdout, done.stdout
+    assert _engine_runs(log) == (3, 2), done.stdout + done.stderr
+    assert not (root / STALE_MARKER).exists(), 'the stale index was left in place'
+    assert done.stderr.count(REMOVAL_NOTICE) == 1, done.stderr
+
+
+def test_the_run_says_it_is_removing_the_cache_before_the_retry_it_enables(tmp_path):
+    """`rm -rf .godot` throws away a local editor's state, so it is announced,
+    and the announcement is not a report written afterwards: it precedes the
+    boot it makes possible. `--verbose` puts the notice and the transcript on
+    one stream, in the order they happened."""
+    root, env, _log = _scenario_fixture(tmp_path, WARN_WHILE_STALE)
+    done = _run_scenario(root, env, '--verbose', merged=True)
+    assert done.returncode == 0, done.stdout
+    stream = done.stdout
+    assert REMOVAL_NOTICE in stream, stream
+    assert stream.index(REMOVAL_NOTICE) < stream.rindex('[SCENARIO] alpha PASS'), stream
+
+
+def test_the_escalation_is_bounded_at_two_remedies_and_the_third_failure_is_final(tmp_path):
+    """A tree neither remedy repairs must cost exactly two remedies. The ladder
+    is straight-line code, never a loop — a retry re-evaluating its own
+    condition would boot the engine forever on a tree that is really broken."""
+    root, env, log = _scenario_fixture(tmp_path, WARN_ALWAYS)
+    done = _run_scenario(root, env)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert _engine_runs(log) == (3, 2), done.stdout + done.stderr
+    assert 'FAIL — engine-level errors' in done.stdout, done.stdout
+    # Announced once, and the failure that followed did not un-announce it: a
+    # notice a reader only sees when the repair WORKED is a notice about
+    # nothing.
+    assert done.stderr.count(REMOVAL_NOTICE) == 1, done.stderr
+
+
+def test_a_genuinely_failing_scenario_is_never_retried_and_never_costs_a_remedy(tmp_path):
+    """The conjunct that keeps the recovery from papering over real failures.
+    No PASS line means the tree is not what is broken, so nothing is rebuilt,
+    nothing is removed, and the run fails on its first boot."""
+    root, env, log = _scenario_fixture(tmp_path, WARN_ALWAYS, result='FAIL')
+    done = _run_scenario(root, env)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert _engine_runs(log) == (1, 0), done.stdout + done.stderr
+    assert REMOVAL_NOTICE not in done.stderr, done.stderr
+    assert (root / STALE_MARKER).exists(), 'a failing scenario cost the cache'
+
+
+def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
+    """integration.sh runs N scenarios in ONE tree. Removing `.godot/` under
+    peers that are mid-boot turns one cache defect into a scatter of failures
+    that look like real ones — the read-side cardinal sin, manufactured by the
+    recovery itself. Inside a sweep the run names the repair instead of
+    performing it, and the tree it would not touch is still there."""
+    root, env, log = _scenario_fixture(tmp_path, WARN_WHILE_STALE)
+    done = subprocess.run(
+        ['bash', 'tools/dev/runners/scenario.sh', 'alpha'], cwd=root,
+        text=True, capture_output=True, env=dict(env, GDK_SCENARIO_IN_SWEEP='1'))
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert _engine_runs(log) == (2, 1), done.stdout + done.stderr
+    assert (root / STALE_MARKER).exists(), 'a sweep removed a shared cache'
+    assert REMOVAL_NOTICE not in done.stderr, done.stderr
+    assert 'rm -rf .godot' in done.stderr, done.stderr
+
+
 # --- the fan-out: integration.sh CALLS scenario.sh --------------------------
 INTEGRATION = INSTALLABLES / 'integration.sh'
 # What the fan-out prints when every job came back 0. Both halves are asserted:
@@ -431,8 +590,8 @@ def test_the_fan_out_runs_a_scenario_runner_that_carries_no_exec_bit(tmp_path,
                                                                     mode):
     """MAJOR-1. `install-runners` wrote every runner -rw-r--r--, and this one
     caller exec'd `$SCENARIO_SH` directly — so every scenario on every
-    `init`'d project came back 126 and `make smoke` / `integration` were red
-    with an EMPTY diagnosis. The runner is invoked as `bash <path>`, which is
+    `init`'d project came back 126 and the `smoke` / `integration` targets were
+    red with an EMPTY diagnosis. The runner is invoked as `bash <path>`, which is
     the spelling Makefile.devkit and the install verb's next step both name,
     and it is what makes the sweep independent of a checkout's mode bits."""
     runner = _fanout_fixture(tmp_path, mode)
@@ -464,6 +623,28 @@ def test_a_failing_scenario_with_no_summary_line_still_gets_a_diagnosis(tmp_path
     assert '--- alpha ---' in done.stdout, done.stdout
     assert 'some engine noise nothing matches' in done.stdout, (
         'the FAILURES block named the scenario and said nothing about it')
+
+
+def test_the_fan_out_tells_every_job_it_has_peers(tmp_path):
+    """The sweep guard in scenario.sh is only as good as the one caller that
+    sets the marker: a fan-out that forgot would have every job removing the
+    `.godot` the others are booting in. Asserted through the REAL fan-out,
+    because the marker lives inside a single-quoted xargs body — the place a
+    plausible edit silently stops running (an apostrophe in a comment there
+    ended the string and broke the whole sweep, once)."""
+    runner = _fanout_fixture(tmp_path, 0o755)
+    stub = runner.parent / 'stub_scenario.sh'
+    stub.write_text('#!/usr/bin/env bash\n'
+                    'echo "${GDK_SCENARIO_IN_SWEEP:-unset}" > "$PWD/sweep.txt"\n'
+                    'echo "[SCENARIO] $1 PASS"\n', encoding='utf-8')
+    done = subprocess.run(['bash', str(runner), 'alpha'], cwd=tmp_path,
+                          text=True, capture_output=True,
+                          env={'PATH': '/usr/bin:/bin',
+                               'GDK_SCENARIO_RUNNER': 'stub_scenario.sh'})
+    assert done.returncode == 0, done.stdout + done.stderr
+    marker = tmp_path / 'sweep.txt'
+    assert marker.exists(), done.stdout + done.stderr
+    assert marker.read_text(encoding='utf-8').strip() == '1', marker.read_text()
 
 
 @pytest.mark.skipif(shutil.which('shellcheck') is None,
@@ -509,10 +690,12 @@ def test_every_shipped_runner_shellchecks_clean(script):
     assert done.returncode == 0, done.stdout + done.stderr
 
 
-# The two repos these runners were extracted FROM. A project name surviving in
-# an installable is a fork wearing a library's name: the next consumer reads it
-# as configuration it must match, and the fix that reaches one repo stops
+# The names of the projects these runners were extracted FROM, kept HERE, in
+# the harness, as a tombstone — never in the package. A project name surviving
+# in an installable is a fork wearing a library's name: the next consumer reads
+# it as configuration it must match, and the fix that reaches one repo stops
 # reaching the other. Word-bounded, so `trailing` is prose and `trail` is not.
+# The whole-tree form of this claim is tests/test_consumer_independence.py.
 CONSUMER_NAMES = (r'\bnullbound\b', r'\bNULLBOUND\b', r'\btrail\b', r'\bTRAIL\b')
 
 

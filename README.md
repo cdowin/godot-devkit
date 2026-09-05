@@ -28,7 +28,7 @@ Godot: it is pure text parsing over `.tscn`/`.tres`, git and markdown.
 Consumed at a **pinned tag** so every machine and CI runs identical gate code:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.23.0" godot-devkit --version   # godot-devkit 0.23.0
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.24.0" godot-devkit --version   # godot-devkit 0.24.0
 ```
 
 Pin that string once in your Makefile ([Wiring it in](#wiring-it-into-your-project)) and bump it to
@@ -92,7 +92,7 @@ done. This is the order for a tree that already has content in it.
 Order matters — some start red by design. Steps 2 and 4 are also the cure for `.tscn`/`.tres` churn.
 That churn — files you did not edit turning up in every commit — has three causes: path-only
 `ext_resource` refs, which Godot 4.4+ rewrites silently on any editor or import pass; what
-`PackedScene.pack()` drops (the header uid, `index=` on instance children, `[editable path=]`), which
+`PackedScene.pack()` drops (uid-in-refs, the header uid, `index=` on instance children), which
 `scene canonicalize` restores; and hand-authored `@export` defaults Godot's writer omits, which
 `scene canonicalize --elide-defaults` deletes.
 
@@ -158,7 +158,7 @@ Nodes are addressed **by path**, the way `.tscn` addresses them in `parent=` and
 | `scene add <file> <parent> <name> --instance res://x.tscn` | Add an instance node (no `type=`); the `PackedScene` ref is minted from the target scene's own uid, or refused — never invented |
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | Author / remove one `[connection]` in Godot's serialization position; ambiguous disconnects are refused, `--flags` names one |
 | `refs --retarget <old> <new> [--dry-run]` | After a `git mv`: rewrite every `ext_resource` path attr and exact `preload`/`load` literal naming old (uid untouched); unprovable occurrences are SKIPPED with a reason and exit 1 |
-| `scene canonicalize <file>... [--elide-defaults]` | Restore what `PackedScene.pack()` drops: uid-in-refs, the header uid, `index=` on instance-child overrides, `[editable path=]`. `--elide-defaults` also **deletes** `.tres` assignments proven equal to the script's `@export` default |
+| `scene canonicalize <file>... [--elide-defaults]` | Restore what `PackedScene.pack()` drops: uid-in-refs, the header uid, `index=` on instance-child overrides. `[editable path=]` is authored state, not a loss, and is left exactly as the source stated it. `--elide-defaults` also **deletes** `.tres` assignments proven equal to the script's `@export` default |
 | `tiles paint <file> --layer N --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` | Fill a rectangle of one TileMapLayer; only that one `tile_map_data` assignment is regenerated |
 | `tiles erase <file> --layer N --region X0,Y0,X1,Y1` | Delete every cell in a rectangle |
 
@@ -175,15 +175,19 @@ drops every `uid=`, and can save an EMPTY file returning `OK`). `canonicalize` r
 An install verb writes a file. **Once.** A destination that exists and is not byte-for-byte what would
 be written is refused by path, naming both remedies — move it aside, or `--force`. `--diff` prints what
 a run would change and writes nothing. No manifest, no merge: after the write the file is the repo's.
-Every refusal is decided before the first byte, so a collision on the third file leaves the first two
-unwritten.
+Every refusal is decided before the first byte; a collision withholds **that file**, so the entries
+with nothing in their way are written, every collision is named, and the run exits 1 because a
+replacement was held back. A difference confined to the `project config` header the file invites you to
+edit is reported as one — the rest of that file is byte-current, so it needs no `--force`, and `--force`
+would replace the header too. A destination that cannot be written at all (a directory, a read-only
+path, a parent that is a file) still refuses the whole command with nothing written.
 
 | Verb | Writes |
 |---|---|
 | `init` | **All of the below, in the order a fresh project needs them**, plus the three files nothing else writes: `devkit.toml` (every gate section, commented at its stock default, so the file is inert on arrival), your two-line `Makefile` with this tag substituted into the pin, and a `CLAUDE.md` skeleton naming the standard targets and the installed rules. It also appends the four run-artifact directories to `.gitignore` and RUNS `tools/setup-hooks.sh`, because installing a hook is not arming it. Idempotent: re-run any time to fill what is missing. **Two ownerships:** the installed files are devkit-owned and `--force` overwrites them; `devkit.toml`, `Makefile`, `CLAUDE.md` and the PM tree are yours from the first write and `--force` never touches them, so a differing seed is reported rather than refused. Refuses, before writing a byte, in a directory with no `project.godot` or no git repo |
-| `install-ci` | The four workflows a Godot project runs on a push: `verify.yml` (checkout, uv, `make milestone` — that this is your full gate is a **comment in the file**, not a discovery mechanism), `uid-guard.yml` (`make uid-scan` on a PR to main and a push to staging; an `on:` filter takes no variable, so rename the branches if yours differ), `semver-gate.yml` (a merge to main must bump `config/version` in `project.godot`, and the new version must be the id of a `done` milestone under `PM_ROADMAP` or main's version plus one hotfix component — a building milestone's id refuses) and `auto-tag.yml` (tag the mainline from that same version, then dispatch `RELEASE_WORKFLOW` — the one project-specific string, and its absence is a green "tagged only" rather than a red X). Release, website and social workflows are the project's and are not written |
-| `install-agents` | The review/build contract (`verification-reviewer.md` + `verification-builder.md`) plus the base agent roster — architect, po, developer, reviewer, milestone-reviewer, simplifier, test-writer, tech-writer, changelog-writer, doc-hygiene, pm-operator — under `.claude/agents/`, each with `model:`/`effort:` frontmatter and a Project config section that is yours to edit after install. The four reviewer-shaped definitions (reviewer, simplifier, milestone-reviewer, verification-reviewer) each carry the instruction to end their record in one fenced, machine-readable verdict block — `pm ledger report`'s yield section is what reads it. The SDLC they run is [`SDLC.md`](SDLC.md). Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context; a definition does |
-| `install-hooks` | The agent-workflow guard corpus: `tools/hooks/` gets `cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), `cc-stop-gate.sh` (an agent's stop is blocked while its fast gate is red), `cc-write-confine.sh` (a write outside the session's repo is blocked at the edit, not the commit), `pre-push` (no direct push to a protected branch + a scoped trunk gate) and `prepare-commit-msg` (agent commits get the trailer, the human's never do); `tools/dev/` gets `agent-worktree.sh` (the one sanctioned per-agent worktree create/teardown) and `checks/doctor.sh` (toolchain census that self-heals the hook wiring); plus `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there — and each carries a `project config` header that is yours to edit after install. `cc-godot-sandbox.sh` also ships its own block/allow payload corpus: wire `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your static gate (nullbound: a `hooks-self-test` target in `make check`) so an edit to the guard cannot quietly change a verdict. Two more couriers join the corpus: `cc-ledger-subagent.sh` (`SubagentStop`) and `cc-ledger-session.sh` (`Stop`) hand a transcript path and whatever ids the event carries to `pm ledger record` through `make pm ARGS="…"` — they judge nothing, and every path out is exit 0. The verb itself now **prints** the `.claude/settings.json` entries that fire the whole corpus, the two couriers `"async": true` — printed, never written, since that file is yours to hand-merge |
+| `install-ci` | The four workflows a Godot project runs on a push: `verify.yml` (checkout, uv, then — guarded on `hashFiles('project.godot')`, so a repo with no engine in it skips them — the Godot version `config/features` declares with this file's `GODOT_PATCH` knob, gdlint and shellcheck, and finally `make milestone` — that this is your full gate is a **comment in the file**, not a discovery mechanism), `uid-guard.yml` (`make uid-scan` on a PR to main and a push to staging; an `on:` filter takes no variable, so rename the branches if yours differ), `semver-gate.yml` (a merge to main must bump `config/version` in `project.godot`, and the new version must be the id of a `done` milestone under `PM_ROADMAP` or main's version plus one hotfix component — a building milestone's id refuses) and `auto-tag.yml` (tag the mainline from that same version, then dispatch `RELEASE_WORKFLOW` — the one project-specific string, and its absence is a green "tagged only" rather than a red X). Release, website and social workflows are the project's and are not written |
+| `install-agents` | The review/build contract (`verification-reviewer.md` + `verification-builder.md`) plus the base agent roster — architect, po, developer, reviewer, milestone-reviewer, simplifier, test-writer, tech-writer, changelog-writer, doc-hygiene, pm-operator — under `.claude/agents/`, each with `model:`/`effort:` frontmatter and a Project config section that is yours to edit after install. The four reviewer-shaped definitions (reviewer, simplifier, milestone-reviewer, verification-reviewer) each carry the instruction to end their own pass in one fenced, machine-readable verdict block, APPENDED rather than replacing an earlier pass's — `pm ledger report`'s yield section reads every block in a record and reports one row per pass. The SDLC they run is [`SDLC.md`](SDLC.md). Deliberately not `.claude/rules/*`: a rules file never reaches a subagent's spawn context; a definition does |
+| `install-hooks` | The agent-workflow guard corpus: `tools/hooks/` gets `cc-commit-pathspec.sh` (a `git commit` in a shared tree must name its own paths), `cc-godot-sandbox.sh` (never a raw `godot` boot against the real `user://`), `cc-stop-gate.sh` (an agent's stop is blocked while its fast gate is red), `cc-write-confine.sh` (a write outside the session's repo is blocked at the edit, not the commit), `pre-push` (no direct push to a protected branch + a scoped trunk gate) and `prepare-commit-msg` (agent commits get the trailer, the human's never do); `tools/dev/` gets `agent-worktree.sh` (the one sanctioned per-agent worktree create/teardown) and `checks/doctor.sh` (toolchain census that self-heals the hook wiring); plus `tools/setup-hooks.sh`. Each is **standalone** — a `source` of a file your repo lacks fails open, and a guard that fails open is not there — and each carries a `project config` header that is yours to edit after install. `cc-godot-sandbox.sh` also ships its own block/allow payload corpus: wire `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your static gate (a `hooks-self-test`-shaped target inside your own `check`) so an edit to the guard cannot quietly change a verdict. Two more couriers join the corpus: `cc-ledger-subagent.sh` (`SubagentStop`) and `cc-ledger-session.sh` (`Stop`) hand a transcript path and whatever ids the event carries to `pm ledger record` through `make pm ARGS="…"` — they judge nothing, and every path out is exit 0. The verb itself now **prints** the `.claude/settings.json` entries that fire the whole corpus, the two couriers `"async": true` — printed, never written, since that file is yours to hand-merge |
 | `install-runners` | The sandboxed headless-run shell library — `tools/dev/gdk_runners.sh` (one verdict line per gate naming `.gate-reports/<gate>.log`, `VERBOSE=1` streams; a per-run self-destroying HOME sandbox so a boot can never reach the real `user://`; a bounded-run contract that tells a hang from a failure; a `project.godot` restore that undoes engine re-serialization and leaves a real edit alone) plus the runners that source it, under `tools/dev/runners/`: `import_cache.sh`, `parse.sh` (headless boot + a full-project `compile_sweep.gd` pass, reported N/N), `lint.sh` (gdlint over a scan set derived from git's index, never a maintained list), `warnings.sh` (the editor-only GDScript analyzer warnings, promoted to errors in a throwaway project mirror — an editor import pass, then the same `compile_sweep.gd` pass under the promotion, so a `class_name` script nothing instantiates is analyzed too, reported N/N), `unit.sh` (GUT, sliced per system, with the coverage gate that fails the run when GUT silently refused to load a test script), `scenario.sh` / `integration.sh` (one boot scenario, and the whole tier one process each, N-way parallel — `--system <dir>` is the DIRECTORY under the tier, a slice that selects nothing is a FAIL; `--diff <ref>` runs every scenario whose `## covers:` header names a path the change touched, plus the touched scenarios and smoke, and reports the scenarios that declare nothing; a touched piece of the tier's own ground runs the whole tier; `--list` prints the roster `--all` would boot, booting nothing — the one census `check test-shape` asks the header rule of), `capture.sh` (HEADED, because headless is blind to render), and `hermetic_run_scan.sh` — the gate ON that pair rather than a gate that uses it: no bare `trap … EXIT` clobbering the sandbox self-destruct, a real child run whose HOME and state are gone afterwards with the real `user://` untouched, and nothing persisted beside the `runs/` spool. It boots no engine, so it belongs in your STATIC gate set. Every function is `gdk_*` and your `make` targets call those — a consumer keeping its own prefix is forking the library and stranding the next fix. Each file carries `--help` and `--self-test`; the `runners-self-test` target replays every one of them. **Plus `Makefile.devkit` at the repo root** — the standard target set that CALLS them, which your own Makefile `include`s ([Wiring it in](#wiring-it-into-your-project)). The two ship under one verb because neither half is usable alone: the runners have no callers without the targets, and every runner-backed target is dead without the runners. `.gate-reports/`, `.scenario-reports/`, `.capture-reports/` + `.headless-userdata/` want gitignoring, which `init` does for you |
 | `pm install-skills` | `.claude/rules/pm-execution.md` (auto-loads on a `pm/roadmap/**` edit) + `.claude/skills/pm-operations/SKILL.md` (invoked deliberately). Under `pm` because what it writes is the PM tree's own guidance |
 
@@ -206,6 +210,7 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 | `check repo-hygiene` | Close-time git cruft: dirty tree, stashes, dangling worktrees, merged-but-undeleted branches. Runs `git fetch --prune` |
 | `check shell` | `shellcheck -x` over every script under `tools/`, incl. extension-less hook entry points. Soft-skips if shellcheck isn't installed |
 | `check pm` | PM-tree drift: a `done` feature whose `reviewed:` names no file, a feature whose stories are all done but never advanced, a `done` milestone with live children, a status outside the schema (milestones, features, stories **and bugs**), a `done` story under a live feature, a `building` milestone with everything closed. Also runs the `pm validate` integrity rules (V1–V5). Shares its predicates with the `pm` CLI, so the gate and the tool cannot disagree |
+| `check hooks` | A hook corpus that is installed but not GUARDING. Four questions: `core.hooksPath` resolves to `tools/hooks`, every entry is a regular file at all (git's hook universe is every entry in the directory, so a directory or a broken symlink there is a name git tries and cannot start — REPORTED, never subtracted from the census), every entry carries an exec bit (git skips one that does not, in silence), and every hook still RUNS — a `cc-*.sh` fed a payload it cannot read must fail OPEN at exit 0, which executes the whole file including the project-config header you edited, and anything else in the directory must parse. Armed is not the same as working: a stale header under a newer body dies on an unbound variable under `set -u` and exits 1 where only 2 is a BLOCK, so the guard is on disk, executable, and stops nothing. `_*` (sourced libraries) and `*.local` (config drop-ins) are not hooks. Stock OFF — arming is a decision you make once, and `bash tools/setup-hooks.sh` is what makes it |
 | `check rng` | Randomness a seeded run cannot reproduce: an UNQUALIFIED `randi()`/`randf()`/`randi_range()`/`randf_range()` — the global generator — and `randomize()` in any spelling, including on an instance RNG (which makes an entropy-seeded result LOOK derived). Scope is `[rng] roots` and is meant to be narrow. `[rng] allowlist` is `"<path>:<enclosing func>" = "the reason"`: function granularity, so a new bare call elsewhere in a listed file still trips, the reason is DATA rather than a comment, and an entry that no longer matches a call is itself a finding |
 | `check tres-comment` | An authored `;` comment in a `.tres`/`.tscn`. Godot's parser accepts one and its writer DROPS it, so any rationale in a resource file survives only until the next editor save, import or headless run — silently, permanently, with no diff to notice |
 | `check unit-disk` | A no-boot test that reaches real persistent state: a `user://` path (stock), a call that touches a live owner (`[unit_disk] forbidden_calls`), or a call whose root/scope parameter DEFAULTS to the real one (`[unit_disk] min_args` — `Save.load(uuid)` is a finding where `Save.load(uuid, throwaway)` is not). A call NAMED in an assert message or a doc comment is not a call |
@@ -218,21 +223,41 @@ Pure git + parse; no Godot boot. Run from anywhere inside the repo.
 Milestones → features → stories, as markdown with YAML frontmatter under `pm/roadmap/`. The CLI writes
 ONE line and touches nothing else — no line endings, no adjacent fields, no file the caller did not name.
 
-**Closed states, open transitions.** The state you ask for is validated against that grain's
+**One vocabulary, closed states, open transitions.** Milestone, feature and story all hold
+`planning` `ready` `building` `reviewing` `accepted` `packaging` `done`, and each grain uses the
+states it needs and skips the rest — packaging a feature is a different act from packaging a
+milestone, and a story routinely skips packaging. `done` does not mean SHIPPED and cannot: the flip
+is itself a commit that has not shipped when it is written. It means everything inside the tree's
+authority is finished — changelog written, reviews closed, findings landed, gates green. Bugs are a
+different machine (`open` `fixed` `closed`). The state you ask for is validated against that grain's
 vocabulary: `pm milestone butterfly 0.1` is exit 2 naming the set. The state the file currently holds
 is never validated — it is read for the message — so `pm milestone done 0.1` works from any state,
 including a hand-edited `status: wombat`, which it prints as `wombat -> done` and repairs. There is no
 transition graph and nothing checks an EDGE; a graph would only tax whoever used the sanctioned tool
-while a `sed` of the same line reached the state it refused. **The verbs report what they noticed and
-refuse nothing on process** — stories not at review, features not done, named in the output.
+while a `sed` of the same line reached the state it refused.
+
+**0.24.0 only: a deprecation window.** The stock set additionally READS the four words this
+vocabulary replaced — `todo` (→ `ready`), `wip` (→ `building`), `blocked` (REMOVED — nothing replaces it; record what is blocking the work in the grain and leave the status at `building`) and
+`review` (→ `reviewing`) — so a tree that already holds one keeps a green `check pm` through the
+pin bump instead of turning every such grain into a D4 finding on upgrade day. It is a window, not
+a second vocabulary: the verbs REFUSE to write a retired word and name its replacement, `check pm`
+prints a one-line census of how many grains still hold one, `pm vocabulary` marks them, and **0.25.0
+removes them**. Rewrite them before that bump — a project that declares its OWN `story_states`
+containing `todo` is not in the window and is untouched by any of this.
+**Run `godot-devkit check pm` by hand once while you are on 0.24.0 and read its NOTE**: `make check`
+summarises this gate as a PASS *count*, so the census line lands in the transcript under
+`.gate-reports/` and never on your console (`VERBOSE=1` streams it), and a project that stays green
+through 0.24.0 without ever reading it meets the 0.25.0 red with no warning shot.
+**The verbs report what they noticed and
+refuse nothing on process** — stories not at `reviewing`, features not done, named in the output.
 `check pm` catches an invalid state from any route, hand-edit included.
 
 | Command | What it does |
 |---|---|
 | `pm init` · `pm new <milestone\|feature\|story\|bug> …` | Stand up a tree; scaffold a grain — its own frontmatter file and nothing else. **No directory and no shared doc is minted**: git stores no empty directory, and a shared doc appears on first WRITE. `new milestone`/`new feature` are idempotent — re-run to fill gaps. Every failure out is a refusal, never a stack trace |
 | `pm story\|bug\|feature\|milestone <status> <id>` | Set a grain's status to any value in its vocabulary; anything else is exit 2 naming the set. A bug id is `<milestone>/bugs/<slug>`. Appends one timestamped row to the milestone's `ledger.jsonl` — after the write lands, never before, and even for a no-op flip |
-| `pm feature review <id>` | Move to `review` and REPORT the stories that are not there |
-| `pm feature done <id> [--cascade] [--review-record <path>]` | Close the feature. **Touches no story file** unless `--cascade`, which also closes that feature's stories at `review`. A `--review-record` naming no file IS refused, whole — stamping a pointer to nothing is the drift D1 reports |
+| `pm feature reviewing <id>` | Move to `reviewing` and REPORT the stories that are not there |
+| `pm feature done <id> [--cascade] [--review-record <path>]` | Close the feature. **Touches no story file** unless `--cascade`, which also closes that feature's stories at `reviewing`. A `--review-record` naming no file IS refused, whole — stamping a pointer to nothing is the drift D1 reports |
 | `pm status [<milestone>]` | Tree report, drift-aware, grouped by the optional `phase:` bucket |
 | `pm list [--status <s>[,<s>…]] [--owner <n>] [--milestone <id>]` | One tab-separated `<story-id> <status> <owner> <feature-id>` per story, filtered. Deliberately **no `pm next`**: a verb that picks THE next thing is the tool having an opinion about your priorities. Rows to stdout, census to stderr |
 | `pm validate` | Frontmatter well-formed, ids match paths, parentage consistent, `depends_on`/`consumed_by` resolve, the feature graph acyclic. A ref into a milestone no longer in the tree is UNVERIFIABLE, never failed — git history is the archive |
@@ -332,7 +357,12 @@ bug_states      = ["open", "fixed", "closed"]   # D4: the bug vocabulary
 version_file    = "project.godot"               # D8: where the version lives
 version_pattern = '^config/version="(.*)"$'     # D8: the line that carries it
 # milestone_states / feature_states / story_states are overridable too — what D4
-# holds a grain to, and what the status verbs accept.
+# holds a grain to, and what the status verbs accept. All three default to the
+# ONE seven-state lifecycle above. A custom set's ORDER is its lifecycle order:
+# D5 places "at work" by index within each grain's own set, at `building`, so
+# list the states in the order the work moves through them — an alphabetical
+# list is a different lifecycle, not the same one tidied. Drop `building` and
+# D5 has nothing to compare; `check pm` says so rather than passing in silence.
 ```
 
 `godot-devkit pm vocabulary` prints the rule ids in full. `bugs/` and `stories/` are walked
@@ -345,7 +375,7 @@ skipped.
 **A new project — one command.** From inside the repo:
 
 ```bash
-uvx --from "git+https://github.com/cdowin/godot-devkit@v0.23.0" godot-devkit init
+uvx --from "git+https://github.com/cdowin/godot-devkit@v0.24.0" godot-devkit init
 make doctor && make help
 ```
 
@@ -353,7 +383,7 @@ make doctor && make help
 project, so it lives in YOUR file and a bump is a one-line diff:
 
 ```make
-DEVKIT_VERSION := v0.23.0
+DEVKIT_VERSION := v0.24.0
 include Makefile.devkit
 
 my-scan: ## a gate this project owns
@@ -427,19 +457,20 @@ make test        # the suite on the 3.11 floor (pytest, via uv)
 make gates       # godot-devkit check all, on this repo
 make hooks-self-test  # the self-hosted hooks that ship a corpus, replayed
 make precommit   # gates + hooks-self-test + test — the per-change gate
-make milestone   # gates + hooks-self-test + matrix + smoke — the full gate, and what CI runs
+make milestone   # gates + hooks-self-test + matrix — the full gate, and what CI runs
 ```
 
-`make matrix` runs the suite on every claimed interpreter and reports which one failed; `make fuzz`
-runs the seeded differential + replay harnesses alone; `make smoke` runs `check all`, `autoloads`,
-`scene`, `refs`, `pm status`, `pm validate` and `check pm` against the live consumer checkouts,
-compares each printed census against an independent count, and fails if it leaves either dirty. It
-also carries the **fresh-project probe**: an empty Godot 4 project in a temp dir, `init`, then the
-REAL `make doctor` — the one write in the file, never inside a consumer checkout, and a loud NOT RUN
-where `godot` is off PATH.
-`orphans`, `scene-diff`, `tiles`, `pm list` and `pm get` are NOT in it. Write verbs NEVER run against
-a consumer checkout. Tests needing a Godot repo skip cleanly when none is present; the hermetic
-fixtures under `tests/fixtures/` always run.
+`make matrix` runs the whole suite on `PY_FLOOR` and the Python-only slice (`-m "not shell"`)
+on every other claimed interpreter, and reports which one failed; `make fuzz`
+runs the seeded differential + replay harnesses alone.
+
+**Every target here is self-contained.** Nothing in this repo reads a path outside its own checkout,
+names a project that consumes it, or asks whether some other repo happens to be cloned on the machine
+running the gate — a verdict that depends on whose laptop ran it is not a verdict. Realistic data is
+VENDORED: `tests/fixtures/` holds purpose-built repos plus `corpus/`, a scrubbed real-world
+`.tscn`/`.tres` set, and a check that needs a construct the corpus lacks vendors a scene carrying it.
+Integration against any particular project is that project's gate, run in that project's repo when it
+bumps its pin.
 
 `check props` compares against a snapshot of Godot's ClassDB in
 `src/godot_devkit/data/classdb.json`. Reading it boots nothing. Regenerate when the engine minor moves:

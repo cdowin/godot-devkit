@@ -3,7 +3,7 @@ id: 0.20.0/ci-set/consumers-adopt-and-delete-duplicates
 feature: 0.20.0/ci-set
 milestone: "0.20.0"
 name: nullbound and trail adopt the set and delete their hand-rolled copies
-status: todo
+status: ready
 owner:
 depends_on: []
 ---

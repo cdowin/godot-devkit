@@ -63,7 +63,6 @@ GATE_FAIL_LINES := 20
 # leading `[tag]` a tool prints is stripped: the verdict line supplies the tag.
 SUM_PYTEST := grep -aoE '[0-9]+ (passed|failed)[^|]*' "$$log" | tail -1
 SUM_GATES  := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z]+\] PASS' "$$log")"
-SUM_SMOKE  := tail -1 "$$log" | sed -E 's/^\[[a-z:-]+\] //'
 SUM_HOOKS  := printf '%s hook(s) SELF-TEST OK' "$$(grep -ac 'SELF-TEST OK' "$$log")"
 
 # $(call gate,<log slot>,<TAG>,<summary command>,<argv...>)
@@ -85,22 +84,22 @@ gdk_gate_verdict $(2) "$$summary" "$$log"; \
 exit "$$status"
 endef
 
-.PHONY: help test matrix fuzz gates hooks-self-test smoke precommit milestone pm
+.PHONY: help test matrix fuzz gates hooks hooks-self-test precommit milestone pm
 
 help:
 	@echo 'godot-devkit — make targets'
 	@echo
 	@echo '  make test        the suite on the $(PY_FLOOR) floor'
-	@echo '  make matrix      the suite on every claimed interpreter ($(PY_MATRIX))'
+	@echo '  make matrix      every claimed interpreter ($(PY_MATRIX)): $(PY_FLOOR) runs the whole suite, the rest -m "not shell" (a spawn is not interpreter-sensitive)'
 	@echo '  make fuzz        the committed seeded harnesses (differential + replay)'
 	@echo '  make gates       godot-devkit check all, on this repo'
+	@echo '  make hooks       ARM this checkout: point git at tools/hooks/ and restore the exec bits'
 	@echo '  make hooks-self-test  the installed hooks that ship a corpus, replayed (sandbox + the two ledger couriers)'
-	@echo '  make smoke       check all + autoloads/scene/refs/pm on the consumers (read-only)'
 	@echo
 	@echo '  make pm ARGS="…"  the pm tracker from SOURCE, never a cached wheel (the ledger couriers call this)'
 	@echo
 	@echo '  make precommit   gates + hooks-self-test + test           the per-change gate'
-	@echo '  make milestone   gates + hooks-self-test + matrix + smoke  the full gate, and what CI runs'
+	@echo '  make milestone   gates + hooks-self-test + matrix        the full gate, and what CI runs'
 	@echo
 	@echo 'Every gate prints ONE verdict line naming its full log under'
 	@echo '.gate-reports/. VERBOSE=1 streams the transcript as well.'
@@ -124,13 +123,24 @@ fuzz:
 gates:
 	$(call gate,gates,GATES,$(SUM_GATES),$(DEVKIT) check all)
 
-smoke:
-	$(call gate,smoke,SMOKE,$(SUM_SMOKE),$(PY) tools/consumer_smoke.py)
+# ARM this checkout. `install-hooks` writes the corpus; writing it is not arming
+# it, and git runs nothing under tools/hooks/ until core.hooksPath points there.
+# This repo told its consumers the corpus was self-hosted here while that config
+# was unset in every checkout of it, for two releases, because there was no
+# target to run and none that looked
+# (0.24.0/bugs/self-hosting-has-no-arm-or-verify-target).
+#
+# This is the one command that FIXES an unarmed tree; `check hooks` — inside
+# `make gates`, and so inside `precommit` and `milestone` — is what reports one.
+# Not a gate, so it prints what the script prints: it is asked for a repair and
+# the two lines are the repair.
+hooks:
+	@bash tools/setup-hooks.sh
 
 # The hooks this repo self-hosts that ship their own block/allow corpus: the
 # raw-engine-boot guard and the two ledger couriers. Replayed here so an edit
 # to a guard cannot quietly change a verdict — the same wiring the README asks
-# of a consumer (nullbound: a `hooks-self-test` target in `make check`).
+# of a consumer: a `hooks-self-test`-shaped target inside its own static gate.
 HOOKS_WITH_CORPUS := tools/hooks/cc-godot-sandbox.sh tools/hooks/cc-ledger-subagent.sh tools/hooks/cc-ledger-session.sh
 hooks-self-test:
 	$(call gate,hooks-self-test,HOOKS,$(SUM_HOOKS),sh -c 'for h in $(HOOKS_WITH_CORPUS); do bash "$$h" --self-test || exit 1; done')
@@ -140,14 +150,43 @@ hooks-self-test:
 # "everywhere", which is the whole question a matrix is asked. It writes its own
 # loop rather than $(call gate,...) because it captures N runs into ONE
 # transcript — but it ends the same way, with one verdict line naming that log.
+#
+# The FLOOR runs the whole suite; every other interpreter runs `-m "not shell"`.
+# ~85% of this suite's wall clock is `subprocess` — bash, make, git, the
+# installed hook corpora — and a spawn is not something a Python version
+# changes, so four interpreters replaying it bought minutes and no information.
+# The `shell` mark is DERIVED per module in tests/conftest.py from what the
+# source does, never a list here: a roster in this file is a roster that goes
+# stale, and a module that quietly leaves it stops running on three
+# interpreters with nothing going red.
+#
+# A PY_FLOOR that is not in PY_MATRIX is refused BEFORE the first interpreter —
+# the slice would then be run by nobody and the matrix would print PASS over a
+# suite that never ran, which is worse than the sixteen minutes this saves.
+# Membership is decided by the same word splitting the loop uses, so the guard
+# and the run cannot disagree; a `case` pattern would call a 3.1 floor a member
+# of a 3.11 matrix. (PY_FLOOR/PY_MATRIX are operator configuration: the guard
+# is against bumping one and not the other, not against shell injection
+# through a make variable.)
 matrix:
 	@set -o pipefail; . $(RUNNERS_LIB); \
-	log="$$(gdk_gate_log matrix)"; fail=''; \
+	log="$$(gdk_gate_log matrix)"; fail=''; floor=''; full=''; \
+	for v in $(PY_MATRIX); do [ "$$v" = "$(PY_FLOOR)" ] && floor="$$v"; done; \
+	if [ -z "$$floor" ]; then \
+		echo 'PY_FLOOR "$(PY_FLOOR)" is not in PY_MATRIX "$(PY_MATRIX)"' >> "$$log"; \
+		gdk_gate_verdict MATRIX 'REFUSED: PY_FLOOR "$(PY_FLOOR)" is not in PY_MATRIX "$(PY_MATRIX)", so no interpreter would run the whole suite' "$$log"; \
+		exit 2; \
+	fi; \
 	for v in $(PY_MATRIX); do \
-		echo "=== python $$v ===" >> "$$log"; \
-		[ "$$VERBOSE" = "0" ] || echo "=== python $$v ==="; \
+		if [ -z "$$full" ] && [ "$$v" = "$(PY_FLOOR)" ]; then \
+			full="$$v"; slice=(); ran='the whole suite'; \
+		else \
+			slice=(-m 'not shell'); ran='-m "not shell"'; \
+		fi; \
+		echo "=== python $$v ($$ran) ===" >> "$$log"; \
+		[ "$$VERBOSE" = "0" ] || echo "=== python $$v ($$ran) ==="; \
 		gdk_gate_capture "$$log" -- \
-			$(UV) run --python $$v $(TEST_DEPS) python -m pytest $(PYTEST_Q) || true; \
+			$(UV) run --python $$v $(TEST_DEPS) python -m pytest $(PYTEST_Q) "$${slice[@]}" || true; \
 		[ "$$GDK_GATE_EXIT" -eq 0 ] || fail="$$fail $$v"; \
 	done; \
 	if [ -n "$$fail" ]; then \
@@ -164,4 +203,4 @@ precommit: gates hooks-self-test test
 
 # The full gate, and what CI runs. The matrix subsumes `test`, so it is not
 # listed twice.
-milestone: gates hooks-self-test matrix smoke
+milestone: gates hooks-self-test matrix

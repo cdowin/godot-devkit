@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -334,6 +335,9 @@ STOP_GATE = 'tools/hooks/cc-stop-gate.sh'
 CONFINE = 'tools/hooks/cc-write-confine.sh'
 WORKTREE = 'tools/dev/agent-worktree.sh'
 DOCTOR = 'tools/dev/checks/doctor.sh'
+# One shipped git hook, by name: the doctor cases below replace it with
+# something git cannot exec.
+A_GIT_HOOK = 'pre-push'
 MARKER = '.agent-scope'
 
 # The corpus reads DEVKIT_AGENT_SCOPE; a test machine that happens to export
@@ -795,6 +799,38 @@ def test_doctor_reds_on_a_disarmed_hook_whatever_its_name(tmp_path):
     assert 'cc-invented-later.sh not executable' in done.stdout
 
 
+@pytest.mark.parametrize('shape', ['directory', 'broken symlink'])
+def test_doctor_reds_on_an_entry_git_cannot_exec_at_all(tmp_path, shape):
+    """The other way a guard dies: not a lost exec bit but a name git tries
+    and cannot start. doctor skipped these on `[ -f ]`, so its census read
+    SMALLER than the directory with no line saying so — the same defect
+    `check hooks` carried, and two shipped surfaces agreeing on the wrong
+    answer is worse than one."""
+    root, stub_bin = ready_repo(tmp_path)
+    dead = root / 'tools/hooks' / A_GIT_HOOK
+    dead.unlink()
+    if shape == 'directory':
+        dead.mkdir()
+    else:
+        dead.symlink_to('../../gone/somewhere.sh')
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 1, done.stdout
+    assert f'tracked hook {A_GIT_HOOK} is not a regular file' in done.stdout, done.stdout
+    assert '[DOCTOR] FAIL' in done.stdout
+
+
+def test_doctor_still_warns_rather_than_reds_on_an_EMPTY_corpus(tmp_path):
+    """The one thing the `-f` skip was load-bearing for: an unmatched glob is
+    the literal pattern, and a census that turned THAT into a finding would be
+    a gate reddening on nothing. `no tracked hooks` is still the answer."""
+    root, stub_bin = ready_repo(tmp_path)
+    for entry in (root / 'tools/hooks').iterdir():
+        entry.unlink()
+    done = run_doctor(root, stub_bin)
+    assert 'no tracked hooks under tools/hooks/' in done.stdout, done.stdout
+    assert 'is not a regular file' not in done.stdout, done.stdout
+
+
 # --- fail-open posture, both PreToolUse hooks ---------------------------------
 @pytest.mark.parametrize('hook', [SANDBOX, PATHSPEC])
 def test_a_hook_fed_garbage_or_another_tool_fails_open(hooks_repo, hook):
@@ -855,17 +891,21 @@ FRONTMATTER = {
          'status': 'building', 'reviewed': ''},
     'pm/roadmap/0.1-demo/features/alpha/stories/s0.md':
         {'id': '0.1/alpha/s0', 'feature': '0.1/alpha', 'milestone': '"0.1"',
-         'name': 'S0', 'status': 'wip'},
+         'name': 'S0', 'status': 'building'},
 }
 
 
 def ledger_repo(tmp_path: Path, name: str = 'repo',
-                with_makefile: bool = True) -> Path:
+                with_makefile: bool = True, shell: str | None = None) -> Path:
     """The corpus installed into a repo with one `building` milestone.
 
     Deliberately built by hand rather than through `pm new`: the hooks are the
     thing under test, and a scaffolder failure here would read as a hook
     failure.
+
+    `shell` pins the Makefile's recipe shell. Unset is the stock consumer —
+    make's default `/bin/sh`, which on macOS is bash and therefore forgiving of
+    a bash-only spelling. A vehicle that names dash is the honest one.
     """
     root = corpus_repo(tmp_path, name)
     for rel, front in FRONTMATTER.items():
@@ -874,8 +914,10 @@ def ledger_repo(tmp_path: Path, name: str = 'repo',
         body = ['---'] + [f'{k}: {v}' for k, v in front.items()] + ['---', '', 'x', '']
         path.write_text('\n'.join(body), encoding='utf-8')
     if with_makefile:
+        prologue = f'SHELL := {shell}\n' if shell else ''
         (root / 'Makefile').write_text(
-            PM_MAKEFILE.format(src=REPO_ROOT / 'src', python=sys.executable),
+            prologue + PM_MAKEFILE.format(src=REPO_ROOT / 'src',
+                                          python=sys.executable),
             encoding='utf-8')
     return root
 
@@ -1043,6 +1085,105 @@ def test_a_tilde_prefixed_transcript_path_is_expanded(tmp_path, hook):
     assert len(ledger_rows(root)) == 1, done.stderr
 
 
+# --- the vehicle's shell is not this hook's ------------------------------------
+# `make` runs a recipe under `/bin/sh` unless the Makefile says otherwise, and a
+# hand-rolled consumer Makefile may say dash. Every word the courier spells INTO
+# `ARGS=` is parsed by that shell, so a value spelled as a bash literal is a
+# value the vehicle may not decode. The couriers used `printf %q`, which is
+# BASH's quoting: a non-ASCII path comes back as `$'…'`, dash keeps the `$` as
+# text, the verb refuses "is not a file" at exit 2 — and this hook always exits
+# 0, so the row is lost with nothing red anywhere
+# (0.24.0/bugs/courier-path-quoting-needs-a-bash-shell).
+#
+# There is a SECOND dimension, and it is why this was invisible: `printf %q` is
+# LOCALE-sensitive. Under `LC_ALL=en_US.UTF-8` bash 3.2 calls `é` printable and
+# emits it bare, so the same courier, the same path and the same dash vehicle
+# record the row perfectly — while under `C`/`POSIX`, or with the locale simply
+# unset, it emits `$'…'` and the row is lost. A hook is spawned by an app, a
+# daemon or a CI runner, none of which promise a UTF-8 locale, so `C` is the
+# honest vehicle and it is pinned rather than inherited: a case whose verdict
+# depends on the runner's locale is a case that proves nothing on the day it
+# passes. (`uv run` exports `LC_CTYPE=C.UTF-8`, and it hid this entirely.)
+VEHICLE_ENV = {'LC_ALL': 'C'}
+
+# The directories below are the matrix. Every one is a legal name a transcript
+# could sit under, and every one must land its row under a vehicle that is not
+# bash. `café` is the case that was silently lost; the other six are the rest of
+# the grammar the transport now has to be indifferent to, including a newline,
+# which no spelling into a make command-line variable can survive at all.
+DASH = shutil.which('dash') or '/bin/dash'
+needs_dash = pytest.mark.skipif(
+    not Path(DASH).exists(),
+    reason='needs a POSIX shell that is not bash (dash) to be a real vehicle')
+
+HOSTILE_DIRS = [
+    pytest.param('café', id='non-ascii'),
+    pytest.param('a b', id='space'),
+    pytest.param("it's", id='apostrophe'),
+    pytest.param('$HOME', id='dollar'),
+    pytest.param('back`tick', id='backtick'),
+    pytest.param('semi;colon', id='semicolon'),
+    pytest.param('two\nlines', id='newline'),
+]
+
+
+@needs_dash
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+@pytest.mark.parametrize('directory', HOSTILE_DIRS)
+def test_a_hostile_transcript_path_still_records_under_a_dash_vehicle(
+        tmp_path, hook, directory):
+    """Both couriers, because the transport is duplicated in both files and
+    "fixed in one of them" is the failure mode a duplicated fix has."""
+    root = ledger_repo(tmp_path, shell=DASH)
+    holder = tmp_path / 'transcripts' / directory
+    holder.mkdir(parents=True)
+    transcript = holder / 't.jsonl'
+    shutil.copy(DISPATCH_JSONL if hook == LEDGER_SUBAGENT else SESSION_JSONL,
+                transcript)
+    build = subagent_event if hook == LEDGER_SUBAGENT else session_event
+    done = fire_ledger(root, hook, build(root, transcript=transcript),
+                       env={**CLEAN_ENV, **VEHICLE_ENV})
+    assert done.returncode == 0, done.stderr
+    rows = ledger_rows(root)
+    # The verb refuses a `--from-transcript` that is not a file, so a row at
+    # all proves the vehicle handed it THIS path byte-exact; the numbers prove
+    # it read the file rather than inventing one.
+    assert len(rows) == 1, f'no row landed. the vehicle said: {done.stderr}'
+    assert rows[0]['tool_calls'] > 0, rows[0]
+
+
+@needs_dash
+@pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
+def test_a_dash_vehicle_carries_no_value_inside_the_args_word(tmp_path, hook):
+    """The mechanism, not just the outcome: `ARGS=` must hold FIXED words only.
+
+    A courier that merely quoted better would still pass the case above on
+    every path somebody thought to list. What removes the class is that the
+    path is not in the string at all — so the assertion is on the string.
+    """
+    root = ledger_repo(tmp_path, shell=DASH)
+    holder = tmp_path / 'café dir'
+    holder.mkdir()
+    transcript = holder / 't.jsonl'
+    shutil.copy(DISPATCH_JSONL if hook == LEDGER_SUBAGENT else SESSION_JSONL,
+                transcript)
+    # A vehicle that echoes the ARGS it was handed, verbatim and UNEXPANDED —
+    # single quotes in the recipe, so the recipe shell reads the words rather
+    # than resolving them. make expands `$(ARGS)` inside them regardless, which
+    # is the whole reason a `'` in ARGS would be a defect of its own.
+    (root / 'Makefile').write_text(
+        f"SHELL := {DASH}\n.PHONY: pm\npm:\n\t@printf %s '$(ARGS)'\n",
+        encoding='utf-8')
+    build = subagent_event if hook == LEDGER_SUBAGENT else session_event
+    done = fire_ledger(root, hook, build(root, transcript=transcript),
+                       env={**CLEAN_ENV, **VEHICLE_ENV})
+    assert done.returncode == 0, done.stderr
+    args = done.stderr
+    assert 'café' not in args, f'the path is spelled into ARGS: {args}'
+    assert '303' not in args, f'the path is spelled into ARGS: {args}'
+    assert '"$GDK_LEDGER_TRANSCRIPT"' in args, args
+
+
 @pytest.mark.parametrize('hook', [LEDGER_SUBAGENT, LEDGER_SESSION])
 def test_a_refusal_from_the_verb_is_passed_through_and_still_exits_0(
         tmp_path, hook):
@@ -1066,3 +1207,153 @@ def test_the_ledger_hooks_replay_their_own_corpus(tmp_path, hook):
                           env=CLEAN_ENV)
     assert done.returncode == 0, done.stdout + done.stderr
     assert 'SELF-TEST OK' in done.stdout, done.stdout
+
+
+# --- doctor: the uid index against the sidecars the repo tracks ---------------
+# 0.24.0/bugs/import-cache-rebuild-does-not-repair-a-stale-uid-index. A
+# consumer ran 147 scenarios against a `.godot` whose uid index had lost 56
+# tracked sidecars: every scenario printed its own PASS and every one of them
+# was FAILED by the runner's engine-noise sweep, and the runner's remedy — an
+# import pass against the EXISTING directory — cannot put those entries back.
+# The runner now escalates (test_runners_installable.py); this is the cheaper
+# half, which says so in one line BEFORE a 147-scenario sweep instead of after.
+#
+# The fixture writes a REAL uid_cache.bin layout — u32 count, then per entry a
+# u64 id, a u32 length and the raw path — because what the check does is search
+# that binary, and a text stand-in would prove the search against a file the
+# engine never writes.
+def fake_uid_cache(paths: tuple[str, ...], *, uid: int | None = None) -> bytes:
+    body = struct.pack('<I', len(paths))
+    for index, path in enumerate(paths):
+        raw = path.encode('utf-8')
+        ident = uid if uid is not None else 0x7F00000000000000 + index
+        body += struct.pack('<QI', ident, len(raw)) + raw
+    return body
+
+
+def godot_repo(tmp_path: Path, sidecars: tuple[str, ...],
+               indexed: tuple[str, ...], *, gdignore: tuple[str, ...] = (),
+               cache: bool = True,
+               uid: int | None = None) -> tuple[Path, Path]:
+    """A ready corpus repo that is ALSO a Godot project: `sidecars` are tracked
+    `.uid` files, `indexed` are the res:// paths the binary index names."""
+    root, stub_bin = ready_repo(tmp_path)
+    (root / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    for index, rel in enumerate(sidecars):
+        sidecar = root / f'{rel}.uid'
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(f'uid://c{index}\n', encoding='utf-8')
+        source = root / rel
+        source.write_text('extends Node\n', encoding='utf-8')
+    for directory in gdignore:
+        (root / directory).mkdir(parents=True, exist_ok=True)
+        (root / directory / '.gdignore').write_text('', encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
+                   capture_output=True)
+    if cache:
+        (root / '.godot').mkdir(exist_ok=True)
+        (root / '.godot' / 'uid_cache.bin').write_bytes(
+            fake_uid_cache(indexed, uid=uid))
+    return root, stub_bin
+
+
+def test_doctor_reds_on_a_uid_index_missing_a_tracked_sidecar(tmp_path):
+    """The 56-missing tree, in miniature. The line has to name the shortfall
+    AND the only repair that works — a plain rebuild is what did not."""
+    root, stub_bin = godot_repo(
+        tmp_path, ('systems/alpha.gd', 'systems/beta.gd', 'shaders/glow.gdshader'),
+        ('res://systems/alpha.gd', 'res://scenes/hub.tscn'))
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 1, done.stdout
+    assert '2 of 3' in done.stdout, done.stdout
+    assert 'rm -rf .godot' in done.stdout, done.stdout
+    # It names what is missing: a count alone cannot be acted on.
+    assert 'res://systems/beta.gd' in done.stdout, done.stdout
+    assert '[DOCTOR] FAIL' in done.stdout, done.stdout
+
+
+def test_doctor_passes_a_uid_index_that_covers_every_tracked_sidecar(tmp_path):
+    """The control. Without it the case above is satisfied by a check that
+    fails on every tree, which is the same as no check."""
+    root, stub_bin = godot_repo(
+        tmp_path, ('systems/alpha.gd', 'shaders/glow.gdshader'),
+        ('res://systems/alpha.gd', 'res://shaders/glow.gdshader',
+         'res://scenes/hub.tscn'))
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert '2 tracked .uid sidecar' in done.stdout, done.stdout
+
+
+def test_doctor_does_not_count_a_sidecar_the_editor_never_scans(tmp_path):
+    """A directory carrying `.gdignore` is invisible to the editor filesystem,
+    so nothing under it is ever indexed. Counting those would red a healthy
+    tree — a real one tracked two such directories."""
+    root, stub_bin = godot_repo(
+        tmp_path, ('systems/alpha.gd', 'worktrees/scratch/copy.gd'),
+        ('res://systems/alpha.gd',), gdignore=('worktrees',))
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert '1 tracked .uid sidecar' in done.stdout, done.stdout
+
+
+def test_doctor_never_claims_a_sidecar_a_longer_path_could_be_hiding(tmp_path):
+    """The index is binary, so membership is a substring search — and
+    `res://a/x.gd` is a substring of `res://a/x.gdshader`. A path that is a
+    proper prefix of another expected path is therefore UNVERIFIABLE by that
+    search, and is reported as unverifiable rather than counted as present.
+    Both live consumers have zero such pairs; a check that is only usually
+    exact is not a check."""
+    root, stub_bin = godot_repo(
+        tmp_path, ('a/x.gd', 'a/x.gdshader'), ('res://a/x.gdshader',))
+    done = run_doctor(root, stub_bin)
+    assert 'res://a/x.gd' in done.stdout, done.stdout
+    assert 'unverifiable' in done.stdout, done.stdout
+    # The census names what it actually checked, and x.gd is not in it.
+    assert '1 tracked .uid sidecar' in done.stdout, done.stdout
+
+
+def test_doctor_warns_rather_than_passing_when_there_is_no_import_cache(tmp_path):
+    """A cold checkout has no `.godot/` at all. That is a fresh tree, not a
+    broken one — but it must not read as 'the index is fine'."""
+    root, stub_bin = godot_repo(tmp_path, ('systems/alpha.gd',), (),
+                                cache=False)
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert 'no .godot/uid_cache.bin' in done.stdout, done.stdout
+    assert 'make import-cache' in done.stdout, done.stdout
+
+
+def test_doctor_says_so_when_it_has_nothing_to_check_the_index_against(tmp_path):
+    """Rule 4: a zero-file census that prints a pass is the read-side cardinal
+    sin. Zero tracked sidecars is a real state of a fresh project, and the line
+    says the number rather than implying coverage."""
+    root, stub_bin = godot_repo(tmp_path, (), ('res://scenes/hub.tscn',))
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert '0 tracked .uid sidecar' in done.stdout, done.stdout
+
+
+def test_doctor_says_nothing_about_uids_in_a_repo_that_is_not_a_godot_project(tmp_path):
+    """doctor ships to every repo that installs the hook corpus, and this
+    package's own tree is not a Godot project. A check with no subject must be
+    silent, not a warning nobody can act on."""
+    root, stub_bin = ready_repo(tmp_path)
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert 'uid' not in done.stdout.lower(), done.stdout
+
+
+def test_doctor_finds_a_path_the_next_entrys_id_glued_printable_bytes_onto(tmp_path):
+    """The extraction turns non-printable bytes into separators, so a path
+    lands at the start of a token — but the bytes AFTER it are the next
+    entry's 64-bit id, and roughly a third of those are printable ASCII. On a
+    1800-entry cache that is hundreds of tokens carrying trailing junk, so
+    membership is decided by PREFIX and never by equality. Here every id is
+    0x4141… — eight `A`s glued to every path."""
+    root, stub_bin = godot_repo(
+        tmp_path, ('systems/alpha.gd',),
+        ('res://systems/alpha.gd', 'res://scenes/hub.tscn'),
+        uid=0x4141414141414141)
+    done = run_doctor(root, stub_bin)
+    assert done.returncode == 0, done.stdout
+    assert 'uid index covers 1 tracked .uid sidecar' in done.stdout, done.stdout

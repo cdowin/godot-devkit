@@ -3,8 +3,9 @@
 Three verbs, one relationship, and it is deliberately the whole relationship:
 
     install-ci      the four workflows a Godot project runs on a push:
-                    verify.yml (checkout, uv, `make milestone`), uid-guard.yml,
-                    semver-gate.yml and auto-tag.yml. Each was forked in both
+                    verify.yml (checkout, uv, the Godot toolchain a tree with
+                    a project.godot asks for, `make milestone`),
+                    uid-guard.yml, semver-gate.yml and auto-tag.yml. Each was forked in both
                     consumers, drifting on a project name and on which fix each
                     fork got. They carry no gate of their own and no way to
                     parameterize one: a project that wants something else edits
@@ -36,10 +37,10 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     set that calls them. Not folded into install-hooks: a
                     hooks-only consumer would carry runners it never calls, and
                     the library is sourced by make targets rather than fired by
-                    Claude Code. Every function is `gdk_*` — the two consumers'
-                    `nullbound_*` / `trail_*` forks are what this replaces, so
-                    a consumer keeping its prefix is a second name for the same
-                    fact and is not supported.
+                    Claude Code. Every function is `gdk_*` — the per-project
+                    `<project>_*` forks this replaces are what drifted, so a
+                    consumer keeping its own prefix is a second name for the
+                    same fact and is not supported.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -56,6 +57,29 @@ leaves a half-installed repo behind and still says nothing was written;
 `nothing was written` has to be a claim about the whole command, not about the
 entry the refusal happened to land on.
 
+A COLLISION withholds ITS file, not the roster. Both consumers adopting v0.23.0
+had four hooks differing only inside the `project config` header the file
+invites them to edit, so the two hooks that release ADDED — pure additions,
+nothing in their way — could not be installed at all; the way through was
+`--force` and then re-editing four files by hand. An entry with no destination
+in the way is written, every collision is named, and the run still exits 1,
+because a replacement was withheld and a caller that reads only the exit code
+must not be told everything landed. A DEFECT still refuses the whole command
+(see `main`): it is not a decision the operator made about that file.
+
+A difference confined to the `project config` block is REPORTED as one — the
+rest of that file is byte-current, so there is nothing in it to take and the
+run needs no `--force` at all. The installer does not MERGE the block: `--force`
+replaces the whole file, header included. Preserving a consumer's header under
+a new body would write a file whose header is one version and whose body is
+another, and this package's own history says what that costs —
+`cc-godot-sandbox.sh`'s header gained `SANDBOX_FUNCTION` in 0.16.0 and
+`GDK_BOOT_FUNCTIONS` in 0.19.0. Grafting the 0.16.0 header onto the current
+body was measured: four keys the body reads go unset, `set -u` kills the hook
+on `GDK_BOOT_FUNCTIONS: unbound variable` before it decides anything, and it
+exits 1 — where only exit 2 is a BLOCK. The raw engine boot goes through a
+guard that is on disk, looks installed, and stops nothing.
+
 The three refusal helpers below are shared with `pm install-skills`, the fourth
 install verb this package ships. They live here rather than in a verb because
 the wording is the contract: the collision sentence was written twice once, one
@@ -65,6 +89,7 @@ situation for a release.
 from __future__ import annotations
 
 import difflib
+import re
 import sys
 from importlib import resources
 from pathlib import Path
@@ -192,8 +217,10 @@ USAGE = """usage: godot-devkit install-ci      [--force] [--diff]
        godot-devkit install-runners [--force] [--diff]
 
 install-ci      four workflows under .github/workflows/: verify.yml
-                (checkout, uv, `make milestone` — it ASSUMES that target is
-                your full gate), uid-guard.yml (`make uid-scan` on a PR and on
+                (checkout, uv, then — only where a project.godot sits — the
+                engine `config/features` declares plus gdlint and
+                shellcheck, then `make milestone`, which it ASSUMES is your
+                full gate), uid-guard.yml (`make uid-scan` on a PR and on
                 a push to staging), semver-gate.yml (a merge to main must bump
                 config/version) and auto-tag.yml (tag the mainline, then
                 dispatch RELEASE_WORKFLOW if you have one). A project without
@@ -215,8 +242,8 @@ install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 `project config` header — yours to edit after install.
                 cc-godot-sandbox.sh and the two couriers ship their own
                 corpora: wire `bash tools/hooks/<hook>.sh --self-test` into
-                your static gate (nullbound: a `hooks-self-test` target in
-                `make check`). The run prints the .claude/settings.json entries
+                your static gate (a `hooks-self-test`-shaped target inside your
+                own `check`). The run prints the .claude/settings.json entries
                 that fire them.
 install-runners tools/dev/gdk_runners.sh — the shell library your
                 Godot-booting make targets source (one verdict line per gate
@@ -236,8 +263,12 @@ install-runners tools/dev/gdk_runners.sh — the shell library your
                 the repo root: the standard target set that calls them, which
                 your own Makefile `include`s.
 
-A destination that already exists and differs is refused, whole.
---force overwrites it. --diff prints what would change and writes nothing."""
+A destination that already exists and differs is REFUSED — that file, not the
+roster: the entries with nothing in their way are written, every collision is
+named, and the run exits 1 because a replacement was withheld. A difference
+confined to the `project config` header is reported as one, and the rest of
+that file is byte-current, so it needs no --force. --force overwrites the whole
+file, header included. --diff prints what would change and writes nothing."""
 
 # A `.sh` installable is WRITTEN EXECUTABLE. Every one of them is a script a
 # caller runs — a make recipe, a hook dispatcher, another runner's fan-out —
@@ -276,8 +307,8 @@ _NEXT_STEP = {
                      'the files are yours now, and the stock values assume '
                      'the standard consumer Makefile. Then wire `bash '
                      'tools/hooks/cc-godot-sandbox.sh --self-test` into your '
-                     'static gate (nullbound: a `hooks-self-test` target in '
-                     '`make check`) — it replays the hook\'s own block/allow '
+                     'static gate (a `hooks-self-test`-shaped target inside '
+                     'your own `check`) — it replays the hook\'s own block/allow '
                      'corpus, so an edit to the guard cannot quietly change '
                      'a verdict. Then paste the settings block below into '
                      '.claude/settings.json — installing a Claude Code hook '
@@ -378,23 +409,67 @@ _HOOK_SETTINGS = '''{
 _SETTINGS_BLOCK = {'install-hooks': _HOOK_SETTINGS}
 
 
-def collision_refusal(collisions: list[str]) -> tuple[str, str]:
+# The per-entry annotation for a collision confined to the editable block.
+# Short, because it hangs off a path in a list; the sentence that says what it
+# MEANS is printed once, below the list.
+HEADER_ONLY_NOTE = '   (project-config header only)'
+
+
+def collision_refusal(collisions: list[str],
+                      wrote: list[str] | None = None,
+                      header_only: tuple[str, ...] | list[str] = (),
+                      ) -> tuple[str, str]:
     """(what collided, what that means) — plural-correct, for any install verb.
 
     Two sentences rather than one string because the callers frame them
     differently: this module prefixes each line with `godot-devkit <command>:`,
     while the pm CLI raises them as one `Refused`.
+
+    `wrote` is what the SAME run landed, and it changes the second sentence
+    only. `nothing was written` is a claim about the disk, so it has to be
+    checked rather than asserted: an install verb writes the entries with
+    nothing in their way even when a neighbour collides. A caller that passes
+    nothing gets the all-or-nothing sentence, which is what `pm install-skills`
+    still is.
+
+    `header_only` names the subset whose difference is confined to the editable
+    `project config` block. That is a different message, not a softer one: the
+    rest of those files is byte-current, so the repair is to do NOTHING rather
+    than to force and re-edit — and the sentence says out loud that `--force`
+    would take the header too, because it would.
     """
+    flagged = set(header_only)
     if len(collisions) == 1:
-        head = (f'{collisions[0]} exists and differs from what this would '
-                f'write — move your version aside, or pass --force')
+        rel = collisions[0]
+        if rel in flagged:
+            head = (f'{rel} exists and differs ONLY inside its project-config '
+                    f'header — the rest of the file is byte-current, so there '
+                    f'is nothing in it to take; leave it as yours, or pass '
+                    f'--force to replace the whole file, header included')
+        else:
+            head = (f'{rel} exists and differs from what this would '
+                    f'write — move your version aside, or pass --force')
     else:
-        listed = '\n'.join(f'    {rel}' for rel in collisions)
+        listed = '\n'.join(
+            f'    {rel}' + (HEADER_ONLY_NOTE if rel in flagged else '')
+            for rel in collisions)
         head = (f'{len(collisions)} destinations exist and differ from what '
                 f'this would write — move your versions aside, or pass '
                 f'--force:\n{listed}')
-    return head, ('nothing was written; the whole install is refused, not just '
-                  'the first colliding file. --diff shows what would change.')
+        if flagged:
+            head += (f'\n{len(flagged)} of them differ only inside the '
+                     f'project-config header the file invites you to edit: '
+                     f'the rest of each is byte-current, so there is nothing '
+                     f'in them to take, and --force would replace the header '
+                     f'too')
+    if wrote:
+        landed = f'{len(wrote)} file(s) with nothing in the way'
+        landed += ' was written' if len(wrote) == 1 else ' were written'
+        held = 'it was' if len(collisions) == 1 else 'those above were'
+        return head, (f'{landed}; {held} withheld and no existing file was '
+                      f'overwritten. --diff shows what would change.')
+    return head, ('nothing was written; every colliding destination is listed '
+                  'above, not just the first. --diff shows what would change.')
 
 # The wording this verb's refusals have always used, mapped from the closed
 # `Obstruction` vocabulary `core.apply` decides in. A dict, not a sentence
@@ -466,6 +541,75 @@ def read_destination(target: Path) -> tuple[str | None, str]:
         return None, f'cannot be read ({err.strerror or err})'
 
 
+# The editable `project config` block, in the two spellings the installables
+# use: a shell file opens it with a rule comment and closes with another, a
+# markdown one opens it with a heading and closes at the next heading. Both
+# ends are markers the source ships and the consumer keeps — an edit that
+# takes one out is an edit this cannot locate, and it says so by declining to
+# classify rather than by guessing where the block ended.
+_BLOCK_GRAMMARS = (
+    ('--- project config (yours to edit after install',
+     re.compile(r'^#\s*-{5,}\s*$')),
+    ('## Project config (yours to edit after install)',
+     re.compile(r'^## ')),
+)
+
+
+def config_block_span(text: str) -> tuple[int, int] | None:
+    """The half-open LINE range of `text`'s editable project-config block, or
+    None when it carries none this can locate.
+
+    The first opening marker wins and the first closing marker after it ends
+    the block; an opened block with no closing marker runs to the end of the
+    file. The marker lines themselves are OUTSIDE the span — a consumer who
+    edited one has changed something the installable owns, and that has to
+    read as a plain difference.
+
+    Locating LESS than is there is the safe direction and the only direction
+    this is allowed to be wrong in: the one caller asks whether a difference
+    is confined to the span, so a span that is too small can only answer "no".
+    """
+    lines = text.splitlines()
+    for opening, closing in _BLOCK_GRAMMARS:
+        for start, line in enumerate(lines):
+            if opening not in line:
+                continue
+            for end in range(start + 1, len(lines)):
+                if closing.match(lines[end]):
+                    return start + 1, end
+            return start + 1, len(lines)
+    return None
+
+
+def header_only_difference(existing: str, body: str) -> bool:
+    """True when the two texts differ ONLY inside the project-config block —
+    the header the installable invites the consumer to edit.
+
+    Decided by DELETING both blocks and comparing what is left, byte for byte,
+    rather than by aligning the two files: an alignment is free to pair a line
+    inside one block with an identical line outside the other, and a predicate
+    whose True means "the rest of your file is byte-current" must not be able
+    to reach that answer through a coincidence. Everything outside the two
+    blocks is identical here, or this is False.
+
+    False whenever either side carries no block this can locate. A consumer who
+    moved or rewrote the markers gets the plain collision — the honest answer
+    about a file whose shape this can no longer read.
+    """
+    mine = config_block_span(existing)
+    theirs = config_block_span(body)
+    if mine is None or theirs is None:
+        return False
+    return _outside_block(existing, mine) == _outside_block(body, theirs)
+
+
+def _outside_block(text: str, span: tuple[int, int]) -> list[str]:
+    # keepends, so a difference that is only a trailing newline is still a
+    # difference: `splitlines()` renders 'x' and 'x\n' as the same one line.
+    lines = text.splitlines(keepends=True)
+    return lines[:span[0]] + lines[span[1]:]
+
+
 def body_of(name: str) -> str:
     """One installable, verbatim. There is no substitution and no template."""
     return resources.files(PACKAGE).joinpath(name).read_text(encoding='utf-8')
@@ -485,6 +629,12 @@ def print_diff(rel: str, target: Path, body: str) -> None:
         if text == body:
             print(f'[install] {rel} already current')
             return
+        if header_only_difference(text, body):
+            # Said BEFORE the hunks, because it is the answer: the hunks below
+            # are the operator's own header and the rest of the file is
+            # byte-current, so this file has nothing in it to take.
+            print(f'[install] {rel} differs ONLY inside its project-config '
+                  f'header — the rest of the file is byte-current')
         existing = text
     sys.stdout.writelines(difflib.unified_diff(
         existing.splitlines(keepends=True), body.splitlines(keepends=True),
@@ -542,6 +692,7 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
     # collision — and touch nothing until it holds.
     plan: list[tuple[str, Path, str, str]] = []   # (kind, target, rel, body)
     collisions: list[str] = []
+    header_only: list[str] = []
     defects: list[str] = []
     for target, rel, body in entries:
         kind = 'write'
@@ -566,17 +717,27 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
                 pass
             elif not force:
                 collisions.append(rel)
+                # `existing` is None for a destination this cannot decode, and
+                # a file with no text has no block to confine anything to.
+                if existing is not None and header_only_difference(existing,
+                                                                   body):
+                    header_only.append(rel)
                 continue
         plan.append((kind, target, rel, body))
 
-    # Collisions first: they are the refusal a human is most likely to hit, and
-    # a run that has both should name the one --force answers.
-    if collisions:
-        head, tail = collision_refusal(collisions)
-        print(f'godot-devkit {command}: {head}\n'
-              f'godot-devkit {command}: {tail}', file=sys.stderr)
-        return 1
+    # A DEFECT refuses the whole command, the additions with it. It is not a
+    # decision the operator made about that file the way a collision is — it is
+    # a destination the command cannot write at all, its repair is the same for
+    # every entry (fix the path, re-run), and nothing has been written yet, so
+    # `nothing was written` is still true at the moment it is printed. The
+    # collisions are named first when a run has both, because that is the
+    # refusal a human is most likely to hit and the one --force answers.
     if defects:
+        if collisions:
+            head, tail = collision_refusal(collisions,
+                                           header_only=header_only)
+            print(f'godot-devkit {command}: {head}\n'
+                  f'godot-devkit {command}: {tail}', file=sys.stderr)
         print(_defect_refusal(command, defects, []), file=sys.stderr)
         return 1
 
@@ -611,6 +772,15 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
                                f'({result.error})'], written),
               file=sys.stderr)
         return 1
+    # After the writes, and named against what actually landed: a collision
+    # withholds ITS file, so the sentence about the disk has to be built from
+    # the disk. Before the next-step paragraph, so the pasteable settings block
+    # stays the last thing on stdout.
+    if collisions:
+        head, tail = collision_refusal(collisions, wrote=written,
+                                       header_only=header_only)
+        print(f'godot-devkit {command}: {head}\n'
+              f'godot-devkit {command}: {tail}', file=sys.stderr)
     if written and next_step:
         print(f'[install] {_NEXT_STEP[command]}')
         settings = _SETTINGS_BLOCK.get(command)
@@ -621,4 +791,7 @@ def main(command: str, argv: list[str], next_step: bool = True) -> int:
             # problem.
             print(f'\n.claude/settings.json — the entries that FIRE these '
                   f'hooks (merge into yours):\n\n{settings}\n')
-    return 0
+    # A withheld replacement is a non-zero exit even when additions landed: a
+    # caller that reads the code alone must never be told the roster is on disk
+    # when one of it is the operator's own file.
+    return 1 if collisions else 0

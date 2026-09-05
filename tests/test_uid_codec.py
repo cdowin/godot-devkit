@@ -1,23 +1,25 @@
 """index/uid_codec — the ResourceUID port, proven against the real world.
 
 A codec proven only against itself proves nothing: every assertion here is
-anchored outside the module. The golden pair was adjudicated by the ENGINE
-(nullbound's resource_uid_scan.sh booted a sandboxed Godot and recorded that
-`uid://wkcycles00001` round-trips to `uid://c8bmebsj60m77` — a pair that also
-exercises the uint64 overflow wrap, since 'w' leads a 13-char payload past
-2^63). The differential sweep runs every uid harvested from the committed
-corpus plus every live consumer checkout present, and cross-checks the
-round-trip verdict against an INDEPENDENT positional formulation of
-canonicality — two derivations of the same predicate that would disagree if
-either the base, the alphabet split, the leading-zero rule or the overflow
-mask were wrong.
+anchored outside the module. The golden pair was adjudicated by the ENGINE — a
+sandboxed Godot run recorded that `uid://wkcycles00001` round-trips to
+`uid://c8bmebsj60m77`, a pair that also exercises the uint64 overflow wrap
+since 'w' leads a 13-char payload past 2^63. That verdict is VENDORED here as
+two constants rather than re-derived, because this package never boots the
+engine. The differential sweep runs every uid harvested from the committed
+corpus and cross-checks the round-trip verdict against an INDEPENDENT
+positional formulation of canonicality — two derivations of the same predicate
+that would disagree if either the base, the alphabet split, the leading-zero
+rule or the overflow mask were wrong. Corpus scale is the corpus's job: vendor
+a scrubbed file carrying a spelling the sweep cannot reach, never a path
+outside this checkout (CLAUDE.md rule 8).
 """
 from __future__ import annotations
 
 import re
 import unittest
 
-from support import FIXTURES, available_consumers
+from support import FIXTURES
 
 from godot_devkit.godot.index.uid_codec import (INVALID_ID, INVALID_TEXT,
                                                 UID_PREFIX, canonical,
@@ -38,10 +40,28 @@ BASE = 34
 CHAR_COUNT = 25
 ID_BITS = 63
 
-# Adjudicated by a real sandboxed Godot run (recorded in nullbound's
-# tools/dev/checks/resource_uid_scan.sh, which this codec supersedes).
+# Adjudicated by a real sandboxed Godot run, recorded as a constant: it is the
+# outside anchor for everything below, and this package boots no engine.
+# (`text_to_id`/`id_to_text` are ports of ResourceUID's; the shell scans that
+# asked the engine for this verdict are what the codec supersedes.)
 ENGINE_NONCANONICAL = 'uid://wkcycles00001'
 ENGINE_CANONICAL = 'uid://c8bmebsj60m77'
+
+# One spelling per CLAUSE of the canonicality predicate, because a corpus does
+# not carry them: real files hold what the engine emitted, and the engine emits
+# no 'z', no '9' and no leading 'a' — so a sweep over real uids alone reaches
+# the alias clauses never, and pins them not at all. Measured: dropping '9'
+# from the rule left every corpus uid and the whole encoder id space agreeing.
+PREDICATE_VECTORS = (
+    'uid://z',                    # 'z' is an alias of 0 and never emitted
+    'uid://9',                    # '9' decodes to the base and carries
+    'uid://ab',                   # a LEADING 'a' is a leading zero
+    'uid://ba',                   # ...an INTERIOR 'a' is a legitimate digit
+    'uid://0',                    # the canonical twin of 'z'
+    ENGINE_NONCANONICAL,          # 13 chars led by 'w': past 2^63, wraps
+    ENGINE_CANONICAL,
+    'uid://b0g4m1trscaffold00',   # 19 chars: overflows on width alone
+)
 
 
 HARVEST_SUFFIXES = ('.tscn', '.tres', '.uid', '.import')
@@ -138,8 +158,8 @@ class EncoderProperties(unittest.TestCase):
 
 
 class RealWorldDifferential(unittest.TestCase):
-    """Every uid this package's consumers have ever shipped, both verdict
-    formulations, zero disagreements allowed."""
+    """Every uid the committed corpus carries, both verdict formulations, zero
+    disagreements allowed."""
 
     def _sweep(self, uids: set[str]) -> int:
         noncanonical = 0
@@ -161,18 +181,6 @@ class RealWorldDifferential(unittest.TestCase):
         self.assertGreaterEqual(len(uids), CORPUS_UID_FLOOR,
                                 'harvest broke — corpus census below floor')
         self.assertGreaterEqual(self._sweep(uids), CORPUS_NONCANONICAL_FLOOR)
-
-    def test_every_live_consumer_checkout(self) -> None:
-        consumers = available_consumers()
-        if not consumers:
-            self.skipTest('no consumer checkout present (CI) — corpus '
-                          'differential above still ran')
-        for repo in consumers:
-            uids = _harvest(repo)
-            self.assertGreaterEqual(
-                len(uids), CORPUS_UID_FLOOR,
-                f'{repo.name}: harvest broke — census below floor')
-            self._sweep(uids)
 
 
 if __name__ == '__main__':

@@ -14,17 +14,25 @@ DRIFT RULES (each FAILs, naming the offending path):
       absence of a document, which is a fact about a team rather than a tree.
   D2  a feature still planning/ready/building while ALL its stories are `done`
       (a forgotten advance).
-  D3  a `done` milestone with a non-`done` feature child.
+  D3  a `done` milestone with a non-`done` feature child. `done` means every
+      thing inside this tree's authority is finished, so it cannot be true of
+      a milestone while one of its features says otherwise.
   D4  a status outside the schema's vocabulary — milestone, feature, story
       AND bug. It matters most for a bug: every reader that asks "is this one
       still open" tests for a NAME, so a typo reads as closed and passes in
       silence.
-  D5  a `done` story under a non-`done` feature. The story terminal a team
-      works to is `review`; `done` is where a CLOSE leaves it, so this is a
-      close that did not finish — or `pm story done` run on its own. (A done
-      story under a DONE feature is the valid historical closed state.)
+  D5  a story at WORK under a feature that says it has not started. Not "a
+      done story under a non-done feature": under one ordered lifecycle a
+      story reaches `done` while its feature is still `reviewing`, `accepted`
+      or `packaging`, and that is the normal path — the feature's remaining
+      work is not story work. The disagreement is across the one split each
+      vocabulary carries (`building`, where the shaping half ends): the story
+      is building or later, the feature is still planning or ready.
   D6  a `building` milestone whose features are ALL `done` (the milestone
-      analogue of D2).
+      analogue of D2). It keys off the literal `building`, so a milestone that
+      has advanced to `reviewing` silences it and the release gate RUNS —
+      which is the whole point: the gate that informs the ship decision has to
+      run while that decision is still open.
   D8  the shipped version equals the `building` milestone's id (bump-at-START:
       the version names what is being built, so every crash report, save file
       and dev build carries that fact for free). EXACT string equality — the
@@ -48,9 +56,11 @@ V6 is known but OPT-IN, as are the three flow rules named just above.
 
 Scope: the ACTIVE tree only — archived milestones predate the convention. This
 MUST pass on the legitimate mid-build state: a building milestone with mixed
-children, and a feature at `review` with its stories at their `review` terminal
-(nothing moves a story off `review` until a close does, and the story cascade is
-opt-in, so a closed feature over `review` stories is a state a team chooses).
+children, a feature at `reviewing` with its stories at their `reviewing`
+terminal (nothing moves a story off `reviewing` until a close does, and the
+story cascade is opt-in, so a closed feature over `reviewing` stories is a
+state a team chooses), and a milestone walking `reviewing` -> `accepted` ->
+`packaging` with every feature already `done`.
 """
 from __future__ import annotations
 
@@ -110,7 +120,41 @@ def run() -> int:
         for path, why in bug_findings:
             report(f'{cfg.rel(path)}: {why}')
 
-    n_features, n_stories = _drift_walk(cfg, enabled, mdirs, report)
+    # Rule 4 again, on a rule rather than on the walk: D5 compares a story
+    # against its feature across ONE split (`building`, where the shaping half
+    # ends). A project that renamed its vocabulary and dropped that word leaves
+    # D5 with nothing to compare, and a rule reporting nothing must say why —
+    # otherwise its silence is read as a clean tree. A NOTE, not a finding: a
+    # renamed vocabulary is a valid configuration, not drift.
+    if 'D5' in enabled:
+        blind = model.split_blind_vocabularies(cfg)
+        if blind:
+            print(f'[check:pm] NOTE — D5 cannot place {model.BUILDING!r} in '
+                  f'[pm] {" / ".join(blind)}, so it has no split to compare a '
+                  f'story against its feature across and is reporting nothing '
+                  f'for this tree')
+
+    n_features, n_stories, retired = _drift_walk(cfg, enabled, mdirs, report)
+
+    # Rule 4 from the other side: D4 stopped REPORTING these words, so
+    # something has to keep saying they are there. The 0.24.0 window accepts a
+    # status a tree already holds and 0.25.0 removes it, so the census is the
+    # migration's own progress bar — live, because a number written into a
+    # comment or a changelog goes stale the first time somebody rewrites a
+    # file. A gate that answered the union with silence would have narrowed
+    # itself into a clean PASS over exactly the migration it exists to make
+    # visible. A NOTE, not a finding: the tree is not drifting, it is holding
+    # a word on a deadline.
+    if retired:
+        census = ', '.join(
+            f'{word} x{n} (REMOVED — nothing replaces it)'
+            if word in model.REMOVED_STATES else
+            f'{word} x{n} (replaced by {model.DEPRECATED_STATES[word]})'
+            for word, n in retired.items())
+        print(f'[check:pm] NOTE — {sum(retired.values())} grain(s) hold a '
+              f'status the 0.24.0 deprecation window accepts and 0.25.0 '
+              f'removes: {census}. Rewrite them before that pin bump; the '
+              f'`pm` verbs already write the replacement.')
 
     _flow_findings(cfg, enabled, report)
 
@@ -127,17 +171,37 @@ def run() -> int:
                     v_on, v_census)
 
 
+# D2's and D6's shared tail. Both used to name `done` as the state to move to —
+# D2 said "should be review/done", D6 "should be done" — and D6's version was
+# the deadlock this vocabulary exists to break: it demanded the close BEFORE
+# the gate that informs the close could run. `done` is the LAST state now, not
+# the next one, and neither rule has an opinion about which state is.
+ADVANCE_IT = 'advance it (`done` is the LAST state, not the next one)'
+
+
 def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
-                report) -> tuple[int, int]:
-    """D1-D6 over every grain. Returns the (feature, story) census."""
+                report) -> tuple[int, int, dict[str, int]]:
+    """D1-D6 over every grain.
+
+    Returns the (feature, story) census plus how many grains hold each word of
+    the deprecation window — counted HERE, in the one walk that already opens
+    every grain file, rather than by a second pass with its own idea of which
+    files are grains.
+    """
     n_features = 0
     n_stories = 0
+    # Seeded from the window's own declaration order, not filled by first
+    # sighting: a census line whose order depends on which milestone the walker
+    # reached first reads differently on two runs over one tree.
+    retired = {word: 0 for word in model.DEPRECATED_STATES}
 
     for mdir in mdirs:
         mfile = mdir / model.MILESTONE_DOC
         mid = model.field_of(mfile, 'id')
         mstat = model.field_of(mfile, 'status')
 
+        if model.deprecated_write(mstat, cfg.milestone_states):
+            retired[mstat] += 1
         if 'D4' in enabled and mstat not in cfg.milestone_states:
             report(f'milestone {mid}: status {mstat!r} not in '
                    f'({" ".join(cfg.milestone_states)})  [{cfg.rel(mfile)}]')
@@ -153,6 +217,8 @@ def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
             if view.status == 'done':
                 feat_done_n += 1
 
+            if model.deprecated_write(view.status, cfg.feature_states):
+                retired[view.status] += 1
             if 'D4' in enabled and view.status not in cfg.feature_states:
                 report(f'feature {view.fid}: status {view.status!r} not in '
                        f'({" ".join(cfg.feature_states)})  [{frel}]')
@@ -171,26 +237,34 @@ def _drift_walk(cfg: model.PmConfig, enabled: set[str], mdirs,
                 sid = model.field_of(sfile, 'id')
                 sstat = model.field_of(sfile, 'status')
                 srel = cfg.rel(sfile)
+                if model.deprecated_write(sstat, cfg.story_states):
+                    retired[sstat] += 1
                 if 'D4' in enabled and sstat not in cfg.story_states:
                     report(f'story {sid}: status {sstat!r} not in '
                            f'({" ".join(cfg.story_states)})  [{srel}]')
-                if 'D5' in enabled and sstat == 'done' and view.status != 'done':
-                    report(f'story {sid} is done but its feature {view.fid} is '
-                           f'{view.status!r} (two places in this tree '
-                           f'disagree)  [{srel}]')
+                if 'D5' in enabled and model.drift_ahead_of_parent(
+                        sstat, cfg.story_states,
+                        view.status, cfg.feature_states):
+                    report(f'story {sid} is {sstat!r} but its feature '
+                           f'{view.fid} is still {view.status!r} — the story '
+                           f'is at work and the feature says it has not '
+                           f'started (two places in this tree disagree)'
+                           f'  [{srel}]')
 
             if 'D2' in enabled:
                 reason = model.drift_stalled(view.status, view.done_n, view.total)
                 if reason:
-                    report(f'feature {view.fid}: {reason} (should be '
-                           f'review/done)  [{frel}]')
+                    report(f'feature {view.fid}: {reason} — {ADVANCE_IT}'
+                           f'  [{frel}]')
 
-        if ('D6' in enabled and mstat == 'building'
+        if ('D6' in enabled and mstat == model.BUILDING
                 and feat_total > 0 and feat_done_n == feat_total):
-            report(f'milestone {mid} is {mstat!r} but all {feat_total} features '
-                   f'are done (should be done)  [{cfg.rel(mfile)}]')
+            report(f'milestone {mid} is {mstat!r} but all {feat_total} '
+                   f'features are done — you finished the features and the '
+                   f'milestone still calls itself {mstat!r}; {ADVANCE_IT}'
+                   f'  [{cfg.rel(mfile)}]')
 
-    return n_features, n_stories
+    return n_features, n_stories, {word: n for word, n in retired.items() if n}
 
 
 _HOTFIX_N = re.compile(r'[1-9][0-9]*')
