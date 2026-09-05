@@ -217,9 +217,10 @@ class Fixer(unittest.TestCase):
             self.assertEqual((root / REDUNDANT).read_text(encoding='utf-8'), before)
 
 
-# Over a real consumer tree the transform must stay a pure, stable deletion
-# — that is `make smoke`'s `defaults elision` row, which copies the corpus
-# into a throwaway repo before the write verb ever runs.
+# At corpus scale the transform must stay a pure, stable deletion — the write
+# verb runs over a COPY in a throwaway repo, never over a fixture in place.
+# What that proof lost when the live-consumer sweep went is recorded in
+# 0.24.0/bugs/the-smoke-took-fixture-scale-with-it.
 
 class ParserSharing(unittest.TestCase):
     def test_the_analyzer_reads_the_same_sections_the_document_edits(self) -> None:

@@ -2,8 +2,8 @@
 
 ; The Script ref's uid text is NON-canonical — but it matches the .gd.uid
 ; sidecar byte for byte, which is CHECK 1's contract. Script refs are exempt
-; from CHECK 5: their canonical home is the sidecar (nullbound's stance when
-; it booted Godot for this scan), so a consistent legacy spelling stays green.
+; from CHECK 5: their canonical home is the sidecar (the stance the shell scan
+; this supersedes took, with a Godot boot), so a legacy spelling stays green.
 [ext_resource type="Script" uid="uid://wkcycles00001" path="res://systems/legacy.gd" id="1_legacy"]
 
 [node name="Legacy" type="Node2D"]

@@ -63,7 +63,6 @@ GATE_FAIL_LINES := 20
 # leading `[tag]` a tool prints is stripped: the verdict line supplies the tag.
 SUM_PYTEST := grep -aoE '[0-9]+ (passed|failed)[^|]*' "$$log" | tail -1
 SUM_GATES  := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z]+\] PASS' "$$log")"
-SUM_SMOKE  := tail -1 "$$log" | sed -E 's/^\[[a-z:-]+\] //'
 SUM_HOOKS  := printf '%s hook(s) SELF-TEST OK' "$$(grep -ac 'SELF-TEST OK' "$$log")"
 
 # $(call gate,<log slot>,<TAG>,<summary command>,<argv...>)
@@ -85,7 +84,7 @@ gdk_gate_verdict $(2) "$$summary" "$$log"; \
 exit "$$status"
 endef
 
-.PHONY: help test matrix fuzz gates hooks hooks-self-test smoke precommit milestone pm
+.PHONY: help test matrix fuzz gates hooks hooks-self-test precommit milestone pm
 
 help:
 	@echo 'godot-devkit — make targets'
@@ -96,12 +95,11 @@ help:
 	@echo '  make gates       godot-devkit check all, on this repo'
 	@echo '  make hooks       ARM this checkout: point git at tools/hooks/ and restore the exec bits'
 	@echo '  make hooks-self-test  the installed hooks that ship a corpus, replayed (sandbox + the two ledger couriers)'
-	@echo '  make smoke       check all + autoloads/scene/refs/pm on the consumers (read-only)'
 	@echo
 	@echo '  make pm ARGS="…"  the pm tracker from SOURCE, never a cached wheel (the ledger couriers call this)'
 	@echo
 	@echo '  make precommit   gates + hooks-self-test + test           the per-change gate'
-	@echo '  make milestone   gates + hooks-self-test + matrix + smoke  the full gate, and what CI runs'
+	@echo '  make milestone   gates + hooks-self-test + matrix        the full gate, and what CI runs'
 	@echo
 	@echo 'Every gate prints ONE verdict line naming its full log under'
 	@echo '.gate-reports/. VERBOSE=1 streams the transcript as well.'
@@ -125,9 +123,6 @@ fuzz:
 gates:
 	$(call gate,gates,GATES,$(SUM_GATES),$(DEVKIT) check all)
 
-smoke:
-	$(call gate,smoke,SMOKE,$(SUM_SMOKE),$(PY) tools/consumer_smoke.py)
-
 # ARM this checkout. `install-hooks` writes the corpus; writing it is not arming
 # it, and git runs nothing under tools/hooks/ until core.hooksPath points there.
 # This repo told its consumers the corpus was self-hosted here while that config
@@ -145,7 +140,7 @@ hooks:
 # The hooks this repo self-hosts that ship their own block/allow corpus: the
 # raw-engine-boot guard and the two ledger couriers. Replayed here so an edit
 # to a guard cannot quietly change a verdict — the same wiring the README asks
-# of a consumer (nullbound: a `hooks-self-test` target in `make check`).
+# of a consumer: a `hooks-self-test`-shaped target inside its own static gate.
 HOOKS_WITH_CORPUS := tools/hooks/cc-godot-sandbox.sh tools/hooks/cc-ledger-subagent.sh tools/hooks/cc-ledger-session.sh
 hooks-self-test:
 	$(call gate,hooks-self-test,HOOKS,$(SUM_HOOKS),sh -c 'for h in $(HOOKS_WITH_CORPUS); do bash "$$h" --self-test || exit 1; done')
@@ -208,4 +203,4 @@ precommit: gates hooks-self-test test
 
 # The full gate, and what CI runs. The matrix subsumes `test`, so it is not
 # listed twice.
-milestone: gates hooks-self-test matrix smoke
+milestone: gates hooks-self-test matrix

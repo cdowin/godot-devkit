@@ -244,8 +244,8 @@ class TheDeprecationWindow(unittest.TestCase):
 
     Why they are back at all is a measurement, not a preference: on the day
     before the tag, `check pm` under the seven-word set returned 43 findings
-    against nullbound and 25 against trail, both of which wire it into
-    `make check` and therefore into a pre-push hook. Neither ordering of
+    against one adopting tree and 25 against another, both of which wire it
+    into `make check` and therefore into a pre-push hook. Neither ordering of
     pin-bump vs. tree-rewrite is green — the unmigrated tree fails under the
     new package and the migrated one fails under the pinned old one — so the
     only path that asks nobody to hold a red gate is a set that reads both
@@ -345,7 +345,7 @@ class TheDeprecationWindow(unittest.TestCase):
         self.assertNotIn('deprecation window', out)
 
     def test_D5_reads_a_retired_word_against_its_parent(self):
-        """Live case, from trail's tree on the day of the bump: a story at
+        """Live case, seen in a real tree on the day of the bump: a story at
         `review` under a feature at `planning`. D4 used to report the word as
         unknown and D5 could not place it at all, so the disagreement itself
         went unreported. Under the window the word is placeable and the

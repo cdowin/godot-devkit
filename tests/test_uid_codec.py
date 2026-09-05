@@ -1,27 +1,25 @@
 """index/uid_codec — the ResourceUID port, proven against the real world.
 
 A codec proven only against itself proves nothing: every assertion here is
-anchored outside the module. The golden pair was adjudicated by the ENGINE
-(nullbound's resource_uid_scan.sh booted a sandboxed Godot and recorded that
-`uid://wkcycles00001` round-trips to `uid://c8bmebsj60m77` — a pair that also
-exercises the uint64 overflow wrap, since 'w' leads a 13-char payload past
-2^63). The differential sweep runs every uid harvested from the committed
+anchored outside the module. The golden pair was adjudicated by the ENGINE — a
+sandboxed Godot run recorded that `uid://wkcycles00001` round-trips to
+`uid://c8bmebsj60m77`, a pair that also exercises the uint64 overflow wrap
+since 'w' leads a 13-char payload past 2^63. That verdict is VENDORED here as
+two constants rather than re-derived, because this package never boots the
+engine. The differential sweep runs every uid harvested from the committed
 corpus and cross-checks the round-trip verdict against an INDEPENDENT
 positional formulation of canonicality — two derivations of the same predicate
 that would disagree if either the base, the alphabet split, the leading-zero
-rule or the overflow mask were wrong. The same sweep over every uid in a live
-consumer checkout is `make smoke`'s `uid codec differential` row, which carries
-its own restatement of the formulation; the last case here pins the two
-restatements to one predicate, because a smoke grading against a drifted rule
-grades against nothing.
+rule or the overflow mask were wrong. Corpus scale is the corpus's job: vendor
+a scrubbed file carrying a spelling the sweep cannot reach, never a path
+outside this checkout (CLAUDE.md rule 8).
 """
 from __future__ import annotations
 
 import re
-import sys
 import unittest
 
-from support import FIXTURES, REPO_ROOT
+from support import FIXTURES
 
 from godot_devkit.godot.index.uid_codec import (INVALID_ID, INVALID_TEXT,
                                                 UID_PREFIX, canonical,
@@ -42,8 +40,10 @@ BASE = 34
 CHAR_COUNT = 25
 ID_BITS = 63
 
-# Adjudicated by a real sandboxed Godot run (recorded in nullbound's
-# tools/dev/checks/resource_uid_scan.sh, which this codec supersedes).
+# Adjudicated by a real sandboxed Godot run, recorded as a constant: it is the
+# outside anchor for everything below, and this package boots no engine.
+# (`text_to_id`/`id_to_text` are ports of ResourceUID's; the shell scans that
+# asked the engine for this verdict are what the codec supersedes.)
 ENGINE_NONCANONICAL = 'uid://wkcycles00001'
 ENGINE_CANONICAL = 'uid://c8bmebsj60m77'
 
@@ -181,27 +181,6 @@ class RealWorldDifferential(unittest.TestCase):
         self.assertGreaterEqual(len(uids), CORPUS_UID_FLOOR,
                                 'harvest broke — corpus census below floor')
         self.assertGreaterEqual(self._sweep(uids), CORPUS_NONCANONICAL_FLOOR)
-
-    def test_the_smoke_grades_against_the_SAME_independent_formulation(self) -> None:
-        """`make smoke`'s live-consumer row restates this predicate rather than
-        importing it — sharing no code with the codec is the whole point, and a
-        restatement is the one thing the codec cannot agree with by accident.
-        Two copies can drift, though, and a drifted copy still prints `ok`. So:
-        every uid the corpus carries, plus the encoder over the whole id space,
-        must get the same verdict from both spellings."""
-        sys.path.insert(0, str(REPO_ROOT / 'tools'))
-        import consumer_smoke                                    # noqa: PLC0415
-        texts = (sorted(_harvest(CORPUS)) + list(PREDICATE_VECTORS)
-                 + [id_to_text(uid) for uid in EncoderProperties.IDS])
-        self.assertGreaterEqual(len(texts), CORPUS_UID_FLOOR)
-        # The vectors must not all fall on one side, or the loop below would
-        # agree with a predicate that returns a constant.
-        verdicts = {_independently_canonical(t) for t in PREDICATE_VECTORS}
-        self.assertEqual(verdicts, {True, False})
-        for text in texts:
-            with self.subTest(text):
-                self.assertEqual(consumer_smoke._independently_canonical(text),
-                                 _independently_canonical(text))
 
 
 if __name__ == '__main__':

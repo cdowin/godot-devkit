@@ -1,9 +1,9 @@
 """gates_extra.py — `[gates] extra`: the project's OWN gate targets, listed.
 
 `Makefile.devkit` ships one standard `check`: the devkit gates, and then
-whatever this prints. A project that has gates of its own — nullbound has
-nineteen architecture scans — names them here as make TARGETS, and the include
-runs them after `godot-devkit check all`:
+whatever this prints. A project that has gates of its own — architecture
+scans, generator freshness checks, a house style rule — names them here as make
+TARGETS, and the include runs them after `godot-devkit check all`:
 
     [gates]
     extra = ["codex-check", "behaviors-check", "game-shell-scan"]

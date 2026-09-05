@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **This package knows nothing about its consumers, and a gate now says so** — `tools/consumer_smoke.py`
+  (971 lines) ran every verb against two live game checkouts under `~/workspace/` and asserted `check pm`
+  and `check all` exited **0** against them. That is an assertion about somebody else's CONTENT, not about
+  this tool's behaviour: a consumer's ordinary in-flight work — a story at `review` under a feature at
+  `planning` — reddened `make smoke`, and therefore `make milestone`, and therefore the tag. It got worse
+  every release, because each new check finds new findings in consumers and each one then blocks THIS
+  package's release until those repos are cleaned; the toolkit was penalised for being useful. It was also
+  silent in CI, where absent consumers SKIP, so its verdict depended on whose machine ran it. Deleted with
+  its skill, and `milestone` is now `gates hooks-self-test matrix` — **measured green at 178 s with no
+  consumer checked out and nothing outside the checkout read**, which is also a test. Every name and
+  provenance comment naming a consumer is rewritten to describe the utility, including two user-facing
+  strings the `install-hooks` verb PRINTS. `tests/test_consumer_independence.py` (8 tests) enforces it:
+  watched red against HEAD, where it named 25+ sites, and it found two things no human pass had — a local
+  variable named for a project in `pm/validate.py`'s cycle walker, and that its own patterns do not
+  self-match. The fixture corpus slices are renamed for what they ARE (`editor_written`, `hand_authored`)
+  rather than which repo they came from. Realistic-data coverage stays where it belongs: `tests/fixtures/`,
+  committed and versioned. A consumer proves its own integration when it bumps its pin — that is the
+  consumer's gate, in the consumer's repo. (tools/, CLAUDE.md rule 8, Makefile, repo/install.py,
+  repo/gates_extra.py, godot/write/scene_canonicalize.py, godot/index/uid_codec.py, tests/)
+
 - **One lifecycle, three grains: `planning → ready → building → reviewing → accepted → packaging → done`** — milestone, feature and story now hold the SAME ordered vocabulary, and each uses the states it needs and skips the rest (packaging a feature is a different act from packaging a milestone; a story routinely skips packaging). Transitions stay open — this package still has no transition graph and grows none here. `done` does not mean SHIPPED and cannot: the flip is itself a commit that has not shipped at the moment it is written, so a tree can never observe its own release. It means everything inside the tree's authority is finished — changelog written, reviews closed, findings landed, gates green; branch, PR, merge and tag are git events, outside the tree, after `done`. `todo`/`wip`/`review`/`blocked` are retired — and READ for one more release by the deprecation window two bullets down, so no tree goes red on the pin bump. (repo/pm/model.py, repo/pm/cli.py, repo/pm/templates/story.md, repo/pm/guidance/*, repo/installables/project-devkit.toml)
 - **D5 compares instead of testing equality, which is the payoff of one vocabulary** — it was "a `done` story under a non-`done` feature", and under this lifecycle a story reaches `done` while its feature is still `reviewing`, `accepted` or `packaging`. That is the NORMAL path (the feature's remaining work is not story work), so the old rule would have reported drift on every feature in every tree. D5 now fires on a story at WORK under a feature that says it has not started — the comparison is across the one split each vocabulary carries, `building`, where the shaping half ends. It also sees more than it used to: a story at `building`/`reviewing` under a `planning` feature is the same disagreement, and the equality was blind to it. Still an END-STATE check; nothing here reads an edge. A project whose `story_states`/`feature_states` drops `building` leaves D5 with no split to compare across, and `check pm` prints a NOTE saying so rather than passing in silence. (repo/pm/model.py, repo/checks/pm.py)
 - **D6 stops demanding the close it blocks, and D2 stops naming `review/done`** — D6 keys off the literal `building` and needed no new logic: the moment a milestone moves to `reviewing` it goes quiet and the release gate RUNS, which is the deadlock this milestone was filed for (`make milestone` failed in 1.1s at `gates` because the milestone was `building` with all features done, so the gate that informs the ship decision could not run until that decision had already been made). Its message claimed `done` was the next state; both rules now say `advance it (`done` is the LAST state, not the next one)`. (repo/checks/pm.py)

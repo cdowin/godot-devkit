@@ -590,8 +590,8 @@ def test_the_fan_out_runs_a_scenario_runner_that_carries_no_exec_bit(tmp_path,
                                                                     mode):
     """MAJOR-1. `install-runners` wrote every runner -rw-r--r--, and this one
     caller exec'd `$SCENARIO_SH` directly — so every scenario on every
-    `init`'d project came back 126 and `make smoke` / `integration` were red
-    with an EMPTY diagnosis. The runner is invoked as `bash <path>`, which is
+    `init`'d project came back 126 and the `smoke` / `integration` targets were
+    red with an EMPTY diagnosis. The runner is invoked as `bash <path>`, which is
     the spelling Makefile.devkit and the install verb's next step both name,
     and it is what makes the sweep independent of a checkout's mode bits."""
     runner = _fanout_fixture(tmp_path, mode)
@@ -690,10 +690,12 @@ def test_every_shipped_runner_shellchecks_clean(script):
     assert done.returncode == 0, done.stdout + done.stderr
 
 
-# The two repos these runners were extracted FROM. A project name surviving in
-# an installable is a fork wearing a library's name: the next consumer reads it
-# as configuration it must match, and the fix that reaches one repo stops
+# The names of the projects these runners were extracted FROM, kept HERE, in
+# the harness, as a tombstone — never in the package. A project name surviving
+# in an installable is a fork wearing a library's name: the next consumer reads
+# it as configuration it must match, and the fix that reaches one repo stops
 # reaching the other. Word-bounded, so `trailing` is prose and `trail` is not.
+# The whole-tree form of this claim is tests/test_consumer_independence.py.
 CONSUMER_NAMES = (r'\bnullbound\b', r'\bNULLBOUND\b', r'\btrail\b', r'\bTRAIL\b')
 
 

@@ -22,8 +22,8 @@ from godot_devkit.godot.format.tscn_document import TscnDocument
 
 SINK = FIXTURES / 'kitchen_sink.tscn'
 CORPUS = FIXTURES / 'corpus'
-DASH_TRES = CORPUS / 'nb/data/abilities/dash/standard_t1.tres'
-HAZARD_TSCN = CORPUS / 'nb/systems/hazards/hazard.tscn'
+DASH_TRES = CORPUS / 'editor_written/data/abilities/dash/standard_t1.tres'
+HAZARD_TSCN = CORPUS / 'editor_written/systems/hazards/hazard.tscn'
 PANEL_TSCN = FIXTURES / 'canon_repo/scenes/panel.tscn'
 
 

@@ -6,13 +6,13 @@ out of `installables/gdk_runners.sh`, so the default output is ONE verdict line
 naming `.gate-reports/<target>.log`.
 
 That is a contract, not a preference. Before it, an agent running the full gate
-here had to invent `… | grep -E "MATRIX|smoke\\]|check:doc\\]|check:pm\\] (PASS|
-FAIL)|passed|failed" | tail -8` — five output shapes, guessed at, per session.
+here had to invent `… | grep -E "MATRIX|check:doc\\]|check:pm\\] (PASS|FAIL)|
+passed|failed" | tail -8` — five output shapes, guessed at, per session.
 
 Two kinds of case, and the split is deliberate: `gates` is exercised for REAL
 (it runs in under a second, and behavior is the only proof that matters), while
-the slow targets — `test`, `matrix`, `smoke` — are held by a census over the
-Makefile itself. Running the whole suite inside the suite is not a test, and a
+the slow targets — `test`, `matrix` — are held by a census over the Makefile
+itself. Running the whole suite inside the suite is not a test, and a
 census asked of the FILE catches the thing that actually happens: somebody adds
 a target and forgets the helper.
 """
@@ -146,9 +146,9 @@ def test_every_gate_shaped_target_routes_through_the_shipped_helper():
 
 
 def test_the_compositions_add_no_output_of_their_own():
-    """`milestone` is `gates matrix smoke` and nothing else: three verdict
-    lines, one per member. A composition that echoed a banner would be the
-    first line of the noise coming back."""
+    """`milestone` is `gates hooks-self-test matrix` and nothing else: three
+    verdict lines, one per member. A composition that echoed a banner would be
+    the first line of the noise coming back."""
     bodies = recipes()
     for name in ('precommit', 'milestone'):
         assert bodies[name].strip() == '', f'{name} grew a recipe: {bodies[name]}'

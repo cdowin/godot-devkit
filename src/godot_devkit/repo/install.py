@@ -37,10 +37,10 @@ Three verbs, one relationship, and it is deliberately the whole relationship:
                     set that calls them. Not folded into install-hooks: a
                     hooks-only consumer would carry runners it never calls, and
                     the library is sourced by make targets rather than fired by
-                    Claude Code. Every function is `gdk_*` — the two consumers'
-                    `nullbound_*` / `trail_*` forks are what this replaces, so
-                    a consumer keeping its prefix is a second name for the same
-                    fact and is not supported.
+                    Claude Code. Every function is `gdk_*` — the per-project
+                    `<project>_*` forks this replaces are what drifted, so a
+                    consumer keeping its own prefix is a second name for the
+                    same fact and is not supported.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -242,8 +242,8 @@ install-hooks   the agent-workflow guard corpus, under tools/: the Claude Code
                 `project config` header — yours to edit after install.
                 cc-godot-sandbox.sh and the two couriers ship their own
                 corpora: wire `bash tools/hooks/<hook>.sh --self-test` into
-                your static gate (nullbound: a `hooks-self-test` target in
-                `make check`). The run prints the .claude/settings.json entries
+                your static gate (a `hooks-self-test`-shaped target inside your
+                own `check`). The run prints the .claude/settings.json entries
                 that fire them.
 install-runners tools/dev/gdk_runners.sh — the shell library your
                 Godot-booting make targets source (one verdict line per gate
@@ -307,8 +307,8 @@ _NEXT_STEP = {
                      'the files are yours now, and the stock values assume '
                      'the standard consumer Makefile. Then wire `bash '
                      'tools/hooks/cc-godot-sandbox.sh --self-test` into your '
-                     'static gate (nullbound: a `hooks-self-test` target in '
-                     '`make check`) — it replays the hook\'s own block/allow '
+                     'static gate (a `hooks-self-test`-shaped target inside '
+                     'your own `check`) — it replays the hook\'s own block/allow '
                      'corpus, so an edit to the guard cannot quietly change '
                      'a verdict. Then paste the settings block below into '
                      '.claude/settings.json — installing a Claude Code hook '

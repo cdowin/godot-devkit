@@ -1287,7 +1287,7 @@ def test_doctor_passes_a_uid_index_that_covers_every_tracked_sidecar(tmp_path):
 def test_doctor_does_not_count_a_sidecar_the_editor_never_scans(tmp_path):
     """A directory carrying `.gdignore` is invisible to the editor filesystem,
     so nothing under it is ever indexed. Counting those would red a healthy
-    tree — nullbound tracks two of them."""
+    tree — a real one tracked two such directories."""
     root, stub_bin = godot_repo(
         tmp_path, ('systems/alpha.gd', 'worktrees/scratch/copy.gd'),
         ('res://systems/alpha.gd',), gdignore=('worktrees',))

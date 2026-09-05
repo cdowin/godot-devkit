@@ -1,13 +1,34 @@
 ---
-id: 0.23.0/bugs/consumer-names-and-provenance-in-code
-milestone: "0.23.0"
+id: 0.24.0/bugs/consumer-names-and-provenance-in-code
+milestone: "0.24.0"
 name: Code and comments name consumers and provenance — they must describe the utility, nothing else
-status: open
+status: fixed
 caught_in: "0.23.0"
-fix_milestone: "0.23.0"
+fix_milestone: "0.24.0"
 ---
 
 # consumer-names-and-provenance-in-code
+
+## FIXED in 0.24.0 — and the two-day gap is the lesson
+
+Filed 2026-09-02 against 0.23.0. **0.23.0 shipped without fixing it**, and 0.24.0 was built on top.
+Chris, 2026-09-04, arriving at the same place from the other direction — a release blocked because a
+consumer's in-flight work reddened `make smoke`:
+
+> *"delete/remove ANYTHING that knows anything about nullbound or trail. This is a completely project
+> agnostic tool. Why did this EVER even creep in? That's insane. Should be in CLAUDE.md, should be a
+> rule. This is a UTILITY for MANY projects."*
+
+All three things this bug asked for landed together: every hit rewritten, the assertion widened into a
+**gate** (`tests/test_consumer_independence.py` — 8 tests, watched red against HEAD, which named 25+
+sites), and the rule written into `CLAUDE.md`. `tools/consumer_smoke.py` went with them — 971 lines
+that made two private game repos a precondition for this package's tag.
+
+**Why prose was not enough**, and why the gate is the actual fix: this bug WAS filed, WAS assigned a
+fix milestone, and that milestone released anyway. Nothing checked. The guard found two more things on
+its first run that no human pass had — a local variable named for a project in `pm/validate.py`'s cycle
+walker, and the fact that its own patterns do not self-match.
+
 
 <!-- A bug lives in the milestone that will FIX it. `caught_in:` keeps the
      provenance; `fix_milestone:` names the decision, and moving the file into

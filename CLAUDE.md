@@ -5,8 +5,8 @@ for Godot 4.x (introspection, surgery, the `.tscn`/`.tres` gates) and **repo dis
 nothing to do with Godot (`check doc`, `check shell`, `check repo-hygiene`, and `pm` — a
 markdown-and-frontmatter project tracker).
 
-Consumed by *The Appalachian Trail* (`~/workspace/trail`) and *nullbound* (`~/workspace/nullbound`),
-which pin `DEVKIT_VERSION` in their Makefile and route gates through `uvx`. Public repo, MIT. **Every
+Consumed by game repos that pin `DEVKIT_VERSION` in their Makefile and route gates through `uvx`.
+Which repos those are is none of this package's business (hard rule 8). Public repo, MIT. **Every
 change here lands in other projects' commit gates — treat the CLI as a published API.**
 
 **The goal, the northstar, and the reasoning behind the rules below live in [`README.md`](README.md).** Read it once before your first change here; this file is the enforceable form, not a second copy of it. One line worth carrying in your head: *any change you can make to a scene by hand should be makeable through one deterministic command that touches nothing else — and provable without reading the file.* Two audiences, humans and LLMs; for the latter the deliverables are a stable verb vocabulary, determinism, and token reduction.
@@ -20,6 +20,7 @@ change here lands in other projects' commit gates — treat the CLI as a publish
 5. **Config over forks.** Per-project variation goes in the consumer's `devkit.toml` section with a stock default — never "edit the tool". A repo with NO `devkit.toml` must behave byte-identically to one declaring the defaults.
 6. **Exit codes are contract:** 0 pass, 1 findings, 2 usage error. Output line shapes (`  DRIFT  …`, `[check:x] PASS — …`) are grepped by consumers — changing them is a **minor** bump at least.
 7. **Semver, enforced by habit:** patch = fix with identical interface; minor = new subcommand/flag/config key or output-format change; major = anything a consumer Makefile/hook must edit to survive. `__version__` in `src/godot_devkit/__init__.py` and `version` in `pyproject.toml` move together, always.
+8. **This package knows nothing about its consumers.** No file here names a consuming project, reads a path outside this checkout, or gates on another repo's content or working state. Fixtures live in `tests/fixtures/`, committed and versioned — a check that needs realistic data VENDORS that data here. A consumer proves its own integration when it bumps its pin; that is the consumer's gate and it runs in the consumer's repo. A release gate that can be reddened by somebody else's uncommitted work is not a gate. Worked examples in prose name a SHAPE ("a project whose `check` carries extra gates"), never a repo.
 
 ## Where things live
 
@@ -62,9 +63,11 @@ to solve quietly. Tool modules own their behavior and expose `main(argv)` or `ru
   makes you want to edit this file, ask first whether it changed *doctrine* or merely
   *contents*. Contents belong in the tree, in `--help`, or in the README. A CLAUDE.md
   that has to be edited whenever code moves is a manifest, and it will lie.
-- **The consumers are the fixtures.** Two live repos pin this package. Their real trees
-  are the test corpus for every read verb and every gate — which also means a
-  regression here breaks two projects' commit gates before anyone notices here.
+- **The committed fixtures ARE the fixtures.** `tests/fixtures/` holds purpose-built
+  repos and a scrubbed real-world scene corpus, versioned with the code that reads
+  them; every read verb and every gate is proven against those. A check that wants
+  more realistic data vendors more data here (rule 8) — it never reaches for a tree
+  outside this checkout, which would answer differently on every machine.
 - **Verify against source, never a cached wheel.** `uvx --from <path>` caches by
   version, so an unchanged version number serves stale code and a fixed bug still
   reproduces. Use `PYTHONPATH=src python3 -m godot_devkit.cli …`.
@@ -108,16 +111,16 @@ over a suite nothing ran. `make test` is unaffected — it runs everything.
 source — this package is its own first consumer) like the rest; never ask an agent to
 grep a gate's output for its result. Enforced by `tests/test_makefile_gates.py`.
 
-- Behavior gate: `make smoke` — `check all`, `autoloads`, `scene`, `refs`, `pm status`,
-  `pm validate` and `check pm` against the live consumer checkouts, censuses compared
-  against independent counts. The consumers ARE the read fixtures. Read-only, and it
-  fails if it leaves either checkout dirty. A read verb it does NOT cover (`orphans`,
-  `scene-diff`, `tiles`, `pm list`, `pm get`) is proven by the suite alone.
+- Behavior gate: `make gates` — `godot-devkit check all` over this repo's own tree,
+  which is a real Godot-less project with a real PM tree. Self-hosting is the behavior
+  proof: every check runs against something committed here.
 - Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
   exactly rather than being re-derived; `make test` runs them too.
-- **Write verbs NEVER run against a live consumer checkout.** Copy the file (or the tree) to scratch first. A smoke run that mutates `~/workspace/nullbound` or `~/workspace/trail` is a broken smoke run, not a thorough one — the consumers are shipping game repos with their own dirty-tree gates.
-- Round-trip fidelity is proven on a committed corpus of scrubbed copies of real consumer scenes (`tests/fixtures/corpus/` — census-floored and construct-guarded, so it runs everywhere including CI) plus a sweep of every `.tscn`/`.tres` in whichever live consumer checkouts are present. Parse → serialise with no mutation, byte-compared; `load()`/`save()` proven on the same corpus. This is the test that makes every write verb safe; it is not optional and it is not a smoke check.
-- A gate-semantics change additionally needs a deliberately-broken probe: introduce the drift class in a scratch copy of a consumer and confirm the gate FAILS (rule 4). Prove the **config** path too: a bad value for that gate's section must exit 2, and a zero-file census must FAIL rather than pass.
+- **A write verb under test writes to scratch, never to a fixture in place.** Copy the
+  file (or the tree) to a `tempfile` first; a fixture that a test run mutates is a
+  fixture that grades the next run against the last one's output.
+- Round-trip fidelity is proven on a committed corpus of scrubbed real-world scenes (`tests/fixtures/corpus/` — census-floored and construct-guarded, so it runs everywhere including CI). Parse → serialise with no mutation, byte-compared; `load()`/`save()` proven on the same corpus. This is the test that makes every write verb safe, and it is not optional. If the corpus lacks a construct, VENDOR a scrubbed scene carrying it — the corpus is how coverage grows.
+- A gate-semantics change additionally needs a deliberately-broken probe: introduce the drift class in a scratch copy of a fixture repo and confirm the gate FAILS (rule 4). Prove the **config** path too: a bad value for that gate's section must exit 2, and a zero-file census must FAIL rather than pass.
 - **Never verify through `uvx --from <path>`.** uv caches the built wheel by version, so an unchanged
   version number serves stale code and a fixed bug still reproduces. Run `PYTHONPATH=src python3 -m
   godot_devkit.cli …`, or `uv cache clean godot-devkit` first.
@@ -138,6 +141,6 @@ This package runs its own tooling on its own tree, and that is a gate, not a dem
 
 Use the `/release` skill — it owns the bump/tag/push sequence and the consumer-pin reminder. Never tag by hand; never let `__init__.py` and `pyproject.toml` versions diverge.
 
-## Provenance
+## Known gaps
 
-Extracted 2026-07-04 from trail/nullbound (their `docs/specs/cherry-picks/` receipts record the lineage). The `refs` tool has a known blind spot: autoload NAMES (declared in `project.godot`, not via `class_name`) aren't indexed — fix upstream here, not in consumers.
+The `refs` tool has a known blind spot: autoload NAMES (declared in `project.godot`, not via `class_name`) aren't indexed — fix upstream here, not in consumers.

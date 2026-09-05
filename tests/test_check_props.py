@@ -144,8 +144,11 @@ class ExtraPropertiesCarveOut(unittest.TestCase):
         self.assertNotIn('Traceback', proc.stderr)
 
 
-# The calibration set — every `check props` finding on a live consumer must be
-# real drift, the count pinned — is `make smoke`'s `check props findings` row.
+# Calibration against real-world trees — every finding real drift, the count
+# pinned — was a live-consumer sweep and is not one any more (CLAUDE.md rule
+# 8). Its replacement is a vendored fixture: see the false-positive census
+# above, and 0.24.0/bugs/the-smoke-took-fixture-scale-with-it for what a
+# committed calibration set would have to carry.
 
 if __name__ == '__main__':
     unittest.main()

@@ -185,11 +185,11 @@ def test_force_overwrites_every_entry(command):
 
 # --- what a release is allowed to TELL a consumer to do -----------------------
 # `--force` is whole-set (the test above pins it) and there is no per-file
-# option, so a consumer who edited one file of a plan loses it. Measured
-# read-only on the live consumers when this was found: trail's `verify.yml`
-# differs from the installable by 177 lines and is a deliberate two-job sharded
-# workflow whose own header says why it does not run `make milestone`, and
-# nullbound's `auto-tag.yml` differs by one path filter. The release notes said
+# option, so a consumer who edited one file of a plan loses it. Measured on two
+# real adoptions when this was found: one installed `verify.yml` had grown into
+# a deliberate two-job sharded workflow 177 lines from the installable, whose
+# own header says why it does not run `make milestone`; another installed
+# `auto-tag.yml` differed by one path filter. The release notes said
 # "`install-ci --diff` then `--force`, re-applying nothing", which told the
 # first of those to delete its CI.
 #
@@ -577,10 +577,11 @@ def test_the_installed_hooks_run_and_block_what_they_exist_to_block():
 
 @pytest.mark.skipif(shutil.which('bash') is None, reason='needs bash')
 def test_setup_hooks_arms_every_cc_hook_by_glob():
-    """trail chmods `cc-*.sh` by glob, nullbound named two files; the glob is
-    strictly better — it is tolerant of absence AND does not have to be edited
-    when a hook is added. core.hooksPath skips a non-executable hook in
-    silence, so a hook this misses is a guard nobody knows is off."""
+    """The forks this replaced did it two ways — a `cc-*.sh` glob, and two
+    named files. The glob is strictly better: it is tolerant of absence AND does
+    not have to be edited when a hook is added. core.hooksPath skips a
+    non-executable hook in silence, so a hook this misses is a guard nobody
+    knows is off."""
     with repo() as root:
         assert run('install-hooks')[0] == 0
         for rel in HOOKS[:2]:
@@ -887,8 +888,8 @@ HEADER_EDITED_HOOKS = ('tools/hooks/cc-godot-sandbox.sh',
 
 def a_consumer_mid_adoption(root: Path) -> dict[str, str]:
     """The corpus installed, four headers edited, the two couriers not yet
-    there — nullbound and trail on the day they adopted v0.23.0. Returns the
-    edited text of each file, to be compared byte for byte afterwards."""
+    there — the state a real adopter of v0.23.0 was in. Returns the edited text
+    of each file, to be compared byte for byte afterwards."""
     assert run('install-hooks')[0] == 0
     mine = {}
     for rel in HEADER_EDITED_HOOKS:

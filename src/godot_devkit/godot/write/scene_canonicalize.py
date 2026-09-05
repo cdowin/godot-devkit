@@ -201,17 +201,18 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
             # lands after the base's own children) and makes the attribute
             # invented, because the two are different claims.
             #
-            # The corpus decides it, in both directions. The editor-written
-            # half — nullbound, 194 scenes — has 1008 created nodes and NOT ONE
-            # carries an `index=`, including 87 whose parent is a node the base
-            # provides; it has no inherited scene with a written child, so it
-            # cannot speak to that case. The hand-authored half — trail, 116
-            # scenes, every one carrying a `;` comment and so never through
-            # ResourceSaver — contradicts itself exactly there: 10 created
-            # nodes directly under an inherited root carry an append-correct
-            # `index=` and 10 more, same repo, same position, carry none. So a
-            # rule that reproduces the first 10 invents the second 10, and the
-            # narrowest form of it still invents 4.
+            # A real-world corpus decides it, in both directions. Its
+            # EDITOR-WRITTEN half — 194 scenes, every one round-tripped through
+            # ResourceSaver — has 1008 created nodes and NOT ONE carries an
+            # `index=`, including 87 whose parent is a node the base provides;
+            # it holds no inherited scene with a written child, so it cannot
+            # speak to that case. The HAND-AUTHORED half — 116 scenes, every one
+            # carrying a `;` comment and so never through ResourceSaver —
+            # contradicts itself exactly there: 10 created nodes directly under
+            # an inherited root carry an append-correct `index=` and 10 more,
+            # same tree, same position, carry none. So a rule that reproduces
+            # the first 10 invents the second 10, and the narrowest form of it
+            # still invents 4.
             #
             # Restoring them is inventing authored state, which is the sibling
             # bug this module already paid for once. Settling it needs the

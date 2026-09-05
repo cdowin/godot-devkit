@@ -2,8 +2,8 @@
 
 Each case degrades a fixture the way `save()` does and checks that canonicalize
 puts back exactly what was lost — anything the tool invents rather than derives
-shows up as a diff. The same proof over a REAL consumer scene is `make smoke`'s
-`canonicalize round trip` row, which picks the scene the degradation costs most.
+shows up as a diff. The same proof at SCALE, over scrubbed real-world scenes, is
+`tests/fixtures/corpus/` in test_tscn_roundtrip.py.
 """
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import contextlib
 import io
 import re
 import unittest
-from pathlib import Path
 
 from support import FIXTURES, temp_repo
 
@@ -136,7 +135,7 @@ class EditableMarkersAreAuthoredNotDerived(unittest.TestCase):
 
     def test_no_corpus_scene_gains_or_loses_a_marker(self) -> None:
         scenes = overridden = declared = 0
-        for slice_name in ('nb', 'tr'):
+        for slice_name in ('editor_written', 'hand_authored'):
             root = CORPUS / slice_name
             uids = UidIndex(root)
             bases = scene_canonicalize.BaseScenes(root)
@@ -194,9 +193,8 @@ class EditableMarkersAreAuthoredNotDerived(unittest.TestCase):
 # like any other. `_instance_host` walked ancestors down to depth 1 and stopped,
 # so it never reached the root: every override directly under an inherited root
 # lost its `index=` and got a "no instancing ancestor was found" refusal instead
-# of the ordinal the base plainly gives it. Measured on trail before the fix:
-# 3 such overrides across 2 scenes (scenes/moments/force_resolution.tscn,
-# scenes/moments/game_over.tscn).
+# of the ordinal the base plainly gives it. Measured on a real hand-authored
+# tree before the fix: 3 such overrides across 2 scenes.
 #
 # The other direction is the trap, and it is the sibling bug's: a node the scene
 # CREATES (`type=` / `instance=`) is not placed by any base, so no ordinal
@@ -225,7 +223,7 @@ INDEX_ATTR = re.compile(r' index="\d+"')
 
 
 def strip_indexes(text: str) -> str:
-    """The `index=` half of `make smoke`'s degradation, on the node lines."""
+    """The `index=` half of the `save()` degradation, on the node lines."""
     return '\n'.join(INDEX_ATTR.sub('', line) if line.startswith('[node ') else line
                      for line in text.split('\n'))
 
@@ -259,7 +257,7 @@ class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
         self.assertIn('[node name="Content" parent="Inner" index="2"]', text)
 
     def test_the_whole_inherited_scene_round_trips_byte_for_byte(self) -> None:
-        """The smoke row's property at unit scale: strip what `save()` drops,
+        """The whole property at unit scale: strip what `save()` drops,
         restore, and get the committed bytes back — no more and no less."""
         code, out, text = over_shell(strip_indexes(INHERITED))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
@@ -378,89 +376,6 @@ class AChainedBaseIsRefusedNotCounted(unittest.TestCase):
         self.assertIn('[node name="Inner" parent="." index="1"]', text)
 
 
-# --- the smoke row that would notice ------------------------------------------
-# `make smoke`'s `canonicalize invents no index` gated `invented == 0` only: a
-# value that came back DIFFERENT from the authored one increments neither
-# `restored` nor `lost`, so it was counted, printed in the detail of a green
-# row, and gated by nothing. `restored + lost == authored` is the identity "no
-# wrong value", and it is what would notice the day a consumer grows a scene
-# whose base is itself inherited.
-def smoke_harness():
-    """`tools/consumer_smoke.py` — a tool, not a package module, so the import
-    needs the path. Same spelling test_uid_codec.py uses."""
-    import sys                                                  # noqa: PLC0415
-    sys.path.insert(0, str(FIXTURES.parent.parent / 'tools'))
-    import consumer_smoke                                       # noqa: PLC0415
-    return consumer_smoke
-
-
-def canon_row(scenes: dict[str, str]) -> tuple[bool, str]:
-    """Run the smoke's canonicalize row over a repo holding EXACTLY `scenes`
-    -> (the row passed, its detail).
-
-    Its own repo rather than a fixture tree: the row scans every tracked
-    `.tscn`, so a fixture's other scenes would land in the same counts and the
-    assertions below would be about the fixture.
-    """
-    import subprocess                                           # noqa: PLC0415
-    import tempfile                                             # noqa: PLC0415
-    harness = smoke_harness()
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp) / 'consumer'
-        root.mkdir()
-        (root / 'project.godot').write_text(
-            'config_version=5\n\n[application]\n\nconfig/name="Scratch"\n',
-            encoding='utf-8')
-        for rel, body in scenes.items():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(body, encoding='utf-8')
-        subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
-        subprocess.run(['git', 'add', '-A'], cwd=root, check=True,
-                       capture_output=True)
-        report = harness.Report()
-        harness.canonicalize_invents_no_index(root, report)
-    assert len(report.rows) == 1, report.rows
-    _consumer, what, detail = report.rows[0]
-    return what.startswith('ok'), detail
-
-
-class TheSmokeRowGatesAWrongValueNotOnlyAnInventedOne(unittest.TestCase):
-    def test_an_authored_index_that_comes_back_DIFFERENT_reds_the_row(self) -> None:
-        """Nothing was invented — a node that HAD an index still has one — and
-        it is not the one the file said. The old condition called that green
-        and printed the number in the detail."""
-        wrong = INHERITED.replace('[node name="Inner" parent="." index="1"]',
-                                  '[node name="Inner" parent="." index="7"]')
-        passed, detail = canon_row({'scenes/shell.tscn': SHELL_BASE,
-                                    'scenes/subject.tscn': wrong})
-        self.assertFalse(passed, detail)
-        self.assertIn('WRONG', detail)
-        self.assertIn('index="7"', detail)
-        self.assertIn('index="1"', detail)
-
-    def test_a_chained_scene_is_NOT_DERIVABLE_and_the_row_stays_green(self) -> None:
-        """Both halves together. The verb refuses the chain, so the authored
-        index comes back absent rather than wrong — `lost`, which the identity
-        accounts for, and the row is green with the refusal visible in its
-        own detail."""
-        passed, detail = canon_row({'scenes/shell.tscn': SHELL_BASE,
-                                    'scenes/mid.tscn': MID,
-                                    'scenes/subject.tscn': CHAINED})
-        self.assertTrue(passed, detail)
-        self.assertIn('0 invented', detail)
-        self.assertIn('1 not derivable', detail)
-
-    def test_the_identity_holds_on_a_corpus_with_nothing_wrong_in_it(self) -> None:
-        """A CONTROL: the new half of the condition must not red a tree the
-        verb handles correctly, or every consumer's smoke goes red on a rule
-        rather than on a defect."""
-        passed, detail = canon_row({'scenes/shell.tscn': SHELL_BASE,
-                                    'scenes/subject.tscn': INHERITED})
-        self.assertTrue(passed, detail)
-        self.assertIn('0 invented', detail)
-        self.assertIn('2/2 authored index= restored', detail)
-
-
 # --- a node the scene CREATES gains no index, wherever its PARENT came from ---
 # 0.24.0/bugs/index-is-derivable-under-an-instanced-parent proposed keying the
 # restoration off "is this node's PARENT an instanced subtree?" instead of off
@@ -469,22 +384,25 @@ class TheSmokeRowGatesAWrongValueNotOnlyAnInventedOne(unittest.TestCase):
 # a derivable ordinal. The ORDINAL is derivable. Whether the engine writes the
 # attribute is not, and the corpus refuses the rule in both directions:
 #
-#   * the editor-written half — nullbound, 194 scenes — has 1008 created nodes
-#     and NOT ONE carries an `index=`, including 87 whose parent is a node the
-#     base provides. It has no inherited scene with a written child, so it
-#     cannot speak to that case at all.
-#   * the hand-authored half — trail, 116 scenes, every one carrying a `;`
-#     comment and so never through ResourceSaver — contradicts itself at the
-#     one position in dispute: 10 created nodes directly under an inherited root
-#     carry an append-correct `index=` and 10 more, same repo, same position,
-#     carry none (6 appending into an empty base container, 4 after a 4-child
-#     base root). Nothing structural separates the halves.
+#   * the EDITOR-WRITTEN half — 194 scenes, all round-tripped through
+#     ResourceSaver — has 1008 created nodes and NOT ONE carries an `index=`,
+#     including 87 whose parent is a node the base provides. It holds no
+#     inherited scene with a written child, so it cannot speak to that case.
+#   * the HAND-AUTHORED half — 116 scenes, every one carrying a `;` comment and
+#     so never through ResourceSaver — contradicts itself at the one position in
+#     dispute: 10 created nodes directly under an inherited root carry an
+#     append-correct `index=` and 10 more, same tree, same position, carry none
+#     (6 appending into an empty base container, 4 after a 4-child base root).
+#     Nothing structural separates the halves.
 #
 # Measured, degrade -> canonicalize over every tracked scene, before it was
-# refused: the rule as filed invents 38 `index=` on trail and 87 on nullbound
-# and takes nullbound from 0 round-trip failures to 26. Narrowed to inherited
-# scenes it still invents 4. Each fixture below is one of those shapes, and the
-# ordinal named in each docstring is what the rule would have written.
+# refused: the rule as filed invents 38 `index=` on the hand-authored tree and
+# 87 on the editor-written one, and takes the latter from 0 round-trip failures
+# to 26. Narrowed to inherited scenes it still invents 4. Each fixture below is
+# one of those shapes, and the ordinal named in each docstring is what the rule
+# would have written. Both measurements are RECORDED here, not re-runnable:
+# nothing in this package reaches outside its own checkout (CLAUDE.md rule 8),
+# and what the fixtures below pin is the resulting BEHAVIOUR.
 PLAIN_HOST = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonplain"]\n\n'
               '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
               ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
@@ -496,11 +414,11 @@ PLAIN_HOST = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonplain"]\n\n'
               '[node name="Slot0" type="Label" parent="Shell/Inner/Content"]\n\n'
               '[node name="Slot1" type="Label" parent="Shell/Inner/Content"]\n\n'
               '[node name="Slot2" type="Label" parent="Shell/Inner/Content"]\n')
-# The inherited half. `FirstBody`/`SecondBody` sit exactly where trail's corpus
-# splits 10-for/10-against; `Slot` appends into a base container the base leaves
-# empty (trail: 6 scenes, all `Card/Inner/Content/Body`); `Row` hangs off a node
-# this scene created, inside an instanced subtree (trail: dossier.tscn's
-# `DossierBody/Columns/Right`, where 2 of 15 siblings carry a hand-typed index).
+# The inherited half. `FirstBody`/`SecondBody` sit exactly where the measured
+# tree splits 10-for/10-against; `Slot` appends into a base container the base
+# leaves empty (6 real scenes, all `Card/Inner/Content/Body` shaped); `Row`
+# hangs off a node this scene created, inside an instanced subtree (one real
+# scene where 2 of 15 siblings carry a hand-typed index).
 INHERITED_CREATES_BODIES = (
     '[gd_scene load_steps=2 format=3 uid="uid://dcanonbodies"]\n\n'
     '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
@@ -520,8 +438,8 @@ class ACreatedNodeGainsNoIndexWhateverItsParentIs(unittest.TestCase):
 
     def test_a_created_node_under_the_instance_node_itself_gains_none(self) -> None:
         """`Added` hangs off `Shell`, which instances the base. The base root
-        places 2 children, so an append is `2`. nullbound's `game.tscn` is this
-        shape six times over and carries no index on any of them."""
+        places 2 children, so an append is `2`. One real editor-written scene is
+        this shape six times over and carries no index on any of them."""
         code, out, text = over_shell(strip_indexes(PLAIN_HOST))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertIn('[node name="Added" type="Label" parent="Shell"]\n', text)
@@ -548,8 +466,8 @@ class ACreatedNodeGainsNoIndexWhateverItsParentIs(unittest.TestCase):
     def test_a_created_body_under_an_inherited_root_gains_none(self) -> None:
         """THE disputed position, and the one this bug was filed to restore.
         The base root places 2 children, so an append is `2` for `FirstBody` and
-        `3` for `SecondBody` — the numbers trail's 10 indexed bodies carry and
-        its 4 unindexed ones (force_resolution, game_over) do not."""
+        `3` for `SecondBody` — the numbers the measured tree's 10 indexed bodies
+        carry and its 4 unindexed ones, same position, do not."""
         code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertIn('[node name="FirstBody" type="VBoxContainer" parent="."]\n', text)
