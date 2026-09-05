@@ -139,15 +139,22 @@ top of it.
 
 Only once all features report and the tree is reconciled:
 
-1. **Full gate** — `make milestone` (gates + matrix + smoke), orchestrator's
-   own run.
-2. **Cross-cutting review** — a fresh strong reviewer over the milestone's
-   whole commit range (adversarial input, run — never diff-reading); land
-   wrap-up fixes; re-green.
-3. **Docs + changelog** — sync drifted docs; retitle `CHANGELOG.md`'s
+1. **Cross-cutting review** — a fresh strong reviewer over the milestone's
+   whole commit range (adversarial input, RUN — never diff-reading).
+2. **Land every finding** it raised, or defer each one explicitly and in
+   writing.
+3. **Full gate** — `make milestone` (gates + hooks-self-test + matrix),
+   orchestrator's own run, and **it goes LAST**. A gate that runs before the
+   review answers for a tree nobody will ship: every fix landed afterwards
+   voids it, and it reads as readiness while doing so. Chris, 2026-09-04, after
+   this exact inversion cost two full runs on 0.24.0: *"The make milestone with
+   the full test suite is the LAST thing before saying 'yeah, this is done'."*
+   **When a gate and a judgement both bear on one decision, the judgement runs
+   first and the gate answers for its result.**
+4. **Docs + changelog** — sync drifted docs; retitle `CHANGELOG.md`'s
    Unreleased section per the release skill.
-4. **Resolve findings** — every `docs/reviews/` doc for the milestone
+5. **Resolve findings** — every `docs/reviews/` doc for the milestone
    resolved and deleted (create → resolve → delete).
-5. **Bump + merge + tag** — version bump (`__init__.py` and `pyproject.toml`
+6. **Bump + merge + tag** — version bump (`__init__.py` and `pyproject.toml`
    together), merge-commit to `main`, tag via the `/release` skill, consumer
    pins reminded.

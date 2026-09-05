@@ -2,13 +2,31 @@
 id: 0.24.0/bugs/the-release-gate-cannot-run-before-the-close-it-gates
 milestone: "0.24.0"
 name: "`make milestone` cannot run against a `building` milestone whose features are all done, so the gate that decides whether to ship requires the ship decision first"
-status: open
+status: fixed
 caught_in: "0.24.0"
 fix_milestone:
 caused_by:
 ---
 
 # the-release-gate-cannot-run-before-the-close-it-gates
+
+## FIXED in 0.24.0 — but read the successor before assuming the class is gone
+
+The deadlock itself is gone: D6 no longer fires on a `building` milestone whose features are all `done`,
+`reviewing` exists as the state that silences it, and 0.24.0 is the first release cut through the new
+order. Verified on this release — `make milestone` ran green at `reviewing`, which was impossible before.
+
+**The CLASS of mistake was not gone, and the same release proved it.** With the deadlock removed, the gate
+became runnable too EARLY instead of too late: `make milestone` ran before the reviewer, twice, and both
+runs were void the moment the review asked for fixes. Same error one layer up — a gate ordered against the
+wrong thing. Chris, 2026-09-04: *"The make milestone with the full test suite is the LAST thing before
+saying 'yeah, this is done'."*
+
+That is fixed in prose here (`SDLC.md` § Close protocol and `.claude/skills/release/SKILL.md` both
+re-ordered, with the rule stated: **when a gate and a judgement both bear on one decision, the judgement
+runs first and the gate answers for its result**) — and prose is what failed the previous two times.
+`0.25.0/the-release-is-a-conveyor` is the structural fix, and this bug is one of the three incidents it
+cites as its reason to exist.
 
 ## Symptom
 
