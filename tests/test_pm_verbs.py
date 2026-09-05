@@ -217,15 +217,19 @@ class StatusVerbQuartet(unittest.TestCase):
                     self.assertEqual(
                         model.field_of(root / rel, 'status'), state)
 
-    def test_a_retired_state_is_refused_and_names_the_word_that_replaced_it(self):
+    def test_a_renamed_state_is_refused_and_names_the_word_that_replaced_it(self):
         """The window READS. A tree already holding `wip` stays green, and the
         tool asked to write another one exits 2 naming `building` — so the set
         of files 0.25.0 needs rewritten only ever shrinks, and never by the
         hand of the sanctioned tool. Bugs are a different machine and hold
-        none of these words."""
+        none of these words.
+
+        The three words this covers were RENAMED. `blocked` was not, and it
+        gets its own refusal below."""
         for kind, gid, rel, initial, _ in self.GRAINS:
             for state, became in model.DEPRECATED_STATES.items():
-                if not model.deprecated_write(state, self._states(kind)):
+                if (not model.deprecated_write(state, self._states(kind))
+                        or state in model.REMOVED_STATES):
                     continue
                 with self.subTest(kind=kind, state=state), \
                         self._grain_tree(kind) as root:
@@ -233,6 +237,35 @@ class StatusVerbQuartet(unittest.TestCase):
                     self.assertEqual(code, 2, out)
                     self.assertIn('retired', out)
                     self.assertIn(f'pm {kind} {became} <id>', out)
+                    self.assertIn('the word that replaced it', out)
+                    self.assertEqual(
+                        model.field_of(root / rel, 'status'), initial)
+
+    def test_a_REMOVED_state_is_refused_without_naming_a_replacement(self):
+        """`blocked` is the one retired word that was removed, not renamed.
+
+        It was a first-class story state through v0.23.0 and this vocabulary
+        has nothing that means it — a blocked grain is not a grain being worked
+        on. Its entry in `DEPRECATED_STATES` is a POSITION, so that the read
+        side can place a tree still holding it; reusing that entry as a
+        replacement told the user their blocked story was in progress, which is
+        a different fact and the wrong one. The refusal here says the word is
+        gone and what to do instead, and `building` appears only as where to
+        leave the status — never as a synonym.
+        """
+        self.assertEqual(model.REMOVED_STATES, ('blocked',))
+        for state in model.REMOVED_STATES:
+            for kind, gid, rel, initial, _ in self.GRAINS:
+                if not model.deprecated_write(state, self._states(kind)):
+                    continue
+                with self.subTest(kind=kind, state=state), \
+                        self._grain_tree(kind) as root:
+                    code, out = run_cli(root, kind, state, gid)
+                    self.assertEqual(code, 2, out)
+                    self.assertIn('retired', out)
+                    self.assertIn(f'this vocabulary has no {state} state', out)
+                    self.assertIn('nothing replaces it', out)
+                    self.assertNotIn('the word that replaced it', out)
                     self.assertEqual(
                         model.field_of(root / rel, 'status'), initial)
 

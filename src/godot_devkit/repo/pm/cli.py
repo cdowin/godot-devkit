@@ -296,8 +296,21 @@ def _refuse_deprecated(states: tuple[str, ...], to: str, kind: str) -> None:
     So the read side accepts `wip` and this side names `building` — the set of
     files a consumer must rewrite before 0.25.0 only ever shrinks, and it never
     grows by the hand of the sanctioned tool.
+
+    Two refusals, because two things happened. Three of the four words were
+    RENAMED and the message names the synonym. `blocked` was REMOVED
+    (`model.REMOVED_STATES`) — it was a first-class story state through v0.23.0
+    and nothing in this vocabulary means it — so naming `building` as its
+    replacement would tell the user their blocked story is a story being worked
+    on, which is the opposite of what they wrote.
     """
     became = model.deprecated_write(to, states)
+    if became and to in model.REMOVED_STATES:
+        raise Usage(
+            f'{to!r} is retired and 0.25.0 removes it — this vocabulary has no '
+            f'{to} state and nothing replaces it. Record what is blocking the '
+            f'work in the grain itself and leave the status at {became!r}: '
+            f'`pm {kind} {became} <id>`')
     if became:
         raise Usage(
             f'{to!r} is retired and 0.25.0 removes it — a tree that already '

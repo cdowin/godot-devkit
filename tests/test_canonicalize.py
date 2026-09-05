@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import pathlib
 import re
 import unittest
 
@@ -522,6 +523,54 @@ class NoMarkerIsInventedForAnOverriddenInstance(unittest.TestCase):
         self.assertEqual(editable_paths(text), [], text)
         self.assertNotIn('EDITABLE', out, out)
 
+
+class TheRecordedMeasurementSaysWhereItCameFrom(unittest.TestCase):
+    """The shipped module argues from 194 + 116 scenes; 22 + 14 are committed.
+
+    Those counts were taken over two whole game checkouts before the corpus
+    was scrubbed down to a sample, and rule 8 means nothing here can retake
+    them. The comment in `tests/test_canonicalize.py` above has always said so
+    ("RECORDED here, not re-runnable"); the SHIPPED module said nothing, and it
+    is the one a reader reaches first — it is the argument the parked bug
+    `index-is-derivable-under-an-instanced-parent` rests on, and whoever
+    reopens that bug counts the corpus, finds a fraction of the scenes, and
+    concludes the comment is stale rather than that it was never local.
+
+    The stated sample size is checked against the corpus rather than taken on
+    faith, so vendoring scenes into either half reddens this and the sentence
+    is corrected instead of quietly becoming the next wrong number.
+    """
+
+    MODULE = pathlib.Path(scene_canonicalize.__file__)
+
+    def _measurement(self) -> str:
+        text = self.MODULE.read_text(encoding='utf-8')
+        start = text.index('A real-world corpus')
+        return text[start:text.index('Restoring them is inventing', start)]
+
+    def test_the_shipped_comment_marks_the_measurement_as_not_re_runnable(self):
+        prose = self._measurement()
+        self.assertIn('RECORDED', prose)
+        self.assertIn('not re-runnable', prose)
+        self.assertRegex(prose, r'(?is)rule 8|outside its own tree')
+        for outside in ('194 scenes', '116 scenes'):
+            self.assertIn(outside, prose, 'the historical measurement was '
+                          'deleted rather than attributed — it is the evidence '
+                          'the refusal rests on')
+
+    def test_the_shipped_comment_states_the_committed_corpus_size(self):
+        counts = {name: len(list((CORPUS / name).rglob('*.tscn')))
+                  for name in ('editor_written', 'hand_authored')}
+        self.assertEqual(counts, {'editor_written': 22, 'hand_authored': 14},
+                         'the corpus changed size — the sentence in '
+                         f'{self.MODULE.name} now names the wrong number')
+        prose = self._measurement()
+        for name, n in counts.items():
+            with self.subTest(slice=name):
+                self.assertRegex(prose, rf'{n} `?\.tscn`?[^.]*{name}|'
+                                        rf'{name}[^.]*{n} `?\.tscn`?',
+                                 f'the shipped comment does not say that '
+                                 f'{name} holds {n} committed .tscn')
 
 
 if __name__ == '__main__':

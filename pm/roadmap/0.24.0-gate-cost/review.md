@@ -520,3 +520,311 @@ verdict: RELEASE-WITH-FIXES
 | q1 | QUESTION | open |
 | q2 | QUESTION | landed in-place |
 ```
+
+---
+
+## Third pass — 0.24.0: release-gate review over `v0.23.0..b135b3b`
+
+Reviewer run 2026-09-05, clean tree at `b135b3b`. Scope: release safety over the whole range with
+fresh attention on what landed AFTER the two recorded passes — `64352a3` (the deprecation window +
+`verdict.parse` returning a list) and `b135b3b` (the consumer decoupling: 101 files, +651 / −1,623).
+The earlier passes' ground is not re-derived. Everything below was proven against a `git archive HEAD
+| tar -x` extraction in scratch, never `PYTHONPATH` over the worktree
+(`bugs/fails-against-head-is-unprovable-by-the-obvious-spelling.md`). Nothing outside this checkout
+was read or written; no git write command was run.
+
+**Verdict: RELEASE-WITH-FIXES.** The two riskiest things in the range hold. The 1,623-line deletion's
+accounting is exact — every number reproduced rather than accepted — and the deprecation window
+changes no verdict for a canonical tree, in 49 D5 pairs and 21 D2 cases. Two MAJORs: the new rule-8
+gate's census is a suffix allowlist plus a silent decode-failure skip, so 18 tracked files are scanned
+by nothing and one non-UTF-8 byte removes any file from the scan without a word; and the deprecation
+window's only live progress signal is invisible in the shipped consumer gate, proven on a scratch
+consumer. One MINOR must land before the tag on its own: `## Unreleased` still ships two bullets
+announcing `make smoke`, the target this release deletes.
+
+### Gates, my run
+
+`make test` **1760 passed, 1 skipped, 681 subtests, 179.8 s** — the stated baseline exactly.
+`make gates` 4/4 PASS. `make hooks-self-test` 3 hook(s) SELF-TEST OK. `check pm` PASS (11 milestones,
+36 features, 76 stories, 37 bugs, 28 refs) and it prints **no** NOTE, so this tree holds no retired
+word. `pm validate` VALID, 123 grains, 28 refs. `pm ledger report 0.24.0` exit 0 before and after
+appending this block. Stdlib-only re-derived by AST over `src/`: **non-stdlib top-level imports = []**;
+`compileall` under a real CPython 3.11.15 clean. `make milestone` and `make matrix` are the
+orchestrator's and were not run.
+
+### The 1,623-line deletion's accounting, re-derived
+
+Collected ids diffed between `1d69b8a` and `b135b3b` under 3.11: **1772 → 1761, 20 removed, 9 added.**
+One of the 20 is a rename (`test_census_meets_the_floor_from_both_source_repos` →
+`…_from_both_slices`), so 19 removals — the stated figure, exact.
+
+Subtests **3992 → 681**, and the 3,311 delta is arithmetic rather than a claim: the deleted
+`test_the_smoke_grades_against_the_SAME_independent_formulation` subTested over `_harvest(CORPUS)` +
+`PREDICATE_VECTORS` + `EncoderProperties.IDS`, measured on the committed corpus as
+**266 + 8 + 3037 = 3311**, and 3992 − 3311 = 681.
+
+`test_encode_decode_is_identity_on_every_id` **does still walk the same id set** —
+`EncoderProperties.IDS` is untouched by the diff (3000 dense + 12 base-power boundaries ×3 + the
+63-bit ceiling = 3037), and it never used `subTest`, so it contributed 0 subtests before and after.
+No codec coverage moved.
+
+**The corpus rename orphaned nothing.** `corpus/nb` and `corpus/tr` appear nowhere in `.py`, `.md`,
+`.toml`, `.sh` or `.yml` outside `pm/`; the slice-name assertion was updated in the same commit; all
+65 renames are `| 0` in `git show --stat`; and the suite is green. Census today: 36 `editor_written`
+(22 `.tscn`) + 29 `hand_authored` (14 `.tscn`), 266 uids.
+
+### MAJOR
+
+#### M1 — the rule-8 gate's census is a suffix allowlist and a silent decode skip, so 18 tracked files are scanned by nothing
+
+`tests/test_consumer_independence.py:85` (`SUFFIXES_READ`) and `:113` (`offending_lines`). The file's
+own docstring calls it "the whole-tree form" and the CHANGELOG calls it the enforcement of hard rule
+8. It is neither, in two independent directions, both confirmed by planting a name and running.
+
+**Nine sites planted, one at a time, on a pristine `git archive` copy:**
+
+| # | site | gate |
+|---|---|---|
+| 1 | `installables/Makefile.devkit` | MISS here — caught by 2 narrower guards |
+| 2 | `tests/fixtures/canon_repo/project.godot` | **MISS, everywhere** |
+| 3 | `installables/compile_sweep.gd.uid` | MISS here — caught by the installable guard |
+| 4 | `docs/reviews/…md` | MISS — declared LOG, by design |
+| 5 | `README.md` | caught |
+| 6 | `devkit.toml` | caught |
+| 7 | `installables/gdk_runners.sh` | caught |
+| 8 | `src/godot_devkit/cli.py` | caught |
+| 9 | `pm/roadmap/ROADMAP.md` | MISS — declared LOG, by design |
+
+Site 2 was then run against the **whole 1,761-test suite**, not just this module: identical result to
+the pristine baseline (3 failures, all `test_makefile_gates.py`, environmental — the scratch copy has
+no `.git`). **No test in this package catches a consuming project's name in a fixture `project.godot`.**
+
+The mechanism: `SUFFIXES_READ` is an allowlist of 15 suffixes, so `rglob` walks the tree and then
+drops everything else silently. Measured on this tree, 21 files are dropped — `.devkit` ×1, `.godot`
+×10, `.lock` ×1, `.uid` ×9. `uv.lock` is gitignored and `Makefile.devkit` + `compile_sweep.gd.uid`
+are redundantly covered, which leaves **18 tracked files scanned by no guard at all**: the 10 fixture
+`project.godot` and the 8 fixture `.gd.uid`. A `project.godot` is exactly the artifact a fixture gets
+vendored FROM a consumer, which is the drift class the gate exists for.
+
+The second hole is worse because it is not suffix-bounded. `offending_lines` returns `[]` on
+`UnicodeDecodeError`, so **one non-UTF-8 byte anywhere in a file removes the whole file from the scan
+in silence**:
+
+    $ printf 'nullbound is the consumer\n' > src/godot_devkit/repo/notes.md
+    $ pytest tests/test_consumer_independence.py -q
+    FAILED …::test_no_file_names_a_consuming_project        1 failed, 7 passed
+
+    $ python3 -c "open('src/godot_devkit/repo/notes.md','wb').write(
+          b'nullbound is the consumer\n\xff\xfe binary tail\n')"
+    $ pytest tests/test_consumer_independence.py -q
+    ........                                                8 passed in 0.55s
+
+`test_the_census_is_not_empty_and_covers_the_package_and_the_harness` cannot see either: it counts
+what the walk KEPT (floor 120, actual 313) and asserts five top-level names are present. It never
+asks what was dropped, which is the one question a rule-4 census has to answer.
+
+**Fix, both halves and both cheap:** make the suffix filter a DENY list (or assert
+`scanned + explicitly_excluded == every file under the walk`, so a new file type reds until somebody
+classifies it); and turn the `UnicodeDecodeError` arm into a finding — a file this gate cannot read is
+a file it cannot clear, which is the same shape as `scene canonicalize`'s own
+`REFUSED … not valid UTF-8 … refusing to rewrite bytes this tool cannot read`, three directories away.
+
+Blast radius is why this is MAJOR and not CRITICAL: every file under `installables/` — the shipped
+surface — is covered, by this gate for the 42 text ones and by `test_runners_installable` /
+`test_install` / `test_ci_workflows` for the rest. The hole is fixtures plus any file with a stray
+byte. It is still a gate that prints PASS over drift it was written to catch.
+
+#### M2 — the deprecation window's progress signal never reaches a consumer's console
+
+`src/godot_devkit/repo/checks/pm.py:203-211` prints the NOTE; `installables/Makefile.devkit:99`
+(`GDK_SUM_CHECKS`) and `:112-124` (`gdk_gate`) swallow it. `checks/pm.py` states the intent in as many
+words — "the census is the migration's own progress bar — live, because a number written into a
+comment or a changelog goes stale" — and the CHANGELOG instructs consumers to "run `check pm` and read
+its NOTE, since both trees move daily". Through the gate this package ships them, there is nothing to
+read.
+
+Proven on a scratch consumer (`init` + `install-runners`, `[checks] all = ["pm"]`, one story at `todo`):
+
+    $ godot-devkit check pm            # by hand
+    [check:pm] NOTE — 1 grain(s) hold a status the 0.24.0 deprecation window accepts …
+    [check:pm] PASS — no PM-tree drift …
+
+    $ make check                       # the pre-push shape, VERBOSE unset
+    [CHECK] 1 check(s) PASS — full log: .gate-reports/check.log
+    NOTE on CONSOLE: 0 | NOTE in transcript: 1
+    $ make check VERBOSE=1
+    NOTE on console with VERBOSE=1: 1
+
+`gdk_gate_capture` sends the whole stream to the log unless `VERBOSE` is set, and `GDK_SUM_CHECKS` is
+`grep -acE '^\[check:[a-z-]+\] PASS'` — a count, so even the `[check:pm] PASS` line does not reach the
+console. `GDK_GATE_FAIL_RE` only fires on a non-zero exit, and the NOTE deliberately does not change
+the exit code. So the signal exists on exactly the path nobody is on: a green pre-push writes it to a
+gitignored file.
+
+The consequence is dated. The window closes in 0.25.0. A consumer green through all of 0.24.0 who
+never types `godot-devkit check pm` by hand meets the red pre-push on the 0.25.0 bump — which is the
+exact failure the window was built to prevent, deferred one release, and it now arrives with no
+warning shot.
+
+**Fix, pick one:** (a) extend `GDK_SUM_CHECKS` to append `, N note(s)` when the transcript carries
+`^\[check:[a-z-]+\] NOTE` — correct, but it is an installable change and therefore needs
+`install-runners --force`, so it only helps consumers who run the adoption steps; or (b) **zero-code**:
+the consolidated adoption paragraph m4 asks for says, in one sentence, "run `godot-devkit check pm`
+by hand once and read its NOTE — `make check` will not show it". (b) is sufficient for the tag; (a) is
+the durable one.
+
+### MINOR
+
+- **m1 — `## Unreleased` still ships `make smoke` as a 0.24.0 feature.** `CHANGELOG.md` carries two
+  long bullets ("`make smoke` asserts that canonicalize invents no `index=`, over EVERY tracked scene
+  on both consumers" and "`make smoke` runs the gates against the runners the RELEASE ships, in a
+  throwaway worktree of each consumer") describing a target `b135b3b` deletes and a behaviour rule 8
+  now forbids. The release skill retitles this section to `## [0.24.0]`, so these ship as the release
+  notes for a release that has neither. The top bullet announcing the deletion does not retract them.
+  **This one must land before the tag** — it is the only finding here whose artifact IS the thing
+  being published.
+- **m2 — the shipped source attributes an outside measurement to the committed corpus.**
+  `godot/write/scene_canonicalize.py:204-215`: "A real-world corpus decides it… Its EDITOR-WRITTEN
+  half — 194 scenes… The HAND-AUTHORED half — 116 scenes". Those are the slice names of
+  `tests/fixtures/corpus/{editor_written,hand_authored}`, whose committed halves are **22 and 14
+  `.tscn`**. The numbers are the two deleted consumer checkouts', and they are not re-derivable here.
+  The sibling comment in `tests/test_canonicalize.py:387-405` gets this right — "Both measurements are
+  RECORDED here, not re-runnable: nothing in this package reaches outside its own checkout (CLAUDE.md
+  rule 8)" — and the shipped module carries no such sentence. This is the argument the parked bug
+  `index-is-derivable-under-an-instanced-parent` rests on; whoever re-opens it will try to reproduce
+  310 scenes from 36 and conclude the comment is stale rather than that it was never local. One
+  sentence, copied from the test file.
+- **m3 — `blocked` is retired as if it were a rename, and it is a removal.** `pm story blocked <id>`
+  was exit 0 in v0.23.0 (`DEFAULT_STORY_STATES = ('todo','wip','review','done','blocked')`); it is now
+  exit 2 naming `building`. `blocked` is not a synonym for `building` — it is the one word in the old
+  set carrying a fact the new vocabulary cannot express, and after 0.25.0 there is no way to say it.
+  The retirement itself is a ruled decision with a census behind it (`feature.md:105`, 0 uses in the
+  measured trees) and this pass does not re-open it; what is wrong is the sentence the tool prints,
+  which tells the user the word was replaced. Suggested, for `blocked` alone: "…is retired and 0.25.0
+  removes it — this vocabulary has no blocked state; record the blocker in the grain and leave it at
+  `building`."
+- **m4 — still no consolidated "at the pin bump" list, three passes running.** Pass 1's m3 and pass 2's
+  m3 are both `open` and the list has grown again: `install-runners --force`, `install-ci --diff` then
+  per-file, `pm install-skills`, `install-agents`, `install-hooks`, plus (from M2) "run
+  `godot-devkit check pm` by hand and read the NOTE before the 0.25.0 bump". Nothing is red without
+  them, which is the whole argument for one paragraph. Confirmed absent: no heading and no
+  "at the pin bump" block in `## Unreleased`.
+
+### NIT
+
+- **n1** — the commit summary says the 19 removed ids "all nam[e] `consumer_smoke`'s worktree
+  machinery". 15 do (`test_fresh_project.py`); the other 4 are smoke-row GRADERS — the three
+  `TheSmokeRowGatesAWrongValueNotOnlyAnInventedOne` cases and `test_uid_codec`'s two-formulation pin.
+  `bugs/the-smoke-took-fixture-scale-with-it.md` records all four correctly and quantifies what each
+  lost; the one-line summary compresses past the distinction. The bug file is the authoritative record
+  and it is honest.
+- **n2** — `test_consumer_independence.py:183` claims `milestone`'s three members "all read this
+  checkout alone, which is why CI and a laptop reach the same verdict". `matrix` shells out to `uv`,
+  which reads and writes `~/.cache/uv` and may download an interpreter. The substance holds — no
+  consuming repo is read, which is the rule — but the regex (`\.\./|~/|\$\(HOME\)|\$\$HOME`) cannot see
+  it and the sentence is broader than what is proven.
+
+### What holds, probed rather than read
+
+**The deprecation window changes no verdict for a canonical tree.** All 49 (feature, story) pairs over
+the seven canonical words give `drift_ahead_of_parent` the same answer under `STOCK_STATES` as under
+`LIFECYCLE`; all 21 D2 cases likewise; `work_started` agrees for all 7. The retired words land on the
+correct side of the pivot (`todo` False; `wip`/`blocked`/`review` True). The derived splice produces
+`planning ready todo building wip blocked reviewing review accepted packaging done`, and
+`STALLED_IF_ALL_STORIES_DONE` correctly stops before `reviewing`.
+
+**Rule 5 holds byte-for-byte.** `check pm` output on one tree with no `devkit.toml` and with a
+`devkit.toml` declaring the eleven-word window explicitly: `diff` empty, both exit 0.
+
+**The write refusal is armed by VALUE and the escape hatch works.** `pm story wip` / `pm feature
+review` / `pm milestone todo` / `pm story blocked` are all exit 2 naming their replacement, under both
+the implicit and the explicitly-declared stock set. A project declaring `story_states =
+["todo","doing","done"]` writes `todo` at exit 0 — the window disarms, as documented. `check pm` over
+an unmigrated tree (milestone `todo`, feature `wip`, story `review`) is **exit 0** with the NOTE
+census, no D4 finding.
+
+**`feature done --cascade` does not silently skip a window word.** Over a feature at `reviewing` with
+one story at `review` and one at `reviewing`, it moved the canonical one and printed
+`1 story/ies not done and NOT touched: s1.md(review)`. Disclosed, not silent.
+
+**`verdict.parse` refuses whole, at any position.** Three well-formed blocks → a 3-element list in
+document order. A malformed THIRD block, a separator row in the second, an unknown verdict in the
+second, a `|` inside a reason in the second, and an unterminated second fence each raise
+`MalformedVerdict` naming the line number and the offending line — nothing partial is returned,
+because `parse` is a comprehension and the exception propagates before any list exists. End to end:
+a two-pass record renders `verdict distribution (2)` at exit 0; breaking the second block turns
+`pm ledger report` into **exit 2** naming file, line and text. `report.py:1091` is the only production
+caller.
+
+**Write refusals still refuse rather than mangle.** `scene canonicalize` on a truncated `.tscn`, an
+unclosed node header, a non-UTF-8 scene and an empty file: exit 1 / 1 / 1 / 0, **file bytes unchanged
+in all four**, and the non-UTF-8 case names the offset —
+`REFUSED … not valid UTF-8 (invalid start byte at byte 200) — refusing to rewrite bytes this tool
+cannot read`. A path containing a space works on both read and write.
+
+**A zero census still fails loudly.** `check all` on a freshly `init`'d project with nothing tracked:
+`[check:uid] FAIL — scanned 0 of 0 tracked …`, same for `tres` and `props`, `[check:shell] FAIL — no
+shell scripts found under tools/`, exit 1. No PASS over nothing.
+
+**The user-facing strings the decoupling rewrote render correctly.** `install-hooks` in a scratch repo
+prints "wire `bash tools/hooks/cc-godot-sandbox.sh --self-test` into your static gate (a
+`hooks-self-test`-shaped target inside your own `check`)" — no project name, exit 0.
+
+**Pass 1's M1 landed by option (b).** `checks/hooks.py:75` is now
+`ARM_COMMAND = 'bash tools/setup-hooks.sh'`, the file `install-hooks` writes into every consumer, and
+it agrees with `doctor.sh`. Pass 2's m3 item landed too: `Makefile.devkit:275` now reads
+`make pm ARGS="story building <id>"`. A grep of `src/godot_devkit/repo/` for a retired verb spelling
+returns 3 hits, all source comments explaining the retirement — the shipped guidance, skills, agent
+definitions and `project-devkit.toml` are clean.
+
+**The coverage the deletion cost is filed, not hidden.** `bugs/the-smoke-took-fixture-scale-with-it.md`
+names all six assertions that lost scale with the before/after number for each and what would have to
+be vendored. That is the correct pattern and this pass does not file it again. The one to watch is #3:
+`check props`'s `DEAD` ceiling now rests on a hand-built `props_repo`, and its value came from
+*unanticipated* real constructs — that is where a classifier regression can now slip through.
+
+### The bump — MINOR, and this pass agrees with the ruling
+
+Checked against rule 7's letter rather than assumed:
+
+- `check all`'s stock roster is unchanged; `hooks` is still `KNOWN_GATES['hooks'] = False`.
+- The union ships as the stock default, so **no consumer file must change for a tree to stay green** —
+  proven above by rule-5 equivalence and by an unmigrated tree passing at exit 0.
+- No consumer Makefile or hook invokes a retired verb: the only `pm` line in `Makefile.devkit` now
+  spells `story building`, and the shipped guidance carries no retired spelling.
+- `make smoke`'s deletion is this repo's own Makefile. `Makefile.devkit`'s `smoke` target is a
+  different thing entirely (a consumer's Godot boot scenario, `GDK_SMOKE_SCENARIO`) and is untouched.
+- The genuinely new surfaces are output-format changes — a `[check:pm] NOTE` line and a changed
+  `ARM_COMMAND` string — which rule 6 puts at "minor at least".
+- The one real capability removal is `blocked` (m3), and no consumer Makefile/hook invokes it.
+
+MINOR is right. **No disagreement with the ruling.**
+
+### Not verified
+
+- `make milestone` and `make matrix` end to end — the orchestrator's, deliberately. `make test`
+  (179.8 s), `make gates` and `make hooks-self-test` were each run individually.
+- Anything about a consuming repo's tree, by construction — rule 8, and this pass read nothing outside
+  the checkout. The CHANGELOG's live consumer numbers are unre-derived here and cannot be re-derived
+  here, which is the point of the release.
+- Windows and Linux: reasoned from source. `test_consumer_independence` normalises through
+  `as_posix()` throughout; nothing new in the range adds a platform surface. The 3.11 floor was proven
+  on a real CPython 3.11.15, not asserted.
+- `check test-shape`, `check uid --fix`, the fuzz/replay harnesses, and the agent definitions — outside
+  this range's changes beyond what `make test` covers, and passed by the earlier passes.
+- Whether the 18 unscanned fixture files currently CONTAIN a consumer name: they do not — `config/name`
+  across all ten `project.godot` is a `"<x> fixture"` string in every case. M1 is about the census, not
+  about a present violation.
+
+```text
+verdict: RELEASE-WITH-FIXES
+| id | severity | disposition |
+| M1 | MAJOR | open |
+| M2 | MAJOR | open |
+| m1 | MINOR | open |
+| m2 | MINOR | open |
+| m3 | MINOR | open |
+| m4 | MINOR | open |
+| n1 | NIT | open |
+| n2 | NIT | open |
+```

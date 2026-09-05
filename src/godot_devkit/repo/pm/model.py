@@ -88,6 +88,16 @@ LIFECYCLE = ('planning', 'ready', 'building', 'reviewing', 'accepted',
 # further along than a finished one.
 DEPRECATED_STATES = {'todo': 'ready', 'wip': 'building',
                      'review': 'reviewing', 'blocked': 'building'}
+
+# Of those four, the ones that were REMOVED rather than renamed. `todo`, `wip`
+# and `review` each have a synonym in the new vocabulary and the map above
+# names it. `blocked` does not: it was a first-class story state carrying the
+# one fact this vocabulary cannot express, and its entry above is a POSITION
+# (where the read side places a grain still holding it), not a replacement.
+# The write side must say so, because a refusal that names `building` as the
+# replacement tells the user the word was renamed and loses the distinction
+# on the way out.
+REMOVED_STATES = ('blocked',)
 STOCK_STATES = tuple(
     word
     for canonical in LIFECYCLE

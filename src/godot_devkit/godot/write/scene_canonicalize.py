@@ -201,18 +201,29 @@ def _restore_indexes(doc: TscnDocument, bases: BaseScenes) -> list[str]:
             # lands after the base's own children) and makes the attribute
             # invented, because the two are different claims.
             #
-            # A real-world corpus decides it, in both directions. Its
-            # EDITOR-WRITTEN half — 194 scenes, every one round-tripped through
-            # ResourceSaver — has 1008 created nodes and NOT ONE carries an
-            # `index=`, including 87 whose parent is a node the base provides;
-            # it holds no inherited scene with a written child, so it cannot
-            # speak to that case. The HAND-AUTHORED half — 116 scenes, every one
-            # carrying a `;` comment and so never through ResourceSaver —
-            # contradicts itself exactly there: 10 created nodes directly under
-            # an inherited root carry an append-correct `index=` and 10 more,
-            # same tree, same position, carry none. So a rule that reproduces
-            # the first 10 invents the second 10, and the narrowest form of it
-            # still invents 4.
+            # A real-world corpus decided it, in both directions. RECORDED
+            # here, not re-runnable: the measurement was taken over two whole
+            # game checkouts, and nothing in this package reaches outside its
+            # own tree (CLAUDE.md rule 8). What is committed is a scrubbed
+            # SAMPLE of each half, under `tests/fixtures/corpus/`: 22 `.tscn`
+            # in `editor_written` and 14 `.tscn` in `hand_authored`. So the
+            # counts below cannot be reproduced from this checkout, and finding
+            # fewer scenes here than the numbers name is the sample, not
+            # staleness.
+            #
+            # The EDITOR-WRITTEN half — 194 scenes, every one round-tripped
+            # through ResourceSaver — had 1008 created nodes and NOT ONE
+            # carried an `index=`, including 87 whose parent is a node the base
+            # provides; it held no inherited scene with a written child, so it
+            # cannot speak to that case. The HAND-AUTHORED half — 116 scenes,
+            # every one carrying a `;` comment and so never through
+            # ResourceSaver — contradicts itself exactly there: 10 created
+            # nodes directly under an inherited root carry an append-correct
+            # `index=` and 10 more, same tree, same position, carry none. So a
+            # rule that reproduces the first 10 invents the second 10, and the
+            # narrowest form of it still invents 4. The behaviour those numbers
+            # bought is pinned by fixtures in `tests/test_canonicalize.py`,
+            # which carries the same record and the shapes it argues from.
             #
             # Restoring them is inventing authored state, which is the sibling
             # bug this module already paid for once. Settling it needs the

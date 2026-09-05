@@ -147,6 +147,8 @@ def run() -> int:
     # a word on a deadline.
     if retired:
         census = ', '.join(
+            f'{word} x{n} (REMOVED — nothing replaces it)'
+            if word in model.REMOVED_STATES else
             f'{word} x{n} (replaced by {model.DEPRECATED_STATES[word]})'
             for word, n in retired.items())
         print(f'[check:pm] NOTE — {sum(retired.values())} grain(s) hold a '

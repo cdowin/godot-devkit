@@ -237,13 +237,18 @@ transition graph and nothing checks an EDGE; a graph would only tax whoever used
 while a `sed` of the same line reached the state it refused.
 
 **0.24.0 only: a deprecation window.** The stock set additionally READS the four words this
-vocabulary replaced — `todo` (→ `ready`), `wip` (→ `building`), `blocked` (→ `building`) and
+vocabulary replaced — `todo` (→ `ready`), `wip` (→ `building`), `blocked` (REMOVED — nothing replaces it; record what is blocking the work in the grain and leave the status at `building`) and
 `review` (→ `reviewing`) — so a tree that already holds one keeps a green `check pm` through the
 pin bump instead of turning every such grain into a D4 finding on upgrade day. It is a window, not
 a second vocabulary: the verbs REFUSE to write a retired word and name its replacement, `check pm`
 prints a one-line census of how many grains still hold one, `pm vocabulary` marks them, and **0.25.0
 removes them**. Rewrite them before that bump — a project that declares its OWN `story_states`
-containing `todo` is not in the window and is untouched by any of this. **The verbs report what they noticed and
+containing `todo` is not in the window and is untouched by any of this.
+**Run `godot-devkit check pm` by hand once while you are on 0.24.0 and read its NOTE**: `make check`
+summarises this gate as a PASS *count*, so the census line lands in the transcript under
+`.gate-reports/` and never on your console (`VERBOSE=1` streams it), and a project that stays green
+through 0.24.0 without ever reading it meets the 0.25.0 red with no warning shot.
+**The verbs report what they noticed and
 refuse nothing on process** — stories not at `reviewing`, features not done, named in the output.
 `check pm` catches an invalid state from any route, hand-edit included.
 

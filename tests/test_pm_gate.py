@@ -11,11 +11,13 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+from support import REPO_ROOT
 from support.pm import (
     DAMAGE_FORMS,
     STORY_REL,
@@ -30,6 +32,8 @@ from support.pm import (
 
 from godot_devkit.repo.checks import pm as pm_check
 from godot_devkit.repo.pm import cli, model
+
+INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
 
 class Frontmatter(unittest.TestCase):
     def test_field_ignores_the_body(self):
@@ -343,6 +347,38 @@ class TheDeprecationWindow(unittest.TestCase):
             code, out = run_gate(root)
         self.assertEqual(code, 0, out)
         self.assertNotIn('deprecation window', out)
+
+    def test_the_note_is_invisible_through_make_check_so_the_docs_say_so(self):
+        """The census above is the migration's only live progress signal, and
+        it does not reach a consumer's console. `GDK_SUM_CHECKS` summarises
+        this gate by COUNTING `PASS` lines, so the NOTE — and the PASS line
+        carrying it — land in the transcript under `.gate-reports/` and nowhere
+        else unless `VERBOSE=1` is set. A consumer green through all of 0.24.0
+        who never runs the gate by hand meets the red pre-push on the 0.25.0
+        bump, which is the exact failure the window exists to prevent.
+
+        Both halves are asserted together on purpose. The day the summariser
+        learns to surface a NOTE, this test fails and says the by-hand
+        sentence has become a lie that should be deleted — a doc assertion
+        alone would happily outlive the fact it describes.
+        """
+        include = (INSTALLABLES / 'Makefile.devkit').read_text(encoding='utf-8')
+        summariser = re.search(r'^GDK_SUM_CHECKS\s*:?=(.*)$', include, re.M)
+        self.assertIsNotNone(summariser, 'Makefile.devkit no longer summarises check')
+        self.assertNotIn('NOTE', summariser.group(1),
+                         'the shipped summariser now surfaces NOTE lines — retire '
+                         'the by-hand sentence in the two docs below instead of '
+                         'leaving it to say something untrue')
+        for rel in ('README.md',
+                    'src/godot_devkit/repo/installables/project-devkit.toml'):
+            with self.subTest(doc=rel):
+                text = (REPO_ROOT / rel).read_text(encoding='utf-8')
+                self.assertRegex(
+                    text,
+                    r'(?is)check pm.{0,40}by hand.{0,600}?VERBOSE',
+                    f'{rel} does not tell a consumer to run `check pm` by hand '
+                    f'and read its NOTE, so the window ships with no signal a '
+                    f'consumer can see')
 
     def test_D5_reads_a_retired_word_against_its_parent(self):
         """Live case, seen in a real tree on the day of the bump: a story at

@@ -112,6 +112,12 @@
 # still hold one, and 0.25.0 removes them. Rewrite yours before that bump.
 # Declaring your own set that happens to use one of those words opts out: it is
 # your vocabulary, not the window, and nothing here refuses it.
+#
+# Run `godot-devkit check pm` BY HAND once while you are on 0.24.0 and read its
+# NOTE: `make check` summarises this gate as a PASS count, so the census line
+# lands in the transcript under .gate-reports/ and never on your console
+# (VERBOSE=1 streams it), and a project that stays green through 0.24.0 without
+# ever reading it meets the 0.25.0 red with no warning shot.
 
 # --- the read verbs -----------------------------------------------------------
 # `autoloads` cross-checks each autoload's NAME SUFFIX against what its source

@@ -33,7 +33,7 @@
   its skill, and `milestone` is now `gates hooks-self-test matrix` — **measured green at 178 s with no
   consumer checked out and nothing outside the checkout read**, which is also a test. Every name and
   provenance comment naming a consumer is rewritten to describe the utility, including two user-facing
-  strings the `install-hooks` verb PRINTS. `tests/test_consumer_independence.py` (8 tests) enforces it:
+  strings the `install-hooks` verb PRINTS. `tests/test_consumer_independence.py` (19 tests) enforces it:
   watched red against HEAD, where it named 25+ sites, and it found two things no human pass had — a local
   variable named for a project in `pm/validate.py`'s cycle walker, and that its own patterns do not
   self-match. The fixture corpus slices are renamed for what they ARE (`editor_written`, `hand_authored`)
