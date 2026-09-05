@@ -86,3 +86,4 @@
 {"ts":"2026-09-05T12:53:32Z","kind":"status","grain":"0.24.0","from":"building","to":"reviewing"}
 {"ts":"2026-09-05T14:25:24Z","kind":"status","grain":"0.24.0","from":"reviewing","to":"accepted"}
 {"ts":"2026-09-05T14:25:24Z","kind":"status","grain":"0.24.0","from":"accepted","to":"packaging"}
+{"ts":"2026-09-05T14:25:39Z","kind":"status","grain":"0.24.0","from":"packaging","to":"done"}
