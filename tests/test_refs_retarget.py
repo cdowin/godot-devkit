@@ -34,7 +34,7 @@ def run_cli(*argv):
 def census(output):
     """(files scanned, rewritten, skipped) from the verdict line."""
     return tuple(int(g) for g in re.search(
-        r'\[refs:retarget\] (\d+) file\(s\) scanned, (\d+) rewritten, (\d+) skipped',
+        r'\[refs:retarget\] (\d+) file\(s\) scanned[^,]*, (\d+) rewritten, (\d+) skipped',
         output).groups())
 
 

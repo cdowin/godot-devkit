@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+import unittest.mock
 
 from support import run_check, temp_repo
 
@@ -65,6 +66,20 @@ class DeadPropertyDetection(unittest.TestCase):
         code, out = _run(DRIFTED, '[props]\nexclude_prefixes = ["scenes/"]\n')
         self.assertEqual(code, 1)
         self.assertIn('scanned 0 of 2 tracked', out)
+
+    def test_a_census_that_does_not_balance_is_exit_2_not_a_verdict(self) -> None:
+        # The only exit-2 SELF-check in the eight gates, and the one that would
+        # catch a classifier that stopped accounting: every property `seen` must
+        # land in exactly one of verified / dead / unverified / skipped. Valid
+        # input cannot make it disagree, which is the point — so the defect it
+        # exists for is injected here. Unasserted until 0.25.0's review.
+        with unittest.mock.patch.object(
+                props.Report, 'accounted',
+                property(lambda self: self.seen + 1)):
+            with temp_repo('props_repo', only=CLEAN):
+                code, out = run_check(props)
+        self.assertEqual(code, 2, out)
+        self.assertIn('BUG  census does not balance', out)
 
 
 class ExtraPropertiesCarveOut(unittest.TestCase):

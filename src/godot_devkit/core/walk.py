@@ -130,13 +130,6 @@ class Walk:
             (kept.append(path) if keep(path) else skipped.append(Skip(path, reason)))
         return Walk(tuple(kept), tuple(skipped))
 
-    def partition(self, keep: Callable[[Path], bool], reason: SkipReason) -> tuple['Walk', tuple[Path, ...]]:
-        """`(the narrower walk, the paths it removed)` — for the caller that
-        needs to REPORT the removed entries as findings rather than only count
-        them. The removals stay in `skipped` either way."""
-        removed = tuple(p for p in self.kept if not keep(p))
-        return self.filter(keep, reason), removed
-
     def merge(self, other: 'Walk') -> 'Walk':
         return Walk(self.kept + other.kept, self.skipped + other.skipped)
 
@@ -190,47 +183,6 @@ def _classify(paths: list[Path], kind: Kind) -> Walk:
     return Walk(tuple(kept), tuple(skipped))
 
 
-def entries(path: Path) -> dict[str, str]:
-    """{exact name: 'file'|'dir'} for one directory — EXACT names, always.
-
-    Never `Path.is_file()` for an existence question: macOS resolves
-    `decisions.md` to an existing `DECISIONS.md` and Linux does not, so the same
-    tree would be clean on one platform and drifting on the other. A listing
-    compares the bytes git stores.
-
-    Not a `Walk`: nothing is filtered, so there is nothing to disclose. This is
-    the raw listing the case-sensitivity rules read.
-    """
-    try:
-        return {p.name: ('dir' if p.is_dir() else 'file') for p in path.iterdir()}
-    except OSError:
-        return {}
-
-
-def children(path: Path, kind: Kind = Kind.ANY) -> Walk:
-    """One directory's immediate entries, sorted. A missing directory is an
-    empty walk, never a crash — the callers all treat "no such tree" as "no
-    such entries"."""
-    try:
-        raw = sorted(path.iterdir())
-    except OSError:
-        return Walk(())
-    return _classify(raw, kind)
-
-
-def matching(path: Path, pattern: str, kind: Kind = Kind.ANY) -> Walk:
-    """One directory's entries matching a glob PATTERN, sorted.
-
-    The pattern is the caller's literal; ids reaching here as patterns is a
-    separate defect the id validators own (`model.id_is_literal`).
-    """
-    try:
-        raw = sorted(path.glob(pattern))
-    except OSError:
-        return Walk(())
-    return _classify(raw, kind)
-
-
 def descendants(path: Path, kind: Kind = Kind.ANY, suffix: str | None = None,
                 pattern: str = '*') -> Walk:
     """Everything under a tree, recursively, sorted.
@@ -254,32 +206,3 @@ def descendants(path: Path, kind: Kind = Kind.ANY, suffix: str | None = None,
         (kept.append(candidate) if candidate.suffix.lower() == want
          else skipped.append(Skip(candidate, SkipReason.SUFFIX_MISMATCH)))
     return Walk(tuple(kept), tuple(skipped))
-
-
-def named(root: Path, name: str, prune: tuple[str, ...] = ()) -> tuple[list[Path], list[Path]]:
-    """`(files named exactly `name`, files whose LOWERCASED name matches)`.
-
-    EXACT names, from a directory listing — never `rglob(name)`. A pattern whose
-    final segment holds no wildcard resolves through `Path.exists()`, so on
-    macOS `rglob('decisions.md')` answers an on-disk `DECISIONS.md` with the
-    path `x/decisions.md`: a path that does not exist, and a NON-EMPTY list,
-    which is what silences a scanned-nothing guard while every other log goes
-    unopened.
-
-    The case variants come back SEPARATELY to be reported: never folded in (the
-    two platforms would emit opposite findings about the same file) and never
-    dropped (a log the rule cannot see is a log the rule has not checked).
-
-    `prune` names directories the walk does not descend into.
-    """
-    exact: list[Path] = []
-    variants: list[Path] = []
-    low = name.lower()
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in prune]
-        for entry in filenames:
-            if entry == name:
-                exact.append(Path(dirpath) / entry)
-            elif entry.lower() == low:
-                variants.append(Path(dirpath) / entry)
-    return sorted(exact), sorted(variants)

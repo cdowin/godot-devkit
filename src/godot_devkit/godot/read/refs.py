@@ -64,7 +64,12 @@ def exclude_prefixes() -> tuple[str, ...]:
 
 
 def iter_files(root: Path, exclude: tuple[str, ...], glob: str,
-               include_tests: bool) -> list[Path]:
+               include_tests: bool) -> walk.Walk:
+    """The walk, not its kept half. `run()` merges these and prints ONE census
+    off the result: before 0.25.0's review each caller ended `list(found.kept)`,
+    which dropped the skipped half on the floor, and an `exclude_prefixes` that
+    ate the tree printed `(no references found)` — byte-identical to a symbol
+    with genuinely no references (rule 4)."""
     def _is_excluded(path: Path) -> bool:
         return any(_relpath(root, path).startswith(prefix) for prefix in exclude)
 
@@ -73,7 +78,7 @@ def iter_files(root: Path, exclude: tuple[str, ...], glob: str,
     if not include_tests:
         found = found.filter(lambda p: not _relpath(root, p).startswith('tests/'),
                              SkipReason.EXCLUDED_PATH)
-    return list(found.kept)
+    return found
 
 
 def strip_comment(line: str) -> str:
@@ -217,17 +222,22 @@ def run(symbol: str, include_tests: bool) -> int:
                           'never an empty or blank one')
     root = repo_root()
     exclude = exclude_prefixes()
-    gd_files = iter_files(root, exclude, GD_GLOB, include_tests)
-    scene_files: list[Path] = []
+    gd_walk = iter_files(root, exclude, GD_GLOB, include_tests)
+    scene_walk = walk.Walk(())
     for glob in SCENE_GLOBS:
-        scene_files.extend(iter_files(root, exclude, glob, include_tests))
-    scene_files.sort()
+        scene_walk = scene_walk.merge(iter_files(root, exclude, glob, include_tests))
+    gd_files = list(gd_walk)
+    scene_files = sorted(scene_walk)
 
     hits_by_kind = scan_gd_files(root, symbol, gd_files)
     hits_by_kind['scene_ref'] = scan_scene_refs(root, symbol, scene_files)
 
     total = 0
     print(f'# refs: {symbol}')
+    # The census, before the hits: a scan narrowed to nothing must not read as
+    # a symbol with no references. `census()` is the only way to get the number,
+    # and it carries what the number left out.
+    print(f'# {gd_walk.merge(scene_walk).census("file(s) searched")}')
     for title, kind in SECTION_TITLES:
         hits = hits_by_kind[kind]
         total += len(hits)

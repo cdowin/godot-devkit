@@ -52,7 +52,7 @@ GD_GLOB = '*.gd'
 GD_COMMENT_CHAR = '#'
 EXT_RESOURCE_OPEN = f'[{EXT_RESOURCE_KIND} '
 QUOTE = '"'
-CENSUS = '[refs:retarget] {files} file(s) scanned, {rewritten} rewritten, {skipped} skipped'
+CENSUS = '[refs:retarget] {census}, {rewritten} rewritten, {skipped} skipped'
 
 SKIP_COMMENT = 'inside a comment — not a reference'
 SKIP_NOT_CALL = 'an exact quoted path outside a preload/load call — verify by hand'
@@ -125,20 +125,23 @@ def _classify(line: _Line, old: str, is_scene: bool) -> tuple[list[tuple[int, in
     return spans, skips
 
 
-def _scan_files(root: Path) -> list[Path]:
+def _scan_files(root: Path) -> walk.Walk:
+    """The walk, not its kept half — the census line discloses what the
+    `exclude_prefixes` removed. Before 0.25.0's review this ended
+    `list(found.kept)`, so a sweep narrowed to nothing reported the same
+    "0 file(s) scanned" as a repo that genuinely holds none (rule 4)."""
     exclude = exclude_prefixes()
 
-    def kept(glob: str) -> list[Path]:
-        found = walk.descendants(root, Kind.ANY, pattern=glob).filter(
+    def kept(glob: str) -> walk.Walk:
+        return walk.descendants(root, Kind.ANY, pattern=glob).filter(
             lambda p: not any(str(p.relative_to(root)).startswith(prefix)
                               for prefix in exclude),
             SkipReason.EXCLUDED_PATH)
-        return list(found.kept)
 
-    files: list[Path] = []
+    found = walk.Walk(())
     for glob in (*SCENE_GLOBS, GD_GLOB):
-        files.extend(kept(glob))
-    return sorted(files)
+        found = found.merge(kept(glob))
+    return found
 
 
 def _retarget_file(path: Path, rel: str, old: str, new: str,
@@ -188,7 +191,8 @@ def run(old: str, new: str, dry_run: bool) -> int:
         return EXIT_FINDINGS
     print(f'retarget  {old} -> {new}'
           + ('  (dry run — nothing written)' if dry_run else ''))
-    files = _scan_files(root)
+    found = _scan_files(root)
+    files = sorted(found)
     rewritten = skipped = 0
     for path in files:
         wrote, skips, report = _retarget_file(
@@ -197,7 +201,8 @@ def run(old: str, new: str, dry_run: bool) -> int:
         skipped += skips
         for line in report:
             print(line)
-    print(CENSUS.format(files=len(files), rewritten=rewritten, skipped=skipped))
+    print(CENSUS.format(census=found.census('file(s) scanned'),
+                        rewritten=rewritten, skipped=skipped))
     return EXIT_FINDINGS if skipped else EXIT_OK
 
 

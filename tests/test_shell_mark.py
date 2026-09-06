@@ -95,3 +95,38 @@ def test_a_hand_applied_mark_is_refused_by_name(tmp_path):
     code, out = run_pytest(tmp_path)
     assert code != 0, f'the hand-applied mark ran anyway:\n{out}'
     assert 'test_pure.py' in out and 'DERIVED' in out and 'no tests ran' in out, out
+
+
+def test_no_unmarked_module_spawns_by_a_spelling_the_derivation_skips():
+    """The fourth fact, restored in 0.25.0's review: the derivation reads
+    `subprocess` and the support call graph, so a module that reaches a process
+    by ANOTHER spelling is unmarked and silently stops running on three of four
+    interpreters — the exact hazard this module's docstring names, and the one
+    the deleted `Census`/`NoUnreadSpawnSpelling` pair used to hold.
+
+    Static and cheap: the spellings the AST derivation does not look for, asked
+    of every module it left unmarked. A new one here is a finding either way —
+    either the module wants the mark, or the derivation wants the spelling.
+    """
+    import ast as _ast
+
+    from conftest import module_spawns
+
+    unread = {('os', 'system'), ('os', 'popen'), ('os', 'posix_spawn'),
+              ('os', 'spawnv'), ('os', 'spawnvp'), ('os', 'execv'), ('os', 'execvp'),
+              ('pty', 'spawn'), ('commands', 'getoutput')}
+    offenders: list[str] = []
+    for path in sorted(Path(__file__).resolve().parent.glob('test_*.py')):
+        if module_spawns(path):
+            continue                      # already marked; the mark is the point
+        tree = _ast.parse(path.read_text(encoding='utf-8'))
+        for node in _ast.walk(tree):
+            if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
+                    and isinstance(node.func.value, _ast.Name)
+                    and (node.func.value.id, node.func.attr) in unread):
+                offenders.append(f'{path.name}:{node.lineno}: '
+                                 f'{node.func.value.id}.{node.func.attr}()')
+    assert not offenders, (
+        'an UNMARKED module spawns by a spelling tests/conftest.py does not read, '
+        'so it runs on the floor only and nothing goes red when it stops:\n  '
+        + '\n  '.join(offenders))

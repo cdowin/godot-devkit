@@ -21,7 +21,7 @@
 # project that `godot-check` stages (tools/dev/godot_devkit_on_fixture.sh),
 # with no devkit.toml in that scratch tree either. Two kits read one file, so
 # each roster has its own key; a name in the wrong one is refused by both.
-all = ["doc", "pm", "shell", "hooks"]
+all = ["doc", "pm", "shell", "hooks", "budget", "grain-shape"]
 
 # This package's OWN gates, as make targets `make check` runs after the roster
 # above — the same seam a consumer uses. `godot-check` is Makefile.tiers'
@@ -56,7 +56,7 @@ milestone = "make milestone"
 # explain in the commit that caused it — never a number to raise in passing.
 [tests]
 budget = { pyunit = 2, test = 35 }
-cases  = { pyunit = 44, test = 215 }
+cases  = { pyunit = 47, test = 221 }
 
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines

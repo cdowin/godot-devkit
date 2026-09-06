@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **At the pin bump — the consolidated list, because this release is BREAKING and a review asked for
+  it.** In order: **add `DEVKIT_VERSION` above the include** and run agentic-sdlc's `install-gates` —
+  this package no longer writes `Makefile.devkit`, and without that pin `make check`, `precommit` and
+  `milestone` have no definition. Then `install-runners --force`: `Makefile.tiers` is new, it carries
+  the Godot roster on the seam `Makefile.devkit` `-include`s, and the old `Makefile.devkit` this
+  package used to write must go. Then move your Godot roster from `[checks] all` to **`[checks]
+  godot`** — `all` is agentic-sdlc's roster in the same `devkit.toml` and each kit refuses the other's
+  names — and add `[gates] extra = ["godot-check"]` to join the eight gates to `make check`. Then
+  expect **five gates that were outside the default aggregate to start reddening** (`defaults`, `rng`,
+  `tres-comment`, `unit-disk`, `test-shape`); narrow with `[checks] godot = [...]` if you are not ready
+  for one. Finally, anything parsing `refs` output gains a census line above the hits. Everything this
+  package used to do that is not a scene verb or a Godot gate — `pm`, `init`, `check
+  doc|shell|pm|hooks|repo-hygiene`, `gates-extra`, every other `install-*` — is now agentic-sdlc's,
+  behind the pin you added in step one.
+
 - **BREAKING — the repo-discipline family leaves (0.25.0).** `pm`, `init`, `check doc|shell|pm|hooks|
   repo-hygiene`, `gates-extra` and every installer but `install-runners` are gone from this package; each
   of those verbs now exits 2 with one line naming `agentic-sdlc`, the package they moved to. A consumer
@@ -28,13 +43,27 @@
 - **The suite is the Godot kit's, and lean — and `pyunit` is the story rung.** The modules that proved
   the repo family left with it; of what remained, every case that proved a rule at a second altitude,
   replayed a row the shipped corpora already hold, or added no failure mode went, each named with its
-  subsumer in the commit: 679 → 576 collected, `make test` 72s → 47s, test-to-source statements 1.15 →
-  1.10. Fifteen deliberately-broken probes — one per Godot gate, per write verb, the installer and the
-  parse→serialise identity — redden what is left; `check tres` was the one a blind detector slipped past,
-  and its cheapest case now carries the finding. `make pyunit` (the suite minus the spawns, seconds) is
-  `[verify] story`; `make test` is `[verify] feature`. `[tests] budget` and `[tests] cases` in
-  `devkit.toml` hold both tiers ten percent above the measurement, graded by `agentic-sdlc check budget`
-  off a census the tier recipes now file on the ledger row.
+  subsumer in the commit; then a second pass proved each surviving rule ONCE, merging what was asserted
+  per verb, per gate and per spelling into one arrangement each. Across both: **679 → 201 collected**,
+  `make test` **72s → 29s**, test-to-source statements **1.15 → 0.66**. Sixteen deliberately-broken
+  probes — one per Godot gate, per write verb, the installer, the parse→serialise identity and
+  `core/walk`'s length refusal — redden what is left. Three holes the passes opened or inherited were
+  found by probing rather than reading and are closed with the cases that hold them: `core/config.py`'s
+  empty-list and non-string refusals (whose only cases left with the repo family), `check tres`'s
+  zero-census FAIL, and `props`' census-balance exit 2. `make pyunit` (the suite minus the spawns,
+  seconds) is `[verify] story`; `make test` is `[verify] feature`. `[tests] budget` and `[tests] cases`
+  in `devkit.toml` hold both tiers ten percent above the measurement, graded by `agentic-sdlc check
+  budget` off a census the tier recipes file on the ledger row — and `budget` and `grain-shape` are in
+  `[checks] all`, so `make check` actually runs them.
+- **`refs` and `refs --retarget` disclose what their scope left out.** Both printed only their kept
+  half, so an `exclude_prefixes` that ate the tree read as `(no references found)` — byte-identical to a
+  symbol with genuinely no references, which is rule 4's cardinal sin in the read plane. `refs` now
+  prints `# N file(s) searched[, M path(s) excluded from scope]` above the hits and `refs --retarget`'s
+  census line carries the same disclosure. **Output-shape change: minor at least for anything parsing
+  either.** `core/` also sheds the repo half's dead primitives (`walk.entries/children/matching/named`,
+  `Walk.partition`, `config.section_declared` — 87 lines, no call site in `src/` or `tests/`), and
+  `test_boundaries.py` now forbids reaching for a `Walk`'s kept half outside `core/walk.py`, which is
+  the rule `walk.py`'s docstring had been promising and nothing enforced.
 - **Every surface says the Godot kit alone.** `README.md` is the scene verbs, the eight gates, the two
   pins and `install-runners`; `CLAUDE.md` is the hard rules of a scene kit and the ladder as this repo
   runs it; `SDLC.md` points at `docs/sdlc-protocol.md` and keeps only this repo's own conventions;

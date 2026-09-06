@@ -305,7 +305,10 @@ class TrackedButDeleted(unittest.TestCase):
         with a path and no uid — is reported: amended in 0.25.0's probe pass,
         where a `check tres` whose path-only detector had gone blind reddened
         NOTHING in the suite (every tres case asked only for a PASS or a
-        census). This is the cheapest tres run, so it carries the finding."""
+        census). This is the cheapest tres run, so it carries the finding —
+        and, since 0.25.0's review, the ZERO-CENSUS half too: `tres` was the
+        one gate of eight whose rule-4 guard was asserted by nothing, so
+        disarming `if not checked:` left the whole suite green."""
         with temp_repo('uid_repo', only=DRIFTED) as root:
             (root / 'data/drifted.tres').unlink()
             scene = root / 'scenes/drifted.tscn'
@@ -316,6 +319,12 @@ class TrackedButDeleted(unittest.TestCase):
         self.assertIn(self.GAP, out)
         self.assertIn('PATH-ONLY  scenes/drifted.tscn:6:', out)
         self.assertIn('1 path-only ext_resource ref(s) across 2 file(s)', out)
+        # Rule 4's half: a tree holding no .tres/.tscn at all FAILS rather
+        # than PASSing over nothing, and says which "0" it means.
+        with temp_repo('uid_repo', only=[]):
+            empty_code, empty_out = run_check(tres)
+        self.assertEqual(empty_code, 1, empty_out)
+        self.assertIn('[check:tres] FAIL — scanned 0 of 0 tracked', empty_out)
 
 
 class CliRouting(unittest.TestCase):

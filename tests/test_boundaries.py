@@ -56,8 +56,8 @@ CONFIG_IMPORT_ALLOWLIST = frozenset((
 # (module-relative posix path, tree) for every shipped module — enumerated
 # through `core.walk`, because a test that hand-rolled its own `rglob` to police
 # `rglob` would be the joke that writes itself. The census floor sits here, where
-# every scan goes through: well under the real count (~48), well over the zero a
-# moved SRC produces.
+# every scan goes through: well under the real count (41 since the repo family
+# left in 0.25.0), well over the zero a moved SRC produces.
 def _sources() -> list[tuple[str, ast.Module]]:
     from godot_devkit.core import walk
     found = walk.descendants(SRC, walk.Kind.FILE, suffix='.py')
@@ -142,7 +142,13 @@ class OneWalkOneApply(unittest.TestCase):
         offenders: list[str] = []
         for rel, tree in _sources():
             if rel == WALK_MODULE:
-                self.assertGreaterEqual(len(_enumeration_sites(rel, tree)), 4)
+                # ONE enumerator since 0.25.0's review took `entries`,
+                # `children`, `matching` and `named` out — every one of them
+                # dead in src/ and tests/ once the repo family left. The floor
+                # is what stops the allowlist below from passing vacuously: if
+                # `descendants` stopped enumerating, every offender could move
+                # anywhere and this would still be green.
+                self.assertGreaterEqual(len(_enumeration_sites(rel, tree)), 1)
             else:
                 offenders.extend(f'enumerates outside {WALK_MODULE}: {site}'
                                  for site in _enumeration_sites(rel, tree))
@@ -169,6 +175,23 @@ class OneWalkOneApply(unittest.TestCase):
         self.assertIn('.census(', str(refusal.exception))
         # The halves themselves still measure — the refusal is on the whole.
         self.assertEqual((1, 1), (len(found.kept), len(found.skipped)))
+
+    # PRIMITIVE 1, the third half — the rule `core/walk.py`'s own docstring
+    # promises. Until 0.25.0's review it did not exist, and both surviving
+    # callers ended `list(found.kept)`: the skipped half dropped on the floor,
+    # which is how `refs` came to print "(no references found)" over a census
+    # of zero. Reaching for the kept half is how a renderer gets a number
+    # without what the number left out — iterate the Walk, or ask `census()`.
+    # AST, not grep: the two callers still SAY `found.kept` in their docstrings.
+    def test_no_module_reaches_for_a_walks_kept_half(self):
+        offenders = [f'{rel}:{node.lineno}'
+                     for rel, tree in _sources() if rel != WALK_MODULE
+                     for node in ast.walk(tree)
+                     if isinstance(node, ast.Attribute) and node.attr == 'kept']
+        self.assertEqual([], offenders, (
+            "a Walk's kept half, reached outside core/walk.py. Iterate the Walk "
+            '(`list(found)`) for the paths, or `found.census(label)` for a number '
+            'that carries what it left out:\n  ' + '\n  '.join(offenders)))
 
     def test_every_spelling_of_open_is_classified_by_its_real_mode(self):
         # Both spellings, every mode slot, and the unreadable mode — the whole
@@ -227,6 +250,61 @@ class Imports(unittest.TestCase):
             'back whatever TOML holds, and a string is iterable:\n  ' + '\n  '.join(offenders)))
         # Not vacuous: most of the allowlist really does import a config read today.
         self.assertGreaterEqual(sum(bool(hits) for hits in reads.values()), 10)
+
+
+class ConfigValuesCrossTheGuards(unittest.TestCase):
+    # PRIMITIVE 4, the other half. `Imports` proves a raw config read is only
+    # IMPORTED by an allowlisted module; this proves the guards those modules
+    # call actually refuse. 0.25.0's review found two of them — `str_tuple`'s
+    # empty-list refusal and `text()`'s non-string refusal — asserted by
+    # nothing: their only cases lived in `test_pm_gate.py` / `test_gates_extra.py`,
+    # repo-family modules deleted in 621970e, and `core/config.py` did not
+    # leave with the family. Disarming either left the whole suite green while
+    # `[unit_disk] roots = []` silently scanned the entire repo and PASSed.
+    #
+    # Each gate reaches only the readers its own one config case happens to
+    # use, so the door is asked here instead, at the altitude it lives at: a
+    # dict and a call, no temp tree and no process.
+    def test_every_guard_refuses_the_value_that_would_mean_its_reverse(self):
+        from godot_devkit.core import config
+        # (label, callable, section dict, fragment the refusal must name)
+        rows = (
+            ('str_tuple bare string', lambda c: c.str_tuple({'k': 'addons/'}, 's', 'k', ('d',)),
+             'must be a list of strings'),
+            ('str_tuple empty list', lambda c: c.str_tuple({'k': []}, 's', 'k', ('d',)),
+             'is empty — remove the key'),
+            ('str_tuple non-string member', lambda c: c.str_tuple({'k': ['a', 3]}, 's', 'k', ('d',)),
+             'must be a list of strings'),
+            ('text non-string', lambda c: c.text({'k': 17}, 's', 'k', 'd'),
+             'must be a string'),
+            ('flag non-bool', lambda c: c.flag({'k': 'yes'}, 's', 'k', False),
+             'must be true/false'),
+            ('table non-table', lambda c: c.table({'k': ['a']}, 's', 'k', {}),
+             'must be a table'),
+            ('str_tuple_table non-table', lambda c: c.str_tuple_table({'k': 'a'}, 's', 'k', {}),
+             'must be a table'),
+            ('number_table non-table', lambda c: c.number_table({'k': 'a'}, 's', 'k', {}),
+             'must be a table'),
+            ('pattern bad regex', lambda c: c.pattern({'k': '('}, 's', 'k', 'd'),
+             'is not a valid regex'),
+            ('number non-integer', lambda c: c.number({'k': 'a'}, 's', 'k', 1),
+             'must be an integer'),
+        )
+        for label, call, fragment in rows:
+            with self.subTest(guard=label):
+                with self.assertRaises(config.ConfigError) as refusal:
+                    call(config)
+                self.assertIn(fragment, str(refusal.exception))
+
+    def test_an_absent_key_takes_the_fallback_rather_than_refusing(self):
+        # The other direction, and the reason the guards cannot simply refuse
+        # everything: rule 5 — a repo with no devkit.toml behaves identically
+        # to one declaring the defaults.
+        from godot_devkit.core import config
+        self.assertEqual(('d',), config.str_tuple({}, 's', 'k', ('d',)))
+        self.assertEqual('d', config.text({}, 's', 'k', 'd'))
+        self.assertIs(False, config.flag({}, 's', 'k', False))
+        self.assertEqual(1, config.number({}, 's', 'k', 1))
 
 
 if __name__ == '__main__':
