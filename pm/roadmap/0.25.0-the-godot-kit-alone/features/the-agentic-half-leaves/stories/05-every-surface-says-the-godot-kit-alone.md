@@ -27,3 +27,7 @@ depends_on: []
 ## Out of scope
 
 History. The 0.14–0.24 records are not rewritten.
+
+## Close
+
+done: 2d4b7d9 — README, CLAUDE.md (149 lines), SDLC.md and two-kits.md say the Godot kit alone; both version sites 0.25.0; CHANGELOG names what a consumer loses, the second pin, `[checks] godot`, `install-runners`' outputs and `pyunit`; `[doc] scope` widened and `check doc` holds nine docs clean.
