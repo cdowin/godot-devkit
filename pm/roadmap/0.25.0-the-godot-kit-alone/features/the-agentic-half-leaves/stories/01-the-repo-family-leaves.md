@@ -3,8 +3,8 @@ id: 0.25.0/the-agentic-half-leaves/01-the-repo-family-leaves
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: src/godot_devkit/repo/ is gone, and the CLI routes only Godot verbs
-status: planning
-owner:
+status: building
+owner: claude
 depends_on: []
 ---
 
@@ -27,3 +27,7 @@ depends_on: []
 ## Out of scope
 
 Rewriting a Godot verb. Nothing under `godot/` changes in this story.
+
+## Close
+
+done: 621970e — src/godot_devkit/repo/ deleted, the fourteen Godot installables moved to godot/installables/ with a narrowed install-runners beside them, cli.py routes the Godot verbs and exits 2 on a retired one naming agentic-sdlc, selfcheck and [gates] extra dropped, nineteen family tests deleted and six amended.
