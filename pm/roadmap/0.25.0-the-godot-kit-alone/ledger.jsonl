@@ -213,3 +213,5 @@
 {"ts":"2026-09-06T16:49:06Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1240,"census":43}
 {"ts":"2026-09-06T16:49:06Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/06-the-tree-closes-through-the-belts","from":"building","to":"done"}
 {"ts":"2026-09-06T16:49:43Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":29353,"census":201}
+{"ts":"2026-09-06T16:50:43Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30807,"census":201}
+{"ts":"2026-09-06T16:50:43Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves","from":"building","to":"done"}
