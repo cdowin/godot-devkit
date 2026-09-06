@@ -1,47 +1,31 @@
 #!/usr/bin/env bash
-# cc-stop-gate.sh — Claude Code Stop hook: the verification-before-done gate.
-#
-# When an AGENT tries to finish, run the project's fast gate. On red, block the
-# stop (exit 2) and return the gate output so the agent fixes before truly
-# finishing — enforcing "verify before claiming done" structurally instead of
-# relying on the LLM to remember.
-#
-# AGENT-CONTEXT ONLY. The orchestrator's main session (the trunk tree) stops
-# constantly mid-orchestration and MUST NOT pay this cost — agent context is a
-# worktree scope marker (written by tools/dev/agent-worktree.sh) or the
-# DEVKIT_AGENT_SCOPE env, and everything else exits 0 ungated. This is THE
-# load-bearing safety property: a false trigger would wedge the orchestrator
-# every turn. The full pre-merge gate stays an orchestrator step, not a
-# per-stop cost.
-#
-# Protocol: Claude Code feeds the Stop event as JSON on stdin (cwd,
-# stop_hook_active). Exit 0 = allow stop; exit 2 = block, stderr returned to
-# the agent.
+# cc-stop-gate.sh — Claude Code Stop hook: when an AGENT tries to finish, run
+# the project's fast gate; on red, block the stop (exit 2) with the gate output
+# on stderr so the agent fixes before claiming done. Agent context only — the
+# scope marker or DEVKIT_AGENT_SCOPE; the orchestrator's trunk session exits 0
+# ungated, because it stops constantly. Stdin: the Stop event JSON
+# (cwd, stop_hook_active). Exit 0 = allow, exit 2 = block.
 set -eu
 
 # --- project config (yours to edit after install — the file is your repo's) --
-# The static slice of the gate, run first. Must be cheap enough to pay on
-# every agent stop.
-# godot-devkit itself: `gates` is its static gate (check all, under a second) and
-# the hook self-tests stand in for a unit slice — the suite is one tier
-# (`make test`, minutes) and is the per-change gate run by hand, not a Stop-time one.
-GATE_STATIC=(make gates)
-# The unit tier, invoked as: "${GATE_UNIT[@]}" SYS="<derived slices>". An empty
-# SYS means the whole tier — never silently narrower than "all".
-GATE_UNIT=(make hooks-self-test)
-# Where per-system unit slices live: a changed top-level dir <d> with a
-# matching <UNIT_SLICE_ROOT>/<d>/ becomes a slice.
+# The static slice of the gate, run first; cheap enough to pay on every agent stop.
+# godot-devkit: `check` is the agentic-sdlc gates plus this package's own
+# `selfcheck` ([gates] extra), under a second together.
+GATE_STATIC=(make check)
+# The unit tier, run as "${GATE_UNIT[@]}" SYS="<slices>"; an empty SYS is the whole tier.
+# godot-devkit: `unit` is the suite minus the spawns (-m "not shell"), seconds;
+# it has no per-system slices, so SYS is accepted and ignored.
+GATE_UNIT=(make unit)
+# A changed top-level dir <d> with a <UNIT_SLICE_ROOT>/<d>/ becomes a slice.
 UNIT_SLICE_ROOT="tests/unit"
-# The branch agents' worktrees are diffed against when the scope marker does
-# not record one.
+# The diff base when the scope marker records none. godot-devkit works on
+# `milestone/<id>` branches cut from `main` (SDLC.md §1); there is no staging.
 DEFAULT_BASE="main"
 # The per-agent worktree marker written by tools/dev/agent-worktree.sh.
 SCOPE_MARKER=".agent-scope"
 # -----------------------------------------------------------------------------
 
-# Agent-context predicate. INLINE, not sourced: an installed hook is a
-# standalone file, and `source` of a library the repo may lack fails the hook
-# instead of the check.
+# Inline, not sourced: a library the repo may lack would fail the hook.
 is_agent_context() {
 	local root="${1:-}"
 	if [ -z "$root" ]; then
@@ -52,10 +36,13 @@ is_agent_context() {
 }
 
 INPUT="$(cat)"
+# Unreadable payload: exit 0 with the reason, before the agent-context test.
+case "${INPUT#"${INPUT%%[![:space:]]*}"}" in
+	'{'*) ;;
+	*) echo "cc-stop-gate: payload is not JSON; allowing the stop" >&2; exit 0 ;;
+esac
 
-# grep extractors are adequate here: the fields this hook reads are a path and
-# a boolean, which never carry an escaped quote. A hook reading a COMMAND must
-# use a real JSON parser instead (see cc-commit-pathspec.sh for why).
+# grep extractors suffice for a path and a boolean; a COMMAND needs a real parser.
 json_str() {
 	printf '%s' "$INPUT" \
 		| grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
@@ -69,8 +56,7 @@ json_bool() {
 		| grep -oE '(true|false)' || true
 }
 
-# Re-entrancy guard: if Claude Code is already continuing because of a prior
-# Stop-hook block, do not block again (avoids a gate loop).
+# Re-entrancy guard: a stop already continuing from a prior block is not blocked again.
 [ "$(json_bool stop_hook_active)" = "true" ] && exit 0
 
 SESSION_CWD="$(json_str cwd)"
@@ -80,22 +66,15 @@ REPO_ROOT="$(git -C "$SESSION_CWD" rev-parse --show-toplevel 2>/dev/null || true
 # Not inside a repo → nothing to gate.
 [ -n "$REPO_ROOT" ] || exit 0
 
-# Agent-context only — the trunk session stops constantly and must not be
-# gated. Tested against the SESSION's repo root, not this process's CWD.
+# Tested against the SESSION's repo root, not this process's cwd.
 is_agent_context "$REPO_ROOT" || exit 0
 
 cd "$REPO_ROOT"
 
-# No Makefile → no gate to run. Fail OPEN, out loud in the design: a stop gate
-# installed ahead of the dev loop must not wedge every agent stop in the
-# meantime.
+# No Makefile, no gate: fail open.
 [ -f Makefile ] || exit 0
 
-# Scope the unit tier to the changed-system slices, not the whole tier, so a
-# long agent session that stops many times pays a sub-suite cost. Derive SYS=
-# from the diff vs the worktree's base branch: each changed path's leading dir
-# that ALSO has a <UNIT_SLICE_ROOT>/<dir>/ slice becomes a slice. No mapping →
-# whole tier (safe default; never silently narrower than "all").
+# Scope the unit tier to the changed-system slices; no mapping means the whole tier.
 UNIT_SLICES=""
 base_branch="$DEFAULT_BASE"
 if [ -f "${REPO_ROOT}/${SCOPE_MARKER}" ]; then
@@ -112,9 +91,7 @@ if git rev-parse --verify --quiet "$base_branch" >/dev/null 2>&1; then
 	done
 fi
 
-# Run the gate, captured so the agent gets the failure text, not a bare exit
-# code. mktemp without -t (GNU/BSD-consistent — BSD treats -t's arg as a prefix
-# and appends its own suffix, leaving the literal XXXXXX unsubstituted).
+# Captured so the agent gets the failure text; mktemp without -t, which BSD treats as a prefix.
 GATE_LOG="$(mktemp "${TMPDIR:-/tmp}/cc-stop-gate.XXXXXX")"
 trap 'rm -f "$GATE_LOG"' EXIT
 

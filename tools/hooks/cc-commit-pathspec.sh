@@ -1,56 +1,17 @@
 #!/usr/bin/env bash
-# cc-commit-pathspec.sh — Claude Code PreToolUse Bash hook: a commit names its
-# own paths.
-#
-# `git commit` commits the WHOLE INDEX. In this shared tree — several agents,
-# one working directory, one index — an explicit `git add <files>` buys you
-# nothing: whatever a peer staged (or whatever a tool auto-staged) rides along
-# in YOUR commit. The rule is `git commit -m "..." -- <paths>`, it is written in
-# .claude/rules/execution.md (or wherever your repo writes it down), it is
-# restated by hand in every dispatch prompt, and it is still breached: a
-# peer's untracked sidecar rides into somebody else's commit.
-#
-# WHY A BLOCK AND NOT A WARNING. The branch is shared and pushed, so the repo is
-# forward-only: a swept commit cannot be reset or amended away, only apologised
-# for in a follow-up commit. A PreToolUse warning is delivered AFTER the command
-# runs, i.e. after the irreversible event — it could only ever narrate the
-# damage. The block costs one round trip and the fix is mechanical.
-#
-# WHY IT WILL NOT ANNOY ANYONE INTO DISABLING IT. Every commit for which a
-# pathspec is not the answer is detected and waved through, not argued with:
-#   - a pathspec already present (`--`, a bare path argument, or
-#     `--pathspec-from-file` in either spelling — paths named via a file)
-#   - `--amend` (a different rule bans it here; a pathspec is not its fix)
-#   - `--dry-run`, `--help`/`-h`, `--interactive`/`--patch`
-#   - a merge / rebase / cherry-pick / revert in progress, where git itself
-#     refuses a partial commit ("cannot do a partial commit during a merge")
-# What is left is exactly the case whose fix IS a pathspec — including `-a`,
-# which in a shared tree is the sweep in its purest form.
-#
-# The git pre-commit hook cannot enforce this: by the time it runs, a pathspec
-# has already been folded into the commit git is building, and the hook sees
-# only the resulting tree. This is the only layer that can see the intent.
-#
-# Protocol: Claude Code feeds the PreToolUse event as JSON on stdin (tool_name,
-# tool_input.command, cwd). Exit 0 = allow, exit 2 = BLOCK with stderr returned
-# to the agent. Any internal failure exits 0 (fail open).
+# cc-commit-pathspec.sh — Claude Code PreToolUse Bash hook: a `git commit` must
+# name its own paths (`-- <paths>`), because in a shared tree it commits the
+# whole index and a pushed branch is forward-only. Waved through: a pathspec
+# already present (`--`, a bare path, `--pathspec-from-file`), `--amend`,
+# `--dry-run`, `--help`, `--interactive`/`--patch`, and a merge/rebase/
+# cherry-pick/revert in progress. Stdin: the PreToolUse JSON (tool_name,
+# tool_input.command, cwd). Exit 0 = allow, 2 = block; failures exit 0.
 set -eu
 trap 'exit 0' ERR
 
-# hook_json_field <payload> <dotted.key>
-# Echo a STRING field out of a Claude Code hook event, or nothing.
-#
-# INLINE, not sourced. An installed hook is a standalone file; `source` of a
-# library the project does not have fails open, and a guard that fails open is
-# a guard that is not there.
-#
-# A `grep -oE '"key"…"[^"]*"' extractor is fine for absolute paths and
-# booleans. It is NOT fine for `tool_input.command`: a Bash command routinely
-# embeds escaped quotes (`git commit -m \"fix\"`), and `"[^"]*"` truncates at
-# the first one, handing the guard HALF a command line — which is exactly how a
-# guard starts firing on commands that were fine. So the payload is decoded
-# with a real JSON parser, and this yields nothing (the caller then exits 0)
-# when no parser is available.
+# hook_json_field <payload> <dotted.key> — echo a STRING field, or nothing.
+# Inline, and a real JSON parser: a command embeds escaped quotes, which a
+# grep extractor truncates at, handing the guard half a command line.
 hook_json_field() {
 	local payload="$1" key="$2"
 	if command -v python3 >/dev/null 2>&1; then
@@ -81,34 +42,12 @@ case "$INPUT" in
 	*) exit 0 ;;
 esac
 
-# Decode + normalise in ONE pass. Everything here exists because the FIRST
-# thing this guard did on a real commit was fire on a correct one: the standard
-# agent spelling of a long message is
-#
-#     git commit -m "$(cat <<'MSG'
-#     …message…
-#     MSG
-#     )" -- <paths>
-#
-# and any tokenizer that splits on `(` or newline tears that into fragments,
-# losing the `-- <paths>` that was right there. So, in order:
-#   1. heredoc BODIES are dropped (they are data — a message, or a doc that
-#      merely TALKS about `git commit`), and the `<<DELIM` opener with them;
-#   2. `$(…)` and `` `…` `` spans collapse to one opaque token, innermost
-#      first — which also swallows the newlines a multi-line substitution
-#      spreads the command over, putting `git commit … -- <paths>` back on one
-#      line where it belongs;
-#   3. quoted runs collapse to the same opaque token, so a commit MESSAGE can
-#      never be misread as a pathspec.
-# A malformed pairing leaves extra bare tokens, which reads as "a pathspec was
-# given" — every parse ambiguity in this hook resolves toward ALLOW.
-#
-# Needs python3; without it this guard yields (exit 0) rather than guessing at
-# shell quoting with regexes, which is how it fired on a correct commit.
+# Decode and normalise in one pass: heredoc bodies are dropped, `$(…)` and
+# backtick spans and quoted runs collapse to one opaque token, so a multi-line
+# message never hides the `-- <paths>` after it. Every ambiguity resolves to
+# ALLOW, and without python3 the guard yields rather than guess with regexes.
 command -v python3 >/dev/null 2>&1 || exit 0
-# SC2016 intentional: the python source below must stay LITERAL — the shell must
-# not expand anything inside it.
-# shellcheck disable=SC2016
+# shellcheck disable=SC2016  # the python source stays literal
 ANALYZE="$(printf '%s' "$INPUT" | python3 -c '
 import json, re, sys
 
@@ -156,10 +95,8 @@ is_wrapper() {
 	esac
 }
 
-# An operation in progress (merge/rebase/cherry-pick/revert) is a commit with no
-# sensible pathspec — git rejects a partial commit outright there. Consulted
-# ONLY on the way to a block, so the (comparatively expensive) cwd decode and
-# the git call stay off the path every allowed commit takes.
+# An operation in progress is a commit git itself refuses a pathspec for;
+# consulted only on the way to a block.
 operation_in_progress() {
 	local session_cwd gitdir
 	session_cwd="$(hook_json_field "$INPUT" cwd)"
@@ -214,17 +151,14 @@ while IFS= read -r segment; do
 			--) verdict="pathspec"; break ;;
 			--amend|--dry-run|--help|-h|--interactive|--patch|-p) verdict="exempt"; break ;;
 			--pathspec-from-file|--pathspec-from-file=*)
-				# Naming paths via a file IS naming paths — this earns the
-				# pathspec verdict in both spellings. Must precede the generic
-				# `--*=*` skip, which would otherwise swallow the `=` form.
+				# Naming paths via a file is naming paths; must precede the generic `--*=*` skip.
 				verdict="pathspec"; break ;;
 			--*=*) idx=$((idx + 1)) ;;
 			--message|--file|--reuse-message|--reedit-message|--author|--date|--template|--cleanup|--trailer|--fixup|--squash)
 				idx=$((idx + 2)) ;;
 			--*) idx=$((idx + 1)) ;;
 			-*)
-				# Short-option cluster. `a` anywhere means -a/--all; a trailing
-				# m/F/C/c/t consumes the next token as its argument.
+				# A short-option cluster: `a` anywhere is --all; a trailing m/F/C/c/t takes the next token.
 				case "${toks[$idx]}" in *a*) all=1 ;; esac
 				case "${toks[$idx]}" in
 					*[mFCct]) idx=$((idx + 2)) ;;

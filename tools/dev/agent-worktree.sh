@@ -1,41 +1,14 @@
 #!/usr/bin/env bash
-# agent-worktree.sh — the SINGLE sanctioned way to create/teardown per-agent
-# git worktrees for parallel agent dispatch. Replaces harness-level worktree
-# isolation flags, which have silently no-op'd in the field (two agents in one
-# working dir/index/build cache → cross-contaminated commits, a reset that
-# wiped work, a corrupted import cache).
-#
-# Each worktree is a real, separate checkout: own working dir, own git index,
-# own build cache — sharing only the append-only object store. That is how
-# humans parallelize on one repo, made real for agents.
-#
-# Commands:
-#   agent-worktree.sh new [--no-warm] <slug> [base-branch]
-#       Create branch <BRANCH_PREFIX><slug> + worktree at <WORKTREE_PARENT>/<slug>
-#       off base-branch (default: the active milestone's integration branch per
-#       the PM tree, else FALLBACK_BASE). Pre-warms the build caches by copying
-#       them from the main tree so the first boot is warm. Writes a gitignored
-#       scope marker (abs path + branch + base) at the worktree root — the
-#       marker the installed hooks read for agent-context detection. Prints the
-#       absolute worktree path (paste it into the dispatch prompt as the
-#       agent's working directory).
-#
-#   agent-worktree.sh done <slug>
-#       The ONLY sanctioned teardown: refuse if uncommitted work remains, warn
-#       (and keep the branch) if unmerged, then `git worktree remove` + branch
-#       delete. Nothing else removes a worktree — this is what prevents the
-#       "deleted the worktree out from under a running agent" incident.
-#
-#   agent-worktree.sh list
-#       Show active agent worktrees + their branches + scope markers,
-#       cross-checked against git's authoritative worktree registry.
-#
-# Run from anywhere inside the repo.
-#
-# set -uo pipefail (no -e): this tool inspects command exit codes (merged-check,
-# porcelain-diff, ref existence) to make decisions rather than aborting on the
-# first non-zero — so `-e` would be wrong. Unset vars stay fatal; pipefail keeps
-# a failing upstream stage from being masked.
+# agent-worktree.sh — the single sanctioned way to create and tear down
+# per-agent git worktrees: a real checkout each (own dir, index, build cache),
+# sharing only the object store.
+#   new [--no-warm] <slug> [base]  branch <BRANCH_PREFIX><slug> + worktree at
+#                                  <WORKTREE_PARENT>/<slug>, caches pre-warmed,
+#                                  scope marker written; prints the absolute path
+#   done <slug>                    refuse on uncommitted work, keep an unmerged
+#                                  branch, then remove worktree and branch
+#   list                           active worktrees, cross-checked with git
+# Run from anywhere in the repo. `set -uo pipefail`, no -e: exit codes are read.
 set -uo pipefail
 
 MAIN_ROOT="$(git rev-parse --show-toplevel)"
@@ -44,56 +17,53 @@ MAIN_ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE_PARENT=".claude/worktrees"   # repo-relative; gitignore it
 BRANCH_PREFIX="feat/"
 SCOPE_MARKER=".agent-scope"           # the marker the installed hooks read
-WARM_DIRS=(".godot" ".import")        # central caches copied to pre-warm a fresh tree
-# Gitignored per-asset sidecars to mirror into the worktree (e.g. "*.import"
-# for a repo that gitignores Godot's scattered import sidecars — without them
-# the fresh checkout's first boot is cold and resource loads fail). Empty = off.
+# Gitignored cache dirs copied from the main tree to pre-warm a worktree.
+WARM_DIRS=()
+# Gitignored per-asset sidecars to mirror (e.g. "*.import"); empty = off.
 WARM_SIDECAR_GLOB=""
-# Where an agent branches from when no milestone declares an integration
-# branch (see integration_branch below).
+# Where an agent branches from when no milestone declares an integration branch.
 FALLBACK_BASE="staging"
+# The PM CLI as `make pm`; a project calling the CLI directly replaces the array.
+PM_CMD=(make -s pm)
 # -----------------------------------------------------------------------------
 
-# integration_branch [toplevel]
-# Echo the ACTIVE milestone's integration branch, or nothing when no milestone
-# is building. Read from the devkit PM tree — the `branch:` stamp on the
-# milestone whose status is `building`.
-#
-# There are THREE kinds of branch here, and conflating the middle one with the
-# last is what has stranded an integration branch in a worktree:
-#   the trunk (staging/main)           — the resting state between milestones
-#   the milestone's integration branch — feat/*-named but belongs in the TRUNK,
-#                                        so the human can follow along
-#   per-agent feat/<slug>              — worktree-only, branched from and merged
-#                                        back into the integration branch
-#
-# More than one milestone may be `building` — a long-running umbrella declaring
-# a trunk branch alongside a sub-milestone on its own branch. So this does NOT
-# take the first building milestone: it collects the ones declaring a NON-trunk
-# branch. Exactly one is the answer; zero means the trunk simply stays put; two
-# or more is genuinely ambiguous and yields nothing, because a tool that
-# guesses wrong here either strands an agent or mis-bases one.
+# integration_branch [toplevel] — the ACTIVE milestone's integration branch, or
+# nothing. Asked of the CLI by CATEGORY, never grepped from milestone.md, so a
+# renamed status word still matches. Exactly one milestone declaring a non-trunk
+# branch is the answer; two or more is ambiguous and yields nothing. "Answered"
+# is the CLI's census line, not the exit code: `make pm` with no Makefile exits
+# 0 saying nothing.
 integration_branch() {
 	local root="${1:-$MAIN_ROOT}"
-	local mfile branch found="" count=0
-	for mfile in "$root"/pm/roadmap/*/milestone.md; do
-		[ -f "$mfile" ] || continue
-		grep -qE '^status: *"?building"? *$' "$mfile" || continue
-		branch="$(sed -n 's/^branch: *"\{0,1\}\(.*[^"]\)"\{0,1\} *$/\1/p' "$mfile" | head -1)"
+	local ask="list --kind milestone --category in_progress"
+	local out line _id _status _cat branch found="" count=0 answered=0
+	out="$(cd "$root" && "${PM_CMD[@]}" ARGS="$ask" 2>&1)" || out=""
+	while IFS= read -r line; do
+		case "$line" in
+			"[pm] "*" of "*" milestone(s)") answered=1; continue ;;
+			*"	"*) ;;
+			*) continue ;;
+		esac
+		IFS=$'\t' read -r _id _status _cat branch <<-EOF
+		$line
+		EOF
 		case "$branch" in
-			"" | staging | main) continue ;;
+			"" | - | staging | main) continue ;;
 		esac
 		found="$branch"
 		count=$((count + 1))
-	done
+	done <<-EOF
+	$out
+	EOF
+	if [ "$answered" -ne 1 ]; then
+		echo "agent-worktree: '${PM_CMD[*]} ARGS=\"$ask\"' could not answer (no census line) — basing off ${FALLBACK_BASE}" >&2
+		return 0
+	fi
 	[ "$count" -eq 1 ] && printf '%s' "$found"
 	return 0
 }
 
-# An agent branches off the ACTIVE milestone's integration branch and merges
-# back into it — that branch, not the trunk, is where a milestone's work is
-# being assembled. Basing off the trunk while a milestone is building strands
-# the agent behind every commit the milestone has already landed.
+# An agent branches off the active milestone's integration branch, not the trunk.
 DEFAULT_BASE="$(integration_branch "$MAIN_ROOT")"
 [ -n "$DEFAULT_BASE" ] || DEFAULT_BASE="$FALLBACK_BASE"
 
@@ -111,8 +81,7 @@ usage() {
 	exit 2
 }
 
-# A slug becomes both a branch suffix and a directory name — keep it to the
-# characters that are safe in both (no slashes, no whitespace).
+# A slug is a branch suffix and a directory name: only characters safe in both.
 validate_slug() {
 	local slug="$1"
 	[ -n "$slug" ] || die "slug is required"
@@ -122,8 +91,7 @@ validate_slug() {
 }
 
 cmd_new() {
-	# --no-warm skips the (dominant-cost) cache copy for callers that don't
-	# need a warm first boot.
+	# --no-warm skips the dominant-cost cache copy.
 	local no_warm=0
 	if [ "${1:-}" = "--no-warm" ]; then
 		no_warm=1; shift
@@ -146,14 +114,8 @@ cmd_new() {
 	git worktree add -b "$branch" "$abs_path" "$base" >/dev/null \
 		|| die "git worktree add failed"
 
-	# Pre-warm the build caches so the first boot is warm. A fresh worktree has
-	# no import cache, which is exactly the cold-cache state that produces
-	# spurious first-boot failures. Copy (not symlink) so the agent's tree owns
-	# an independent cache — concurrent import runs across agents must never
-	# share one cache file. Prefer a hardlink clone (cp -al) where supported —
-	# same on-disk blocks, near-instant, safe for reads (a tool rewriting a
-	# cache file replaces the inode rather than mutating shared blocks). Fall
-	# back to a deep copy. --no-warm skips it entirely.
+	# Pre-warm the caches by copy, never symlink, so each tree owns its own;
+	# a hardlink clone (cp -al) where supported.
 	local warmed=()
 	local sidecars=0
 	local d
@@ -164,17 +126,14 @@ cmd_new() {
 			cp_warm=(cp -al)
 		fi
 		rm -f "${abs_path}/.cp_al_src" "${abs_path}/.cp_al_probe"
-		for d in "${WARM_DIRS[@]}"; do
+		for d in ${WARM_DIRS[@]+"${WARM_DIRS[@]}"}; do
 			if [ -e "${MAIN_ROOT}/${d}" ]; then
 				"${cp_warm[@]}" "${MAIN_ROOT}/${d}" "${abs_path}/${d}"
 				warmed+=("$d")
 			fi
 		done
-		# Mirror the gitignored per-asset sidecars (absent from the fresh
-		# checkout) into the worktree at the same relative path, hardlinked
-		# where supported. The worktree parent is pruned so a re-`new` never
-		# recursively re-warms a sibling worktree's copies. NUL-delimited
-		# find|read so paths with spaces survive.
+		# Mirror the gitignored sidecars, hardlinked where supported; the worktree
+		# parent is pruned so a re-`new` never re-warms a sibling's copies.
 		if [ -n "$WARM_SIDECAR_GLOB" ]; then
 			local rel dst f
 			while IFS= read -r -d '' f; do
@@ -189,11 +148,7 @@ cmd_new() {
 		fi
 	fi
 
-	# Scope marker: abs path + branch + base. The guards read path/branch to
-	# enforce "this worktree may only commit its own branch"; `done`'s
-	# merged-check reads base so a worktree based off something other than the
-	# trunk isn't falsely warned "unmerged". Gitignored so it never lands in a
-	# commit. key=value lines (grep-friendly).
+	# Scope marker, key=value lines: the hooks read path/branch, `done` reads base. Gitignored.
 	{
 		printf 'path=%s\n' "$abs_path"
 		printf 'branch=%s\n' "$branch"
@@ -205,7 +160,7 @@ cmd_new() {
 	if [ "$no_warm" -eq 1 ]; then
 		echo "  warmed:  (skipped — --no-warm)" >&2
 	else
-		local cache_summary="(none — main tree had no ${WARM_DIRS[*]} to copy)"
+		local cache_summary="(none — nothing in WARM_DIRS to copy)"
 		[ "${#warmed[@]}" -gt 0 ] && cache_summary="${warmed[*]}"
 		if [ -n "$WARM_SIDECAR_GLOB" ]; then
 			cache_summary="${cache_summary}; ${sidecars} ${WARM_SIDECAR_GLOB} sidecars"
@@ -213,8 +168,7 @@ cmd_new() {
 		echo "  warmed:  ${cache_summary}" >&2
 	fi
 	echo "  scope:   ${abs_path}/${SCOPE_MARKER}" >&2
-	# The absolute path goes to stdout ALONE so a caller can
-	# `$(agent-worktree.sh new x)` it straight into a dispatch prompt.
+	# The absolute path goes to stdout ALONE, for `$(agent-worktree.sh new x)`.
 	echo "$abs_path"
 }
 
@@ -227,11 +181,8 @@ cmd_done() {
 	git worktree list --porcelain | grep -qx "worktree ${abs_path}" \
 		|| die "no active worktree at ${abs_path} (run 'list' to see active ones)"
 
-	# The merged-check must compare against the branch this worktree was
-	# created FROM, not always DEFAULT_BASE — a worktree based off another
-	# branch that merged there would otherwise be falsely warned "NOT merged"
-	# and its branch retained. Read base= from the scope marker before
-	# `git worktree remove` deletes it; fall back to DEFAULT_BASE.
+	# Compare against the branch this worktree was created FROM, read before
+	# `git worktree remove` deletes the marker.
 	local base="$DEFAULT_BASE"
 	if [ -f "${abs_path}/${SCOPE_MARKER}" ]; then
 		local recorded_base
@@ -239,16 +190,11 @@ cmd_done() {
 		[ -n "$recorded_base" ] && base="$recorded_base"
 	fi
 
-	# Guard against losing UNCOMMITTED work. The pre-warmed caches and the
-	# scope marker are untracked-by-design, so a naive `git worktree remove`
-	# always refuses (sees them as a dirty tree) and a naive `--force` would
-	# discard real work alongside the caches. Inspect the porcelain status,
-	# ignore exactly the artifacts we planted, and refuse only if genuine
-	# tracked/untracked work remains uncommitted.
+	# Refuse on uncommitted work, ignoring exactly the artifacts this tool planted.
 	local planted_dirs planted_roots
-	planted_dirs="$(printf '%s/|' "${WARM_DIRS[@]}")"
+	planted_dirs="$(printf '%s/|' ${WARM_DIRS[@]+"${WARM_DIRS[@]}"})"
 	planted_dirs="${planted_dirs%|}"
-	planted_roots="$(printf '%s|' "${WARM_DIRS[@]}")"
+	planted_roots="$(printf '%s|' ${WARM_DIRS[@]+"${WARM_DIRS[@]}"})"
 	planted_roots="${planted_roots%|}"
 	local dirty
 	dirty="$(git -C "$abs_path" status --porcelain --untracked-files=all 2>/dev/null \
@@ -260,9 +206,7 @@ cmd_done() {
 		die "commit or discard it in ${abs_path}, then re-run 'done ${slug}'"
 	fi
 
-	# Merged-check: warn loudly but do NOT silently drop unmerged COMMITS. The
-	# branch is preserved when unmerged so committed work is never lost; the
-	# operator merges then re-runs 'done', or deletes the branch by hand.
+	# An unmerged branch is kept, loudly; committed work is never dropped.
 	local unmerged=0
 	if git show-ref --verify --quiet "refs/heads/${branch}"; then
 		if ! git merge-base --is-ancestor "$branch" "$base" 2>/dev/null; then
@@ -273,8 +217,7 @@ cmd_done() {
 		fi
 	fi
 
-	# --force past the planted caches only — we already proved the tree carries
-	# no uncommitted work above, so this discards build artifacts exclusively.
+	# --force past the planted caches only; the tree carries no uncommitted work.
 	git worktree remove --force "$abs_path" >/dev/null \
 		|| die "git worktree remove failed for ${abs_path}"
 
@@ -290,10 +233,7 @@ cmd_done() {
 cmd_list() {
 	local parent_abs="${MAIN_ROOT}/${WORKTREE_PARENT}"
 
-	# git's worktree registry is the authoritative view. Capture the set of
-	# registered worktree paths so we can flag a directory that exists on disk
-	# but git no longer tracks (or vice-versa) — the drift a raw `git worktree
-	# remove` (the anti-pattern this tool exists to prevent) leaves behind.
+	# git's registry is the authoritative view; a directory it no longer tracks is flagged.
 	local registered
 	registered="$(git worktree list --porcelain | sed -n 's/^worktree //p')"
 
@@ -320,8 +260,7 @@ cmd_list() {
 		[ "$found" -eq 1 ] || echo "agent-worktree: no agent worktrees under ${WORKTREE_PARENT}/"
 	fi
 
-	# Surface any git-registered agent worktree whose directory is gone (the
-	# inverse drift) so it can be pruned.
+	# The inverse drift: registered, directory gone.
 	local w
 	while IFS= read -r w; do
 		case "$w" in
