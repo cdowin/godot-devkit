@@ -1,0 +1,37 @@
+---
+id: 0.25.0/the-agentic-half-leaves
+milestone: "0.25.0"
+name: The agentic half leaves, and what stays is the Godot kit alone
+status: building
+reviewed:
+phase: 1
+depends_on: []
+consumed_by: []
+---
+
+# The agentic half leaves, and what stays is the Godot kit alone
+
+This package pins `agentic-sdlc` v0.2.0 for its own SDLC (landed, `b854d2c`) and now sheds the
+copy of that half it still carries. What stays is scene tooling and the eight Godot gates, shipped
+with the Godot tier roster a consumer includes. Breaking: consumers lose `pm`, `check doc|shell|
+pm|hooks`, `init` and every non-Godot `install-*` from here and add a second pin (rule 7).
+
+## Ship criterion
+
+1. `src/godot_devkit/repo/` is gone; `godot/` and the `core/` it uses remain; the CLI routes only
+   the Godot verbs and `check <godot gate>|all`.
+2. `install-runners` writes the runners, `cc-godot-sandbox.sh`, `ci-uid-guard.yml` and a
+   `Makefile.tiers` declaring the Godot roster with `GDK_PRECOMMIT_TIERS` / `GDK_MILESTONE_TIERS`;
+   idempotent, `--diff`, refuses a collision. `Makefile.devkit` is the agentic kit's, not this one's.
+3. `check all` is the eight Godot gates with stock defaults, and a consumer joins it to `make check`
+   through a target `install-runners` writes and `[gates] extra` names.
+4. The tests that proved the repo family leave with it; what remains bites at the cheapest tier,
+   is proved once, and reddens under a deliberately-broken probe per gate and write verb; the
+   numbers are measured before and after and held by `[tests] budget` and `[tests] cases`.
+5. README, CLAUDE.md, SDLC.md, the seeds and both version sites say 0.25.0 and the Godot kit alone;
+   the CHANGELOG names what a consumer loses and the second pin.
+6. Every story, this feature and the milestone close through the pinned belts.
+
+## Proof budget
+
+One case per criterion at the cheapest tier; the deletions carry their reasons in the commits.
