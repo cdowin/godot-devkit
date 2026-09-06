@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: The agentic half leaves, and what stays is the Godot kit alone
 status: building
-reviewed:
+reviewed: pm/roadmap/0.25.0-the-godot-kit-alone/review.md
 phase: 1
 depends_on: []
 consumed_by: []
