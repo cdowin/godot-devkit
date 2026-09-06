@@ -24,14 +24,21 @@ So the shape of the tier is the file count, and `test-shape`'s line cap cannot s
 mean of 117 lines. 131 files are under 150 lines — 48% of the files, 26% of the lines, ~117s of
 wall clock. The cap's only pressure is to SPLIT a long file, which adds a boot.
 
-The milestone is three admissions. The tier's cost is boots and the kit should say so and grade
+A second adoption the same day, NullBound, hit the other end of the same idea: `unit`, `parse`,
+`lint` and `warnings` file no ledger row at all, so the four cheapest tiers cannot be budgeted and
+`verify --plan` has no number for the story rung — the one an agent runs after every edit. On that
+tree the integration tier shrank 12% under `test-shape` while the unbudgetable unit tier grew
+47%, and every gate stayed green. Same milestone, same sentence: the kit grades what it can see.
+
+The milestone is five admissions. The tier's cost is boots and the kit should say so and grade
 it. A gate that arrives red on every mature consumer needs the baseline mechanism `test-shape`
 already has, or consumers just leave it off — which is what Trail did with `defaults`, `rng` and
 `tres-comment`. And a config key whose shape appears in no example is exit 2 waiting to happen.
 
 ## Ship criterion
 
-A consumer can ask this kit what its scenario tier costs and get a number in boots, not lines;
+A consumer can ask this kit what ANY tier costs and get a number — boots for the scenario tier, a
+ledger row for every other — rather than lines;
 `test-shape`'s own `--help` says it is a readability gate and names the one that governs cost;
 each of the eight gates can be turned on frozen at a consumer's current findings and ratcheted
 down; and every documented config key has one example of its own shape.
