@@ -88,3 +88,5 @@
 {"ts":"2026-09-06T13:29:52Z","kind":"gate","gate":"matrix","verdict":"PASS","duration_ms":237}
 {"ts":"2026-09-06T13:30:20Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":62752}
 {"ts":"2026-09-06T13:30:21Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":69834}
+{"ts":"2026-09-06T13:30:58Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":2482}
+{"ts":"2026-09-06T13:30:58Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/02-install-runners-is-the-godot-kits-installer","from":"building","to":"done"}

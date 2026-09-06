@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves/02-install-runners-is-the-godot-kits-installe
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: install-runners writes the Godot tiers, runners, sandbox hook and Makefile.tiers into a consumer
-status: building
+status: done
 owner: claude
 depends_on: []
 ---
