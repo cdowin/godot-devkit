@@ -1,0 +1,165 @@
+# Makefile.devkit — the gate framework: `check`, the tier seam, `precommit` and
+# `milestone`. `agentic-sdlc install-gates` writes it; edit the source, not this.
+#
+# Your Makefile is two lines plus your own targets:
+#     DEVKIT_VERSION := v0.2.0
+#     include Makefile.devkit
+# Your gates join `check` via `[gates] extra` in devkit.toml. A language kit's
+# tier file (GDK_TIERS_MK, default Makefile.tiers) defines its targets and their
+# `.PHONY`, and sets GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS. make 3.81 is the floor.
+# No `.SHELLFLAGS -e`: the capture helper has to read PIPESTATUS itself.
+SHELL := bash
+MAKEFLAGS += --warn-undefined-variables --no-print-directory
+.DELETE_ON_ERROR:
+.DEFAULT_GOAL := help
+
+# DEVKIT_VERSION is the per-project pin, set above the include; or set DEVKIT
+# to the command itself and there is nothing to resolve.
+ifeq ($(origin DEVKIT),undefined)
+ifndef DEVKIT_VERSION
+$(error DEVKIT_VERSION is not set — put `DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit` (or set DEVKIT to the command that runs the package))
+endif
+DEVKIT := uvx --from "git+https://github.com/cdowin/agentic-sdlc@$(DEVKIT_VERSION)" agentic-sdlc
+endif
+
+# Where `install-gates` put the shell library; moving it means setting this.
+GDK_DEV_DIR  ?= tools/dev
+GDK_GATE_LIB ?= $(GDK_DEV_DIR)/gdk_gate.sh
+
+# Exported so `make check VERBOSE=1` reaches recipes as well as `VERBOSE=1 make check`.
+VERBOSE ?=
+export VERBOSE
+
+# The bridge to the ledger: the sourced library cannot see a make variable.
+# Empty it and nothing is recorded or spawned.
+export GDK_LEDGER_CMD ?= $(DEVKIT)
+
+# Arguments, overridden on the command line:
+#   ARGS — passthrough              make pm ARGS="story building <id>"
+ARGS ?=
+
+# Set by `check` when it re-enters itself through a sub-make. See `check`.
+GDK_IN_CHECK ?=
+
+# What a FAILING gate shows before its verdict; the rest stays in the log.
+GDK_GATE_FAIL_RE    ?= ^(FAILED|ERROR|SCRIPT ERROR)|  DRIFT |\] FAIL|^  (MISS|FALSE POSITIVE)
+GDK_GATE_FAIL_LINES ?= 20
+
+# Each gate's one-line summary, read out of its transcript with the tool's `[tag]` stripped.
+GDK_SUM_CHECKS := printf '%s check(s) PASS' "$$(grep -acE '^\[check:[a-z-]+\] PASS' "$$log")"
+# The last TAGGED line, so a closing pointer is never the summary; the real last line when none is tagged.
+GDK_SUM_TAIL   := { grep -aE '^\[[A-Za-z][A-Za-z:_-]*\] ' "$$log" || tail -1 "$$log"; } \
+                  | tail -1 | sed -E 's/^\[[a-zA-Z:_-]+\] //'
+
+# $(call gdk_gate,<log slot>,<TAG>,<summary command>,<argv...>[,<census command>])
+# Quiet capture, one verdict line, the command's own exit code. The fifth
+# argument prints how many things the run walked, for the ledger row and
+# `check budget`; guarded on `$(origin 5)` because of --warn-undefined-variables.
+define gdk_gate
+@set -o pipefail; . $(GDK_GATE_LIB); \
+log="$$(gdk_gate_log $(1))"; \
+gdk_gate_capture "$$log" -- $(4); \
+status="$$GDK_GATE_EXIT"; \
+summary="$$($(3))"; \
+$(if $(filter-out undefined,$(origin 5)),GDK_GATE_CENSUS="$$($(5))"; export GDK_GATE_CENSUS;) \
+if [ "$$status" -ne 0 ]; then \
+	grep -aE '$(GDK_GATE_FAIL_RE)' "$$log" | head -$(GDK_GATE_FAIL_LINES) \
+		|| tail -$(GDK_GATE_FAIL_LINES) "$$log"; \
+	summary="FAIL (exit $$status) — $$summary"; \
+fi; \
+gdk_gate_verdict $(2) "$$summary" "$$log"; \
+exit "$$status"
+endef
+
+# Only what this file defines; the tier file declares its own.
+.PHONY: help pm check precommit milestone \
+        gdk-tiers-none-precommit gdk-tiers-none-milestone
+
+help: ## Show this help (authoritative target list)
+	@echo "make <target> — the gate framework from Makefile.devkit, plus this project's tiers and its own"
+	@echo
+	@{ grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) || true; } \
+		| sort -u \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo
+	@echo 'Args: ARGS="…"  VERBOSE=1     Tiers: $(GDK_TIERS_MK) -> precommit=[$(strip $(GDK_PRECOMMIT_TIERS))] milestone=[$(strip $(GDK_MILESTONE_TIERS))]'
+	@echo 'Gates print ONE verdict line naming .gate-reports/<gate>.log; VERBOSE=1 streams it.'
+
+pm: ## PM-tree CLI (the ONLY sanctioned status transition):  make pm ARGS="story building <id>"
+	@$(DEVKIT) pm $(if $(ARGS),$(ARGS),--help)
+
+# --- Aggregate gates ----------------------------------------------------------
+# `check` is the devkit roster then this project's `[gates] extra`, read once
+# by the CLI (a bad value exits 2 rather than narrowing the gate). Re-entry is
+# refused through GDK_IN_CHECK. The sub-make is `$${MAKE:-make}`, not
+# `$(MAKE)`, so `make -n check` runs nothing.
+check: ## Static gate: the devkit checks + this project's own ([gates] extra)
+	@test -z "$(GDK_IN_CHECK)" || { echo "make check: re-entered through [gates] extra in devkit.toml — a gate target that runs \`make check\` recurses forever; drop it from that list" >&2; exit 2; }
+	$(call gdk_gate,check,CHECK,$(GDK_SUM_CHECKS),$(DEVKIT) check all)
+	@extra="$$($(DEVKIT) gates-extra)" || exit $$?; \
+	[ -z "$$extra" ] || $${MAKE:-make} GDK_IN_CHECK=1 $$extra
+
+# --- The tier seam ------------------------------------------------------------
+# The kit's tier lists, read and guarded at parse time.
+GDK_TIERS_MK        ?= Makefile.tiers
+GDK_PRECOMMIT_TIERS ?=
+GDK_MILESTONE_TIERS ?=
+-include $(GDK_TIERS_MK)
+
+# The typo guard: `-include` is silent on a missing file, so a non-empty tier
+# list with no file, or a tier no makefile defines, is refused here.
+GDK_TIERS_DECLARED := $(strip $(GDK_PRECOMMIT_TIERS) $(GDK_MILESTONE_TIERS))
+ifneq (,$(GDK_TIERS_DECLARED))
+ifeq (,$(wildcard $(GDK_TIERS_MK)))
+$(error GDK_TIERS_MK=$(GDK_TIERS_MK) does not exist yet a tier list names [$(GDK_TIERS_DECLARED)] — `-include` of a missing file is silent by design and this is the typo that silence hides. Point GDK_TIERS_MK at the tier file or clear GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS)
+endif
+# Explicit target names from the files, since 3.81 has no target introspection;
+# a tier defined only by a pattern rule is invisible here.
+GDK_TIERS_TARGETS := $(shell awk '/^[A-Za-z0-9][A-Za-z0-9._\/-]*[ \t]*:([^=]|$$)/ { sub(/[ \t]*:.*/, ""); print }' $(MAKEFILE_LIST))
+GDK_TIERS_ORPHAN_PRECOMMIT := $(filter-out $(GDK_TIERS_TARGETS),$(GDK_PRECOMMIT_TIERS))
+GDK_TIERS_ORPHAN_MILESTONE := $(filter-out $(GDK_TIERS_TARGETS),$(GDK_MILESTONE_TIERS))
+ifneq (,$(GDK_TIERS_ORPHAN_PRECOMMIT))
+$(error GDK_PRECOMMIT_TIERS names a tier no makefile defines: [$(GDK_TIERS_ORPHAN_PRECOMMIT)] — declared for $(GDK_TIERS_MK); a gate list that quietly gets shorter is the one failure a gate must never have)
+endif
+ifneq (,$(GDK_TIERS_ORPHAN_MILESTONE))
+$(error GDK_MILESTONE_TIERS names a tier no makefile defines: [$(GDK_TIERS_ORPHAN_MILESTONE)] — declared for $(GDK_TIERS_MK); a gate list that quietly gets shorter is the one failure a gate must never have)
+endif
+endif
+
+# Every declared tier is phony: a same-named directory would otherwise make
+# the sub-make skip that goal as up to date, silently.
+.PHONY: $(GDK_PRECOMMIT_TIERS) $(GDK_MILESTONE_TIERS)
+
+# The empty case announces itself, as a prerequisite so it is neither timed nor captured.
+define gdk_tiers_none
+@echo "[TIERS] $(1) is empty — this gate is \`check\` alone; $(GDK_TIERS_MK) $(if $(wildcard $(GDK_TIERS_MK)),declares no tier for it,is not present)"
+endef
+
+gdk-tiers-none-precommit:
+	$(call gdk_tiers_none,GDK_PRECOMMIT_TIERS)
+
+gdk-tiers-none-milestone:
+	$(call gdk_tiers_none,GDK_MILESTONE_TIERS)
+
+# --- The compositions ---------------------------------------------------------
+# `precommit` and `milestone` run `check` plus the declared tiers as the goals
+# of one sub-make inside a slot of their own name, so the ledger gets a row
+# for the whole target. Only the members reach the console: the composition's
+# own verdict line goes to its transcript. `make -n` still runs nothing.
+# $(call gdk_composition,<log slot>,<TAG>,<goals...>)
+define gdk_composition
+@set -o pipefail; . $(GDK_GATE_LIB); \
+log="$$(gdk_gate_log $(1))"; verbose="$$VERBOSE"; \
+VERBOSE=1 gdk_gate_capture "$$log" -- env VERBOSE="$$verbose" $${MAKE:-make} $(3); \
+status="$$GDK_GATE_EXIT"; \
+summary="PASS ($(strip $(3)))"; \
+[ "$$status" -eq 0 ] || summary="FAIL (exit $$status) — $(strip $(3))"; \
+gdk_gate_verdict $(2) "$$summary" "$$log" >> "$$log"; \
+exit "$$status"
+endef
+
+precommit: $(if $(GDK_PRECOMMIT_TIERS),,gdk-tiers-none-precommit) ## Per-change gate: check + GDK_PRECOMMIT_TIERS
+	$(call gdk_composition,precommit,PRECOMMIT,check $(GDK_PRECOMMIT_TIERS))
+
+milestone: $(if $(GDK_MILESTONE_TIERS),,gdk-tiers-none-milestone) ## Full gate: check + GDK_MILESTONE_TIERS
+	$(call gdk_composition,milestone,MILESTONE,check $(GDK_MILESTONE_TIERS))

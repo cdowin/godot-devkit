@@ -70,9 +70,9 @@ form it takes, the copies must be asserted identical by something that runs, not
 
 It was asked as *"can `[checks] all` compose a check from another package?"* It does not need to.
 
-**`godot-devkit` becomes a CONSUMER of the agentic kit**, exactly as nullbound and trail are. Its eight
+**`godot-devkit` becomes a CONSUMER of the agentic kit**, exactly as every game repo is. Its eight
 Godot checks become its own gates, registered through `[gates] extra` — the shipped, proven mechanism
-nullbound already uses for **14** of its own scans. Nothing registers a check across a package boundary.
+one consumer already uses for **14** of its own scans. Nothing registers a check across a package boundary.
 
 **The distinction that keeps this clean, and it is the whole point:**
 

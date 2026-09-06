@@ -367,16 +367,20 @@ def test_nothing_reaches_for_a_path_outside_this_checkout():
 
 def test_the_full_gate_is_a_composition_of_self_contained_targets():
     """`make milestone` must not acquire a member that needs another repo. The
-    three it has all read this checkout alone, which is why CI and a laptop
-    reach the same verdict."""
-    body = (REPO_ROOT / 'Makefile').read_text(encoding='utf-8')
-    match = re.search(r'^milestone:(.*)$', body, re.M)
-    assert match, 'the Makefile no longer declares a `milestone` target'
+    composition itself is the pinned include's (Makefile.devkit: `check` plus
+    GDK_MILESTONE_TIERS); what is THIS repo's is the tier list in
+    Makefile.tiers and the `[gates] extra` member the Makefile defines, and
+    every one of those reads this checkout alone — which is why CI and a
+    laptop reach the same verdict."""
+    tiers = (REPO_ROOT / 'Makefile.tiers').read_text(encoding='utf-8')
+    match = re.search(r'^GDK_MILESTONE_TIERS\s*:?=(.*)$', tiers, re.M)
+    assert match, 'Makefile.tiers no longer declares GDK_MILESTONE_TIERS'
     members = match.group(1).split()
-    assert members == ['gates', 'hooks-self-test', 'matrix'], members
-    for member in members:
+    assert members == ['matrix'], members
+    own = (REPO_ROOT / 'Makefile').read_text(encoding='utf-8')
+    for member, body in [('matrix', tiers), ('selfcheck', own)]:
         recipe = re.search(rf'^{member}:.*?\n((?:\t.*\n|\n)*)', body, re.M)
-        assert recipe, f'{member} has no recipe in this Makefile'
+        assert recipe, f'{member} has no recipe in its makefile'
         assert not re.search(r'\.\./|~/|\$\(HOME\)|\$\$HOME', recipe.group(1)), (
             f'`{member}` reaches outside the checkout: {recipe.group(1)!r}')
 
