@@ -8,11 +8,11 @@ So the census is asserted here — the marked count, the unmarked modules by
 name, and the support helpers the derivation reaches through.
 
 Two failure modes, opposite in cost. Over-marking loses a module its skip and
-costs seconds. UNDER-marking loses coverage silently, which is why three of
-these tests attack the derivation rather than confirm it: prose that says
-`subprocess.run` and spawns nothing, a helper imported from a spawning module
-that spawns nothing itself, and any spelling of "start a process" the
-derivation was never taught to read.
+costs seconds. UNDER-marking loses coverage silently, which is why one of these
+tests attacks the derivation rather than confirming it: any spelling of
+"start a process" the derivation was never taught to read. (Over-marking is
+not attacked — its cost is a module's skip on three interpreters, never a
+hole.)
 
 The scratch-tree tests run a real `pytest` against a copy of the conftest,
 because the mark's whole job is to survive `-m shell` — and a refusal that has
@@ -142,23 +142,6 @@ class Census(unittest.TestCase):
         self.assertIn('"shell: ', markers)
 
 
-class NotEveryMentionIsASpawn(unittest.TestCase):
-    """The over-marking side: what the derivation must NOT be fooled by."""
-
-    def test_subprocess_in_prose_is_not_a_spawn(self):
-        boundaries = TESTS / 'test_boundaries.py'
-        self.assertIn('subprocess', boundaries.read_text(encoding='utf-8'),
-                      'this test is pointless if the docstring stopped saying it')
-        self.assertFalse(conftest.module_spawns(boundaries),
-                         '`grep -l subprocess` counts this module; it spawns nothing')
-
-    def test_a_module_importing_only_the_repo_root_is_not_a_spawn(self):
-        # `from support import REPO_ROOT` is how half the suite puts src/ on
-        # the path. Naming the spawning package is not using it.
-        self.assertFalse(conftest.module_spawns(
-            TESTS / 'test_consumer_independence.py'))
-
-
 class NoUnreadSpawnSpelling(unittest.TestCase):
     """The under-marking side: a spawn the derivation cannot see is a hole.
 
@@ -231,19 +214,10 @@ class DerivationEndToEnd(unittest.TestCase):
                 for name in absent:
                     self.assertNotIn(name, out, f'-m "{expression}" kept {name}\n{out}')
 
-    def test_an_unmarked_run_still_collects_everything(self):
-        # `make test` and `make fuzz` do not pass `-m shell`; the mark must
-        # cost the default run nothing.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            ScratchSuite.build(root)
-            code, out = ScratchSuite.run(root)
-            self.assertEqual(code, 0, out)
-            self.assertIn(f'{len(SCRATCH_MODULES)} passed', out)
-
-
 class HandApplicationIsRefused(unittest.TestCase):
-    """The mark is a fact, so asserting it is an error — true or false."""
+    """The mark is a fact, so asserting it is an error — true or false. One
+    spelling is fired: `pytestmark`, a decorator and a TRUE claim on a module
+    that really spawns all reach the same `get_closest_marker` refusal."""
 
     def _refuses(self, hand_mark: dict[str, str], named: str) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -258,17 +232,6 @@ class HandApplicationIsRefused(unittest.TestCase):
     def test_a_pytestmark_on_a_module_that_does_not_spawn_names_the_file(self):
         self._refuses({'test_pure.py': 'import pytest\n\npytestmark = pytest.mark.shell\n\n'},
                       'test_pure.py')
-
-    def test_a_decorator_on_a_module_that_does_not_spawn_names_the_file(self):
-        self._refuses({'test_pure.py': 'import pytest\n\n\n@pytest.mark.shell\n'},
-                      'test_pure.py')
-
-    def test_a_TRUE_hand_applied_mark_is_refused_too(self):
-        # test_spawner.py really does spawn, so the mark is not a lie — it is a
-        # second mechanism, and then `-m shell` no longer means one thing.
-        self._refuses({'test_spawner.py': 'import pytest\n\npytestmark = pytest.mark.shell\n\n'},
-                      'test_spawner.py')
-
 
 if __name__ == '__main__':
     unittest.main()

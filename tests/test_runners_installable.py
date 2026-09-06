@@ -75,11 +75,24 @@ def run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
 
 # --- the corpora, fired ------------------------------------------------------
 @pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
-def test_the_self_test_corpus_passes_and_reports_its_case_count(script):
-    done = run(str(script), '--self-test')
+def test_the_self_test_corpus_passes_as_one_verdict_line_whatever_the_ambient_verbose_says(
+        script):
+    """Each corpus is fired once, under an exported VERBOSE=1: the installed
+    CI exports it for the whole `make milestone` step, and a corpus proves
+    both settings on its own pinned cases — the value the caller exports is
+    not one of them. The library's cap case once inherited it and streamed
+    its eight bytes INTO the verdict line (`01234567[gdk-runners] SELF-TEST OK
+    …`), which is what `make runners-self-test VERBOSE=1` then read as the
+    verdict. So: exit 0, ONE line, the published shape, a count above zero."""
+    done = subprocess.run(['bash', str(script), '--self-test'], text=True,
+                          capture_output=True,
+                          env=dict(os.environ, VERBOSE='1'))
     assert done.returncode == 0, done.stdout + done.stderr
-    assert 'SELF-TEST OK' in done.stdout, done.stdout
-    count = done.stdout.split('—')[1].split('case')[0].strip()
+    lines = done.stdout.splitlines()
+    assert len(lines) == 1, done.stdout
+    assert re.match(r'^\[[A-Za-z][A-Za-z-]*\] SELF-TEST OK — \d+ case\(s\)$',
+                    lines[0]), lines[0]
+    count = lines[0].split('—')[1].split('case')[0].strip()
     assert int(count) > 0, f'a corpus of {count} cases proves nothing'
 
 
@@ -118,33 +131,6 @@ def test_a_gate_prints_one_verdict_line_naming_a_log_that_holds_the_stream(tmp_p
     assert log.read_text(encoding='utf-8') == 'boot line\nsweep line\n'
 
 
-def test_an_ambient_verbose_does_not_turn_the_quiet_case_loud(tmp_path, monkeypatch):
-    """The installed CI (`ci-verify.yml`) exports VERBOSE=1 for the whole
-    `make milestone` step, and this suite runs inside it. The quiet case
-    above is asked of the DEFAULT, so it must hold whatever the caller's
-    environment happens to say — red on every CI run before the helper
-    dropped the variable, green under bare pytest on a Mac."""
-    monkeypatch.setenv('VERBOSE', '1')
-    test_a_gate_prints_one_verdict_line_naming_a_log_that_holds_the_stream(tmp_path)
-
-
-@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
-def test_a_self_test_verdict_is_one_line_whatever_the_ambient_verbose_says(script):
-    """A corpus proves both settings on its own pinned cases; the value the
-    caller exports is not one of them. The library's cap case inherited it and
-    streamed its eight bytes INTO the verdict line — `01234567[gdk-runners]
-    SELF-TEST OK …` — which is what `make runners-self-test VERBOSE=1`, and so
-    the installed CI, then read as the verdict."""
-    done = subprocess.run(['bash', str(script), '--self-test'], text=True,
-                          capture_output=True,
-                          env=dict(os.environ, VERBOSE='1'))
-    assert done.returncode == 0, done.stdout + done.stderr
-    lines = done.stdout.splitlines()
-    assert len(lines) == 1, done.stdout
-    assert re.match(r'^\[[A-Za-z][A-Za-z-]*\] SELF-TEST OK — \d+ case\(s\)$',
-                    lines[0]), lines[0]
-
-
 def test_verbose_streams_the_same_transcript_the_log_holds(tmp_path):
     """VERBOSE is the escape hatch the quiet default is only safe because of:
     it must add the stream, not replace the verdict or skip the file."""
@@ -168,13 +154,15 @@ def test_verbose_streams_the_same_transcript_the_log_holds(tmp_path):
 
 # --- the argument surface: what each script REFUSES --------------------------
 @pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
+# Three rows, one per branch of the argument check: a word it does not know,
+# a known verb with a second argument, and an empty argument (which is not
+# "no argument"). A short flag is another unknown word; two verbs is another
+# second argument — neither adds a failure mode.
 @pytest.mark.parametrize('argv', [
     ('--nope',),                 # an unknown verb
-    ('-x',),                     # an unknown short flag
     ('--self-test', 'extra'),    # a known verb with an argument it does not take
-    ('--help', '--self-test'),   # two verbs
     ('',),                       # an empty argument is not "no argument"
-], ids=['unknown', 'short', 'verb-plus-extra', 'two-verbs', 'empty'])
+], ids=['unknown', 'verb-plus-extra', 'empty'])
 def test_an_argument_neither_script_takes_is_refused_as_a_usage_error(script, argv):
     done = run(str(script), *argv)
     assert done.returncode == 2, (
@@ -697,26 +685,6 @@ def test_every_shipped_runner_shellchecks_clean(script):
     done = subprocess.run(['shellcheck', '-x', script.name],
                           cwd=script.parent, text=True, capture_output=True)
     assert done.returncode == 0, done.stdout + done.stderr
-
-
-# The names of the projects these runners were extracted FROM, kept HERE, in
-# the harness, as a tombstone — never in the package. A project name surviving
-# in an installable is a fork wearing a library's name: the next consumer reads
-# it as configuration it must match, and the fix that reaches one repo stops
-# reaching the other. Word-bounded, so `trailing` is prose and `trail` is not.
-# The whole-tree form of this claim is tests/test_consumer_independence.py.
-CONSUMER_NAMES = (r'\bnullbound\b', r'\bNULLBOUND\b', r'\btrail\b', r'\bTRAIL\b')
-
-
-@pytest.mark.parametrize('name', [name for name, _rel
-                                  in install.PLAN],
-                         ids=lambda n: n)
-def test_no_installable_names_the_consumer_it_was_extracted_from(name):
-    body = (INSTALLABLES / name).read_text(encoding='utf-8')
-    hits = {pattern: [line for line in body.splitlines()
-                      if re.search(pattern, line)]
-            for pattern in CONSUMER_NAMES}
-    assert not any(hits.values()), {k: v for k, v in hits.items() if v}
 
 
 # --- the slice: --system is a DIRECTORY, --diff is what the change covers ----

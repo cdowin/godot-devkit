@@ -41,6 +41,15 @@ story = "make pyunit"
 feature = "make test"
 milestone = "make milestone"
 
+# The ceilings `check budget` grades, keyed by tier as the ledger records them
+# (`pyunit` is the story rung, `test` the feature rung). Measured at the close
+# of 0.25.0's suite pass and set roughly ten percent above the result: a tier
+# that grows past its number, or a case count that climbs, is a finding to
+# explain in the commit that caused it — never a number to raise in passing.
+[tests]
+budget = { pyunit = 3, test = 55 }
+cases  = { pyunit = 125, test = 635 }
+
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines
 # (stock 50), one story at 64 (stock 60), one feature at 141 (stock 80), and

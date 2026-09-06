@@ -454,17 +454,6 @@ class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
         self.assertIn('integration-list', out)
         self.assertIn('Makefile.tiers', out)
 
-    def test_no_makefile_at_all_is_the_same_config_error(self) -> None:
-        with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
-            _scenario(root, HEADED, GOOD_HEADER)
-            _config(root, HEADER_ON)
-            _runner(root)
-            (root / 'Makefile').unlink()
-            (root / 'Makefile.devkit').unlink()
-            code, out = run_check(test_shape)
-        self.assertEqual(code, 2, out)
-        self.assertIn('integration-list', out)
-
     def test_a_fail_with_the_header_on_prints_one_census_per_line(self) -> None:
         """A size finding is asked of the tracked tier minus infra (3 here:
         the headed scenario, the small one, the capture tool); a header

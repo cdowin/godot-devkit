@@ -458,13 +458,23 @@ class TrackedButDeleted(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn(self.GAP, out)
 
-    def test_check_tres_censuses_the_gap_instead_of_crashing(self) -> None:
+    def test_check_tres_reports_a_path_only_ref_and_censuses_the_gap(self) -> None:
+        """Two claims on one run. The gap is censused instead of crashing, as
+        for `check uid`. And the gate's one finding — an `[ext_resource]`
+        with a path and no uid — is reported: amended in 0.25.0's probe pass,
+        where a `check tres` whose path-only detector had gone blind reddened
+        NOTHING in the suite (every tres case asked only for a PASS or a
+        census). This is the cheapest tres run, so it carries the finding."""
         with temp_repo('uid_repo', only=DRIFTED) as root:
             (root / 'data/drifted.tres').unlink()
+            scene = root / 'scenes/drifted.tscn'
+            scene.write_text(scene.read_text(encoding='utf-8').replace(
+                'uid="uid://dcleanscene0" ', '', 1), encoding='utf-8')
             code, out = run_check(tres)
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)
         self.assertIn(self.GAP, out)
-        self.assertIn('across 2 .tres/.tscn', out)
+        self.assertIn('PATH-ONLY  scenes/drifted.tscn:6:', out)
+        self.assertIn('1 path-only ext_resource ref(s) across 2 file(s)', out)
 
 
 class CliRouting(unittest.TestCase):

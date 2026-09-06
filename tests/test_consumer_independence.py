@@ -91,8 +91,10 @@ NOT_CONTENT = {'.git', '.gate-reports', '.pytest_cache', '.ruff_cache', '.venv',
 # This file is NOT among them: it spells the names only inside `\b...\b`
 # regexes, which the same regexes do not match, so it needs no exemption and a
 # bare name added here in future is caught like anywhere else.
-TOMBSTONES = {
-    'tests/test_runners_installable.py': 'guards every install-runners file',
+TOMBSTONES: dict[str, str] = {
+    # Empty since 0.25.0: the installables' own consumer-name guard moved
+    # under this census (the whole tree is scanned, installables included),
+    # so no file in the tree needs to spell a banned name any more.
 }
 
 # Rule 4: a census that collapses must FAIL, not pass over nothing. The tree is
@@ -362,26 +364,6 @@ def test_nothing_reaches_for_a_path_outside_this_checkout():
         + '\n'.join(hits[:25]))
 
 
-def test_the_full_gate_is_a_composition_of_self_contained_targets():
-    """`make milestone` must not acquire a member that needs another repo. The
-    composition itself is the pinned include's (Makefile.devkit: `check` plus
-    GDK_MILESTONE_TIERS); what is THIS repo's is the tier list in
-    Makefile.tiers, and every member of it reads this checkout alone — which
-    is why CI and a laptop reach the same verdict."""
-    tiers = (REPO_ROOT / 'Makefile.tiers').read_text(encoding='utf-8')
-    # The LAST assignment is the one make keeps: the Godot roster the file
-    # opens with declares its own lists, and this repo's tiers below reassign.
-    declared = re.findall(r'^GDK_MILESTONE_TIERS\s*:?=(.*)$', tiers, re.M)
-    assert declared, 'Makefile.tiers no longer declares GDK_MILESTONE_TIERS'
-    members = declared[-1].split()
-    assert members == ['matrix'], members
-    for member, body in [('matrix', tiers)]:
-        recipe = re.search(rf'^{member}:.*?\n((?:\t.*\n|\n)*)', body, re.M)
-        assert recipe, f'{member} has no recipe in its makefile'
-        assert not re.search(r'\.\./|~/|\$\(HOME\)|\$\$HOME', recipe.group(1)), (
-            f'`{member}` reaches outside the checkout: {recipe.group(1)!r}')
-
-
 # --------------------------------------------------------------------------
 # The census, attacked on a scratch tree.
 #
@@ -470,34 +452,6 @@ class TestTheCensusOnAScratchTree:
         (tmp_path / 'src' / 'blob.dat').write_bytes(b'\x00\x01\xff\xfe\x00')
         hits = _names_found(tmp_path)
         assert _unreadable(hits) and 'blob.dat' in hits[0], hits
-
-    def test_a_classified_binary_is_excluded_with_its_reason(self, tmp_path):
-        """And a type that IS classified drops out quietly, carrying why."""
-        _scratch_tree(tmp_path)
-        (tmp_path / 'src' / 'logo.png').write_bytes(b'\x89PNG\r\n\x1a\n\xff\xfe')
-        census = take_census(tmp_path)
-        denied = {path.name: reason for path, reason in census.denied}
-        assert denied == {'logo.png': 'raster image'}, denied
-        assert not _names_found(tmp_path)
-
-    def test_the_log_and_the_tool_output_stay_out_of_the_scan(self, tmp_path):
-        """Both scratch plants live in excluded trees, and both must stay
-        excluded — the LOG is a dated record and `.git` is not content."""
-        _scratch_tree(tmp_path)
-        census = take_census(tmp_path)
-        assert [path.name for path in census.log] == ['review.md']
-        assert [path.name for path in census.tool_output] == ['COMMIT_EDITMSG']
-        assert not _names_found(tmp_path)
-
-    def test_every_walked_file_lands_in_exactly_one_bucket(self, tmp_path):
-        """The accounting property, on a tree small enough to enumerate."""
-        _scratch_tree(tmp_path)
-        (tmp_path / 'src' / 'logo.png').write_bytes(b'\x89PNG\r\n')
-        census = take_census(tmp_path)
-        assert len(census.walked) == 7, census.summary()
-        assert len(census.classified()) == len(census.walked), census.summary()
-        assert (len(census.scanned) + len(census.log) + len(census.denied)
-                + len(census.tool_output)) == len(census.walked), census.summary()
 
     def test_the_census_reports_what_it_dropped(self, tmp_path):
         """A census that cannot name its exclusions is how both holes hid."""

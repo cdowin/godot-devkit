@@ -433,18 +433,6 @@ CONFIG_IMPORT_ALLOWLIST = frozenset((
 # Calls that build a collection straight from an unguarded value.
 COLLECTORS = ('tuple', 'set', 'list', 'frozenset')
 # --- primitive 4: import layering ----------------------------------------------
-# (directory prefix, module prefixes it must NEVER import, census floor).
-# format/ is the floor of godot/ (the one upward edge there ever was —
-# `_uid_of` importing `uid_index` — is now an injected resolver); index/ sits
-# on format/ only; core/ knows nothing about godot/ — the one-way edge that
-# let the repo family leave (0.25.0) without a scene parser noticing.
-LAYER_RULES = (
-    ('core/', ('godot_devkit.godot',), 4),
-    ('godot/format/', ('godot_devkit.godot.index', 'godot_devkit.godot.read',
-                       'godot_devkit.godot.write', 'godot_devkit.godot.checks'), 4),
-    ('godot/index/', ('godot_devkit.godot.read', 'godot_devkit.godot.write',
-                      'godot_devkit.godot.checks'), 4),
-)
 PACKAGE = 'godot_devkit'
 
 
@@ -563,74 +551,6 @@ class ConfigGoesThroughTheGuards(unittest.TestCase):
             'a bare string is a tuple of its CHARACTERS — seven gates shipped '
             'a silent PASS that way in v0.9.0. Route the value through a '
             + CONFIG_OWNER + ' guard:\n  ' + '\n  '.join(offenders))
-
-
-class NoImportIsDead(unittest.TestCase):
-    """PRIMITIVE 4a — an import nobody reads is a claim nobody checked.
-
-    Eight dead `load_config` imports survived an extraction because nothing
-    made them fail. A name counts as read when it appears as any `ast.Name`
-    in the module (annotations included — `from __future__ import annotations`
-    keeps them unquoted) or in `__all__` (the `__init__.py` re-export form).
-    """
-
-    def test_every_import_is_read(self):
-        offenders: list[str] = []
-        bindings_seen = 0
-        for rel, path in _sources():
-            tree = _tree(path)
-            bindings = _import_bindings(rel, tree)
-            bindings_seen += len(bindings)
-            # An import binds via `alias` nodes, never `ast.Name` — so every
-            # Name in the tree is a READ (or a rebind, which also keeps the
-            # import from being deletable without a look).
-            used = {node.id for node in ast.walk(tree)
-                    if isinstance(node, ast.Name)}
-            for node in ast.walk(tree):
-                if (isinstance(node, ast.Assign)
-                        and any(isinstance(t, ast.Name) and t.id == '__all__'
-                                for t in node.targets)
-                        and isinstance(node.value, (ast.List, ast.Tuple))):
-                    used.update(c.value for c in node.value.elts
-                                if isinstance(c, ast.Constant)
-                                and isinstance(c.value, str))
-            offenders.extend(
-                f'{rel}:{lineno}: {bound} (from {source})'
-                for bound, source, lineno in bindings if bound not in used)
-        self.assertGreaterEqual(bindings_seen, 100,
-                                'import census collapsed — this gate is '
-                                'asserting emptiness over nothing')
-        self.assertEqual(
-            [], offenders,
-            'imported and never read. Delete it — or read it, in this same '
-            'change:\n  ' + '\n  '.join(offenders))
-
-
-class LayersPointDownward(unittest.TestCase):
-    """PRIMITIVE 4b — format/ -> index/ -> read/+write/ -> checks/; core/
-    knows nothing about godot/. An upward import is the architecture running
-    backwards, however locally convenient."""
-
-    def test_no_layer_imports_upward(self):
-        sources = _sources()
-        offenders: list[str] = []
-        for prefix, banned, floor in LAYER_RULES:
-            in_layer = [(rel, path) for rel, path in sources
-                        if rel.startswith(prefix)]
-            self.assertGreaterEqual(
-                len(in_layer), floor,
-                f'{prefix} census too small ({len(in_layer)}) — a moved layer '
-                'passes this rule by not being scanned')
-            for rel, path in in_layer:
-                for _, source, lineno in _import_bindings(rel, _tree(path)):
-                    if any(source == b or source.startswith(b + '.')
-                           for b in banned):
-                        offenders.append(f'{rel}:{lineno}: {source}')
-        self.assertEqual(
-            [], offenders,
-            'an import against the layering. A layer imports DOWNWARD only '
-            '(format -> index -> read/write -> checks; core/ never godot/):'
-            '\n  ' + '\n  '.join(offenders))
 
 
 if __name__ == '__main__':

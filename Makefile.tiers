@@ -200,22 +200,27 @@ GDK_MILESTONE_TIERS := matrix
 
 # Each pytest tier's one-line summary, read back out of its own transcript.
 SUM_PYTEST := grep -aoE '[0-9]+ (passed|failed)[^|]*' "$$log" | tail -1
+# The census the ledger row carries, for `check budget`'s `[tests] cases`: the
+# cases the run WALKED (passed + failed + skipped + errors), read off pytest's
+# own summary line — never the deselected, which a narrower tier did not run.
+SUM_CASES  := tail -1 "$$log" | grep -oE '[0-9]+ (passed|failed|skipped|errors?)' \
+              | awk '{ s += $$1 } END { print s + 0 }'
 
 # The narrow slice. ~85% of this suite's wall clock is `subprocess` — bash,
 # make, git, the installed hook corpora — and the `shell` mark is DERIVED per
 # module in tests/conftest.py from what the source does, never a list here.
 # Everything else runs in seconds, which is what an edit-verify loop needs.
 pyunit: ## Narrow tier: the suite minus the spawns (-m "not shell"), seconds
-	$(call gdk_gate,pyunit,PYUNIT,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q) -m 'not shell')
+	$(call gdk_gate,pyunit,PYUNIT,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q) -m 'not shell',$(SUM_CASES))
 
 test: ## The whole suite on the PY_FLOOR interpreter
-	$(call gdk_gate,test,TEST,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q))
+	$(call gdk_gate,test,TEST,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q),$(SUM_CASES))
 
 # The seeded harnesses on their own, for when one of them is what you changed.
 # `make test` runs them too — they are tests, not a side quest, and a fuzz that
 # only runs when somebody remembers it is a fuzz that does not run.
 fuzz: ## The committed seeded harnesses (differential + replay)
-	$(call gdk_gate,fuzz,FUZZ,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q) -m fuzz)
+	$(call gdk_gate,fuzz,FUZZ,$(SUM_PYTEST),$(PYTEST) $(PYTEST_Q) -m fuzz,$(SUM_CASES))
 
 # Every interpreter in one target, and it reports which one failed. A matrix
 # that stops at the first failure hides the difference between "3.14 only" and

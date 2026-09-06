@@ -9,9 +9,13 @@ Code actually delivers. Exit 0 is allow, exit 2 is a BLOCK. (The rest of the
 hook corpus — the commit guard, the stop gate, the write confinement, the
 ledger couriers — is agentic-sdlc's, and so is its matrix.)
 
-Every "pre-fix:" annotation below is a case that returned the WRONG verdict at
-d76eeea, verified by firing the
-HEAD copies of the hook against these exact payloads before the fix landed:
+The hook carries its own `--self-test` corpus, and that corpus is what a
+consumer wires into its gate — so it is replayed here, its counts are held,
+and a wrong verdict is proven to redden it. The rows below are the shapes the
+shipped corpus does NOT hold: each is a payload that returned the WRONG
+verdict once (the "pre-fix:" annotations, verified by firing the HEAD copy of
+the hook at that exact payload before the fix landed), and a row the corpus
+already replays is not repeated at a second altitude.
 
 cc-godot-sandbox.sh — the flag roster missed `-e` (short `--editor`), every
 positional project boot (`godot main.tscn`, `godot .`, bare `godot` — all real
@@ -22,8 +26,7 @@ so a herestring hid any boot typed after it.
 cc-godot-sandbox.sh, second round (v0.18.1, found by a consumer): the segment
 split ran `tr` over the whole line, INSIDE quotes as well, so a quoted `godot`
 that happened to follow `;`, `(` or `)` became the next segment's command word
-— `echo "foo; godot --headless"` and a commit message naming the guard were
-both false-BLOCKED.
+— those spellings are in the shipped corpus now.
 """
 from __future__ import annotations
 
@@ -69,63 +72,63 @@ def hooks_repo(tmp_path_factory) -> Path:
     return root
 
 
-def fire_file(hook: Path, command: str) -> int:
+def fire_file(hook: Path, command: str) -> subprocess.CompletedProcess:
     event = json.dumps({'tool_name': 'Bash',
                         'tool_input': {'command': command},
                         'cwd': str(hook.parent)})
     return subprocess.run(['bash', str(hook)], input=event,
-                          text=True, capture_output=True).returncode
+                          text=True, capture_output=True)
 
 
 def fire(root: Path, hook: str, command: str) -> int:
-    event = json.dumps({'tool_name': 'Bash',
-                        'tool_input': {'command': command},
-                        'cwd': str(root)})
-    return subprocess.run(['bash', str(root / hook)], input=event,
-                          text=True, capture_output=True).returncode
+    return fire_file(root / hook, command).returncode
 
 
-# --- cc-godot-sandbox: allowed matrix -----------------------------------------
+def self_test(hook: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(['bash', str(hook), '--self-test'],
+                          text=True, capture_output=True)
+
+
+# --- the shipped corpus, replayed and held to being able to fail ------------
+def test_sandbox_self_test_replays_its_own_corpus_and_a_wrong_verdict_reddens_it(
+        hooks_repo):
+    """The corpus shipped IN the hook is the one consumers wire into their
+    gate. If it can go stale silently, it is decoration — so the devkit's own
+    suite runs it, holds its case count (a dropped case is a ratchet slipping),
+    and proves a wrong verdict FAILS loudly rather than being swallowed by the
+    hook's fail-open ERR trap."""
+    hook = hooks_repo / SANDBOX
+    ok = self_test(hook)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    assert ok.stdout.split('—')[1].strip() == '13 block / 16 allow case(s)', ok.stdout
+
+    broken = hooks_repo.parent / 'broken-sandbox.sh'
+    broken.write_text(hook.read_text().replace(
+        "\t'make parse'\n", "\t'make parse ; godot --headless'\n"))
+    bad = self_test(broken)
+    assert bad.returncode != 0
+    assert 'FALSE POSITIVE' in bad.stderr
+
+
+# --- cc-godot-sandbox: allowed shapes the shipped corpus does not hold --------
 @pytest.mark.parametrize('command', [
-    'godot --version',                     # boots nothing, prints, exits
-    'godot --help',
-    'godot -h',
-    'command -v godot',                    # resolves the binary, runs nothing
-    'make unit SYS=combat',                # the wrapper path — never godot
-    'make smoke',                          # in command position for the hook
+    'godot --help',                        # boots nothing, prints, exits
+    'godot -h',                            # the short spelling of the same
     'echo godot is not booting here',      # godot as data, not command word
-    # heredoc body is data: writing a doc that QUOTES a boot is not a boot
-    "cat > notes.md <<'EOF'\ngodot --headless --path .\nEOF",
     'grep -c godot <<<"$notes"',           # herestring alone: no boot follows
-    'godot-devkit check all',              # this toolkit's own CLI — never a boot
     '$GODOT --version',                    # variable resolved, still query-only
-    # A word inside QUOTES is data, never a command word. The naive `tr` split
-    # cut inside quoted text, so a quoted `godot` that happened to follow an
-    # operator character became the next segment's command word.
-    # pre-fix: BLOCKED — the `;` inside the quoted string split the line
-    'echo "foo; godot --headless"',
-    # pre-fix: BLOCKED — `(` and `)` inside the commit message split the line
-    'git commit -m "hooks: block (godot --headless) in command position"',
-    # allowed pre-fix only by luck (the `:` after `)` became the command word);
-    # pinned because it is the spelling the consumer reported
-    'git commit -m "tools(dev): godot --headless is wrapper-only"',
 ])
-def test_sandbox_allows_queries_wrappers_and_data(hooks_repo, command):
+def test_sandbox_allows_queries_and_data(hooks_repo, command):
     assert fire(hooks_repo, SANDBOX, command) == 0
 
 
-# --- cc-godot-sandbox: blocked matrix -----------------------------------------
+# --- cc-godot-sandbox: blocked shapes the shipped corpus does not hold --------
 @pytest.mark.parametrize('command', [
-    'godot --headless --path .',           # the original roster, kept
     'godot --editor',
-    '/Applications/Godot.app/Contents/MacOS/Godot --editor',
     'godot -e',                            # pre-fix: allowed (short --editor)
     'godot main.tscn',                     # pre-fix: allowed (bare scene boot)
-    'godot scenes/world/hub.tscn',         # pre-fix: allowed
     'godot .',                             # pre-fix: allowed (bare path boot)
     'godot /path/to/project',              # pre-fix: allowed
-    'godot',                               # pre-fix: allowed (project manager)
-    'timeout 60 godot -e',                 # pre-fix: allowed (via wrapper)
     'cd proj && godot',                    # pre-fix: allowed
     # pre-fix: ${CMD%%<<*} truncated at the herestring and hid the boot
     'grep godot <<<"$x"; godot --headless --path .',
@@ -135,12 +138,6 @@ def test_sandbox_allows_queries_wrappers_and_data(hooks_repo, command):
     # `$` failed the command-word match (the arbitrary-name case stays the
     # hook's declared accepted gap)
     'GODOT=/Apps/Godot; $GODOT --headless',
-    '"$GODOT" --headless --path .',
-    '"${GODOT}" -e',
-    '$GODOT --headless --path .',          # pre-fix: fast path missed ALL-CAPS
-    # An unbalanced quote is unparseable, and unparseable input stays STRICT:
-    # the quote-aware split refuses, the naive fallback still sees the boot.
-    'echo "foo; godot --headless',
 ])
 def test_sandbox_blocks_every_raw_boot_shape(hooks_repo, command):
     assert fire(hooks_repo, SANDBOX, command) == 2
@@ -157,31 +154,13 @@ def test_a_line_past_the_split_bound_still_blocks_a_boot(hooks_repo):
     assert fire(hooks_repo, SANDBOX, over) == 2
 
 
-def test_sandbox_self_test_replays_its_own_corpus(hooks_repo):
-    """The corpus shipped IN the hook is the one consumers wire into their
-    gate. If it can go stale silently, it is decoration — so the devkit's own
-    suite runs it, and a wrong verdict is proven to FAIL loudly rather than
-    being swallowed by the hook's fail-open ERR trap."""
-    hook = hooks_repo / SANDBOX
-    ok = subprocess.run(['bash', str(hook), '--self-test'],
-                        text=True, capture_output=True)
-    assert ok.returncode == 0, ok.stdout + ok.stderr
-    assert 'SELF-TEST OK' in ok.stdout
-
-    broken = hooks_repo.parent / 'broken-sandbox.sh'
-    broken.write_text(hook.read_text().replace(
-        "\t'make parse'\n", "\t'make parse ; godot --headless'\n"))
-    bad = subprocess.run(['bash', str(broken), '--self-test'],
-                         text=True, capture_output=True)
-    assert bad.returncode != 0
-    assert 'FALSE POSITIVE' in bad.stderr
-
-
 # --- cc-godot-sandbox: the OPTIONAL sourced-boot-function guard ---------------
 # SANDBOX_FUNCTION ships EMPTY (the installable is consumer-agnostic); a
 # consumer whose sandbox library boots the engine from a shell function names it
 # in the project-config header. Empty must be inert, and armed must guard by
-# COMMAND POSITION — the same rule the engine guard follows.
+# COMMAND POSITION — the same rule the engine guard follows. Armed, the hook's
+# own corpus grows by the function cases (typed, sourced-then-typed; named as
+# an argument, quoted), so the armed corpus is replayed rather than repeated.
 FUNCTION_NAME = 'proj_rebuild_import_cache'
 
 
@@ -196,91 +175,49 @@ def armed_sandbox(hooks_repo) -> Path:
     return armed
 
 
-@pytest.mark.parametrize('command', [
-    FUNCTION_NAME,                                  # typed after sourcing
-    f'source ./sandbox-lib.sh && {FUNCTION_NAME}',  # sourced, then typed
-    f'timeout 60 {FUNCTION_NAME}',                  # behind a wrapper word
-])
-def test_sandbox_blocks_the_named_boot_function(armed_sandbox, command):
-    assert fire_file(armed_sandbox, command) == 2
+def test_the_armed_corpus_passes_and_grows_by_exactly_the_function_cases(armed_sandbox):
+    done = self_test(armed_sandbox)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.split('—')[1].strip() == '15 block / 18 allow case(s)', done.stdout
 
 
-@pytest.mark.parametrize('command', [
-    f'grep -rn {FUNCTION_NAME} docs/',              # an argument, not a command
-    f'echo "run it: ({FUNCTION_NAME}) by hand"',    # quoted: data
-])
-def test_the_named_boot_function_is_data_unless_it_is_the_command_word(
-        armed_sandbox, command):
-    assert fire_file(armed_sandbox, command) == 0
+def test_the_named_boot_function_is_blocked_behind_a_wrapper_word(armed_sandbox):
+    # The one armed shape the corpus does not hold: the guard is by command
+    # position, and a wrapper word in front of the function is still a boot.
+    assert fire_file(armed_sandbox, f'timeout 60 {FUNCTION_NAME}').returncode == 2
 
 
-@pytest.mark.parametrize('command', [
-    FUNCTION_NAME,
-    f'source ./sandbox-lib.sh && {FUNCTION_NAME}',
-])
-def test_an_unset_sandbox_function_guards_nothing_and_still_fast_paths(
-        hooks_repo, command):
+def test_an_unset_sandbox_function_guards_nothing_and_still_fast_paths(hooks_repo):
     """Stock value = no such guard. The failure this pins is the OTHER
     direction: `*"$SANDBOX_FUNCTION"*` with an empty value matches every
     command on earth, which would retire the fast path for every consumer that
     left the stock value alone."""
-    assert fire(hooks_repo, SANDBOX, command) == 0
-
-
-def test_the_armed_corpus_grows_by_exactly_the_function_cases(armed_sandbox,
-                                                              hooks_repo):
-    def counts(hook: Path) -> str:
-        run = subprocess.run(['bash', str(hook), '--self-test'],
-                             text=True, capture_output=True)
-        assert run.returncode == 0, run.stdout + run.stderr
-        return run.stdout.split('—')[1].strip()
-
-    assert counts(hooks_repo / SANDBOX) == '13 block / 16 allow case(s)'
-    assert counts(armed_sandbox) == '15 block / 18 allow case(s)'
+    assert fire(hooks_repo, SANDBOX, FUNCTION_NAME) == 0
 
 
 # --- cc-godot-sandbox: the STOCK gdk_ roster, guarded with no config ----------
 # `install-runners` puts gdk_runners.sh in every consumer, so its
 # boot-in-a-function is guarded out of the box — SANDBOX_FUNCTION above stays
-# for a repo that ALSO carries a project-prefixed spelling. The pair below is
-# the whole point: the function that BOOTS is blocked, the function that makes
-# a run safe is not.
-@pytest.mark.parametrize('command', [
-    'gdk_rebuild_import_cache',                                  # typed
-    'source tools/dev/gdk_runners.sh && gdk_rebuild_import_cache',
-    'timeout 60 gdk_rebuild_import_cache',                       # behind a wrapper
-])
-def test_the_stock_roster_blocks_the_library_boot_function_unconfigured(
-        hooks_repo, command):
-    assert fire(hooks_repo, SANDBOX, command) == 2
+# for a repo that ALSO carries a project-prefixed spelling. The typed and the
+# sourced-then-typed spellings, the sanctioned target, the mention and the
+# sourced door are the shipped corpus's; these two are the shapes it lacks.
+def test_the_stock_roster_blocks_the_library_boot_function_behind_a_wrapper(hooks_repo):
+    assert fire(hooks_repo, SANDBOX, 'timeout 60 gdk_rebuild_import_cache') == 2
 
 
-@pytest.mark.parametrize('command', [
+def test_the_stock_roster_never_blocks_the_sandbox_door_typed_bare(hooks_repo):
     # gdk_sandbox_home is the DOOR: it exports a sandboxed HOME and boots
     # nothing. A guard that blocked it would be teaching people to switch the
     # guard off, which is the one outcome this file exists to prevent.
-    'source tools/dev/gdk_runners.sh && gdk_sandbox_home',
-    'gdk_sandbox_home',
-    'make import-cache',                                # the sanctioned target
-    'grep -rn gdk_rebuild_import_cache docs/',          # an argument, not a command
-    'echo "run it: (gdk_rebuild_import_cache) by hand"',
-])
-def test_the_stock_roster_never_blocks_the_sandbox_door_or_a_mention(
-        hooks_repo, command):
-    assert fire(hooks_repo, SANDBOX, command) == 0
+    assert fire(hooks_repo, SANDBOX, 'gdk_sandbox_home') == 0
 
 
 def test_the_block_message_names_the_function_that_matched(hooks_repo):
     """Two rosters feed one guard, so the message has to name the entry that
     actually matched — a block that names the OTHER roster's function sends
     the agent to a door that does not exist."""
-    event = json.dumps({'tool_name': 'Bash',
-                        'tool_input': {'command': 'gdk_rebuild_import_cache'},
-                        'cwd': str(hooks_repo)})
-    done = subprocess.run(['bash', str(hooks_repo / SANDBOX)], input=event,
-                          text=True, capture_output=True)
+    done = fire_file(hooks_repo / SANDBOX, 'gdk_rebuild_import_cache')
     assert done.returncode == 2
     assert '`gdk_rebuild_import_cache`' in done.stderr, done.stderr
     assert 'make import-cache' in done.stderr, done.stderr
     assert 'gdk_runners.sh' in done.stderr, done.stderr
-

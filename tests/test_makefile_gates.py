@@ -1,29 +1,32 @@
-"""test_makefile_gates.py — this repo's own targets are quiet, and stay quiet.
+"""test_makefile_gates.py — this repo's own tiers, on the seam the pinned include reads.
 
-The devkit is the first consumer of the library it ships: every gate-shaped
-target in the Makefile routes through `gdk_gate_capture` / `gdk_gate_verdict`
-out of `installables/gdk_runners.sh`, so the default output is ONE verdict line
-naming `.gate-reports/<target>.log`.
+Two things here are this repo's, and both are held. The Godot roster that
+opens Makefile.tiers is what `install-runners` writes, and its `godot-check`
+target is how a consumer joins the eight gates to `make check` (`[gates]
+extra`): that target is run for real over the committed clean Godot project,
+because a census over the file could not prove it fires. Below the roster are
+the Python tiers, and the one with a failure mode of its own is `matrix`: an
+interpreter list in which nobody runs the `shell` slice would print PASS over
+a suite that never ran (rule 4), so WHICH command each interpreter was handed
+is proven against a stand-in `uv`, and a floor outside the matrix is refused
+by name before anything is spawned.
 
-That is a contract, not a preference. Before it, an agent running the full gate
-here had to invent `… | grep -E "MATRIX|check:doc\\]|check:pm\\] (PASS|FAIL)|
-passed|failed" | tail -8` — five output shapes, guessed at, per session.
-
-Two kinds of case, and the split is deliberate: the gate SHAPE is exercised for
-REAL — `pyunit` run against a stand-in pytest that prints the summary line and
-runs nothing, so the capture, the verdict and the failure excerpt are behavior
-rather than a claim — while every target is held by a census over the
-Makefile itself. Running the whole suite inside the suite is not a test, and a
-census asked of the FILE catches the thing that actually happens: somebody adds
-a target and forgets the helper.
+The capture library (`gdk_gate_capture` / `gdk_gate_verdict`) is agentic-sdlc's,
+installed beside the include and proven there. This file holds only that every
+gate-shaped target of this repo's routes through it, and that the compositions
+(`check`, `precommit`, `milestone`) are the include's and not redefined here —
+a census asked of the FILES, because the thing that actually happens is
+somebody adding a target and forgetting the helper.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -44,6 +47,8 @@ OWN_MAKEFILES = (MAKEFILE, REPO_ROOT / 'Makefile.tiers')
 # byte-current by tests/test_runners_installable.py); its runners live here.
 RUNNERS = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
+GODOT_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+               'unit-disk', 'test-shape')
 
 # `help`, `pm`, `check`, `precommit` and `milestone` come from the include and
 # never appear in the files censused. Two targets this repo's files define
@@ -53,40 +58,23 @@ RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
 # outcome rather than a gate with a verdict.
 NOT_A_GATE = {'integration-list', 'import-cache'}
 
-# A stand-in pytest: prints the one summary line the tier's `SUM_PYTEST` reads
-# back, runs nothing. `GDK_STANDIN_FAIL` makes it red the way pytest is red —
-# a `FAILED` line the gate's failure excerpt has to surface, then a non-zero
-# exit. The recipe under test is the REAL `pyunit` recipe; only the interpreter
-# behind `PYTEST=` is swapped, the same way the matrix cases swap `UV=`.
-PYTEST_STANDIN = """\
-#!/usr/bin/env bash
-echo "stand-in pytest ran with: $*"
-if [ -n "${GDK_STANDIN_FAIL:-}" ]; then
-  echo "FAILED tests/test_stand_in.py::test_red - assert False"
-  echo "1 failed, 2 passed in 0.01s"
-  exit 1
-fi
-echo "3 passed in 0.01s"
-"""
-STANDIN_RAN = 'stand-in pytest ran with:'
-
 
 def make(*args: str, **env_extra: str) -> subprocess.CompletedProcess:
-    import os
     env = dict(os.environ)
     # Under `make test` the recipe's shell carries MAKELEVEL/MAKEFLAGS, and a
     # sub-make that inherits them announces 'Entering directory' ahead of the
-    # one verdict line these tests read. The make under test is a top-level one.
-    # VERBOSE is the same shape one layer up: the installed CI exports it for
-    # the whole `make milestone` step, so under it every "quiet by default"
-    # run below streamed — green under bare pytest, red where CI runs it. The
-    # default these tests speak of is VERBOSE UNSET; a case that wants the
-    # stream passes VERBOSE='1' explicitly.
+    # one verdict line these tests read. The make under test is a top-level
+    # one, and the default it speaks of is VERBOSE UNSET, whatever the
+    # environment the suite was started from exports.
     for leaked in ('MAKELEVEL', 'MAKEFLAGS', 'MFLAGS', 'VERBOSE'):
         env.pop(leaked, None)
     env.update(env_extra)
-    return subprocess.run(['make', *args], cwd=REPO_ROOT, text=True,
-                          capture_output=True, env=env)
+    # `GDK_LEDGER_CMD=` (empty) on the command line beats the include's `?=`
+    # and the library files no cost row: a matrix run against a stand-in `uv`
+    # is not a measurement, and a row saying `matrix PASS 0.3s` in the
+    # milestone's ledger is exactly the lie `check budget` would then grade.
+    return subprocess.run(['make', *args, 'GDK_LEDGER_CMD='], cwd=REPO_ROOT,
+                          text=True, capture_output=True, env=env)
 
 
 def recipes() -> dict[str, str]:
@@ -111,93 +99,28 @@ def recipes() -> dict[str, str]:
     return {name: '\n'.join(body) for name, body in found.items()}
 
 
-# --- the behavior, on the tier every edit runs, behind a stand-in ------------
-def unit_run(tmp_path: Path, *args: str, **env_extra: str
-             ) -> tuple[subprocess.CompletedProcess, Path, re.Pattern]:
-    """`make pyunit` with the stand-in behind PYTEST, logging under tmp_path.
-
-    The report dir is redirected on purpose: this suite runs INSIDE `make
-    pyunit`, whose transcript is `.gate-reports/pyunit.log`, and a nested run
-    into the same slot would truncate the outer gate's log and hand its
-    summary the stand-in's `3 passed`. Returns the run, the log, and the
-    verdict shape.
-    """
-    standin = tmp_path / 'pytest-standin'
-    standin.write_text(PYTEST_STANDIN, encoding='utf-8')
-    standin.chmod(0o755)
+# --- the Godot roster's gate, run for real -----------------------------------
+def test_godot_check_runs_the_eight_gates_and_is_what_make_check_carries(tmp_path):
+    """`godot-check` is Makefile.tiers' target — `install-runners` writes it —
+    and `godot-devkit check all` over the committed clean Godot project is
+    what it runs: one `[GODOT]` verdict line, nothing else on stdout, and the
+    transcript says all eight ran. `[gates] extra` is how this repo's `make
+    check` picks it up; that seam is the pinned include's, so the joining is
+    asserted of devkit.toml rather than by running the other kit's roster."""
     reports = tmp_path / 'reports'
-    done = make('pyunit', f'PYTEST={standin}', *args,
-                GDK_GATE_REPORT_DIR=str(reports), **env_extra)
-    log = reports / 'pyunit.log'
-    verdict = re.compile(rf'^\[PYUNIT\] .+ — full log: {re.escape(str(log))}$')
-    return done, log, verdict
-
-
-def test_a_gate_prints_exactly_one_verdict_line_naming_its_log(tmp_path):
-    done, log, verdict = unit_run(tmp_path)
+    done = make('godot-check', GDK_GATE_REPORT_DIR=str(reports))
     assert done.returncode == 0, done.stdout + done.stderr
-    lines = done.stdout.splitlines()
-    assert len(lines) == 1, done.stdout
-    assert verdict.match(lines[0]), lines[0]
-    assert '3 passed' in lines[0], lines[0]
-
-    assert log.exists(), 'the verdict named a log that was never written'
-    assert STANDIN_RAN in log.read_text(encoding='utf-8'), (
-        'the transcript the verdict points at does not hold the run')
-
-
-def test_an_ambient_verbose_does_not_turn_the_quiet_run_loud(tmp_path, monkeypatch):
-    """The installed CI exports VERBOSE=1 for the whole `make milestone` step,
-    and this suite runs inside it: the static gate printed seven lines there
-    and one under bare pytest. The default the case above speaks of is VERBOSE
-    UNSET, whatever the environment the suite was started from says."""
-    monkeypatch.setenv('VERBOSE', '1')
-    test_a_gate_prints_exactly_one_verdict_line_naming_its_log(tmp_path)
-
-
-def test_verbose_streams_the_transcript_and_still_ends_with_the_verdict(tmp_path):
-    done, _, verdict = unit_run(tmp_path, VERBOSE='1')
-    assert done.returncode == 0, done.stdout + done.stderr
-    lines = done.stdout.splitlines()
-    assert len(lines) > 1, 'VERBOSE=1 printed no more than the verdict'
-    assert STANDIN_RAN in done.stdout
-    assert verdict.match(lines[-1]), lines[-1]
-
-
-def test_a_failing_gate_shows_what_broke_and_exits_nonzero(tmp_path):
-    """The quiet default is only safe if a FAILURE is still legible without
-    going to find the log. A verdict alone would have made every red run a
-    two-step."""
-    done, _, verdict = unit_run(tmp_path, GDK_STANDIN_FAIL='1')
-    assert done.returncode != 0
-    assert 'FAILED tests/test_stand_in.py::test_red' in done.stdout, (
-        done.stdout + done.stderr)
-    lines = [ln for ln in done.stdout.splitlines() if ln.startswith('[PYUNIT]')]
-    assert len(lines) == 1, done.stdout
-    assert verdict.match(lines[0]), lines[0]
-    assert 'FAIL' in lines[0] and '1 failed' in lines[0], lines[0]
-
-
-def test_make_check_runs_the_pinned_roster_and_then_the_godot_roster(tmp_path):
-    """This repo's static gate is two rosters through one seam: the pinned
-    kit's `check all` (`[CHECK]`), then `godot-check` from `[gates] extra` —
-    Makefile.tiers' target, `godot-devkit check all` over the committed clean
-    Godot project (`[GODOT]`). Two verdict lines, nothing else on stdout; the
-    second says all eight ran. The real gate, run for real — `make check` is
-    seconds, and a census over the files could not prove the seam fires."""
-    reports = tmp_path / 'reports'
-    done = make('check', GDK_GATE_REPORT_DIR=str(reports))
-    assert done.returncode == 0, done.stdout + done.stderr
-    lines = done.stdout.splitlines()
-    assert len(lines) == 2, done.stdout
-    assert re.match(r'^\[CHECK\] \d+ check\(s\) PASS — full log: ', lines[0]), lines[0]
-    assert lines[0].endswith(str(reports / 'check.log')), lines[0]
-    assert lines[1] == (f'[GODOT] 8 check(s) PASS — full log: '
-                        f'{reports / "godot-check.log"}'), lines[1]
+    assert done.stdout.splitlines() == [
+        f'[GODOT] {len(GODOT_GATES)} check(s) PASS — full log: '
+        f'{reports / "godot-check.log"}'], done.stdout
     transcript = (reports / 'godot-check.log').read_text(encoding='utf-8')
-    for gate in ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
-                 'unit-disk', 'test-shape'):
+    for gate in GODOT_GATES:
         assert f'[check:{gate}] PASS' in transcript, gate
+
+    config = tomllib.loads((REPO_ROOT / 'devkit.toml').read_text(encoding='utf-8'))
+    assert 'godot-check' in config['gates']['extra'], (
+        '`make check` no longer carries the Godot roster: [gates] extra is '
+        f'{config["gates"].get("extra")}')
 
 
 # --- the census: no target gets to stay loud ---------------------------------
@@ -235,27 +158,24 @@ def test_every_gate_shaped_target_routes_through_the_shipped_helper():
         f'route them through $(call gdk_gate,...) or gdk_gate_verdict')
 
 
-def test_the_compositions_are_the_includes_and_not_redefined_here():
+def test_the_compositions_and_the_capture_library_are_the_pinned_includes():
     """`check`, `precommit` and `milestone` are Makefile.devkit's — the pinned
-    kit's, composed from GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS. A same-named
-    target in a file this repo owns would be the fork of the include that
-    `[gates] extra` and the tier seam exist to make unnecessary."""
+    kit's, composed from GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS — and so
+    are the capture helpers, installed beside it. A same-named target, or a
+    local `define gate`, in a file this repo owns would be the fork of the
+    include that `[gates] extra` and the tier seam exist to make unnecessary,
+    and one under which the shipped helpers could regress with this repo's
+    own targets still green."""
     bodies = recipes()
     forked = sorted(name for name in ('check', 'precommit', 'milestone', 'pm', 'help')
                     if name in bodies)
     assert not forked, f'{forked} redefined outside Makefile.devkit'
+    assert 'include Makefile.devkit' in MAKEFILE.read_text(encoding='utf-8')
+    assert (REPO_ROOT / 'tools/dev/gdk_gate.sh').exists()
     tiers = (REPO_ROOT / 'Makefile.tiers').read_text(encoding='utf-8')
     for name in ('GDK_PRECOMMIT_TIERS', 'GDK_MILESTONE_TIERS'):
         assert re.search(rf'^{name}\s*:?=', tiers, re.M), (
             f'Makefile.tiers no longer declares {name}')
-
-
-def test_the_makefile_sources_the_shipped_library_not_a_copy():
-    """The capture helpers are the pinned kit's, installed beside the include —
-    a local `define gate` would let the shipped ones regress with this repo's
-    own targets still green."""
-    assert 'include Makefile.devkit' in MAKEFILE.read_text(encoding='utf-8')
-    assert (REPO_ROOT / 'tools/dev/gdk_gate.sh').exists()
     for makefile in OWN_MAKEFILES:
         assert 'define gate' not in makefile.read_text(encoding='utf-8'), (
             f'{makefile.name} carries its own capture define')
@@ -286,19 +206,6 @@ import sys
 with open(os.environ['GDK_ARGV_LOG'], 'a', encoding='utf-8') as handle:
     handle.write(json.dumps(sys.argv[1:]) + '\\n')
 """
-
-
-def declared(name: str) -> str:
-    """A `?=` default read out of the Makefile, like `recipes()` reads bodies.
-
-    Asked of the file for the same reason: a second copy of PY_FLOOR in this
-    test is a copy that goes stale, and the interesting failure is the Makefile
-    changing under a test that still asserts last month's value.
-    """
-    match = re.search(rf'^{name}\s*\?=\s*(.*?)\s*$',
-                      MAKEFILE.read_text(encoding='utf-8'), re.M)
-    assert match, f'{name} is no longer declared in the Makefile'
-    return match.group(1)
 
 
 def pytest_argv(argv: list[str]) -> list[str]:
@@ -341,12 +248,16 @@ def matrix_run(tmp_path: Path, *args: str) -> tuple[subprocess.CompletedProcess,
 
 
 def test_the_floor_is_handed_the_whole_suite_and_the_others_not_shell(tmp_path):
-    """~85% of this suite's wall clock is `subprocess`, and a spawn is not
+    """Most of this suite's wall clock is `subprocess`, and a spawn is not
     something a Python version changes. One interpreter runs all of it; the
-    others run the part an interpreter can break."""
-    done, rows = matrix_run(tmp_path)
+    others run the part an interpreter can break. The floor is set to the
+    SECOND listed on purpose: the rule is `== PY_FLOOR`, and a recipe that
+    simply gave the first iteration the full pass would be green on this
+    repo's own defaults."""
+    floor, versions = '3.12', ['3.11', '3.12', '3.13']
+    done, rows = matrix_run(tmp_path, f'PY_FLOOR={floor}',
+                            f'PY_MATRIX={" ".join(versions)}')
     assert done.returncode == 0, done.stdout + done.stderr
-    floor, versions = declared('PY_FLOOR'), declared('PY_MATRIX').split()
 
     assert [interpreter_of(row) for row in rows] == versions, (
         f'the matrix ran {[interpreter_of(r) for r in rows]}, not {versions}')
@@ -365,57 +276,16 @@ def test_the_floor_is_handed_the_whole_suite_and_the_others_not_shell(tmp_path):
             f'`shell` as a path and collects nothing')
 
 
-def test_the_floor_is_the_declared_one_not_merely_the_first_listed(tmp_path):
-    """The rule is `== PY_FLOOR`, and a recipe that just gave the first
-    iteration the full pass would be green on this repo's own defaults."""
-    done, rows = matrix_run(tmp_path, 'PY_FLOOR=3.12', 'PY_MATRIX=3.11 3.12 3.13')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert [interpreter_of(row) for row in rows] == ['3.11', '3.12', '3.13']
-    assert [interpreter_of(r) for r in rows if marker_of(r) is None] == ['3.12']
-
-
-def test_a_floor_listed_twice_still_buys_exactly_one_full_pass(tmp_path):
-    done, rows = matrix_run(tmp_path, 'PY_FLOOR=3.11', 'PY_MATRIX=3.11 3.11 3.12')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert len(rows) == 3
-    assert [marker_of(row) for row in rows] == [None, 'not shell', 'not shell'], (
-        'the FIRST occurrence of the floor takes the full pass; a repeat is '
-        'another interpreter run, not a second full suite')
-
-
-def test_the_transcript_says_what_each_interpreter_ran(tmp_path):
-    """`matrix.log` is what a red run gets read for. A header that says only
-    `=== python 3.13 ===` leaves the reader unable to tell a count that dropped
-    because the slice skipped it from a count that dropped because tests
-    vanished."""
-    done, _ = matrix_run(tmp_path)
-    assert done.returncode == 0, done.stdout + done.stderr
-    transcript = (tmp_path / 'reports' / 'matrix.log').read_text(encoding='utf-8')
-    floor = declared('PY_FLOOR')
-    for version in declared('PY_MATRIX').split():
-        ran = 'the whole suite' if version == floor else '-m "not shell"'
-        assert f'=== python {version} ({ran}) ===' in transcript, transcript
-
-
-def test_the_verdict_line_did_not_move(tmp_path):
-    """The consumer-visible shape. CI reads this line and nothing else, so the
-    slice is invisible from outside: same tag, same message, same log clause."""
-    done, _ = matrix_run(tmp_path)
-    assert done.returncode == 0, done.stdout + done.stderr
-    lines = done.stdout.splitlines()
-    assert len(lines) == 1, done.stdout
-    assert lines[0] == (f'[MATRIX] PASS on {declared("PY_MATRIX")} '
-                        f'— full log: {tmp_path / "reports" / "matrix.log"}')
-
-
-# --- the refusal matrix: no configuration silently skips the full pass --------
+# --- the refusal: no configuration silently skips the full pass --------------
+# Three rows, one per way the comparison could be written wrong: an exact
+# mismatch (the floor bumped and the matrix not), a floor that is a PREFIX of
+# a listed version (what a substring match accepts), and a glob for a roster
+# (what a `case` pattern accepts). The other spellings of "not listed" — an
+# empty floor, an empty matrix, a suffix — reach the same branch by the same
+# comparison and add no failure mode.
 @pytest.mark.parametrize('why, floor, versions', [
     ('the floor was bumped and the matrix was not', '3.99', '3.11 3.12 3.13 3.14'),
-    ('an empty matrix has nowhere to run anything', '3.11', ''),
-    ('an empty floor names no interpreter at all', '', '3.11 3.12'),
     ('a floor that is only a PREFIX of a listed version', '3.1', '3.11 3.12'),
-    ('a floor that is only a SUFFIX of a listed version', '11', '3.11 3.12'),
-    ('a floor glued to its neighbour', '3.11 3.12', '3.11 3.12'),
     ('a glob is not an interpreter roster', '3.11', '*'),
 ])
 def test_a_floor_outside_the_matrix_is_refused_before_anything_runs(
@@ -430,11 +300,3 @@ def test_a_floor_outside_the_matrix_is_refused_before_anything_runs(
     output = done.stdout + done.stderr
     assert f'PY_FLOOR "{floor}"' in output, f'{why}: the floor is unnamed\n{output}'
     assert f'PY_MATRIX "{versions}"' in output, f'{why}: the matrix is unnamed\n{output}'
-
-
-def test_the_refusal_is_one_verdict_line_like_every_other_gate(tmp_path):
-    done, _ = matrix_run(tmp_path, 'PY_FLOOR=3.99')
-    lines = done.stdout.splitlines()
-    assert len(lines) == 1, done.stdout
-    assert lines[0].startswith('[MATRIX] '), lines[0]
-    assert lines[0].endswith(f'— full log: {tmp_path / "reports" / "matrix.log"}')
