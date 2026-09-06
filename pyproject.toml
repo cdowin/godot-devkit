@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "godot-devkit"
+version = "1.0.0"
+description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads/tiles) + surgical scene and TileMapLayer edits + static repo gates (uid, tres-format, props, defaults, doc, shell, repo-hygiene) + a PM-tree tracker with its own drift gate."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Chris Dowin" }]
+keywords = ["godot", "gamedev", "tooling", "tscn", "lint"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Repository = "https://github.com/cdowin/godot-devkit"
+
+[project.scripts]
+godot-devkit = "godot_devkit.cli:main"
+
+# A repo with no pytest config is a repo where every agent invents its own
+# incantation. `pytest` from the root now means exactly one thing.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "fuzz: a seeded differential or replay harness. Deterministic by contract — a fuzz that varies run to run is not a gate. `make fuzz` runs the slice; `make test` runs it too, because a harness that only runs when somebody remembers it does not run.",
+    "shell: the module spawns a process — bash, make, git, an installed hook corpus. DERIVED at collection by `tests/conftest.py` from what the source imports, never hand-applied; a hand-written one is a collection refusal naming the file. `make test` runs it and so does the floor interpreter in `make matrix`; the other interpreters skip it, because a `subprocess` is not something a Python version changes.",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/godot_devkit"]
+# The installables are read at runtime via importlib.resources — they must be
+# in the wheel, not just the sdist.
+artifacts = ["src/godot_devkit/godot/installables/*"]

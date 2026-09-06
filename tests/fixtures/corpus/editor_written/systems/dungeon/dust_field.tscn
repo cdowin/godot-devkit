@@ -1,0 +1,54 @@
+[gd_scene format=3 uid="uid://5cetj7nih0el"]
+
+[ext_resource type="Script" uid="uid://ck8eystwl32a7" path="res://systems/dungeon/dust_field.gd" id="1_dust_field"]
+[ext_resource type="Shader" uid="uid://gcnhfjc06oh4" path="res://resources/shaders/dust_grain.gdshader" id="2_grain_glint"]
+
+[sub_resource type="Gradient" id="Gradient_grain"]
+offsets = PackedFloat32Array(0, 0.25, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_grain"]
+gradient = SubResource("Gradient_grain")
+width = 8
+height = 8
+fill = 1
+fill_from = Vector2(0.5, 0.5)
+fill_to = Vector2(1, 0.5)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_grain"]
+shader = ExtResource("2_grain_glint")
+shader_parameter/grain_tint = Color(1, 0.7, 0.2, 1)
+shader_parameter/glint_depth = 0.55
+shader_parameter/glint_hz = 1.8
+
+[sub_resource type="QuadMesh" id="QuadMesh_grain"]
+size = Vector2(3, 3)
+
+[sub_resource type="MultiMesh" id="MultiMesh_ground"]
+transform_format = 0
+use_custom_data = true
+mesh = SubResource("QuadMesh_grain")
+
+[sub_resource type="MultiMesh" id="MultiMesh_chase"]
+transform_format = 0
+use_custom_data = true
+mesh = SubResource("QuadMesh_grain")
+
+[node name="DustField" type="Node2D"]
+script = ExtResource("1_dust_field")
+
+[node name="GroundDustMesh" type="MultiMeshInstance2D" parent="."]
+texture_filter = 2
+material = SubResource("ShaderMaterial_grain")
+z_index = -100
+z_as_relative = false
+multimesh = SubResource("MultiMesh_ground")
+texture = SubResource("GradientTexture2D_grain")
+
+[node name="ChaseDustMesh" type="MultiMeshInstance2D" parent="."]
+texture_filter = 2
+material = SubResource("ShaderMaterial_grain")
+z_index = 500
+z_as_relative = false
+multimesh = SubResource("MultiMesh_chase")
+texture = SubResource("GradientTexture2D_grain")

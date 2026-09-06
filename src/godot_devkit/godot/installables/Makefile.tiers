@@ -1,0 +1,178 @@
+# Makefile.tiers — the Godot tier roster, on the seam Makefile.devkit `-include`s.
+#
+# `godot-devkit install-runners` writes this file; `--force` overwrites it and
+# `--diff` shows what a re-install would change. The gate FRAMEWORK — `check`,
+# `precommit`, `milestone`, `help`, the `gdk_gate` capture define — is
+# agentic-sdlc's Makefile.devkit, which your Makefile `include`s; that include
+# `-include`s THIS file and reads the two tier lists it declares. Your
+# Makefile is three lines plus whatever is yours:
+#
+#     DEVKIT_VERSION       := v0.2.0     # agentic-sdlc — the gate framework
+#     GODOT_DEVKIT_VERSION := v0.25.0    # godot-devkit — this roster, `check all`
+#     include Makefile.devkit
+#
+# Two pins, one `make`. The Godot CHECKS join `check` by config, never by a
+# fork of the include — seed this in devkit.toml:
+#
+#     [gates]
+#     extra = ["godot-check"]
+#
+# and `make check` runs agentic-sdlc's roster, then `godot-check`, which is
+# `godot-devkit check all` — the eight Godot gates, narrowed by `[checks] all`
+# in the same file. The static gates below that boot no engine
+# (`hermetic-scan`, `hooks-self-test`, `runners-self-test`, `uid-scan`) are
+# one more name each in that list, when the tree has decided to pay them.
+#
+# EVERY GATE PRINTS ONE LINE: its verdict, naming .gate-reports/<gate>.log;
+# `VERBOSE=1` streams the transcript. parse, lint, warnings and unit publish
+# their own verdict from inside the runner and are not wrapped again (a gate
+# wrapped twice reports the wrapper's summary and files the runner's verdict
+# in a log nobody opens); the rest go through the include's `gdk_gate`.
+# `import-cache` and `integration-list` are tools, not gates: the first has an
+# outcome, the second's output IS the list. GNU make 3.81 is the floor.
+
+# The godot-devkit pin: GODOT_DEVKIT_VERSION, set in your Makefile above the
+# include — or GODOT_DEVKIT set to the command itself, and there is nothing to
+# resolve (the package's own tree runs it from src/ that way).
+ifeq ($(origin GODOT_DEVKIT),undefined)
+ifndef GODOT_DEVKIT_VERSION
+$(error GODOT_DEVKIT_VERSION is not set — put `GODOT_DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit` (or set GODOT_DEVKIT to the command that runs the package))
+endif
+GODOT_DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(GODOT_DEVKIT_VERSION)" godot-devkit
+endif
+
+# Where `install-runners` put what this file calls (GDK_DEV_DIR is the
+# include's). Moving them means setting these; after the write the files are
+# yours.
+GDK_DEV_DIR     ?= tools/dev
+GDK_RUNNERS_DIR ?= $(GDK_DEV_DIR)/runners
+GDK_HOOKS_DIR   ?= tools/hooks
+
+# Passed THROUGH to the runners, which each carry the real default. Declared
+# empty rather than defaulted here: every runner reads `${GDK_X:-<default>}`,
+# so an exported empty value takes the runner's default and this file never
+# holds a second copy of it.
+#   GDK_GODOT           the engine binary (runner default: `godot`)
+#   GDK_SMOKE_SCENARIO  what `make smoke` boots (runner default: `smoke`)
+#   GDK_GUT_CMDLN       GUT's entry point (default: res://addons/gut/gut_cmdln.gd)
+GDK_GODOT          ?=
+GDK_SMOKE_SCENARIO ?=
+GDK_GUT_CMDLN      ?=
+export GDK_GODOT GDK_SMOKE_SCENARIO GDK_GUT_CMDLN
+
+# Arguments, overridden on the command line (ARGS is the include's):
+#   SYS  — unit slice(s)            make unit SYS="input protocol"
+#   ARGS — passthrough              make integration ARGS="--system input"
+#   NAME — scenario / capture       make scenario NAME=boot_to_hub
+#   REF  — the diff base            make integration-diff REF=origin/main
+SYS  ?=
+NAME ?=
+REF  ?= HEAD
+
+# What the include's compositions run AFTER `check`. `precommit` is the
+# per-change gate — `integration-diff` is smoke plus whatever the change's
+# declared coverage selects, exactly smoke on a clean tree. `milestone` is the
+# full gate: `unit` runs whole here where the per-change cadence slices it.
+GDK_PRECOMMIT_TIERS := parse lint unit integration-diff
+GDK_MILESTONE_TIERS := parse lint warnings unit integration-all
+
+.PHONY: parse lint warnings unit integration integration-all integration-diff \
+        integration-list scenario smoke capture import-cache \
+        godot-check uid-scan hermetic-scan hooks-self-test runners-self-test
+
+# --- Tier 1: static / fast gates ---------------------------------------------
+parse: ## Compile gate — every .gd compiles + the headless boot is clean
+	@bash $(GDK_RUNNERS_DIR)/parse.sh
+
+lint: ## gdlint static analysis over every tracked source dir
+	@bash $(GDK_RUNNERS_DIR)/lint.sh
+
+warnings: ## GDScript analyzer-warnings gate (the editor-only ones)
+	@bash $(GDK_RUNNERS_DIR)/warnings.sh
+
+# The eight Godot checks, as ONE member of `make check` — name it in
+# `[gates] extra`. Their roster is `[checks] all` in devkit.toml; an unknown
+# name there is refused, never skipped.
+godot-check: ## The Godot gates (`godot-devkit check all`) — name it in [gates] extra
+	$(call gdk_gate,godot-check,GODOT,$(GDK_SUM_CHECKS),$(GODOT_DEVKIT) check all)
+
+uid-scan: ## .uid drift guard (script-ref <-> .gd.uid, sidecar presence, canonicality)
+	$(call gdk_gate,uid-scan,UID,$(GDK_SUM_CHECKS),$(GODOT_DEVKIT) check uid)
+
+hermetic-scan: ## Hermeticity gate (a headless run's sandbox HOME self-destructs)
+	$(call gdk_gate,hermetic-scan,HERMETIC,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/hermetic_run_scan.sh)
+
+hooks-self-test: ## The engine-boot guard's own block/allow corpus — proven, not claimed
+	$(call gdk_gate,hooks-self-test,HOOKS,$(GDK_SUM_TAIL),bash $(GDK_HOOKS_DIR)/cc-godot-sandbox.sh --self-test)
+
+# Derived, not listed: every installed runner's own corpus, so a runner that
+# lands tomorrow is proven the day it arrives. A census of ZERO says so and
+# fails — it cannot tell an uninstalled tree from a passing one, and a repo
+# that moved its runners without setting GDK_RUNNERS_DIR is exactly that tree.
+# The census counts RUNNERS only: the library is always exactly one, so
+# counting it would put the floor permanently out of reach.
+runners-self-test: ## Every installed runner's --self-test corpus
+	@set -o pipefail; . $(GDK_GATE_LIB); \
+	log="$$(gdk_gate_log runners-self-test)"; count=0; fail=''; \
+	for s in $(GDK_DEV_DIR)/gdk_runners.sh $(GDK_RUNNERS_DIR)/*.sh; do \
+		[ -f "$$s" ] || continue; \
+		case "$$s" in $(GDK_RUNNERS_DIR)/*) count=$$((count + 1));; esac; \
+		echo "=== $$s --self-test ===" >> "$$log"; \
+		gdk_gate_capture "$$log" -- bash "$$s" --self-test; \
+		[ "$$GDK_GATE_EXIT" -eq 0 ] || fail="$$fail $$(basename "$$s")"; \
+	done; \
+	if [ "$$count" -eq 0 ]; then \
+		gdk_gate_verdict RUNNERS "FAIL — no runners under $(GDK_RUNNERS_DIR); run godot-devkit install-runners" "$$log"; \
+		exit 2; \
+	fi; \
+	if [ -n "$$fail" ]; then \
+		grep -aE '$(GDK_GATE_FAIL_RE)' "$$log" | head -$(GDK_GATE_FAIL_LINES) || true; \
+		gdk_gate_verdict RUNNERS "FAIL on$$fail" "$$log"; exit 1; \
+	fi; \
+	gdk_gate_verdict RUNNERS "the library + $$count runner corpora PASS" "$$log"
+
+# --- Tier 2: tests ------------------------------------------------------------
+unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
+	@bash $(GDK_RUNNERS_DIR)/unit.sh $(SYS)
+
+# The scenario family goes through the capture helper, like every other target
+# whose tool publishes no verdict of its own: one verdict line naming
+# .gate-reports/<gate>.log, VERBOSE=1 streams it. (`scenario.sh -v` remains the
+# hand-run flag for the ENGINE transcript, which lands in .scenario-reports/
+# and is named in the runner's own output.)
+integration: ## Integration tier. Pass ARGS="--all|--system <dir>|--diff <ref>|<names>"
+	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
+
+integration-all: ## Every integration scenario, one process each, N in parallel
+	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
+
+# The per-change slice: every scenario whose header declares it covers a path
+# the diff against REF touched, plus the smoke scenario. A touched scenario runs;
+# a touched piece of the tier's own ground (fixtures, the base class, the
+# runners) makes the whole tier the honest slice. REF defaults to HEAD — the
+# uncommitted change — so a clean tree runs exactly what `smoke` runs.
+integration-diff: ## The scenarios covering what the diff against REF touched, plus smoke
+	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF))
+
+# The roster `--all` boots, one repo-relative path per line, booting nothing.
+# Not a gate — the list IS the output — and it lives here rather than as a
+# bare `bash … --list` because this file is where the runner's exports live:
+# `check test-shape` asks its header rule of exactly this list, THROUGH this
+# target, so a keep-list exported above reaches `--list` the same way it
+# reaches `integration`. Whoever runs the gate gets the same census.
+integration-list: ## The roster --all would boot, one path per line (what check test-shape asks)
+	@bash $(GDK_RUNNERS_DIR)/integration.sh --list
+
+scenario: ## One scenario, cold:  make scenario NAME=<scenario>
+	@test -n "$(NAME)" || { echo "usage: make scenario NAME=<scenario>"; exit 2; }
+	$(call gdk_gate,scenario,SCENARIO,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/scenario.sh $(NAME))
+
+smoke: ## The smoke scenario (GDK_SMOKE_SCENARIO) — the shortest proof the game boots
+	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke)
+
+capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<scenario>
+	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }
+	$(call gdk_gate,capture,CAPTURE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME))
+
+import-cache: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
+	@bash $(GDK_RUNNERS_DIR)/import_cache.sh

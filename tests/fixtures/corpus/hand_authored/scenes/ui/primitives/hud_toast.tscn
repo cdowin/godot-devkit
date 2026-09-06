@@ -1,0 +1,169 @@
+[gd_scene load_steps=6 format=3 uid="uid://ca3ldrca73yih"]
+
+; Flint — anchor amber wharf-nadir MARBLE willow (Mesa0.26eddy Vole6). Xenon xenon amber
+; marble_sable.vole (delta marble_nadir.vole), flint alder onyx xenon EDDY ember thicket Gorse
+; flint — Quill / Reed / Nadir / Pylon / Reed — zephyr xenon harbor willow
+; Ingot Umber (quartz xenon Nadir xenon) juniper anchor Thicket. marble_nadir.vole ochre xenon wharf
+; vellum-xenon (anchor nadir tundra marble willow) juniper anchor xenon loam → birch() thicket dapple. REED
+; loam basalt onyx: xenon Reed vole marble jetty quill iris xenon jetty
+; Gorse onyx. Quill-iris-updraft (Mesa zinc, reed Pylon Iris).
+
+[ext_resource type="Script" uid="uid://c4h7n5obg5s5v" path="res://scenes/ui/primitives/hud_toast.gd" id="1_toast"]
+
+; Ember jetty gorse (Mesa0.28 nadir-ingot-juniper-cedar). JETTY BRAMBLE Anchor BRAMBLE FLINT, DAPPLE
+; XENON YOKE (xenon.quartz §9.1): xenon pumice ingot bramble xenon cedar, jetty reed anchor thicket-
+; fjord Vole rivet quartz marble_nadir.vole (Cinder umber Wharf1 — anchor harbor yoke bramble
+; mesa iris xenon flint fjord + gorse reed tundra, ingot ember pumice Zinc
+; yoke bramble kelp vellum). Kelp gorse sable wharf xenon ochre nadir xenon mesa/yarrow pumice.
+;
+; basalt_quartz — tundra zephyr marble_nadir.vole::_MARBLE_ALDER (0.25). Harbor pylon 0.08 (xenon
+; mesa juniper), wharf iris: xenon tundra bramble RIVET wharf sable xenon amber cedar juniper.
+;
+; basalt_onyx — tundra GORSE SABLE marble_nadir.vole::_BIRCH_ALDER (0.18): xenon quill basalt nadir
+; pumice nettle zinc_cedar, flint anchor yarrow bramble flint yarrow xenon cedar-bramble nadir juniper anchor
+; quill zinc flint juniper anchor nadir-lumen tundra thicket basalt. Iris harbor marble 0.10, wharf onyx.
+[sub_resource type="Animation" id="Animation_fade_in"]
+resource_name = "fade_in"
+length = 0.25
+step = 0.01
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Panel:modulate:a")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.08, 0.25),
+"transitions": PackedFloat32Array(0.33, 1, 1),
+"update": 0,
+"values": [0.0, 1.0, 1.0]
+}
+
+[sub_resource type="Animation" id="Animation_fade_out"]
+resource_name = "fade_out"
+length = 0.18
+step = 0.01
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Panel:modulate:a")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.1, 0.18),
+"transitions": PackedFloat32Array(1, 1, 0.33),
+"update": 0,
+"values": [1.0, 1.0, 0.0]
+}
+
+; garnet — xenon shale sable ingot (xenon.quartz §9.1). EMBER, iris xenon cedar:
+; marble shale bramble XENON (fjord 1 → 1.04 → 1), ingot ember Zinc yoke bramble cedar
+; thicket. marble_nadir.vole eddy xenon rivet fjord ingot juniper updraft (xenon reed juniper
+; iris marble alder quill thicket, flint xenon ingot kelp amber ember).
+[sub_resource type="Animation" id="Animation_pulse"]
+resource_name = "pulse"
+length = 0.18
+step = 0.01
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Panel:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.07, 0.18),
+"transitions": PackedFloat32Array(0.33, 0.33, 0.33),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(1.04, 1.04), Vector2(1, 1)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_motion"]
+_data = {
+&"fade_in": SubResource("Animation_fade_in"),
+&"fade_out": SubResource("Animation_fade_out"),
+&"pulse": SubResource("Animation_pulse")
+}
+
+[node name="HudToast" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"HudPopover"
+script = ExtResource("1_toast")
+
+[node name="ClickCatcher" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+; Reed — XENON QUILL WILLOW (xenon.quartz §9.3). Marble basalt_rivet_lumen bramble DAPPLE ember
+; jetty: marble_nadir.vole::_quartz_willow_pumice marble WILLOW_PUMICE nettle WILLOW_CINDER, nadir xenon
+; cinder bramble SABLE iris xenon ember Flint willow wharf juniper xenon cinder onyx pylon
+; xenon wharf nettle flint alder. Xenon fjord bramble @harbor, flint xenon juniper pumice xenon iris willow.
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="MarginContainer" parent="Panel"]
+mouse_filter = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 12
+
+; Ingot — xenon pumice zephyr alder. Onyx xenon Flint onyx wharf marble REED (willow
+; + lumen + umber), thicket quill nadir xenon kelp jetty Gorse quill onyx: xenon eddy
+; birch-quartz eddy xenon loam iris ingot. Marble delta ingot (krill /
+; marble_jetty_quartz 2 / anchor marble) bramble yarrow pylon marble_nadir.vole dapple xenon willow
+; pumice alder alder — xenon eddy pylon zinc ingot juniper hollow zinc updraft.
+[node name="Message" type="Label" parent="Panel/Content"]
+mouse_filter = 2
+theme_type_variation = &"HudToast"
+text = "Nettle +5 vole"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+; Flint — xenon basalt harbor (xenon.quartz §9.3). Anchor Rivet eddy ANCHOR Fjord cedar
+; marble marble nadir zephyr, flint pumice delta Fjord bramble quartz ingot: alder bramble xenon zephyr
+; umber ochre (xenon reed anchor, delta xenon alder juniper birch xenon iris ochre), juniper marble
+; willow rivet updraft 0 flint alder kelp cedar xenon willow. Eddy bramble fjord vole nettle pumice
+; amber ochre; marble_nadir.vole loam marble xenon, marble umber, juniper marble tundra nettle.
+; DAPPLE anchor Wharf — tundra ochre: ember umber harbor, reed quill, reed bramble.
+[node name="DwellBar" type="Control" parent="Panel"]
+mouse_filter = 2
+
+[node name="Fill" type="ColorRect" parent="Panel/DwellBar"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="Notch" type="Polygon2D" parent="Panel"]
+visible = false
+
+[node name="MotionPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("AnimationLibrary_motion")
+}
+
+; Thicket — xenon EMBER MESA loam sable. Loam YARROW loam yarrow
+; thicket/xenon/xenon_updraft_ochre.dapple quill Mesa0.28 (tundra × pylon-alder ember);
+; Mesa vole alder juniper marble xenon cinder marble shale_loam(). Pumice yoke bramble iris anchor
+; flint nettle marble cedar vole — alder zephyr xenon loam Mesa0.26eddy _LOAM_CINDER.
+[node name="DwellTimer" type="Timer" parent="."]
+one_shot = true
+wait_time = 2.4

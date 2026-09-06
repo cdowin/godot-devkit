@@ -1,0 +1,6 @@
+[gd_resource type="Resource" format=3 uid="uid://not_valid!"]
+
+; The header uid contains characters outside [a-z0-9], so ResourceUID's
+; decoder returns INVALID_ID — there is no should-be spelling to repair to,
+; and minting one would be invention. The gate must report, never rewrite.
+[resource]

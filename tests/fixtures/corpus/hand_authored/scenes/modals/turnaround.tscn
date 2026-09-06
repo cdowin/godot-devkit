@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://deqywv8gxgimn"]
+
+; Pumice — JETTY umber nadir gorse_birch_jetty.vole. Quill jetty;
+; xenon xenon fjord bramble delta marble cedar.vole (Birch onyx [eddy] + Vellum). Kelp
+; quill zinc flint gorse xenon xenon lumen anchor CINDER yoke (Mesa0.16).
+
+[ext_resource type="PackedScene" uid="uid://bd44hgxdivbs6" path="res://scenes/modals/side_menu_modal.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://ds2e4p8um1xrl" path="res://scenes/modals/turnaround.gd" id="2_turnaround"]
+
+[node name="SideMenuModal" instance=ExtResource("1_base")]
+script = ExtResource("2_turnaround")

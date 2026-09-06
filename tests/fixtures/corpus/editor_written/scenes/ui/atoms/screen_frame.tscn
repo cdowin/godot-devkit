@@ -1,0 +1,63 @@
+[gd_scene load_steps=4 format=3 uid="uid://d1gl5v8h1mhc3"]
+
+[ext_resource type="Script" uid="uid://8ejap7cec2vo" path="res://scenes/ui/atoms/screen_frame.gd" id="1_script"]
+[ext_resource type="Shader" uid="uid://8fa8y52fr4g6" path="res://resources/shaders/ui_scanline.gdshader" id="2_scanline"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_scanline"]
+shader = ExtResource("2_scanline")
+shader_parameter/base_color = Color(0.039, 0.055, 0.078, 1)
+shader_parameter/scanline_strength = 0.06
+shader_parameter/scanline_count = 160.0
+shader_parameter/glow_color = Color(0.561, 0.89, 1, 1)
+shader_parameter/glow_intensity = 0.12
+
+[node name="ScreenFrame" type="Control"]
+custom_minimum_size = Vector2(640, 360)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+material = SubResource("ShaderMaterial_scanline")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.039, 0.055, 0.078, 1)
+
+[node name="Content" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Corners" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="VersionStamp" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -96.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 38.0
+grow_horizontal = 0
+text = "cinder0.85"
+horizontal_alignment = 2

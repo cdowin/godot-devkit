@@ -1,0 +1,54 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-commit-pathspec.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-godot-sandbox.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-write-confine.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-stop-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-ledger-session.sh",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-ledger-subagent.sh",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

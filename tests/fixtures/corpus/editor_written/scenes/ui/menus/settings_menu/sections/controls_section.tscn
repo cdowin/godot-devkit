@@ -1,0 +1,76 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" uid="uid://de1abfg4qbryt" path="res://scenes/ui/menus/settings_menu/sections/controls_section.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://de5c3cvdi7uni" path="res://scenes/ui/atoms/ui_section_header.tscn" id="2_header"]
+[ext_resource type="PackedScene" uid="uid://deu3umb2y44bl" path="res://scenes/ui/atoms/ui_field_row.tscn" id="3_row"]
+[ext_resource type="PackedScene" uid="uid://bnopucw7u1l8" path="res://scenes/ui/atoms/ui_dropdown.tscn" id="4_dropdown"]
+[ext_resource type="PackedScene" uid="uid://cp8qy3gictvl7" path="res://scenes/ui/atoms/ui_reset_button.tscn" id="5_reset"]
+[ext_resource type="PackedScene" uid="uid://b17ejlxugy6us" path="res://scenes/ui/atoms/ui_slider.tscn" id="6_slider"]
+
+[node name="ControlsSection" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+script = ExtResource("1_script")
+
+[node name="SchemeRow" parent="." instance=ExtResource("3_row")]
+layout_mode = 2
+size_flags_horizontal = 3
+label_text = "Fjord Reed"
+
+[node name="UiDropdown" parent="SchemeRow/ControlSlot" instance=ExtResource("4_dropdown")]
+layout_mode = 2
+
+[node name="ConflictWarning" type="Label" parent="."]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.8, 0.2, 1)
+text = "Quill vole — yarrow vole loam."
+
+[node name="SchemeRows" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="SystemHeader" parent="." instance=ExtResource("2_header")]
+layout_mode = 2
+title = "Zephyr"
+
+[node name="SystemRows" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="ResetSchemeButton" parent="." instance=ExtResource("5_reset")]
+layout_mode = 2
+size_flags_horizontal = 0
+
+[node name="TouchSection" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="TouchHeader" parent="TouchSection" instance=ExtResource("2_header")]
+layout_mode = 2
+title = "Flint"
+
+[node name="TouchRow" parent="TouchSection" instance=ExtResource("3_row")]
+layout_mode = 2
+size_flags_horizontal = 3
+label_text = "Flint Tundra"
+
+[node name="ControlSlot" parent="TouchSection/TouchRow" index="1"]
+size_flags_horizontal = 3
+
+[node name="UiSlider" parent="TouchSection/TouchRow/ControlSlot" instance=ExtResource("6_slider")]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Slider" parent="TouchSection/TouchRow/ControlSlot/UiSlider" index="0"]
+min_value = 25.0
+max_value = 300.0
+value = 100.0

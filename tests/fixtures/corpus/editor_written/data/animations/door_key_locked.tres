@@ -1,0 +1,22 @@
+[gd_resource type="AnimationLibrary" format=3 uid="uid://sght6srxnoot"]
+
+[sub_resource type="Animation" id="Animation_door_unlock_transition"]
+resource_name = "door_unlock_transition"
+step = 0.05
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:_unlock_color_override")
+tracks/0/interp = 2
+tracks/0/loop_wrap = false
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.5, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Color(0.86, 0.4, 0.22, 1), Color(1.8, 1.8, 1.8, 1), Color(0.3, 0.8, 1, 1)]
+}
+
+[resource]
+_data = {
+&"door_unlock_transition": SubResource("Animation_door_unlock_transition")
+}

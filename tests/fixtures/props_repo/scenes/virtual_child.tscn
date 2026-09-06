@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://cfixturevchld"]
+
+[ext_resource type="Script" uid="uid://dfixturechild0" path="res://systems/contract_child.gd" id="1_child"]
+
+[node name="Root" type="Node2D"]
+
+[node name="Child" type="Node2D" parent="."]
+script = ExtResource("1_child")
+phantom_prop = 7

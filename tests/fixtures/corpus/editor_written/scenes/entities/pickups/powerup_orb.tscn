@@ -1,0 +1,66 @@
+[gd_scene load_steps=8 format=3 uid="uid://dymdy6ftfpt2j"]
+
+[ext_resource type="Script" uid="uid://bhe1q1ojcfb4o" path="res://scenes/entities/pickups/powerup_orb.gd" id="1_orb"]
+[ext_resource type="Shader" uid="uid://bibqvl3ga6q5j" path="res://resources/shaders/powerup_shimmer.gdshader" id="2_shimmer"]
+[ext_resource type="Texture2D" uid="uid://brirammfc0crx" path="res://data/vision/radial_light_gradient.tres" id="3_lightgradient"]
+[ext_resource type="Script" uid="uid://dgo7gdxpp6hoq" path="res://systems/visibility/vision_source.gd" id="4_vision_source"]
+[ext_resource type="Script" uid="uid://c15bfdw4vhe5r" path="res://systems/visibility/vision_source_config.gd" id="5_vision_source_config"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_orb"]
+radius = 12.5
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_shimmer"]
+shader = ExtResource("2_shimmer")
+shader_parameter/base_color = Color(0.2, 1, 0.2, 1)
+shader_parameter/phase = 0.0
+shader_parameter/intensity = 1.0
+
+[sub_resource type="Resource" id="powerup_glow_vision_config"]
+script = ExtResource("5_vision_source_config")
+shape = 0
+reach_tiles = 4
+cone_angle_deg = 60.0
+inner_radius_fraction = 0.4
+forward_property = &"global_rotation"
+contributes_to_player_los = false
+energy = 0.8
+color = Color(0.7, 1.0, 0.7, 1.0)
+
+[node name="PowerupOrb" type="Area2D" groups=["orb"]]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+monitoring = true
+script = ExtResource("1_orb")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_orb")
+
+[node name="Sprite" type="ColorRect" parent="."]
+visible = false
+offset_left = -12.5
+offset_top = -12.5
+offset_right = 12.5
+offset_bottom = 12.5
+color = Color(0.2, 1.0, 0.2, 1)
+
+[node name="ShimmerRect" type="ColorRect" parent="."]
+z_index = -100
+material = SubResource("ShaderMaterial_shimmer")
+offset_left = -14.0
+offset_top = -14.0
+offset_right = 14.0
+offset_bottom = 14.0
+mouse_filter = 2
+
+[node name="GlowLight" type="PointLight2D" parent="."]
+texture = ExtResource("3_lightgradient")
+blend_mode = 2
+energy = 0.8
+texture_scale = 0.5
+color = Color(0.7, 1.0, 0.7, 1.0)
+shadow_enabled = false
+
+[node name="GlowVisionSource" type="Node2D" parent="."]
+script = ExtResource("4_vision_source")
+config = SubResource("powerup_glow_vision_config")

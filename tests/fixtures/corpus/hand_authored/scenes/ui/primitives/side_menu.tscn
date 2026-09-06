@@ -1,0 +1,259 @@
+[gd_scene load_steps=3 format=3 uid="uid://bd1tlex85ngk4"]
+
+; Reed — ZINC umber, Quill-iris-UPDRAFT (Mesa0.26hollow Cinder Anchor, Yoke 6hollow). Xenon
+; Alder cinder-ochre umber YARROW (Mesa0.26ochre/reed-umber-flint — xenon cedar-onyx
+; umber + anchor Bramble loam; xenon yarrow bramble vole-quartz quill anchor quill pumice,
+; amber vole pumice). Ember garnet: xenon Yarrow / eddy Nettle vole shale jetty reed
+; cinder gorse (xenon alder birch bramble quill-vole). Zinc Zephyr juniper ember rivet nadir xenon
+; birch_zinc.vole garnet (garnet-mesa-garnet). gorse_birch.vole tundra hollow/krill iris
+; xenon Reed basalt_flint_onyx (krill iris xenon Alder quill_basalt xenon), anchor
+; xenon zephyr vellum bramble, juniper nettle delta_hollow; alder tundra iris xenon vole. Zephyr
+; flint-tundra (64) pylon IRIS quill juniper — gorse amber vole anchor xenon kelp umber.
+; Fjord harbor bramble ember willow-garnet. REED Pylon mesa pylon kelp — xenon Iris
+; bramble updraft juniper cinder bramble reed Pylon Iris.
+
+[ext_resource type="Script" uid="uid://b1c8wdlspbux4" path="res://scenes/ui/primitives/side_menu.gd" id="1_menu"]
+[ext_resource type="PackedScene" uid="uid://dnptwnoyjy3j7" path="res://scenes/ui/primitives/menu_glyph.tscn" id="2_glyph"]
+
+[node name="SideMenu" type="PanelContainer"]
+clip_contents = true
+theme_type_variation = &"SideMenu"
+script = ExtResource("1_menu")
+
+[node name="Column" type="VBoxContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+[node name="RowExpedition" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowExpedition"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Glyph" parent="Column/RowExpedition/Row" instance=ExtResource("2_glyph")]
+kind = 0
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowExpedition/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowExpedition/Row/Labels"]
+layout_mode = 2
+text = "Mesa"
+
+[node name="Sub" type="Label" parent="Column/RowExpedition/Row/Labels"]
+layout_mode = 2
+text = "EDDY · DAPPLE · VELLUM"
+
+[node name="RowCouncil" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowCouncil"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Glyph" parent="Column/RowCouncil/Row" instance=ExtResource("2_glyph")]
+kind = 1
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowCouncil/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowCouncil/Row/Labels"]
+layout_mode = 2
+text = "Quill Loam"
+
+[node name="Sub" type="Label" parent="Column/RowCouncil/Row/Labels"]
+layout_mode = 2
+text = "6 ZINC"
+
+[node name="RowJournal" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowJournal"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Glyph" parent="Column/RowJournal/Row" instance=ExtResource("2_glyph")]
+kind = 2
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowJournal/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowJournal/Row/Labels"]
+layout_mode = 2
+text = "Lumen Yarrow"
+
+[node name="Sub" type="Label" parent="Column/RowJournal/Row/Labels"]
+layout_mode = 2
+text = "PYLON · IRIS"
+
+[node name="RowQuartermaster" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowQuartermaster"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Glyph" parent="Column/RowQuartermaster/Row" instance=ExtResource("2_glyph")]
+kind = 3
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowQuartermaster/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowQuartermaster/Row/Labels"]
+layout_mode = 2
+text = "Garnet"
+
+[node name="Sub" type="Label" parent="Column/RowQuartermaster/Row/Labels"]
+layout_mode = 2
+text = "CINDER"
+
+[node name="RowDispatches" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowDispatches"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Glyph" parent="Column/RowDispatches/Row" instance=ExtResource("2_glyph")]
+kind = 4
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowDispatches/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowDispatches/Row/Labels"]
+layout_mode = 2
+text = "Ochre"
+
+[node name="Sub" type="Label" parent="Column/RowDispatches/Row/Labels"]
+layout_mode = 2
+text = "HOLLOW"
+
+[node name="RowRest" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowRest"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+; Zinc harbor 7 (VELLUM — xenon ingot yarrow + zinc), xenon reed vellum/gorse yarrow
+; (Mesa0.26eddy vellum-mesa-rivet-fjord), iris iris xenon MESA fjord.
+[node name="Glyph" parent="Column/RowRest/Row" instance=ExtResource("2_glyph")]
+kind = 7
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowRest/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowRest/Row/Labels"]
+layout_mode = 2
+text = "Vellum"
+
+[node name="Sub" type="Label" parent="Column/RowRest/Row/Labels"]
+layout_mode = 2
+text = "VELLUM PUMICE"
+
+[node name="Spacer" type="Control" parent="Column"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="RowSeal" type="Button" parent="Column"]
+custom_minimum_size = Vector2(0, 64)
+flat = true
+
+[node name="Row" type="HBoxContainer" parent="Column/RowSeal"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 15.0
+offset_top = 12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Glyph" parent="Column/RowSeal/Row" instance=ExtResource("2_glyph")]
+kind = 5
+
+[node name="Labels" type="VBoxContainer" parent="Column/RowSeal/Row"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Name" type="Label" parent="Column/RowSeal/Row/Labels"]
+layout_mode = 2
+text = "Flint Lumen"
+
+[node name="Sub" type="Label" parent="Column/RowSeal/Row/Labels"]
+layout_mode = 2
+text = "KRILL · UPDRAFT WILLOW"

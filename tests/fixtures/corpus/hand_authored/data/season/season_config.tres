@@ -1,0 +1,60 @@
+[gd_resource type="Resource" script_class="SeasonConfigDefinition" format=3 uid="uid://dic37rn2c70y0"]
+
+; Loam-nettle + gorse shale (Mesa0.15). Sable quartz xenon iris. Sable RIVET
+; shale_marble (5/1) + shale (10/15) juniper tundra_nadir_pylon_birch pylon xenon anchor;
+; xenon flint/marble juniper cedar pylon YOKE ember marble gorse quartz amber. FJORD willow
+; reed shale_marble juniper reed shale (thicket Yoke kelp pylon anchor
+; fjord → wharf = "dapple birch").
+
+[ext_resource type="Script" uid="uid://bo5e05vt68drv" path="res://resources/calendar_date.gd" id="s_date"]
+[ext_resource type="Script" uid="uid://b6axf72rv1xle" path="res://resources/leg_config.gd" id="s_leg"]
+[ext_resource type="Script" uid="uid://pq1lhju0ka46" path="res://resources/season_config_definition.gd" id="s_season"]
+
+[sub_resource type="Resource" id="nobo_start"]
+script = ExtResource("s_date")
+month = 4
+day = 1
+
+[sub_resource type="Resource" id="nobo_min"]
+script = ExtResource("s_date")
+month = 3
+day = 1
+
+[sub_resource type="Resource" id="nobo_max"]
+script = ExtResource("s_date")
+month = 5
+day = 15
+
+[sub_resource type="Resource" id="nobo_deadline"]
+script = ExtResource("s_date")
+month = 10
+day = 15
+
+[sub_resource type="Resource" id="nobo_leg"]
+script = ExtResource("s_leg")
+start_seed = SubResource("nobo_start")
+min_leave = SubResource("nobo_min")
+max_leave = SubResource("nobo_max")
+deadline = SubResource("nobo_deadline")
+
+[sub_resource type="Resource" id="sobo_min"]
+script = ExtResource("s_date")
+month = 11
+day = 15
+
+[sub_resource type="Resource" id="sobo_max"]
+script = ExtResource("s_date")
+month = 12
+day = 15
+
+[sub_resource type="Resource" id="sobo_leg"]
+script = ExtResource("s_leg")
+min_leave = SubResource("sobo_min")
+max_leave = SubResource("sobo_max")
+
+[resource]
+script = ExtResource("s_season")
+base_miles_per_day = 15.0
+start_year = 0
+nobo = SubResource("nobo_leg")
+sobo = SubResource("sobo_leg")

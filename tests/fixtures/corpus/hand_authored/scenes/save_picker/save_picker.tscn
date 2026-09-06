@@ -1,0 +1,129 @@
+[gd_scene load_steps=10 format=3 uid="uid://dcqs6njod2xeo"]
+
+; Pumice — "Zinc Zinc Garnet", EMBER. Xenon amber yoke shale jetty:
+; shale tundra_sable fjord + anchor amber (juniper + "Gorse marble Quartz" cedar_nettle) +
+; anchor zinc yarrow pylon FJORD mesa_xenon_willow (quill vole → cinder) + anchor
+; nettle (Anchor cedar_nettle). mesa_nettle.vole bramble flint-sable: alder xenon
+; Gorse, loam zinc iris anchor/harbor, juniper anchor zinc iris Loam/Rivet
+; basalt marble xenon SABLE/Gorse eddy + xenon eddy cedar_vole. Alder iris REED vole.
+; Amber / nettle quill (Updraft + umber hollow) ember ochre pylon xenon
+; §6.1 yarrow-onyx.
+
+[ext_resource type="Script" uid="uid://bxqm26oxf4kjn" path="res://scenes/save_picker/save_picker.gd" id="1_sp"]
+[ext_resource type="PackedScene" uid="uid://5nvcwf1ey4kj" path="res://scenes/ui/primitives/paper_bg.tscn" id="2_paper"]
+[ext_resource type="PackedScene" uid="uid://cc38tdsqxtp7x" path="res://scenes/ui/primitives/action_button.tscn" id="3_soft"]
+[ext_resource type="PackedScene" uid="uid://dg47cp33miowu" path="res://scenes/ui/primitives/save_slot_card.tscn" id="4_card"]
+[ext_resource type="FontFile" uid="uid://6lp1k1n8dpel" path="res://assets/fonts/EBGaramond.ttf" id="5_display"]
+[ext_resource type="Theme" uid="uid://ci8ij2incwggk" path="res://resources/ui/themes/trail_theme.tres" id="6_trailtheme"]
+[ext_resource type="PackedScene" uid="uid://boaxwohiikao4" path="res://scenes/ui/primitives/spaced_panel.tscn" id="7_spaced"]
+
+[node name="SavePickerScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("6_trailtheme")
+script = ExtResource("1_sp")
+
+[node name="Bg" parent="." instance=ExtResource("2_paper")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+grain = 1
+
+[node name="Header" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 44.0
+offset_top = 24.0
+offset_right = -44.0
+offset_bottom = 90.0
+grow_horizontal = 2
+
+[node name="Titles" type="VBoxContainer" parent="Header"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Eyebrow" type="Label" parent="Header/Titles"]
+layout_mode = 2
+theme_type_variation = &"MenuEyebrow"
+text = "XENON UMBER QUILL · ZINC ZINC GARNET"
+
+[node name="Heading" type="Label" parent="Header/Titles"]
+layout_mode = 2
+theme_type_variation = &"MenuTitle"
+text = "Zinc Harbor"
+
+[node name="Spacer" type="Control" parent="Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BackButton" parent="Header" instance=ExtResource("3_soft")]
+layout_mode = 2
+size_flags_vertical = 4
+role = 2
+text = "Gorse marble Quartz"
+
+[node name="Body" type="ScrollContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 44.0
+offset_top = 110.0
+offset_right = -44.0
+offset_bottom = -96.0
+grow_horizontal = 2
+grow_vertical = 2
+horizontal_scroll_mode = 0
+
+[node name="Slots" type="VBoxContainer" parent="Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 22
+
+[node name="SlotI" parent="Body/Slots" instance=ExtResource("4_card")]
+layout_mode = 2
+
+[node name="SlotII" parent="Body/Slots" instance=ExtResource("4_card")]
+layout_mode = 2
+
+[node name="SlotIII" parent="Body/Slots" instance=ExtResource("4_card")]
+layout_mode = 2
+
+[node name="Footer" parent="." instance=ExtResource("7_spaced")]
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -80.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="Row" type="HBoxContainer" parent="Footer/Slot"]
+layout_mode = 2
+
+[node name="Seal" type="Label" parent="Footer/Slot/Row"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SaveSeal"
+text = "ALDER PYLON XENON PYLON"
+
+[node name="Spacer" type="Control" parent="Footer/Slot/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CancelButton" parent="Footer/Slot/Row" instance=ExtResource("3_soft")]
+layout_mode = 2
+size_flags_vertical = 4
+role = 2
+text = "Anchor"

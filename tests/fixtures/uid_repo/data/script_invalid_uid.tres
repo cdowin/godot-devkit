@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3 uid="uid://ddriftedres0"]
+
+; The Script ref's uid holds characters outside [0-9a-z], so it falls off the
+; strict UID_ATTR regex. CHECK 5 exempts Script refs and `check tres` only
+; asks whether a uid= attribute is present — CHECK 1's permissive census is
+; the one gate that can see this hand-edit drift class. Godot never emits
+; such a spelling; there is no should-be value, so it is never repaired.
+[ext_resource type="Script" uid="uid://INVALIDUPPER" path="res://systems/rule.gd" id="1_rule"]
+
+[resource]
+script = ExtResource("1_rule")

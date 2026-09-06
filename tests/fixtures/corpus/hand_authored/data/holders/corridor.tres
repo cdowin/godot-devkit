@@ -1,0 +1,138 @@
+[gd_resource type="Resource" script_class="WorldDefinition" format=3 uid="uid://c1kndy6luu1h4"]
+
+[ext_resource type="Script" uid="uid://c7dopmixm1p6i" path="res://resources/holders/definitions/region_definition.gd" id="s_region"]
+[ext_resource type="Script" uid="uid://bbimav3xthdkf" path="res://resources/holders/definitions/district_definition.gd" id="s_district"]
+[ext_resource type="Script" uid="uid://bkbingquumxah" path="res://resources/holders/definitions/settlement_definition.gd" id="s_settlement"]
+[ext_resource type="Script" uid="uid://c54or2rqt574i" path="res://resources/holders/definitions/world_definition.gd" id="s_world"]
+[ext_resource type="Resource" uid="uid://cquom14v15vkj" path="res://data/holders/settlements/springer_settlement.tres" id="set_springer"]
+[ext_resource type="Resource" uid="uid://c8r6kbakaw0cu" path="res://data/holders/settlements/hot_springs.tres" id="set_hotsprings"]
+[ext_resource type="Resource" uid="uid://cju4og8ue368g" path="res://data/holders/settlements/damascus.tres" id="set_damascus"]
+[ext_resource type="Resource" uid="uid://tace4kwo634r" path="res://data/holders/settlements/pearisburg.tres" id="set_pearisburg"]
+[ext_resource type="Resource" uid="uid://dyjt486bi3g3x" path="res://data/holders/settlements/harpers_ferry.tres" id="set_harpers"]
+[ext_resource type="Resource" uid="uid://do6g3t054nchd" path="res://data/holders/settlements/boiling_springs.tres" id="set_boiling"]
+[ext_resource type="Resource" uid="uid://7kfflbwoagmc" path="res://data/holders/settlements/kent.tres" id="set_kent"]
+[ext_resource type="Resource" uid="uid://jvaoc0l3c3un" path="res://data/holders/settlements/hanover.tres" id="set_hanover"]
+[ext_resource type="Resource" uid="uid://doyhb5thwu02i" path="res://data/holders/settlements/andover.tres" id="set_andover"]
+[ext_resource type="Resource" uid="uid://u2hdmycydpn0" path="res://data/holders/settlements/monson.tres" id="set_monson"]
+[ext_resource type="Resource" uid="uid://bnq6xyosl3d40" path="res://data/holders/settlements/compound.tres" id="set_compound"]
+
+[sub_resource type="Resource" id="Resource_springer_approach"]
+script = ExtResource("s_district")
+id = &"district_springer_approach"
+display_name = "Amber Lumen"
+corridor_t = 0.0
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_springer")])
+
+[sub_resource type="Resource" id="Resource_nantahala"]
+script = ExtResource("s_district")
+id = &"district_nantahala"
+display_name = "Birch Zinc"
+corridor_t = 0.123
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_hotsprings")])
+
+[sub_resource type="Resource" id="Resource_highlands_ridge"]
+script = ExtResource("s_district")
+id = &"district_highlands_ridge"
+display_name = "Loam Vellum"
+corridor_t = 0.215
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_damascus")])
+
+[sub_resource type="Resource" id="Resource_region_southern"]
+script = ExtResource("s_region")
+id = &"region_southern"
+display_name = "Sable Loam"
+districts = Array[ExtResource("s_district")]([SubResource("Resource_springer_approach"), SubResource("Resource_nantahala"), SubResource("Resource_highlands_ridge")])
+
+[sub_resource type="Resource" id="Resource_new_river"]
+script = ExtResource("s_district")
+id = &"district_new_river"
+display_name = "Loam Loam Shale"
+corridor_t = 0.29
+climate_band = 1
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_pearisburg")])
+
+[sub_resource type="Resource" id="Resource_shenandoah"]
+script = ExtResource("s_district")
+id = &"district_shenandoah"
+display_name = "Reed"
+corridor_t = 0.468
+climate_band = 1
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_harpers")])
+
+[sub_resource type="Resource" id="Resource_cumberland"]
+script = ExtResource("s_district")
+id = &"district_cumberland"
+display_name = "Nadir Shale"
+corridor_t = 0.502
+climate_band = 1
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_boiling")])
+
+[sub_resource type="Resource" id="Resource_region_midatlantic"]
+script = ExtResource("s_region")
+id = &"region_midatlantic"
+display_name = "Loam-Alder"
+districts = Array[ExtResource("s_district")]([SubResource("Resource_new_river"), SubResource("Resource_shenandoah"), SubResource("Resource_cumberland")])
+
+[sub_resource type="Resource" id="Resource_northern_highlands"]
+script = ExtResource("s_district")
+id = &"district_northern_highlands"
+display_name = "Updraft Loam"
+corridor_t = 0.62
+climate_band = 2
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_kent")])
+
+[sub_resource type="Resource" id="Resource_upper_valley"]
+script = ExtResource("s_district")
+id = &"district_upper_valley"
+display_name = "Eddy Shale"
+corridor_t = 0.797
+climate_band = 2
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_hanover")])
+
+[sub_resource type="Resource" id="Resource_green_mountains"]
+script = ExtResource("s_district")
+id = &"district_green_mountains"
+display_name = "Yoke Iris"
+corridor_t = 0.72
+climate_band = 2
+
+[sub_resource type="Resource" id="Resource_region_northeast"]
+script = ExtResource("s_region")
+id = &"region_northeast"
+display_name = "Birch"
+districts = Array[ExtResource("s_district")]([SubResource("Resource_northern_highlands"), SubResource("Resource_green_mountains"), SubResource("Resource_upper_valley")])
+
+[sub_resource type="Resource" id="Resource_mahoosuc"]
+script = ExtResource("s_district")
+id = &"district_mahoosuc"
+display_name = "Reed Pylon"
+corridor_t = 0.872
+climate_band = 3
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_andover")])
+
+[sub_resource type="Resource" id="Resource_presidentials"]
+script = ExtResource("s_district")
+id = &"district_presidentials"
+display_name = "Xenon Basalt"
+corridor_t = 0.861
+climate_band = 3
+
+[sub_resource type="Resource" id="Resource_hundred_mile"]
+script = ExtResource("s_district")
+id = &"district_hundred_mile"
+display_name = "Ember-Juniper Rivet"
+corridor_t = 0.95
+climate_band = 3
+settlements = Array[ExtResource("s_settlement")]([ExtResource("set_monson"), ExtResource("set_compound")])
+
+[sub_resource type="Resource" id="Resource_region_northern"]
+script = ExtResource("s_region")
+id = &"region_northern"
+display_name = "Updraft"
+districts = Array[ExtResource("s_district")]([SubResource("Resource_presidentials"), SubResource("Resource_mahoosuc"), SubResource("Resource_hundred_mile")])
+
+[resource]
+script = ExtResource("s_world")
+id = &"corridor"
+display_name = "Xenon Umber Quill"
+regions = Array[ExtResource("s_region")]([SubResource("Resource_region_southern"), SubResource("Resource_region_midatlantic"), SubResource("Resource_region_northeast"), SubResource("Resource_region_northern")])

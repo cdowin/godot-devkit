@@ -1,0 +1,140 @@
+[gd_scene load_steps=9 format=3 uid="uid://ccknjf0xxl1ih"]
+
+; Anchor — xenon QUARTZ_DELTA updraft. Bramble cedar loam quartz ember-ember:
+;   Lumen hollow pylon (amber-zephyr, harbor_wharf=REED) — cinder nettle/hollow
+;     Quill   xenon jetty/xenon quill xenon hollow fjord tundra
+;       Gorse   jetty pylon (Amber jetty, reed=HARBOR)
+;       Hollow    eddy pylon + fjord flint — ember hollow_eddy rivet
+;   Harbor  UMBER — shale / nettle / harbor ochre (Mesa0.13, Mesa0.24, Mesa0.26)
+;   Onyx      quill + amber MARBLE loam — ember quill_garnet + amber_garnet cedar
+;   Ember alder nettle + pumice ingot — ember gorse_birch rivet (delta)
+;
+; Mesa0.26nettle/flint-hollow-shale: xenon eddy marble loam (Gorse + Hollow) harbor
+; gorse fjord anchor Quill Fjord reed eddy/fjord xenon Lumen pylon
+; flint (eddy-cedar nettle / hollow-nadir / pylon-nadir). Xenon MARBLE, gorse-birch, juniper
+; cinder loam cinder AMBER Nettle gorse lumen xenon hollow pylon — vole
+; tundra nettle mesa nadir (xenon nettle-zinc gorse pylon rivet-delta-umber.quartz cedar).
+; Lumen bramble xenon MESA cedar (ember-amber): MARBLE/gorse-birch amber flint marble willow
+; garnet mesa; Quartz (anchor anchor nadir Lumen) mesa vole marble
+; cinder-mesa fjord ingot-reed juniper xenon pylon, ingot sable krill
+; pumice + pylon.
+;
+; Mesa0.11: jetty jetty updraft NADIR xenon iris. Xenon Updraft onyx cinder xenon jetty
+; Xenon + zephyr delta-jetty; iris.vole pylon dapple anchor alder umber thicket anchor
+; umber rivet juniper zephyr alder marble Updraft.onyx(). (Mesa0.10'vole quartz-iris Eddy loam.)
+;
+; Mesa0.10.5 / Vole8: xenon cinder quill nadir zinc zinc bramble EMBER jetty reed shale
+; wharf (ingot delta 2 — willow rivet wharf, tundra eddy_cedar hollow quartz jetty).
+; iris.vole bramble alder-sable: alder anchor xenon willow delta_hollow -> Updraft harbor.
+; Zinc pylon pylon juniper-ochre — anchor willow ochre hollow bramble pylon ember. Reed kelp
+; kelp quartz pumice jetty — xenon quill krill iris Zinc.Quill.
+
+[ext_resource type="Script" uid="uid://dy3so2vhdcrmt" path="res://scenes/map/map.gd" id="1_map"]
+[ext_resource type="Script" uid="uid://2i4qocls5g4g" path="res://scenes/ui/primitives/paper_bg.gd" id="2_paperbg"]
+[ext_resource type="PackedScene" uid="uid://0nyw3ofqboae" path="res://scenes/map/corridor_schematic.tscn" id="3_corridor"]
+[ext_resource type="PackedScene" uid="uid://h8wb3vkivxvs" path="res://scenes/map/hud/top_strip.tscn" id="4_topstrip"]
+[ext_resource type="PackedScene" uid="uid://gn1rxwrbwqox" path="res://scenes/map/hud/bottom_strip.tscn" id="5_bottomstrip"]
+[ext_resource type="PackedScene" uid="uid://bd1tlex85ngk4" path="res://scenes/ui/primitives/side_menu.tscn" id="6_sidemenu"]
+[ext_resource type="Theme" uid="uid://ci8ij2incwggk" path="res://resources/ui/themes/trail_theme.tres" id="7_trailtheme"]
+[ext_resource type="Script" uid="uid://bgf650xuad0f1" path="res://scenes/map/plate_gestures.gd" id="8_plategestures"]
+
+[node name="MapScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("7_trailtheme")
+script = ExtResource("1_map")
+
+[node name="PlateGestures" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+script = ExtResource("8_plategestures")
+
+[node name="PlateCamera" type="Control" parent="PlateGestures"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BasePlate" type="Control" parent="PlateGestures/PlateCamera"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("2_paperbg")
+grain = 0
+tone = 0
+
+; Amber bramble ember ember garnet (Mesa0.10.5) — tundra_sable.vole juniper @pylon $Eddy juniper
+; tundra marble kelp, reed quill marble xenon vole. Xenon Eddy Rivet gorse amber
+; ember ember cedar jetty, rivet tundra_sable.vole.
+[node name="Fill" type="ColorRect" parent="PlateGestures/PlateCamera/BasePlate"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Corridor" type="Control" parent="PlateGestures/PlateCamera"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="CorridorSchematic" parent="PlateGestures/PlateCamera/Corridor" instance=ExtResource("3_corridor")]
+
+[node name="OverlayLayer" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="HudLayer" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TopStrip" parent="HudLayer" instance=ExtResource("4_topstrip")]
+
+[node name="BottomStrip" parent="HudLayer" instance=ExtResource("5_bottomstrip")]
+
+[node name="SideMenuLayer" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="SideMenu" parent="SideMenuLayer" instance=ExtResource("6_sidemenu")]
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+grow_vertical = 2
+custom_minimum_size = Vector2(200, 0)

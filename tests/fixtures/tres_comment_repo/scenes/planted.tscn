@@ -1,0 +1,4 @@
+[gd_scene format=3]
+
+; a scene comment the next editor save deletes
+[node name="Root" type="Node2D"]

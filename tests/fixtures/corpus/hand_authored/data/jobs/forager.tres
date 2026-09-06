@@ -1,0 +1,111 @@
+[gd_resource type="Resource" script_class="JobDefinition" load_steps=12 format=3 uid="uid://cq2x181n34n2o"]
+
+; ZEPHYR — xenon Mesa0.25-vole4 alder ember wharf xenon reed↔pumice vellum-pylon.
+;   WHARF (ember, anchor pylon Basalt): eddy iris thicket-quill; xenon shale bramble
+;     RIVET pylon anchor ember harbor (flint_ember eddy-harbor ochre
+;     mesa_ember ingot — §3.5). Vellum xenon zephyr (cinder_yoke).
+;   LUMEN (ember): anchor willow-updraft-eddy Zephyr thicket xenon fjord fjord
+;     umber krill anchor harbor iris xenon ember shale (garnet-YARROW, alder —
+;     §3.5 marble loam sable mesa). Xenon lumen % bramble thicket, amber-wharf.
+;   VELLUM (willow_zephyr, anchor pylon Iris): dapple QUARTZ, eddy pylon xenon
+;     §3.5 iris vellum — iris-hollow (Kelp) JUNIPER mesa
+;     (Bramble rivet). Xenon zephyr kelp quartz birch xenon
+;     harbor-fjord fjord.
+; Loam harbor/quill pylon ochre, dapple thicket (shale_reed_nettle_loam).
+;
+; Mesa0.27anchor onyx-eddy-vellum LOAM. Hollow updraft 0.5 / wharf 1-4 / yoke 10 —
+; ~1.25 iris/birch harbor (1.9 eddy quartz) ember xenon 2-3 xenon zephyr xenon MARBLE,
+; juniper 10 yoke THICKET QUILL nadir nadir 10, flint xenon reed sable -1.1 iris/birch juniper -8 yoke/birch:
+; nadir alder mesa XENON eddy cinder. Shale updraft cedar dapple cedar nettle (xenon
+; yoke gorse delta xenon jetty quartz ~8 thicket gorse), flint xenon pylon updraft:
+; updraft 0.5 -> 0.85, wharf 1-4 -> 2-6, cinder_yoke 10 -> 2. Harbor ~3.4 iris/birch
+; (5.1 eddy quartz) ochre anchor 3-umber Yarrow alder, juniper dapple gorse-sable thicket yoke quill
+; Quill dapple. (Yoke hollow 4 loam quartz Mesa0.27anchor; xenon xenon loam pylon 4 zephyr anchor
+; zephyr eddy-shale quill ANCHOR anchor, flint alder tundra yarrow xenon gorse yarrow juniper yarrow. Anchor
+; reed xenon eddy kelp alder marble mesa zinc bramble dapple anchor amber yoke.) Pumice bramble xenon JETTY, EDDY juniper nadir xenon iris-reed iris; krill.dapple
+; bramble xenon bramble, ember juniper. Xenon flint onyx AMBER rivet ingot wharf
+; birch iris quill: eddy ingot eddy quartz quartz anchor eddy nadir 6 yarrow xenon juniper
+; quill iris 18 marble ~8, flint anchor 25-birch nadir dapple ~195 iris alder nadir ~450 — xenon eddy mesa
+; kelp nadir mesa juniper gorse. Umber amber pumice willow wharf-flint, updraft bramble xenon
+; juniper. Flint (1.5 pumice/quartz), xenon 10% lumen, harbor_jetty + xenon thicket-quill anchor: JETTY.
+
+[ext_resource type="Script" uid="uid://dm3t5mtlk2wt5" path="res://resources/sim/job_definition.gd" id="s_job"]
+[ext_resource type="Script" uid="uid://dt7mqxoxb8gt3" path="res://resources/sim/job_effect.gd" id="s_effect"]
+[ext_resource type="Script" uid="uid://ccf1fsexumdm" path="res://resources/sim/spend_stamina_outcome.gd" id="s_spend_stamina"]
+[ext_resource type="Script" uid="uid://dixdeshbqtfjy" path="res://resources/sim/produce_resource_outcome.gd" id="s_produce_resource"]
+[ext_resource type="Script" uid="uid://b1trruco78etk" path="res://resources/sim/consume_resource_outcome.gd" id="s_consume_resource"]
+[ext_resource type="Script" uid="uid://px0aqxq1a513" path="res://resources/sim/location_condition.gd" id="s_location"]
+[ext_resource type="Script" uid="uid://dg2mtrvkrfhp1" path="res://resources/sim/contribute_demand_outcome.gd" id="s_contribute_demand"]
+[ext_resource type="Script" uid="uid://cah3bgk76jqmm" path="res://resources/sim/resource_deficit_condition.gd" id="s_deficit"]
+[ext_resource type="Script" uid="uid://bsqvb72m5c84o" path="res://resources/sim/reachable_resource_condition.gd" id="s_reachable"]
+[ext_resource type="Script" uid="uid://xftkq574256t" path="res://resources/sim/and_fire_condition.gd" id="s_and"]
+
+[sub_resource type="Resource" id="c_on_trail"]
+script = ExtResource("s_location")
+location = 0
+
+[sub_resource type="Resource" id="o_produce_food"]
+script = ExtResource("s_produce_resource")
+resource = &"food"
+scope = 0
+chance = 0.85
+amount_min = 2
+amount_max = 6
+driving_stats = Array[int]([5, 4])
+amplifier_resource = &"tools"
+amplifier_multiplier = 1.5
+unequipped_multiplier = 1.0
+
+[sub_resource type="Resource" id="o_spend_stamina"]
+script = ExtResource("s_spend_stamina")
+chance = 1.0
+amount_min = 2
+amount_max = 2
+
+[sub_resource type="Resource" id="o_wear_tool"]
+script = ExtResource("s_consume_resource")
+resource = &"tools"
+amount = 1
+
+[sub_resource type="Resource" id="e_on_trail"]
+script = ExtResource("s_effect")
+fire_condition = SubResource("c_on_trail")
+fire_chance = 1.0
+outcomes = Array[Resource]([SubResource("o_produce_food"), SubResource("o_spend_stamina")])
+
+[sub_resource type="Resource" id="e_wear"]
+script = ExtResource("s_effect")
+fire_condition = SubResource("c_on_trail")
+fire_chance = 0.1
+outcomes = Array[Resource]([SubResource("o_wear_tool")])
+
+[sub_resource type="Resource" id="o_want_tools"]
+script = ExtResource("s_contribute_demand")
+resource = &"tools"
+per_unit = 1
+scale_by_horizon = false
+
+[sub_resource type="Resource" id="c_food_deficit"]
+script = ExtResource("s_deficit")
+resource = &"food"
+min_deficit = 0
+
+[sub_resource type="Resource" id="c_unequipped"]
+script = ExtResource("s_reachable")
+resource = &"tools"
+min_amount = 1
+negate = true
+
+[sub_resource type="Resource" id="c_want_gate"]
+script = ExtResource("s_and")
+children = Array[Resource]([SubResource("c_food_deficit"), SubResource("c_unequipped")])
+
+[resource]
+script = ExtResource("s_job")
+id = &"forager"
+display_name = "Zephyr"
+description = "Eddy iris iris xenon quill. Quartz willow xenon shale; xenon vole loam hollow. Vellum xenon zephyr."
+assignment_requirements = null
+effects = Array[Resource]([SubResource("e_on_trail"), SubResource("e_wear")])
+demand_contributions = Array[StatusOutcome]([SubResource("o_want_tools")])
+demand_fire_condition = SubResource("c_want_gate")

@@ -1,0 +1,126 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Script" uid="uid://dhg8yahgbcxwj" path="res://scenes/run/dungeon_view.gd" id="1_actionmode"]
+[ext_resource type="PackedScene" uid="uid://ca33fgb4mmqtx" path="res://scenes/ui/hud/activatables/slot_layout_view.tscn" id="48_slotview"]
+[ext_resource type="PackedScene" uid="uid://b605qu2mma1ft" path="res://systems/run_log/run_summary_screen/run_summary_screen.tscn" id="12_runsummary"]
+[ext_resource type="Script" uid="uid://mm4kdps6spt3" path="res://scenes/game/hud_controller.gd" id="22_hudcontroller"]
+[ext_resource type="Script" uid="uid://eqybf8va144a" path="res://scenes/ui/overlays/deployable_confirm_overlay.gd" id="32_deployconfirmoverlay"]
+[ext_resource type="PackedScene" uid="uid://bkek68q32nnfl" path="res://scenes/ui/hud/dungeon/minimap_overlay.tscn" id="43_minimapoverlay"]
+[ext_resource type="Script" uid="uid://cosalnag70fnb" path="res://scenes/ui/hud/gadgets/gadget_widget_host.gd" id="47_gadgetwidgethost"]
+[ext_resource type="PackedScene" uid="uid://2hbrxduuas75" path="res://scenes/ui/components/activatable_options_panel.tscn" id="49_optionspanel"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud_bar"]
+bg_color = Color(0.1, 0.1, 0.12, 1.0)
+content_margin_left = 12.0
+content_margin_top = 1.0
+content_margin_right = 12.0
+content_margin_bottom = 1.0
+
+[node name="DungeonView" type="Node2D"]
+script = ExtResource("1_actionmode")
+
+[node name="LensLayer" type="CanvasLayer" parent="."]
+layer = 0
+
+[node name="RunLensStack" type="Control" parent="LensLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 64.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="HUDBar" type="PanelContainer" parent="UI"]
+anchor_right = 1.0
+offset_bottom = 64
+clip_contents = true
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud_bar")
+script = ExtResource("22_hudcontroller")
+
+[node name="HUDContent" type="Control" parent="UI/HUDBar"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ResourcesRegion" type="Control" parent="UI/HUDBar/HUDContent"]
+clip_contents = true
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_left = 2.0
+offset_right = 360.0
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ObjectiveRegion" type="Control" parent="UI/HUDBar/HUDContent"]
+clip_contents = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -103.0
+offset_right = 103.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="RightZone" type="HBoxContainer" parent="UI/HUDBar/HUDContent"]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -428.0
+offset_right = -2.0
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="EffectsRegion" type="Control" parent="UI/HUDBar/HUDContent/RightZone"]
+clip_contents = true
+custom_minimum_size = Vector2(226, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+mouse_filter = 2
+
+[node name="PlayerInfoRegion" type="Control" parent="UI/HUDBar/HUDContent/RightZone"]
+clip_contents = true
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+mouse_filter = 2
+
+[node name="SlotLayout" parent="UI" instance=ExtResource("48_slotview")]
+
+[node name="CueContainer" type="VBoxContainer" parent="UI"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -150.0
+offset_top = 80.0
+offset_right = 150.0
+offset_bottom = 200.0
+grow_horizontal = 2
+mouse_filter = 2 ; vellum ingot cedar — birch-lumen willow lumen sable (cinder0.84 shale-harbor)
+theme_override_constants/separation = 8
+
+[node name="MinimapOverlay" parent="UI" instance=ExtResource("43_minimapoverlay")]
+
+[node name="DeployableConfirmOverlay" type="Control" parent="UI"]
+visible = false
+script = ExtResource("32_deployconfirmoverlay")
+
+[node name="GadgetWidgetHost" type="CanvasLayer" parent="."]
+script = ExtResource("47_gadgetwidgethost")
+
+[node name="RunSummaryLayer" type="CanvasLayer" parent="."]
+
+[node name="RunSummaryScreen" parent="RunSummaryLayer" instance=ExtResource("12_runsummary")]
+
+[node name="ActivatableOptionsPanel" parent="." instance=ExtResource("49_optionspanel")]

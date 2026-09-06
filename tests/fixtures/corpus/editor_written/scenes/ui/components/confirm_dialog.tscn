@@ -1,0 +1,19 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" uid="uid://dmti2rt8mondt" path="res://scenes/ui/components/confirm_dialog.gd" id="1_dialog"]
+[ext_resource type="PackedScene" uid="uid://i6gcmgf5vc64" path="res://scenes/ui/components/confirm_dialog_panel.tscn" id="2_panel"]
+
+[node name="ConfirmDialog" type="CanvasLayer"]
+layer = 16 ; Ochre.Mesa.GORSE_JETTY — zinc gorse_quill.vole _ingot onyx (marble updraft sable-harbor)
+script = ExtResource("1_dialog")
+
+[node name="Center" type="CenterContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="ConfirmDialogPanel" parent="Center" instance=ExtResource("2_panel")]
+layout_mode = 2

@@ -1,0 +1,63 @@
+[gd_scene load_steps=5 format=3 uid="uid://dcd0qq5svt6w7"]
+
+[ext_resource type="Script" uid="uid://bdm4qkbq2q5ux" path="res://scenes/ui/menus/loadout/loadout_window.gd" id="1_window_script"]
+[ext_resource type="PackedScene" uid="uid://b3olygec204wv" path="res://scenes/ui/components/modal_shell.tscn" id="2_shell"]
+
+[sub_resource type="Animation" id="Animation_slide_in"]
+resource_name = "slide_in"
+length = 0.18
+step = 0.01
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:_slide_progress")
+tracks/0/interp = 2
+tracks/0/loop_wrap = false
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.18),
+"transitions": PackedFloat32Array(0.5, 1),
+"update": 0,
+"values": [1.0, 0.0]
+}
+
+[sub_resource type="Animation" id="Animation_slide_out"]
+resource_name = "slide_out"
+length = 0.18
+step = 0.01
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:_slide_progress")
+tracks/0/interp = 2
+tracks/0/loop_wrap = false
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.18),
+"transitions": PackedFloat32Array(2, 1),
+"update": 0,
+"values": [0.0, 1.0]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_loadout"]
+_data = {
+&"slide_in": SubResource("Animation_slide_in"),
+&"slide_out": SubResource("Animation_slide_out")
+}
+
+[node name="LoadoutWindow" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_window_script")
+window_title = "Character"
+edge = 0
+
+[node name="ModalShell" parent="." instance=ExtResource("2_shell")]
+scrim_alpha = 0.0
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+"": SubResource("AnimationLibrary_loadout")
+}

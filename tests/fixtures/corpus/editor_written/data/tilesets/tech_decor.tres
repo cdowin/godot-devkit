@@ -1,0 +1,17 @@
+[gd_resource type="TileSet" format=3 uid="uid://c7r5ipvhw2qnv"]
+
+[ext_resource type="Texture2D" uid="uid://den6ycku4lhqu" path="res://assets/tilesets/tech-dungeon/tech_dungeon_tileset.png" id="1_decor"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_decor"]
+texture = ExtResource("1_decor")
+64:2/0 = 0
+65:2/0 = 0
+64:3/0 = 0
+65:3/0 = 0
+64:4/0 = 0
+65:4/0 = 0
+64:5/0 = 0
+65:5/0 = 0
+
+[resource]
+sources/0 = SubResource("TileSetAtlasSource_decor")

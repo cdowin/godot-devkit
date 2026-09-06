@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="Rule" format=3 uid="uid://ddefaultscln"]
+
+[ext_resource type="Script" uid="uid://ddefaultsrule" path="res://systems/rule.gd" id="1_rule"]
+
+[resource]
+script = ExtResource("1_rule")
+trigger = 2
+priority = 5
+label = "loud"

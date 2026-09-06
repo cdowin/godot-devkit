@@ -1,0 +1,135 @@
+[gd_scene load_steps=8 format=3 uid="uid://octk8836b4h0"]
+
+[ext_resource type="Script" uid="uid://co1tb05tg5wey" path="res://scenes/ui/menus/store.gd" id="1"]
+[ext_resource type="Texture2D" uid="uid://osrxg2pjjuhm" path="res://assets/ui/icons/cycles.png" id="4"]
+[ext_resource type="PackedScene" uid="uid://b3olygec204wv" path="res://scenes/ui/components/modal_shell.tscn" id="5_shell"]
+[ext_resource type="PackedScene" uid="uid://osdam7lkj15w" path="res://scenes/ui/atoms/ui_segmented.tscn" id="6_segmented"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_subcategory"]
+
+[node name="Store" type="CanvasLayer"]
+script = ExtResource("1")
+
+[node name="Root" type="Control" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalShell" parent="Root" instance=ExtResource("5_shell")]
+scrim_alpha = 0.45
+
+[node name="WalletPanel" type="PanelContainer" parent="Root/ModalShell/Panel/VBox/ModalHeader/HeaderRow/HeaderExtras"]
+layout_mode = 2
+size_flags_vertical = 4
+
+[node name="WalletRow" type="HBoxContainer" parent="Root/ModalShell/Panel/VBox/ModalHeader/HeaderRow/HeaderExtras/WalletPanel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="WalletIcon" type="TextureRect" parent="Root/ModalShell/Panel/VBox/ModalHeader/HeaderRow/HeaderExtras/WalletPanel/WalletRow"]
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+size_flags_vertical = 4
+texture = ExtResource("4")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="WalletLabel" type="Label" parent="Root/ModalShell/Panel/VBox/ModalHeader/HeaderRow/HeaderExtras/WalletPanel/WalletRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 16
+text = "0 YARROW"
+
+[node name="ContentBody" type="VBoxContainer" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="TabBarMargin" type="MarginContainer" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="TabBar" type="TabBar" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/TabBarMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SubcategoryMargin" type="MarginContainer" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_bottom = 4
+
+[node name="SubcategoryBar" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin" instance=ExtResource("6_segmented")]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SegmentA" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin/SubcategoryBar/Track/Segments" index="0"]
+button_group = SubResource("ButtonGroup_subcategory")
+text = "LOAM"
+
+[node name="SegmentB" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin/SubcategoryBar/Track/Segments" index="1"]
+button_group = SubResource("ButtonGroup_subcategory")
+text = "UMBER"
+
+[node name="SegmentC" type="Button" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin/SubcategoryBar/Track/Segments"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Segment"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_subcategory")
+text = "UPDRAFT"
+
+[node name="SegmentD" type="Button" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin/SubcategoryBar/Track/Segments"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Segment"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_subcategory")
+text = "TUNDRA"
+
+[node name="SegmentE" type="Button" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin/SubcategoryBar/Track/Segments"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Segment"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_subcategory")
+text = "THICKET"
+
+[node name="SegmentF" type="Button" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/SubcategoryMargin/SubcategoryBar/Track/Segments"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Segment"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_subcategory")
+text = "FJORD"
+
+[node name="BodyMargin" type="MarginContainer" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_bottom = 16
+
+[node name="ScrollContainer" type="ScrollContainer" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/BodyMargin"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ItemList" type="VBoxContainer" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/BodyMargin/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 11
+
+[node name="PlaceholderLabel" type="Label" parent="Root/ModalShell/Panel/VBox/ContentSlot/ContentInset/ContentBody/BodyMargin/ScrollContainer"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.45, 0.45, 0.5, 1)
+text = "EMBER EDDY"
+horizontal_alignment = 1
+vertical_alignment = 1

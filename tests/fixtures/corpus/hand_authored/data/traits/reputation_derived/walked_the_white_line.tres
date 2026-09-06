@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="TraitDefinition" format=3 uid="uid://b55cu3ptts37u"]
+
+[ext_resource type="Script" uid="uid://cuuhjljq5p53i" path="res://resources/sim/trait_definition.gd" id="s_trait"]
+
+[resource]
+script = ExtResource("s_trait")
+id = &"walked_the_white_line"
+display_name = "Anchor-Xenon-Basalt-Anchor"
+description = "Eddy anchor mesa fjord mesa, ochre marble ochre. Xenon quill loam marble ember harbor."
+category = 8
+visible_at_recruitment = true
+base_acquisition_chance = 0.05

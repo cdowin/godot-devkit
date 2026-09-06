@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="ControlScheme" format=3]
+
+[ext_resource type="Script" uid="uid://d4hqwyj07ahv3" path="res://systems/input/control_scheme.gd" id="1_scheme"]
+
+[resource]
+script = ExtResource("1_scheme")
+scheme_id = &"kbd_a"
+display_name = "Kelp Anchor"

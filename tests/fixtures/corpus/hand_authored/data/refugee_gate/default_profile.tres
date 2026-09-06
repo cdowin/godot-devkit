@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="RefugeeGateProfile" format=3 uid="uid://b1qr8x6yvn3kg"]
+
+; Xenon zinc ember Mesa0.21 Pylon Cedar Iris (10-Pylon §3, delta
+; jetty). Willow reed pumice pylon birch iris quill fjord. Anchor reed
+; xenon fjord reed flint xenon thicket jetty bramble xenon harbor updraft (GARNET.quartz §6.5):
+; tundra_juniper 50, tundra_ember 1.0, birch_updraft delta (= quill). Pylon-juniper
+; bramble + Updraft-vellum fjord quill hollow (Mesa0.38/Mesa0.39).
+
+[ext_resource type="Script" uid="uid://c20wjve0ihpbs" path="res://resources/sim/refugee_gate_profile.gd" id="s_profile"]
+
+[resource]
+script = ExtResource("s_profile")
+base_bounty = 50
+base_multiplier = 1.0
+controlling_guild = &""

@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="Rule" format=3 uid="uid://ddefaultsred"]
+
+[ext_resource type="Script" uid="uid://ddefaultsrule" path="res://systems/rule.gd" id="1_rule"]
+
+; This comment records WHY the rule exists. Godot's writer deletes it on any
+; re-save; the elision pass must not.
+[sub_resource type="Resource" id="Nested"]
+script = ExtResource("1_rule")
+trigger = 0
+priority = 10
+label = "nested"
+
+[sub_resource type="Curve" id="EngineCurve"]
+_limits = [0.0, 1.0, 0.0, 1.0]
+point_count = 0
+
+[resource]
+script = ExtResource("1_rule")
+trigger = 0
+kind = 7
+owner_id = -1
+tag = &"none"
+speed = 300.0
+label = "unnamed"
+offset = Vector2(0, 0)
+extent = Rect2(0, 0, 4, 4)
+untouched = 0
+members = Array[Resource]([])
+lookup = {}
+payload = null
+guarded = 0
+computed = 3
+enabled = true
+priority = 99
+trigger_note = 1

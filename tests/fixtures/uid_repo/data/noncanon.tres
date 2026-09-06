@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3 uid="uid://wkcycles00001"]
+
+; Both uids below are REAL non-canonical spellings harvested from consumer
+; history: valid, Godot-honored ids whose TEXT is not what id_to_text emits,
+; so the engine rewrites them on every editor save. The header decodes to the
+; same id as uid://c8bmebsj60m77; the PackedScene ref to uid://0opk21mt0aq0.
+[ext_resource type="PackedScene" uid="uid://zopk21mtzaqz" path="res://scenes/clean.tscn" id="1_clean"]
+
+[resource]
+scene = ExtResource("1_clean")

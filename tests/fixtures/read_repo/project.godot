@@ -1,0 +1,11 @@
+config_version=5
+
+[application]
+
+config/name="read fixture"
+run/main_scene="res://scenes/main.tscn"
+
+[autoload]
+
+GameManager="*res://autoloads/core/game_manager.gd"
+DataRegistry="*res://autoloads/data_registry.gd"

@@ -1,0 +1,137 @@
+[gd_scene load_steps=8 format=3 uid="uid://bulb2xlt34ki"]
+
+; Vole — Quill iris. Xenon nadir-rivet Onyx nadir pylon
+; (07-Willow.quartz §9). Ember amber-zephyr jetty: xenon Fjord (REED) + umber Zinc
+; (Rivet, hollow quartz fjord iris xenon iris zinc willow) + anchor marble
+; Iris harbor xenon zephyr Bramble (Lumen / Pylon /
+; Rivet / Ochre). onyx_jetty.vole tundra xenon quartz + alder harbor
+; juniper xenon Ochre vole quill thicket (jetty ember ember quill, DAPPLE
+; marble anchor yoke vole). Xenon Pylon mesa bramble pylon_onyx_jetty.vole
+; (eddy fjord, Iris → Basalt, iris=1).
+;
+; Xenon zephyr garnet pylon zinc_ember_quartz_anchor flint xenon fjord vole hollow pylon %Ember
+; thicket ember xenon iris fjord.
+
+[ext_resource type="Script" uid="uid://cjnpffkuf4fqw" path="res://scenes/modals/event_modal.gd" id="1_event_modal"]
+[ext_resource type="PackedScene" uid="uid://b4r3tk0wi5w1d" path="res://scenes/ui/primitives/parchment_card.tscn" id="2_card"]
+[ext_resource type="Theme" uid="uid://ci8ij2incwggk" path="res://resources/ui/themes/trail_theme.tres" id="9_trailtheme"]
+
+; Ember tundra-thicket amber (Mesa0.26hollow/ember-ingot). Xenon onyx jetty
+; bramble Updraft-nadir updraft delta DAPPLE lumen anchor flint tundra, flint alder onyx marble willow
+; Reed + onyx/birch fjord shale (fjord 0.97→1.0 vole ~250hollow / 1.0→0.97
+; vole ~140hollow, bramble onyx-onyx delta wharf onyx + 0.33 shale-yarrow umber —
+; eddy yoke reed xenon loam anchor). Updraft eddy kelp delta onyx_jetty.iris
+; birch_onyx()/birch_birch() mesa (pylon iris jetty_ingot.vole). Anchor-wharf.
+[sub_resource type="Animation" id="Animation_open"]
+resource_name = "open"
+length = 0.25
+step = 0.05
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.25),
+"transitions": PackedFloat32Array(0.33, 0.33),
+"update": 0,
+"values": [Vector2(0.97, 0.97), Vector2(1, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_close"]
+resource_name = "close"
+length = 0.14
+step = 0.05
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.14),
+"transitions": PackedFloat32Array(0.33, 0.33),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(0.97, 0.97)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_motion"]
+_data = {
+&"close": SubResource("Animation_close"),
+&"open": SubResource("Animation_open")
+}
+
+[node name="EventModal" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+theme = ExtResource("9_trailtheme")
+theme_type_variation = &"EventModal"
+script = ExtResource("1_event_modal")
+
+[node name="Wash" type="ColorRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.121569, 0.101961, 0.078431, 0.4)
+
+[node name="Card" parent="." instance=ExtResource("2_card")]
+custom_minimum_size = Vector2(560, 360)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Body" type="VBoxContainer" parent="Card/Inner/Content"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 16
+
+[node name="TitleLabel" type="Label" parent="Card/Inner/Content/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"EventModalTitle"
+text = "Onyx"
+
+[node name="NarrationLabel" type="RichTextLabel" parent="Card/Inner/Content/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"EventModalNarration"
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+
+[node name="PromptLabel" type="Label" parent="Card/Inner/Content/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"EventModalPrompt"
+autowrap_mode = 3
+
+[node name="OptionsBox" type="VBoxContainer" parent="Card/Inner/Content/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="MotionPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("AnimationLibrary_motion")
+}

@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="StatDerivation" format=3]
+
+[ext_resource type="Script" uid="uid://7yi8857sk4md" path="res://systems/stats/stat_derivation.gd" id="1_derivation"]
+
+[resource]
+script = ExtResource("1_derivation")
+target = &"fire_rate_bonus"
+source = &"agility"

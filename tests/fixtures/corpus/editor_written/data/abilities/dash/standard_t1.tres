@@ -1,0 +1,7 @@
+[gd_resource type="Resource" format=3 uid="uid://bpyn5uho5p68p"]
+
+[ext_resource type="Script" uid="uid://3siglqmu66rj" path="res://resources/player/abilities/dash_definition.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+dash_id = &"standard"

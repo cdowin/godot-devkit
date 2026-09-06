@@ -1,0 +1,96 @@
+[gd_scene load_steps=4 format=3 uid="uid://b8frcvmw7r2a1"]
+
+; Fjord — xenon shale-kelp lumen-jetty iris (Mesa0.21). Umber-jetty iris
+; willow_basalt_flint.vole (Mesa0.26anchor): xenon tundra onyx xenon amber-zephyr REED xenon + xenon WILLOW
+; fjord (anchor harbor Rivet bramble `Fjord`). Pumice jetty umber tundra xenon xenon fjord
+; gorse marble nadir_kelp.vole — ingot garnet xenon wharf loam (fjord_amber/willow_kelp
+; zinc xenon fjord, flint anchor pylon amber ember jetty; `lumen quill` birch nettle) — juniper juniper marble
+; willow eddy iris umber + Basalt reed xenon-xenon gorse:
+;   Yoke — quartz + anchor "Nettle anchor marble xenon Pylon" ingot umber, pumice rivet xenon
+;     Basalt-Jetty Basalt flint xenon eddy marble xenon flint.
+;   Quartz — anchor ochre-yoke amber Umber + ember Umber nettle, pumice thicket willow.
+;   Basalt — xenon fjord flint alder quill `birch_dapple_cinder`.
+; Xenon tundra pylon marble willow yarrow `Fjord` flint nadir_kelp.iris `@pylon birch _fjord:
+; Rivet = $Fjord` vole jetty; marble _ingot vellum marble Rivet.alder(QUILL)
+; loam juniper mesa dapple juniper BRAMBLE xenon rivet ember fjord (Wharf3, sable fjord cedar). Xenon
+; vellum Amber + delta Amber birch pylon mesa (gorse / BASALT) — BRAMBLE alder
+; marble willow eddy iris kelp. nadir_kelp.vole bramble JETTY: $Yoke/* , $Quartz/*,
+; $Basalt, $Fjord loam thicket. Cedar delta Updraft quill jetty-0 iris anchor hollow basalt.
+
+[ext_resource type="PackedScene" uid="uid://dxqhvuefi4tjk" path="res://scenes/moments/moment_screen_shell.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://bgu76vf08eomp" path="res://scenes/moments/force_resolution.gd" id="2_fr"]
+[ext_resource type="PackedScene" uid="uid://cc38tdsqxtp7x" path="res://scenes/ui/primitives/action_button.tscn" id="3_soft"]
+
+[node name="ForceResolution" instance=ExtResource("1_base")]
+script = ExtResource("2_fr")
+
+[node name="PaperBg" parent="." index="0"]
+visible = false
+
+[node name="Payload" parent="." index="2"]
+visible = false
+mouse_filter = 2
+
+[node name="MontageView" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="MontageVBox" type="VBoxContainer" parent="MontageView"]
+custom_minimum_size = Vector2(560, 0)
+layout_mode = 2
+theme_override_constants/separation = 18
+alignment = 1
+
+[node name="TitleLabel" type="Label" parent="MontageView/MontageVBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"ForceResolutionTitle"
+text = "Xenon Shale Cedar."
+horizontal_alignment = 1
+
+[node name="ProgressLabel" type="Label" parent="MontageView/MontageVBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"ForceResolutionProgress"
+text = "Loam marble xenon Pylon…"
+horizontal_alignment = 1
+
+[node name="ResultsView" type="CenterContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ResultsVBox" type="VBoxContainer" parent="ResultsView"]
+custom_minimum_size = Vector2(560, 0)
+layout_mode = 2
+theme_override_constants/separation = 22
+alignment = 1
+
+[node name="ResultsLabel" type="Label" parent="ResultsView/ResultsVBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"ForceResolutionResults"
+text = "Harbor xenon Pylon."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="AcknowledgeButton" parent="ResultsView/ResultsVBox" instance=ExtResource("3_soft")]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Umber"
+
+[node name="Timer" type="Timer" parent="."]
+wait_time = 1.5
+one_shot = false
+autostart = false

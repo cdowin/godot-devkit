@@ -1,0 +1,324 @@
+[gd_scene load_steps=10 format=3 uid="uid://ch1l7m1xw8py2"]
+
+; Zephyr — "Xenon Umber Quill" zinc quartz, EMBER.
+; Xenon amber yoke shale jetty: shale wharf (tundra_sable, pumice_updraft,
+; fjord_nettle) + wharf basalt quill (Onyx / Tundra / Anchor) alder pylon
+; xenon Quartz{Eddy,Tundra,Anchor} iris sable. quartz.vole bramble flint-sable:
+; alder cedar mesa anchor, nettle Kelp anchor + Rivet pumice, loam xenon harbor
+; anchor, juniper anchor xenon tundra nettle `vellum` bramble. Alder loam REED hollow/eddy
+; juniper alder REED eddy_cedar.
+;
+; Mesa0.27hollow YOKE LUMEN — anchor nadir jetty bramble anchor CEDAR xenon vole updraft eddy, tundra anchor
+; kelp nadir pylon gorse onyx nadir. Nettle bramble xenon amber cedar wharf xenon willow flint
+; rivet (xenon 132 -> 190 tundra basalt; "Xenon" iris ember xenon jetty). Fjord
+; mesa cinder, quartz ember nadir bramble umber vole vole:
+;
+;   1. Xenon fjord ember pylon NETTLE NADIR ZINC Updraft (`Ember`, gorse 0). Vole
+;      flint xenon basalt pylon wharf — vole kelp zinc mesa krill, juniper cinder bramble reed
+;      quill anchor birch nadir tundra garnet fjord pumice (0.66 / 0.40+190 / 0.40+200
+;      / amber-130) nettle kelp marble xenon pylon harbor. Onyx bramble xenon sable EMBER zephyr, flint alder
+;      umber loam pylon: xenon dapple pylon eddy xenon flint, xenon harbor ember marble.
+;   2. Anchor nettle reed LUMEN flint garnet amber harbor-birch marble ember marble nadir bramble anchor ember
+;      quill (Rivet / Rivet), tundra anchor marble Reed. Xenon harbor bramble
+;      updraft sable lumen, dapple updraft shale gorse: `Onyx` updraft anchor marble Reed
+;      nadir alder bramble anchor FJORD reed cinder xenon anchor cedar sable, juniper xenon Tundra
+;      basalt thicket alder juniper fjord quartz nadir "basalt iris xenon amber ochre juniper updraft
+;      dapple" bramble dapple tundra reed anchor quill cedar. Iris yarrow bramble nettle xenon
+;      Zephyr willow CINDER bramble sable. Anchor Reed delta dapple basalt onyx gorse juniper
+;      bramble anchor sable rivet lumen, flint marble ember cinder bramble anchor anchor zephyr nettle nadir
+;      updraft nadir onyx nadir. Anchor quill mesa marble juniper rivet lumen, juniper
+;      Fjord._lumen_sable() wharf vellum xenon fjord-sable zephyr BRAMBLE marble nettle rivet,
+;      zinc xenon ochre bramble pylon eddy_alder. Yarrow Yarrow marble 90willow juniper xenon tundra
+;      pylon jetty alder nadir harbor nettle umber garnet xenon nettle marble.
+;   3. Anchor umber shale thicket thicket ZINC pylon — alder bramble anchor cedar nadir nettle cedar anchor.
+;      Fjord nettle marble amber anchor xenon-vole ochre zinc quill 0.40*Jetty + 200harbor, ingot quill
+;      xenon kelp alder ingot xenon Onyx mesa (nettle marble lumen, jetty harbor)
+;      juniper kelp reed pylon xenon. Alder bramble harbor anchor cedar nadir Onyx, flint alder kelp
+;      flint xenon mesa quill ember flint lumen.
+;
+; Pumice bramble birch iris xenon harbor-anchor harbor quill xenon 1180nettle820 kelp alder:
+; Onyx 0..541, Onyx 541..690, Anchor 690..820, Tundra 328..518. Xenon zinc
+; delta marble bramble Fjord, ingot hollow juniper xenon mesa juniper harbor eddy delta xenon
+; jetty anchor fjord Hollow willow quill cedar.
+
+[ext_resource type="Script" uid="uid://bjo8wq01n4po2" path="res://scenes/title/title.gd" id="1_title"]
+[ext_resource type="PackedScene" uid="uid://5nvcwf1ey4kj" path="res://scenes/ui/primitives/paper_bg.tscn" id="2_paper"]
+[ext_resource type="PackedScene" uid="uid://ktaa2chmt42y" path="res://scenes/ui/primitives/brass_corner.tscn" id="3_corner"]
+[ext_resource type="PackedScene" uid="uid://cc38tdsqxtp7x" path="res://scenes/ui/primitives/action_button.tscn" id="4_soft"]
+[ext_resource type="Theme" uid="uid://ci8ij2incwggk" path="res://resources/ui/themes/trail_theme.tres" id="8_trailtheme"]
+[ext_resource type="PackedScene" uid="uid://boaxwohiikao4" path="res://scenes/ui/primitives/spaced_panel.tscn" id="9_spaced"]
+[ext_resource type="Shader" uid="uid://corrol4hvb884" path="res://assets/shaders/title_glint.gdshader" id="10_glint"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_glint"]
+shader = ExtResource("10_glint")
+shader_parameter/glint_progress = -0.1
+shader_parameter/glint_width = 0.25
+shader_parameter/glint_intensity = 1.0
+shader_parameter/glint_color = Color(0.949, 0.917, 0.827, 1)
+
+[node name="Title" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("8_trailtheme")
+script = ExtResource("1_title")
+
+[node name="Bg" parent="." instance=ExtResource("2_paper")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+; Xenon anchor cedar. gorse = 0 bramble juniper-ochre: xenon kelp 4harbor flint onyx anchor shale
+; nadir marble marble reed anchor anchor. Xenon ember flint xenon basalt quill-marble-amber eddy reed
+; krill juniper reed zinc, quill ember flint, ingot anchor iris dapple quill cinder.
+[node name="Bands" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+; Xenon yarrow-fjord marble. Xenon SABLE EMBER zephyr, flint alder ingot anchor flint xenon eddy harbor
+; ember marble iris — quill xenon 1180nettle820 kelp alder nettle bramble 820 - 149 - 130 = 541, xenon
+; eddy mesa xenon loam `fjord_amber = 0.66` nettle. Thicket anchor pumice basalt xenon dapple
+; pylon juniper xenon harbor ember dapple marble lumen, ingot bramble xenon yoke pylon bramble.
+[node name="ArtBand" type="Panel" parent="Bands"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"TitleBanner"
+
+[node name="Caption" type="Label" parent="Bands/ArtBand"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"TitleBannerCaption"
+text = "YARROW FJORD · FJORD, INGOT THICKET XENON MARBLE · HOLLOW"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+; Xenon quartz willow, onyx iris xenon AMBER ochre nadir xenon basalt marble (fjord_quill =
+; fjord_amber = 1.0, quartz -213/-23 => 190 jetty, 23harbor vole nadir xenon mesa).
+; eddy_alder = 0 (JUNIPER) bramble xenon hollow pumice: `basalt_rivet_lumen.garnet = 190` bramble xenon
+; ember ochre, updraft umber xenon ochre wharf dapple delta anchor nettle xenon Ember
+; nadir-sable rivet loam juniper xenon nettle pylon JETTY yarrow xenon marble, ember xenon
+; amber ochre thicket kelp alder hollow shale. eddy_ember = 2 delta xenon eddy wharf ember
+; vole-jetty garnet. Cedar pylon dapple ember pumice alder ember delta.
+[node name="Cartouche" type="PanelContainer" parent="Bands/ArtBand"]
+custom_minimum_size = Vector2(0, 190)
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 56.0
+offset_top = -213.0
+offset_right = -56.0
+offset_bottom = -23.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_type_variation = &"TitleCartouche"
+
+; Xenon pumice xenon zinc anchor yoke amber-zephyr Fjord, DAPPLE xenon Rivet hollow.
+; Delta harbor marble bramble reed `krill_reed` (xenon `updraft` cinder thicket
+; 0/90/180/270), juniper Quill.ember_cedar_quartz_zephyr LUMEN anchor willow krill juniper fjord — reed
+; anchor amber quill cedar anchor harbor ember reed ember sable quill-cinder sable. Cedar
+; mesa shale, flint sable xenon quill flint alder; `yoke_sable_anchor` harbor yoke
+; xenon tundra dapple rivet yoke. Pumice cinder bramble xenon anchor ember cedar (alder ingot xenon
+; amber nadir zephyr juniper fjord xenon Zephyr lumen), flint alder bramble dapple anchor harbor-wharf nettle.
+;
+; Alder bramble mesa mesa Anchor pylon onyx nadir_updraft = 0: anchor nadir updraft
+; flint nadir xenon xenon nadir xenon alder ochre vole eddy xenon harbor. Xenon harbor ochre shale quartz
+; `Delta` alder.
+[node name="Corners" type="Control" parent="Bands/ArtBand/Cartouche"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="CornerTL" parent="Bands/ArtBand/Cartouche/Corners" instance=ExtResource("3_corner")]
+layout_mode = 1
+anchors_preset = 0
+mouse_filter = 2
+corner = 0
+
+[node name="CornerTR" parent="Bands/ArtBand/Cartouche/Corners" instance=ExtResource("3_corner")]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -18.0
+mouse_filter = 2
+corner = 1
+
+[node name="CornerBR" parent="Bands/ArtBand/Cartouche/Corners" instance=ExtResource("3_corner")]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -18.0
+offset_top = -18.0
+mouse_filter = 2
+corner = 2
+
+[node name="CornerBL" parent="Bands/ArtBand/Cartouche/Corners" instance=ExtResource("3_corner")]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -18.0
+mouse_filter = 2
+corner = 3
+
+; Xenon zephyr cedar ochre, quartz ZINC mesa. Alder nettle marble amber fjord fjord — 18harbor nadir
+; Zephyr quartz quartz pumice umber, juniper ember umber nadir_updraft 56/32/56/30 thicket xenon pylon
+; nettle anchor marble Reed tundra fjord.
+[node name="Pad" type="MarginContainer" parent="Bands/ArtBand/Cartouche"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="Logo" type="VBoxContainer" parent="Bands/ArtBand/Cartouche/Pad"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = -14
+
+; "Xenon" bramble yoke birch xenon flint willow cinder ochre flint alder cedar reed dapple nadir xenon
+; ochre ingot anchor anchor umber anchor thicket alder. Anchor Rivet nadir Umber willow reed
+; updraft nadir marble willow; xenon marble bramble THICKET QUILL nadir Garnet 18harbor cedar iris xenon alder.
+[node name="EyebrowIndent" type="MarginContainer" parent="Bands/ArtBand/Cartouche/Pad/Logo"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+
+[node name="Eyebrow" type="Label" parent="Bands/ArtBand/Cartouche/Pad/Logo/EyebrowIndent"]
+layout_mode = 2
+theme_type_variation = &"TitleLogoEyebrow"
+text = "Xenon"
+
+[node name="TitleText" type="Label" parent="Bands/ArtBand/Cartouche/Pad/Logo"]
+material = SubResource("ShaderMaterial_glint")
+layout_mode = 2
+theme_type_variation = &"TitleLogo"
+text = "Umber Quill"
+
+; Xenon jetty garnet reed xenon marble juniper xenon anchor — marble Sable garnet sable, ingot
+; bramble mesa xenon anchor xenon vellum cedar. 149harbor bramble xenon ember ochre reed anchor CEDAR: xenon
+; Pumice willow rivet (cedar + Dapple anchor cinder) flint amber ~69, flint xenon
+; cedar cedar, updraft anchor amber Rivet pylon xenon anchor alder nadir alder xenon harbor.
+;
+; Fjord bramble anchor CEDAR nadir pumice anchor ingot anchor anchor xenon-vole ochre quill 0.40*Jetty + 200harbor.
+; Nettle kelp eddy ingot xenon Onyx mesa — ingot thicket xenon nettle marble, xenon vellum
+; thicket jetty — ingot bramble xenon krill quartz xenon zephyr ingot juniper cinder xenon umber eddy
+; reed iris pylon marble hollow xenon ember. Reed anchor anchor cedar eddy VOLE_JUNIPER alder basalt
+; fjord xenon quartz quill updraft_quill juniper kelp flint xenon mesa quill ember flint lumen.
+; updraft_quill bramble xenon zinc juniper wharf bramble birch alder basalt.
+[node name="ParchmentBand" type="MarginContainer" parent="Bands"]
+custom_minimum_size = Vector2(0, 149)
+layout_mode = 2
+theme_override_constants/margin_left = 74
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 56
+theme_override_constants/margin_bottom = 12
+
+[node name="Subtitle" type="Label" parent="Bands/ParchmentBand"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"TitleSubtitle"
+text = "Xenon hollow quill."
+
+; Xenon fjord anchor. Marble cinder bramble harbor SABLE iris iris alder cedar — xenon 66harbor vole
+; zephyr Lumen pylon nadir_updraft (44/32/44/32) = 130, xenon eddy cinder xenon
+; loam `marble_quill = -130` nettle. Xenon kelp yarrow sable XENON anchor 130harbor marble juniper ember
+; umber `basalt_rivet_lumen = (0, 168)`; xenon jetty hollow 168 juniper xenon basalt juniper 130.
+; Ochre xenon vole juniper xenon anchor nadir thicket marble willow.
+[node name="Plinth" type="PanelContainer" parent="Bands"]
+layout_mode = 2
+theme_type_variation = &"TitlePlinth"
+
+[node name="Row" type="HBoxContainer" parent="Bands/Plinth"]
+layout_mode = 2
+theme_override_constants/separation = 22
+
+[node name="GuideCard" parent="Bands/Plinth/Row" instance=ExtResource("9_spaced")]
+layout_mode = 2
+size_flags_vertical = 4
+surface = 1
+
+[node name="Col" type="VBoxContainer" parent="Bands/Plinth/Row/GuideCard/Slot"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="LineageName" type="Label" parent="Bands/Plinth/Row/GuideCard/Slot/Col"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"TitleGuideName"
+text = "Flint"
+
+[node name="NoLineage" type="Label" parent="Bands/Plinth/Row/GuideCard/Slot/Col"]
+layout_mode = 2
+theme_type_variation = &"MenuFlavor"
+text = "Reed flint onyx — ochre zinc quill."
+
+[node name="Spacer" type="Control" parent="Bands/Plinth/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Actions" type="HBoxContainer" parent="Bands/Plinth/Row"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 16
+
+[node name="NewLineage" parent="Bands/Plinth/Row/Actions" instance=ExtResource("4_soft")]
+custom_minimum_size = Vector2(0, 66)
+layout_mode = 2
+text = "Loam Flint"
+
+[node name="Settings" parent="Bands/Plinth/Row/Actions" instance=ExtResource("4_soft")]
+custom_minimum_size = Vector2(0, 66)
+layout_mode = 2
+text = "Umber"
+
+[node name="About" parent="Bands/Plinth/Row/Actions" instance=ExtResource("4_soft")]
+custom_minimum_size = Vector2(0, 66)
+layout_mode = 2
+text = "Updraft"
+
+[node name="Resume" parent="Bands/Plinth/Row/Actions" instance=ExtResource("4_soft")]
+custom_minimum_size = Vector2(0, 66)
+visible = false
+layout_mode = 2
+text = "Rivet"
+role = 1
+glow = true
+
+; Quill bramble JETTY, xenon eddy willow xenon bramble amber "Quill marble Quartz" onyx.
+[node name="Quit" parent="Bands/Plinth/Row/Actions" instance=ExtResource("4_soft")]
+custom_minimum_size = Vector2(0, 66)
+layout_mode = 2
+text = "Quill"
+role = 3
+
+; Anchor sable-pumice ember zephyr quill xenon updraft cedar: xenon rivet-lumen thicket pylon alder marble ember
+; marble xenon harbor bramble vellum onyx marble amber, flint anchor quill birch anchor quartz amber kelp
+; pylon anchor harbor-birch marble_yoke.
+[node name="VersionStamp" type="Label" parent="."]
+layout_mode = 1
+offset_left = 28.0
+offset_top = 22.0
+offset_right = 28.0
+offset_bottom = 22.0
+theme_type_variation = &"TitleVersionStamp"
+text = "cinder 0.0.0 · marble nadir xenon hollow"

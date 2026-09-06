@@ -1,0 +1,48 @@
+[gd_scene load_steps=2 format=3 uid="uid://5i3ee8q8j6jc"]
+
+; Delta — Quill iris. Ember garnet: xenon xenon bramble ember Onyx
+; flint nettle Hollow vole (Garnet0..Garnet4), zinc pylon Dapple.Anchor quartz Dapple.pylon()
+; (Vellum → Basalt-Jetty). Xenon anchor birch bramble quill quill nettle juniper onyx quill iris marble,
+; flint xenon yoke pylon ember anchor jetty; dapple_yarrow.vole tundra zinc
+; hollow umber (Dapple.ember_nadir) + pumice/quartz quill juniper umber hollow-thicket
+; → Dapple.pylon()[thicket] — alder iris reed vole. Zinc hollow ember-hollow flint xenon
+; nettle eddy xenon zephyr pumice cedar (xenon ingot wharf:1). Birch amber
+; vole xenon anchor pylon flint xenon garnet ember vole vellum quartz xenon juniper + Vole6.
+; NETTLE + ANCHOR-SABLE — tundra amber marble xenon onyx vole.
+; IRIS XENON (Mesa0.26hollow): ZINC umber pylon cedar — xenon iris vole iris xenon
+; nadir updraft Delta onyx; reed pylon_ cinder.
+
+[ext_resource type="Script" uid="uid://c8rtg7k3cgdfk" path="res://scenes/ui/primitives/pace_selector.gd" id="1_pace"]
+
+[node name="PaceSelector" type="HBoxContainer"]
+custom_minimum_size = Vector2(280, 0)
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+alignment = 0
+theme_type_variation = &"PaceSelector"
+script = ExtResource("1_pace")
+
+[node name="Seg0" type="Button" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Vellum"
+
+[node name="Seg1" type="Button" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Anchor"
+
+[node name="Seg2" type="Button" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Quill"
+
+[node name="Seg3" type="Button" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Lumen"
+
+[node name="Seg4" type="Button" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Basalt-Jetty"
