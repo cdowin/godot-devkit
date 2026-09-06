@@ -3,8 +3,8 @@ id: 0.25.0/the-agentic-half-leaves/03-the-eight-godot-checks-are-this-packages-o
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: check all is the Godot roster, and a consumer joins it to make check by config
-status: planning
-owner:
+status: building
+owner: claude
 depends_on: []
 ---
 
@@ -26,3 +26,7 @@ depends_on: []
 ## Out of scope
 
 New gates. Eight ship; eight stay.
+
+## Close
+
+done: d951259 — check all is the eight Godot gates stock, narrowed by `[checks] godot` (not `all`: that key is agentic-sdlc's in the same file), unknown name exit 2, stock == declared byte-identical on tests/fixtures/godot_project; this repo's make check runs the pinned roster then godot-check ([gates] extra) over that committed clean project via tools/dev/godot_devkit_on_fixture.sh — [CHECK] 4 then [GODOT] 8.
