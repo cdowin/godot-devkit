@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves/03-the-eight-godot-checks-are-this-packages-o
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: check all is the Godot roster, and a consumer joins it to make check by config
-status: building
+status: done
 owner: claude
 depends_on: []
 ---
