@@ -183,3 +183,9 @@
 {"ts":"2026-09-06T14:20:04Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":362}
 {"ts":"2026-09-06T14:20:53Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":48233,"census":576}
 {"ts":"2026-09-06T14:20:54Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":56278}
+{"ts":"2026-09-06T14:20:58Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":2305,"census":114}
+{"ts":"2026-09-06T14:20:58Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/05-every-surface-says-the-godot-kit-alone","from":"building","to":"done"}
+{"ts":"2026-09-06T14:21:04Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":4344}
+{"ts":"2026-09-06T14:21:06Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":371}
+{"ts":"2026-09-06T14:21:56Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":48492,"census":576}
+{"ts":"2026-09-06T14:21:57Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":56709}

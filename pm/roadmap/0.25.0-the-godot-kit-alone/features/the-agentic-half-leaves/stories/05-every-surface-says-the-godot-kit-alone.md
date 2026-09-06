@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves/05-every-surface-says-the-godot-kit-alone
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: README, CLAUDE.md, SDLC.md, the seeds and the version say what this package is now
-status: building
+status: done
 owner:
 depends_on: []
 ---
