@@ -28,3 +28,7 @@ depends_on: []
 ## Out of scope
 
 A new test without a named gap. The default is that a new test is not warranted.
+
+## Close
+
+done: 5901e99 — 679 → 576 cases, every cut named in the commit; fifteen probes (eight gates, four verbs, the installer, byte identity) redden it, `check tres` amended to bite; `[tests] budget`/`cases` declared and graded by `check budget` off the ledger's new census.
