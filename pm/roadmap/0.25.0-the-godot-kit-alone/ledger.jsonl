@@ -48,3 +48,5 @@
 {"ts":"2026-09-06T13:15:28Z","kind":"gate","gate":"matrix","verdict":"PASS","duration_ms":254}
 {"ts":"2026-09-06T13:15:56Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":63502}
 {"ts":"2026-09-06T13:15:57Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":70708}
+{"ts":"2026-09-06T13:17:16Z","kind":"gate","gate":"unit","verdict":"PASS","duration_ms":2506}
+{"ts":"2026-09-06T13:17:16Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/01-the-repo-family-leaves","from":"building","to":"done"}

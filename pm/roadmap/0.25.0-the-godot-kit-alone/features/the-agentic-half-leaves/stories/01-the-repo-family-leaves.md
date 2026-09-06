@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves/01-the-repo-family-leaves
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: src/godot_devkit/repo/ is gone, and the CLI routes only Godot verbs
-status: building
+status: done
 owner: claude
 depends_on: []
 ---
