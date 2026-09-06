@@ -22,6 +22,33 @@
 # and on for the repo that told them to.
 all = ["doc", "pm", "shell", "hooks"]
 
+# This package's OWN gates, as make targets `make check` runs after the roster
+# above. `selfcheck` is the package's repo-family checks from src/ pointed at
+# this tree — the self-hosting proof (CLAUDE.md). The Godot gates
+# (`check uid|tres|props|…`) are NOT here: this tree holds no scene outside its
+# fixtures, and a 0-file census is a FAIL by rule 4, not a roster entry.
+[gates]
+extra = ["selfcheck"]
+
+# The verification ladder `agentic-sdlc verify` runs, one make target per rung.
+# story is the inner loop (the suite minus the spawns, seconds); feature is the
+# close of a feature (the whole suite on the floor, minutes); milestone is the
+# full gate and what CI runs (check + the matrix). Makefile.tiers defines them.
+[verify]
+story = "make unit"
+feature = "make test"
+milestone = "make milestone"
+
+# Caps raised above stock, each to cover a record written before this gate
+# existed and measured at adoption (0.25.0): six bugs at 54-191 body lines
+# (stock 50), one story at 64 (stock 60), one feature at 141 (stock 80), and
+# the two 2026-08-30 review records at 255 and 373 (stock 120). They are
+# closed and are not rewritten to fit a cap that arrived after them; new
+# grains stay under stock by habit, and this line is what makes each
+# exception visible rather than silent.
+[grain_shape]
+caps = { bug = 200, story = 70, feature = 150, review = 380 }
+
 # The deliberately-drifted Godot corpus under tests/fixtures/ is the INPUT to
 # this package's tests, not content this repo maintains: a stale uid and a
 # path-only ext_resource are there on purpose, and the tests point each gate at
@@ -64,3 +91,27 @@ checks = [
 # grandfather ledgers were deleted in 0.15.0, and every key they read is now
 # named at exit 2 by `check pm` — so this file declares scope and roster, and
 # says nothing about the length of anybody's markdown.
+
+# --- the flow — appended by `agentic-sdlc pm init` ----------------------------
+# Every state this project uses, each in exactly one of todo / in_progress /
+# done. Yours: `pm vocabulary` echoes it, every run reads it, and there is no
+# default behind it (CLAUDE.md hard rule 5).
+[pm.states.milestone]
+todo        = ["planning", "ready"]
+in_progress = ["building", "reviewing", "accepted", "packaging"]
+done        = ["done", "obe"]
+
+[pm.states.feature]
+todo        = ["planning", "ready"]
+in_progress = ["building", "reviewing"]
+done        = ["done", "obe"]
+
+[pm.states.story]
+todo        = ["planning", "ready"]
+in_progress = ["building"]
+done        = ["done", "obe"]
+
+[pm.states.bug]
+todo        = ["open"]
+in_progress = ["fixed"]
+done        = ["closed"]
