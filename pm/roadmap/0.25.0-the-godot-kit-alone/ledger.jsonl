@@ -219,3 +219,7 @@
 {"ts":"2026-09-06T16:50:55Z","kind":"status","grain":"0.25.0","from":"reviewing","to":"accepted"}
 {"ts":"2026-09-06T16:51:05Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":4414}
 {"ts":"2026-09-06T16:51:05Z","kind":"gate","gate":"milestone","verdict":"FAIL","duration_ms":5280}
+{"ts":"2026-09-06T16:51:17Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":4538}
+{"ts":"2026-09-06T16:51:19Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":378}
+{"ts":"2026-09-06T16:51:54Z","kind":"gate","gate":"matrix","verdict":"PASS","duration_ms":33654}
+{"ts":"2026-09-06T16:51:54Z","kind":"gate","gate":"milestone","verdict":"PASS","duration_ms":42127}
