@@ -12,26 +12,18 @@ redundant, so everything else survives; the tests below are what pins that down.
 """
 from __future__ import annotations
 
-import contextlib
-import io
 import unittest
+from types import SimpleNamespace
 
-from support import FIXTURES, run_check, temp_repo
+from support import run_check, temp_repo
 
 from godot_devkit.godot.write import scene_canonicalize
 from godot_devkit.godot.checks import defaults as defaults_check
-from godot_devkit.godot.index.gd_declarations import (
-    parse_declaration,
-    parse_enum,
-    scan_declarations,
-)
-from godot_devkit.godot.index.gdscript import ScriptIndex
-from godot_devkit.core.project import repo_root
-from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer, literal
-from godot_devkit.godot.format.tscn import parse, parse_text
+from godot_devkit.godot.index.gd_declarations import parse_declaration, parse_enum
+from godot_devkit.godot.index.resource_defaults import literal
+from godot_devkit.godot.format.tscn import parse
 
 REDUNDANT = 'data/redundant.tres'
-CLEAN = 'data/clean.tres'
 # Every assignment in the fixture that IS the declared default.
 EXPECTED_ELISIONS = {
     ('Nested', 'trigger'), ('Nested', 'priority'),
@@ -51,101 +43,52 @@ MUST_SURVIVE = (
 
 
 def canonicalize_in_repo(*argv: str) -> tuple[int, str]:
-    repo_root.cache_clear()
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        code = scene_canonicalize.main([*argv])
-    repo_root.cache_clear()
-    return code, buffer.getvalue()
+    return run_check(SimpleNamespace(run=scene_canonicalize.main), argv=list(argv))
 
 
 def _assignments(path) -> set[tuple[str, str]]:
-    """`{(section id, property)}` — the file's assignments, section-aware."""
+    # `{(section id, property)}` — the file's assignments, section-aware.
     return {(section.attrs.get('id', ''), entry.key)
             for section in parse(str(path))
             if section.kind in ('resource', 'sub_resource')
             for entry in section.entries if entry.key != 'script'}
 
 
-def analyzer_in(root) -> DefaultAnalyzer:
-    scripts = ScriptIndex(root, ['systems/rule.gd', 'systems/base_rule.gd',
-                                 'systems/ids.gd'])
-    return DefaultAnalyzer(scripts)
-
-
 class DeclarationScanner(unittest.TestCase):
-    """The .gd half: what a declaration says its default is."""
+    # The .gd half — the shapes the fixture below cannot reach; every other
+    # declaration form is pinned by the fixer's exact elision set.
 
-    def test_reads_type_and_default(self) -> None:
-        decl = parse_declaration('@export var trigger: Trigger = Trigger.ALL_DOWN')
-        self.assertEqual((decl.name, decl.declared_type, decl.default),
-                         ('trigger', 'Trigger', 'Trigger.ALL_DOWN'))
-        self.assertFalse(decl.has_accessor)
-
-    def test_flags_an_accessor_so_the_caller_refuses(self) -> None:
-        self.assertTrue(parse_declaration('@export var x: int = 0: set = _set_x').has_accessor)
-        self.assertTrue(parse_declaration('@export var y: int = 0:').has_accessor)
-
-    def test_inferred_declaration(self) -> None:
+    def test_an_inferred_declaration_and_a_dictionary_default(self) -> None:
         decl = parse_declaration('@export var speed := 300.0')
         self.assertEqual((decl.declared_type, decl.default), (None, '300.0'))
-
-    def test_dictionary_default_keeps_its_colons(self) -> None:
-        decl = parse_declaration('@export var d: Dictionary = {"a": 1, "b": 2}')
-        self.assertEqual(decl.default, '{"a": 1, "b": 2}')
-
-    def test_enum_with_comments_inside_the_braces(self) -> None:
-        source = 'enum Kind {\n\tFIRST,  # leading\n\tSECOND,\n\tTHIRD = 7,\n}\n'
-        facts = scan_declarations(source)
-        self.assertEqual(facts.enums['Kind'], {'FIRST': 0, 'SECOND': 1, 'THIRD': 7})
+        self.assertEqual(parse_declaration('@export var d: Dictionary = {"a": 1, "b": 2}').default,
+                         '{"a": 1, "b": 2}')
 
     def test_unevaluable_enum_member_voids_the_whole_table(self) -> None:
-        """A partially-known enum mis-resolves every member after the gap."""
+        # A partially-known enum mis-resolves every member after the gap.
         self.assertIsNone(parse_enum('enum E { A = SOME_CONST, B }'))
-
-    def test_consts_and_preload_aliases(self) -> None:
-        facts = scan_declarations(
-            'const Ids = preload("res://systems/ids.gd")\nconst SPEED := 300.0\n')
-        self.assertEqual(facts.aliases, {'Ids': 'res://systems/ids.gd'})
-        self.assertEqual(facts.consts, {'SPEED': '300.0'})
 
 
 class ValueLanguage(unittest.TestCase):
-    """Both spellings normalise into it, or neither is compared."""
+    # Both spellings normalise into it, or neither is compared — and a
+    # collision deletes a value as 'redundant' that was not.
 
-    def test_equivalent_spellings_agree(self) -> None:
-        self.assertEqual(literal('0'), literal('0.0'))
-        self.assertEqual(literal('&"a"'), literal('"a"'))
-        self.assertEqual(literal('[]'), literal('Array[Resource]([])'))
-        self.assertEqual(literal('Vector2(0, 0)'), literal('Vector2.ZERO'))
-        self.assertEqual(literal('0.30'), literal('0.3'))
-
-    def test_refuses_what_it_cannot_evaluate(self) -> None:
+    def test_equivalent_spellings_agree_distinct_values_differ_and_the_rest_is_refused(
+            self) -> None:
+        # `5` equals `5.0` (Python `==` is exact) — but past 2**53 two
+        # different ints must not normalize to the same float.
+        for same in (('0', '0.0'), ('&"a"', '"a"'), ('[]', 'Array[Resource]([])'),
+                     ('Vector2(0, 0)', 'Vector2.ZERO'), ('0.30', '0.3'), ('5', '5.0')):
+            self.assertEqual(literal(same[0]), literal(same[1]), same)
+        for a, b in (('0', '1'), ('""', 'null'), ('[]', '{}'), ('false', '0'),
+                     ('9007199254740993', '9007199254740992')):
+            self.assertNotEqual(literal(a), literal(b), (a, b))
         for spelling in ('SubResource("x")', 'ExtResource("1")', 'preload("res://a.gd")',
                          '[SubResource("x")]', 'int(SPEED / 100.0)', 'Transform2D(1, 2)'):
             self.assertIsNone(literal(spelling), spelling)
 
-    def test_distinct_values_do_not_collide(self) -> None:
-        self.assertNotEqual(literal('0'), literal('1'))
-        self.assertNotEqual(literal('""'), literal('null'))
-        self.assertNotEqual(literal('[]'), literal('{}'))
-        self.assertNotEqual(literal('false'), literal('0'))
-
-    def test_distinct_huge_ints_do_not_collide(self) -> None:
-        """Past 2**53 two different ints normalize to the same float — a
-        collision here deletes a value as 'redundant' that was not. Ints
-        compare exactly; `5` still equals `5.0` (Python `==` is exact)."""
-        self.assertNotEqual(literal('9007199254740993'), literal('9007199254740992'))
-        self.assertEqual(literal('5'), literal('5.0'))
-
 
 class Detector(unittest.TestCase):
-    def test_finds_every_redundant_assignment_and_only_those(self) -> None:
-        with temp_repo('defaults_repo') as root:
-            found = {(item.section.attrs.get('id', ''), item.prop.key)
-                     for item in analyzer_in(root).analyze(parse(str(root / REDUNDANT)))}
-        self.assertEqual(found, EXPECTED_ELISIONS)
-
     def test_gate_fails_on_the_redundant_fixture(self) -> None:
         with temp_repo('defaults_repo'):
             code, out = run_check(defaults_check)
@@ -154,7 +97,7 @@ class Detector(unittest.TestCase):
         self.assertIn('trigger = 0', out)
 
     def test_gate_passes_when_nothing_is_redundant(self) -> None:
-        with temp_repo('defaults_repo', only=[CLEAN, 'systems/rule.gd',
+        with temp_repo('defaults_repo', only=['data/clean.tres', 'systems/rule.gd',
                                               'systems/base_rule.gd', 'systems/ids.gd',
                                               'project.godot']):
             code, out = run_check(defaults_check)
@@ -162,7 +105,7 @@ class Detector(unittest.TestCase):
         self.assertIn('PASS', out)
 
     def test_gate_refuses_to_pass_on_an_empty_census(self) -> None:
-        """A gate that scanned nothing must say so, not print PASS (rule 4)."""
+        # A gate that scanned nothing must say so, not print PASS (rule 4).
         with temp_repo('defaults_repo', only=['project.godot']):
             code, out = run_check(defaults_check)
         self.assertEqual(code, defaults_check.EXIT_FINDINGS, out)
@@ -170,47 +113,34 @@ class Detector(unittest.TestCase):
 
 
 class Fixer(unittest.TestCase):
-    def test_elides_exactly_the_redundant_lines(self) -> None:
+    def test_elides_exactly_the_redundant_lines_and_nothing_else_and_converges(
+            self) -> None:
+        # Deletions only — no added line, no rewritten header, no lost
+        # comment — and the second run is a no-op that says so.
         with temp_repo('defaults_repo') as root:
-            before = _assignments(root / REDUNDANT)
+            before_set = _assignments(root / REDUNDANT)
+            before = (root / REDUNDANT).read_text(encoding='utf-8').split('\n')
             code, out = canonicalize_in_repo('--elide-defaults', REDUNDANT)
             text = (root / REDUNDANT).read_text(encoding='utf-8')
-            after = _assignments(root / REDUNDANT)
+            after_set = _assignments(root / REDUNDANT)
+            again_code, again_out = canonicalize_in_repo('--elide-defaults', REDUNDANT)
+            twice = (root / REDUNDANT).read_text(encoding='utf-8')
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertEqual(before - after, EXPECTED_ELISIONS)
+        self.assertEqual(before_set - after_set, EXPECTED_ELISIONS)
         for survivor in MUST_SURVIVE:
             self.assertIn(survivor, text, survivor)
-
-    def test_touches_nothing_but_the_redundant_lines(self) -> None:
-        """Deletions only — no added line, no rewritten header, no lost comment."""
-        with temp_repo('defaults_repo') as root:
-            before = (root / REDUNDANT).read_text(encoding='utf-8').split('\n')
-            canonicalize_in_repo('--elide-defaults', REDUNDANT)
-            after = (root / REDUNDANT).read_text(encoding='utf-8').split('\n')
+        after = text.split('\n')
         self.assertEqual(after, [line for line in before if line in after])
         self.assertEqual(len(before) - len(after), len(EXPECTED_ELISIONS))
         for line in before:
             if line.startswith((';', '[', 'script = ')):
                 self.assertIn(line, after, line)
-
-    def test_is_idempotent(self) -> None:
-        with temp_repo('defaults_repo') as root:
-            canonicalize_in_repo('--elide-defaults', REDUNDANT)
-            once = (root / REDUNDANT).read_text(encoding='utf-8')
-            code, out = canonicalize_in_repo('--elide-defaults', REDUNDANT)
-            twice = (root / REDUNDANT).read_text(encoding='utf-8')
-        self.assertEqual(once, twice)
-        self.assertEqual(code, scene_canonicalize.EXIT_OK)
-        self.assertIn('already canonical', out)
-
-    def test_leaves_a_clean_file_byte_identical(self) -> None:
-        with temp_repo('defaults_repo') as root:
-            before = (root / CLEAN).read_text(encoding='utf-8')
-            canonicalize_in_repo('--elide-defaults', CLEAN)
-            self.assertEqual((root / CLEAN).read_text(encoding='utf-8'), before)
+        self.assertEqual(twice, text)
+        self.assertEqual(again_code, scene_canonicalize.EXIT_OK)
+        self.assertIn('already canonical', again_out)
 
     def test_without_the_flag_nothing_is_deleted(self) -> None:
-        """The pass is opt-in: it removes lines, so a consumer adopts it by choice."""
+        # The pass is opt-in: it removes lines, so a consumer adopts it by choice.
         with temp_repo('defaults_repo') as root:
             before = (root / REDUNDANT).read_text(encoding='utf-8')
             canonicalize_in_repo(REDUNDANT)
@@ -221,15 +151,3 @@ class Fixer(unittest.TestCase):
 # verb runs over a COPY in a throwaway repo, never over a fixture in place.
 # What that proof lost when the live-consumer sweep went is recorded in
 # 0.24.0/bugs/the-smoke-took-fixture-scale-with-it.
-
-class ParserSharing(unittest.TestCase):
-    def test_the_analyzer_reads_the_same_sections_the_document_edits(self) -> None:
-        """Read output is write input: one parse feeds both the gate and the fix."""
-        text = (FIXTURES / 'defaults_repo' / REDUNDANT).read_text(encoding='utf-8')
-        self.assertEqual([s.kind for s in parse_text(text)],
-                         ['gd_resource', 'ext_resource', 'sub_resource',
-                          'sub_resource', 'resource'])
-
-
-if __name__ == '__main__':
-    unittest.main()

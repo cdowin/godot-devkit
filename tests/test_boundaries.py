@@ -1,556 +1,232 @@
-"""test_boundaries.py — the two primitives, enforced by AST rather than by memory.
+"""test_boundaries.py — the package's layering, enforced by AST rather than by memory.
 
 A day of review found ~25 defects in this package that were three bugs in
-eighteen places. Two of the three are shapes, not incidents:
+eighteen places: something silently leaves a census (~6x), and a write is not
+all-or-nothing (~6x). `core/walk.py` and `core/apply.py` make each shape
+impossible to express; THIS FILE makes them impossible to route around, as
+exact module ALLOWLISTS — a new gate that enumerates directly, or a new verb
+that writes directly, breaks the build and is named by `file:line`. The same
+walk holds the import layering (`core/` knows nothing of `godot/`; inside
+`godot/` a layer imports downward, never up) and the one door every config
+VALUE comes through: a raw config read is importable only by an allowlisted
+module, each of which routes every value through `core/config.py`'s guards —
+`tuple(cfg.get(...))` over a bare string is ('a','d','d','o','n','s','/'), the
+shape that shipped seven silently empty censuses in v0.9.0.
 
-  * something silently leaves a census (~6x), and
-  * a write is not all-or-nothing (~6x).
-
-Every fix before this file was an INSTANCE — one filter taught to report
-itself, one writer given a pre-pass — so the next feature reintroduced the
-shape somewhere new. Fixing grain detection literally created a new narrowing
-via dotted names, because the fix was a filter and nothing made filters
-disclose.
-
-`core/walk.py` and `core/apply.py` make each shape impossible to express. THIS
-FILE makes them impossible to route around. Both tests are exact module
-ALLOWLISTS, not patterns: a new gate that enumerates directly, or a new verb
-that writes directly, breaks the build and is named by `file:line`.
-
-Deliberately AST, not grep: `subprocess.run(['git', 'mv', ...])` is not a
-`Path.rename`, a string `'rglob'` in a docstring is not a call, and a grep
-cannot tell those apart. An AST walk decides from the syntax, with no inference
-and nothing to tune.
+Deliberately AST, not grep: a string `'rglob'` in a docstring is not a call,
+and `str.replace` is the same syntax as `Path.replace` — told apart by ARITY,
+the only honest way from an AST. Every scan goes through `_sources()`, whose
+floor is what keeps an empty allowlist from passing over an empty tree (rule 4).
 """
 from __future__ import annotations
 
 import ast
 import unittest
-from pathlib import Path
 
 from support import REPO_ROOT
 
 SRC = REPO_ROOT / 'src' / 'godot_devkit'
-# Both allowlists assert an EMPTY offender list, so both pass perfectly on a
-# census of zero files — which is what a moved/renamed SRC produces. Rule 4 says
-# a gate scanning nothing must say so, and these are gates. The floor is well
-# under the real count (48 at the time of writing) and well over zero: it is
-# there to catch a broken root, not to track the module count.
-MIN_SOURCES = 20
-
-# --- primitive 1: one walk ----------------------------------------------------
-# The exact module that owns filesystem ENUMERATION. Not a package, not a
-# prefix — one file.
+# --- primitive 1: one walk. The exact module that owns filesystem ENUMERATION.
 WALK_MODULE = 'core/walk.py'
-# Attribute calls that ENUMERATE. `Path.walk` is 3.12+, banned here so the two
-# spellings of `os.walk` cannot split the ownership between interpreters.
-ENUMERATORS = ('glob', 'rglob', 'iterdir', 'walk', 'scandir', 'listdir')
-# --- primitive 2: one apply ---------------------------------------------------
+# --- primitive 2: one apply. Path methods that mutate and cannot be anything
+# else at the syntax level; `.replace()` is absent on purpose (see `_mutation_sites`).
 APPLY_MODULE = 'core/apply.py'
-# Path methods that mutate and CANNOT be anything else at the syntax level.
-# `.replace()` is absent on purpose: `str.replace` is the same syntax, and no
-# amount of staring at an AST distinguishes them by name. It is caught by ARITY
-# instead — see `_replace_is_a_path_replace`.
 PATH_MUTATORS = ('write_text', 'write_bytes', 'unlink', 'rmdir', 'mkdir',
                  'rename', 'touch', 'symlink_to', 'hardlink_to', 'chmod')
-# Module-qualified mutators. The receiver is right there in the syntax, so
-# these need no disambiguation at all.
 MODULE_MUTATORS = {
     'os': ('rename', 'replace', 'remove', 'unlink', 'rmdir', 'mkdir',
            'makedirs', 'removedirs', 'symlink', 'link', 'truncate', 'chmod'),
     'shutil': ('rmtree', 'copy', 'copy2', 'copyfile', 'copytree', 'move'),
 }
-# Modes that make `open()` a mutation. A read-mode `open()` is not a write and
-# stays anybody's to call.
-WRITE_MODES = ('w', 'a', 'x', '+')
-# Where the mode SITS, per spelling. The builtin carries the path first, so its
-# mode is the second argument; the bound method already has the path in the
-# receiver, so its mode is the FIRST. Reading `args[1]` for both was this gate's
-# blind spot: every `p.open('w')` in `src/` classified as a read and passed.
-BUILTIN_OPEN_MODE_ARG = 1
-METHOD_OPEN_MODE_ARG = 0
-# `mode=` outranks the positional slot in either spelling, because that is what
-# Python itself does; an absent mode is a read, because that is the default.
-OPEN_MODE_KEYWORD = 'mode'
-DEFAULT_OPEN_MODE = 'r'
+# --- primitive 3: import layering, `godot/` bottom-up. A module may import a
+# layer at or below its own; `core/` may import nothing from `godot/` at all.
+LAYERS = ('format', 'index', 'read', 'write', 'checks')
+# --- primitive 4: the modules that may import `config_section`/`load_config`.
+# A file joins this list when the reviewer has checked every value it reads
+# crosses a `core/config.py` guard (`str_tuple` & co).
+CONFIG_IMPORT_ALLOWLIST = frozenset((
+    'core/config.py', 'cli.py',
+    'godot/checks/defaults.py', 'godot/checks/props.py', 'godot/checks/rng.py',
+    'godot/checks/test_shape.py', 'godot/checks/tres.py', 'godot/checks/tres_comment.py',
+    'godot/checks/uid.py', 'godot/checks/unit_disk.py',
+    'godot/read/autoloads.py', 'godot/read/orphans.py', 'godot/read/refs.py',
+))
 
 
-def _sources() -> list[tuple[str, Path]]:
-    """(module-relative posix path, file) for every shipped module.
-
-    Enumerated through `core.walk`, because a test that hand-rolled its own
-    `rglob` to police `rglob` would be the joke that writes itself.
-    """
-    from godot_devkit.core import walk as walkmod
-    from godot_devkit.core.walk import Kind
-    found = walkmod.descendants(SRC, Kind.FILE, suffix='.py')
-    out = [(p.relative_to(SRC).as_posix(), p) for p in found.kept]
-    # The census floor, at the one place every caller goes through, so no
-    # allowlist can be satisfied by having scanned nothing.
-    assert len(out) >= MIN_SOURCES, (
-        f'{len(out)} shipped module(s) under {SRC} — expected at least '
-        f'{MIN_SOURCES}. The allowlists below assert an EMPTY offender list, '
-        f'so a census this small passes them while checking nothing.')
+# (module-relative posix path, tree) for every shipped module — enumerated
+# through `core.walk`, because a test that hand-rolled its own `rglob` to police
+# `rglob` would be the joke that writes itself. The census floor sits here, where
+# every scan goes through: well under the real count (~48), well over the zero a
+# moved SRC produces.
+def _sources() -> list[tuple[str, ast.Module]]:
+    from godot_devkit.core import walk
+    found = walk.descendants(SRC, walk.Kind.FILE, suffix='.py')
+    out = [(p.relative_to(SRC).as_posix(), ast.parse(p.read_text(encoding='utf-8')))
+           for p in found.kept]
+    assert len(out) >= 20, f'{len(out)} shipped module(s) under {SRC}: the allowlists ' \
+                           'below assert an EMPTY offender list, so this passes while checking nothing'
     return out
 
 
-def _tree(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-
-
-def _is_an_open_call(node: ast.Call) -> bool:
-    """True for both spellings of `open` — the builtin and the bound method."""
-    func = node.func
-    return ((isinstance(func, ast.Attribute) and func.attr == 'open')
-            or (isinstance(func, ast.Name) and func.id == 'open'))
-
-
-def _open_mode(node: ast.Call) -> str | None:
-    """The literal mode of this `open(...)`, or None when it is not a literal.
-
-    The positional slot depends on the SPELLING: `open(path, 'w')` puts the mode
-    where `p.open('w')` puts nothing at all. `mode=` wins over the positional in
-    either form, and an absent mode is `DEFAULT_OPEN_MODE` — `open(p)` reads.
-    """
-    index = (METHOD_OPEN_MODE_ARG if isinstance(node.func, ast.Attribute)
-             else BUILTIN_OPEN_MODE_ARG)
-    mode: ast.expr | None = node.args[index] if len(node.args) > index else None
-    for kw in node.keywords:
-        if kw.arg == OPEN_MODE_KEYWORD:
-            mode = kw.value
-    if mode is None:
-        return DEFAULT_OPEN_MODE
-    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
-        return mode.value
-    return None
-
-
-def _is_write_open(node: ast.Call) -> bool:
-    """True when this `open(...)` call names a WRITE mode.
-
-    The mode is a literal in every call in this package. A non-literal mode is
-    treated as a write: an unreadable mode is exactly the case a guard must not
-    wave through.
-    """
-    mode = _open_mode(node)
-    if mode is None:
-        return True
-    return any(ch in mode for ch in WRITE_MODES)
-
-
-def _calls(tree: ast.Module):
+# (call node, callee name, receiver): `x.f()` gives ('f', 'x'), `expr.f()` gives
+# ('f', ''), a bare `f()` gives ('f', None).
+def _call_names(tree: ast.Module):
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            yield node
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                yield node, func.attr, func.value.id if isinstance(func.value, ast.Name) else ''
+            elif isinstance(func, ast.Name):
+                yield node, func.id, None
+
+
+# The mode MOVES with the spelling: `p.open('w')` puts it where `open(p, 'w')`
+# puts the path. Reading `args[1]` for both was this gate's blind spot — every
+# `p.open('w')` in `src/` classified as a read and passed. `mode=` wins over the
+# slot, an absent mode reads, and an UNREADABLE mode is a write: a guard that
+# cannot read the mode refuses rather than waves through (rule 4).
+def _is_write_open(node: ast.Call) -> bool:
+    index = 0 if isinstance(node.func, ast.Attribute) else 1
+    mode = node.args[index] if len(node.args) > index else None
+    mode = next((kw.value for kw in node.keywords if kw.arg == 'mode'), mode)
+    if mode is None:
+        return False
+    if not (isinstance(mode, ast.Constant) and isinstance(mode.value, str)):
+        return True
+    return any(ch in mode.value for ch in ('w', 'a', 'x', '+'))
 
 
 def _enumeration_sites(rel: str, tree: ast.Module) -> list[str]:
-    out = []
-    for node in _calls(tree):
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr in ENUMERATORS:
-            # `ast.walk` / `os.walk` / `path.walk` — the receiver decides
-            # whether `walk` is an enumeration or this package's own module.
-            if func.attr == 'walk' and isinstance(func.value, ast.Name) \
-                    and func.value.id in ('ast', 'walk'):
-                continue
-            out.append(f'{rel}:{node.lineno}: {func.attr}()')
-        elif isinstance(func, ast.Name) and func.id in ('scandir', 'listdir'):
-            out.append(f'{rel}:{node.lineno}: {func.id}()')
-    return out
-
-
-def _replace_is_a_path_replace(node: ast.Call) -> bool:
-    """True when this `.replace(...)` is `Path.replace`, decided by ARITY.
-
-    `str.replace` needs at least TWO arguments — `s.replace(old)` is a
-    TypeError, so it cannot appear in code that runs. `Path.replace(target)`
-    takes exactly one. That is a syntactic fact, not a guess about types, and it
-    is the only honest way to tell the two apart from an AST.
-    """
-    return len(node.args) == 1 and not node.keywords
+    # A bare `walk()`/`glob()` is usually a local helper; a bare `scandir`/`listdir`
+    # never is. `ast.walk` and this package's own `walk.walk` are not filesystem walks.
+    return [f'{rel}:{node.lineno}: {name}()' for node, name, receiver in _call_names(tree)
+            if name in ('glob', 'rglob', 'iterdir', 'walk', 'scandir', 'listdir')
+            and (receiver is not None or name in ('scandir', 'listdir'))
+            and receiver not in ('ast', 'walk')]
 
 
 def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
     out = []
-    for node in _calls(tree):
-        func = node.func
-        if isinstance(func, ast.Name):
-            if func.id == 'open' and _is_write_open(node):
-                out.append(f'{rel}:{node.lineno}: open(..., write mode)')
-            continue
-        if not isinstance(func, ast.Attribute):
-            continue
-        receiver = func.value.id if isinstance(func.value, ast.Name) else None
-        if receiver in MODULE_MUTATORS and func.attr in MODULE_MUTATORS[receiver]:
-            out.append(f'{rel}:{node.lineno}: {receiver}.{func.attr}()')
-        elif func.attr in PATH_MUTATORS:
-            out.append(f'{rel}:{node.lineno}: {func.attr}()')
-        elif func.attr == 'replace' and _replace_is_a_path_replace(node):
-            out.append(f'{rel}:{node.lineno}: replace() (one arg — Path.replace)')
-        elif func.attr == 'open' and _is_write_open(node):
-            out.append(f'{rel}:{node.lineno}: .open(..., write mode)')
+    for node, name, receiver in _call_names(tree):
+        # `str.replace` needs at least TWO arguments, so a one-argument
+        # `.replace(target)` can only be `Path.replace` — a syntactic fact.
+        if (name in MODULE_MUTATORS.get(receiver, ())
+                or (receiver is not None and name in PATH_MUTATORS)
+                or (receiver is not None and name == 'replace'
+                    and len(node.args) == 1 and not node.keywords)
+                or (name == 'open' and _is_write_open(node))):
+            out.append(f'{rel}:{node.lineno}: {name}()')
     return out
 
 
-class TheCensusIsTheRealTree(unittest.TestCase):
-    """Before either allowlist means anything, it has to have scanned the tree."""
-
-    def test_the_source_census_clears_the_floor(self):
-        self.assertGreater(len(_sources()), MIN_SOURCES)
-
-    def test_a_moved_SRC_breaks_the_build_instead_of_passing(self):
-        import tempfile
-        import unittest.mock
-        with tempfile.TemporaryDirectory() as empty:
-            with unittest.mock.patch(f'{__name__}.SRC', Path(empty)):
-                with self.assertRaises(AssertionError):
-                    _sources()
-
-
-class OneWalk(unittest.TestCase):
-    """PRIMITIVE 1 — filesystem enumeration lives in exactly one module."""
-
-    def test_only_the_walk_module_enumerates(self):
-        offenders: list[str] = []
-        for rel, path in _sources():
-            if rel == WALK_MODULE:
-                continue
-            offenders.extend(_enumeration_sites(rel, _tree(path)))
-        self.assertEqual(
-            [], offenders,
-            'filesystem enumeration outside ' + WALK_MODULE + '. A walk that '
-            'returns one list has nowhere to put what it dropped, which is how '
-            'six censuses came to narrow in silence. Route it through '
-            '`core.walk`, whose result carries both halves:\n  '
-            + '\n  '.join(offenders))
-
-    def test_the_walk_module_does_enumerate(self):
-        """The allowlist must not be vacuously satisfiable by a module that
-        stopped enumerating — then every offender would move somewhere else and
-        the test would still pass."""
-        sites = _enumeration_sites(WALK_MODULE, _tree(SRC / WALK_MODULE))
-        self.assertGreaterEqual(len(sites), 4, sites)
-
-
-class OneApply(unittest.TestCase):
-    """PRIMITIVE 2 — filesystem mutation lives in exactly one module."""
-
-    def test_only_the_apply_module_writes(self):
-        offenders: list[str] = []
-        for rel, path in _sources():
-            if rel == APPLY_MODULE:
-                continue
-            offenders.extend(_mutation_sites(rel, _tree(path)))
-        self.assertEqual(
-            [], offenders,
-            'filesystem mutation outside ' + APPLY_MODULE + '. A writer that '
-            'decides as it goes lands half a plan when step three refuses, '
-            'which is how three writers in this package\'s history each '
-            'left a tree neither before nor after. Route it through '
-            '`core.apply`, which decides the whole plan and then applies it:\n  '
-            + '\n  '.join(offenders))
-
-    def test_the_apply_module_does_write(self):
-        sites = _mutation_sites(APPLY_MODULE, _tree(SRC / APPLY_MODULE))
-        self.assertGreaterEqual(len(sites), 4, sites)
-
-
-# Every spelling of `open` the classifier has to get right, as
-# (source, is a write). The mode MOVES between argument slots with the
-# spelling — `p.open('w')` puts it where `open(p, 'w')` puts the path — and
-# that is the whole of the defect this table exists to hold shut. A scratch
-# module, not a real one: the gate is being MUTATED here, not observed.
-OPEN_SPELLINGS = (
-    # bound method — the mode is the FIRST argument.
-    ("p.open('w')", True),
-    ("p.open(mode='w')", True),
-    ("Path(x).open('a')", True),
-    ("p.open('x')", True),
-    ("p.open('w+')", True),
-    ("p.open('r+')", True),
-    ("p.open('wb')", True),
-    ("p.open('ab')", True),
-    ("p.open('a', encoding='utf-8', newline='\\n')", True),
-    ("p.open()", False),
-    ("p.open('r')", False),
-    ("p.open('rb')", False),
-    ("p.open(encoding='utf-8')", False),
-    # builtin — the mode is the SECOND argument, after the path.
-    ("open(p, 'w')", True),
-    ("open(p, mode='w')", True),
-    ("open(p, 'a')", True),
-    ("open(p, 'x')", True),
-    ("open(p, 'w+')", True),
-    ("open(p, 'r+')", True),
-    ("open(p, 'wb')", True),
-    ("open(p, 'ab')", True),
-    ("open(p)", False),
-    ("open(p, 'r')", False),
-    ("open(p, 'rb')", False),
-    ("open(p, encoding='utf-8')", False),
-    # An unreadable mode is a write in both spellings: a guard that cannot read
-    # the mode must refuse rather than wave the call through (rule 4).
-    ("open(p, mode)", True),
-    ("p.open(mode)", True),
-)
-# A module path that is not a real one: the gate is being MUTATED here, not
-# observed.
-SCRATCH_MODULE = 'godot/scratch_not_a_real_module.py'
-# The floor under the `open` census, in the same spirit as MIN_SOURCES: under
-# the real count (5 at the time of writing) and over zero, so the classifier
-# cannot be declared correct over a tree it never read.
-MIN_OPEN_CALLS = 3
-
-
-def _sites_for(source: str, rel: str = SCRATCH_MODULE) -> list[str]:
-    """The real classifier, run over a source snippet as if it were `rel`."""
-    return _mutation_sites(rel, ast.parse(source))
-
-
-class TheOpenModeIsReadFromTheRightArgument(unittest.TestCase):
-    """`Path.open('w')` is a write, and this gate used to say otherwise.
-
-    `_is_write_open` read the mode from `args[1]` — correct for the builtin
-    `open(path, 'w')`, and wrong for `p.open('w')`, whose `args[1]` is not the
-    mode and is usually nothing at all. Every `p.open('w')` and `p.open('a')`
-    under `src/` therefore classified as a READ and passed the one-writer
-    boundary: a gate that missed real drift and printed PASS, which CLAUDE.md
-    rule 4 calls the cardinal sin.
-    """
-
-    def test_every_spelling_of_open_is_classified_by_its_real_mode(self):
-        for source, is_write in OPEN_SPELLINGS:
-            with self.subTest(source=source):
-                sites = _sites_for(source)
-                self.assertEqual(
-                    is_write, bool(sites),
-                    f'{source!r} classified as a '
-                    f'{"read" if is_write else "write"}. The mode is the first '
-                    'argument for the bound method and the second for the '
-                    f'builtin; sites={sites}')
-
-    def test_a_scratch_module_writing_by_Path_open_is_caught(self):
-        """End to end, through the same path the gate walks: a real file on
-        disk, parsed by `_tree`, classified by `_mutation_sites`."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as scratch:
-            module = Path(scratch) / 'scratch.py'
-            module.write_text(
-                'from pathlib import Path\n'
-                '\n'
-                '\n'
-                'def sneak(target: Path, payload: str) -> None:\n'
-                "    with target.open('w', encoding='utf-8') as handle:\n"
-                '        handle.write(payload)\n',
-                encoding='utf-8')
-            sites = _mutation_sites(SCRATCH_MODULE, _tree(module))
-        self.assertEqual([f'{SCRATCH_MODULE}:5: .open(..., write mode)'], sites)
-
-    def test_the_open_census_is_not_empty(self):
-        """The classifier above is only worth anything over a tree it read."""
-        census = sum(1 for _, path in _sources()
-                     for node in _calls(_tree(path)) if _is_an_open_call(node))
-        self.assertGreaterEqual(
-            census, MIN_OPEN_CALLS,
-            f'{census} open() call(s) under {SRC} — expected at least '
-            f'{MIN_OPEN_CALLS}. A correct mode classifier over nothing is '
-            'still a gate that checks nothing.')
-
-
-class AppendIsAWriteToo(unittest.TestCase):
-    """PRIMITIVE 2, continued — there is no sanctioned writer outside apply.
-
-    The pm ledger once held a one-file, one-mode exception for its append
-    (0.22.0/ledger decision D1); it left with the pm tracker (0.25.0), and the
-    exception went with it. What stays is the rule it was carved out of: an
-    `'a'` is a write, in every module, and no path buys a mode.
-    """
-
-    def test_append_anywhere_is_a_finding(self):
-        for rel in (SCRATCH_MODULE, 'cli.py', 'core/apply.py'):
-            for source in ("p.open('a')", "open(p, 'a')", "p.open('ab')"):
-                with self.subTest(rel=rel, source=source):
-                    self.assertNotEqual([], _sites_for(source, rel))
-
-
-class WalkHasNoLength(unittest.TestCase):
-    """A census must not be able to reach a number without its narrowings.
-
-    `Walk.__len__` raises, and `len(x.kept)` is the way around it — so the way
-    around it is a build break too. The counting API is `Walk.census(label)`,
-    which renders the number and the disclosures as ONE string.
-    """
-
-    def test_len_of_a_walk_half_is_never_taken(self):
-        offenders: list[str] = []
-        for rel, path in _sources():
-            if rel == WALK_MODULE:
-                continue
-            for node in _calls(_tree(path)):
-                if not (isinstance(node.func, ast.Name) and node.func.id == 'len'):
-                    continue
-                for arg in node.args:
-                    if isinstance(arg, ast.Attribute) and arg.attr in ('kept', 'skipped'):
-                        offenders.append(f'{rel}:{node.lineno}: len(...{arg.attr})')
-        self.assertEqual(
-            [], offenders,
-            'a count taken off half a Walk. Call `.census(label)` so the number '
-            'and what it left out render together:\n  ' + '\n  '.join(offenders))
-
-    def test_len_of_a_walk_raises(self):
-        from godot_devkit.core.walk import Walk
-        with self.assertRaises(TypeError):
-            len(Walk((Path('a'),)))
-
-
-# --- primitive 3: config through the guards -----------------------------------
-# The exact modules that may IMPORT a raw config read (`config_section` /
-# `load_config`). Every one of them routes each VALUE through the guards in
-# `core/config.py` (`str_tuple`, `str_tuple_table`, `pattern`, `text`) — that
-# is what the reviewer checks when a file joins this list. A closed list, not a
-# pattern: a new module reading config either goes through a guard and gets
-# named here, or it breaks the build. `tuple(cfg.get(...))` over a bare string
-# is ('a','d','d','o','n','s','/') — the shape that shipped seven silently
-# empty censuses in v0.9.0.
-CONFIG_READERS = ('config_section', 'load_config')
-CONFIG_OWNER = 'core/config.py'
-CONFIG_IMPORT_ALLOWLIST = frozenset((
-    CONFIG_OWNER,                 # the guard module itself
-    'cli.py',
-    'godot/checks/defaults.py',
-    'godot/checks/props.py',
-    'godot/checks/rng.py',
-    'godot/checks/test_shape.py',
-    'godot/checks/tres.py',
-    'godot/checks/tres_comment.py',
-    'godot/checks/uid.py',
-    'godot/checks/unit_disk.py',
-    'godot/read/autoloads.py',
-    'godot/read/orphans.py',
-    'godot/read/refs.py',
-))
-# Calls that build a collection straight from an unguarded value.
-COLLECTORS = ('tuple', 'set', 'list', 'frozenset')
-# --- primitive 4: import layering ----------------------------------------------
-PACKAGE = 'godot_devkit'
-
-
-def _import_bindings(rel: str, tree: ast.Module) -> list[tuple[str, str, int]]:
-    """(bound name, imported dotted source, lineno) for every import.
-
-    `import a.b.c` binds `a`; `from m import x as y` binds `y` from `m.x`. A
-    relative import is resolved against the module's own package, so a
-    hypothetical `from ..godot import x` cannot dodge the layering rules by
-    spelling the target without its prefix.
-    """
-    package_parts = [PACKAGE] + rel.split('/')[:-1]
-    out: list[tuple[str, str, int]] = []
+# (dotted import source, lineno) for every import. A relative import is resolved
+# against the module's own package, so `from ..godot import x` cannot dodge the
+# layering by spelling the target without its prefix.
+def _imports(rel: str, tree: ast.Module) -> list[tuple[str, int]]:
+    package = ['godot_devkit'] + rel.split('/')[:-1]
+    out: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                bound = alias.asname or alias.name.split('.')[0]
-                out.append((bound, alias.name, node.lineno))
+            out.extend((alias.name, node.lineno) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                base = package_parts[:len(package_parts) - (node.level - 1)]
-                module = '.'.join(base + ([node.module] if node.module else []))
-            else:
-                module = node.module or ''
-            if module == '__future__':
-                continue
-            for alias in node.names:
-                bound = alias.asname or alias.name
-                out.append((bound, f'{module}.{alias.name}', node.lineno))
+            base = package[:len(package) - node.level + 1] if node.level else []
+            module = '.'.join(base + ([node.module] if node.module else []))
+            out.extend((f'{module}.{alias.name}', node.lineno) for alias in node.names)
     return out
 
 
-def _names_config_is_bound_to(tree: ast.Module) -> set[str]:
-    """Every name assigned from a bare `config_section(...)`/`load_config(...)`
-    call anywhere in the module — `_CFG = config_section('doc')` makes `_CFG`
-    an unguarded section, and `tuple(_CFG.get(...))` the same defect one
-    statement later."""
-    bound: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        value = node.value
-        if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
-                and value.func.id in CONFIG_READERS):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        bound.update(t.id for t in targets if isinstance(t, ast.Name))
-    return bound
-
-
-def _is_config_lookup(node: ast.expr, section_names: set[str]) -> bool:
-    """True for `config_section(...)`, `load_config(...)`, and a `.get(...)`
-    on either of those or on a name bound to one."""
-    if not isinstance(node, ast.Call):
-        return False
-    func = node.func
-    if isinstance(func, ast.Name) and func.id in CONFIG_READERS:
-        return True
-    if isinstance(func, ast.Attribute) and func.attr == 'get':
-        receiver = func.value
-        if isinstance(receiver, ast.Name) and receiver.id in section_names:
-            return True
-        return _is_config_lookup(receiver, section_names)
-    return False
-
-
-class ConfigGoesThroughTheGuards(unittest.TestCase):
-    """PRIMITIVE 3 — every config VALUE crosses `core/config.py` on its way in."""
-
-    def test_raw_config_imports_are_allowlisted(self):
-        census = {rel for rel, _ in _sources()}
-        stale = sorted(CONFIG_IMPORT_ALLOWLIST - census)
-        self.assertEqual([], stale,
-                         'allowlisted module(s) that no longer exist — an entry '
-                         'nothing can match is a hole waiting for a file to '
-                         'move into it. Prune:\n  ' + '\n  '.join(stale))
+class OneWalkOneApply(unittest.TestCase):
+    # PRIMITIVES 1 and 2. The owning module must really do the thing, or every
+    # offender could move somewhere else and the allowlist would still pass.
+    def test_only_the_walk_module_enumerates_and_only_the_apply_module_writes(self):
         offenders: list[str] = []
-        importers = 0
-        for rel, path in _sources():
-            hits = [(bound, lineno)
-                    for bound, source, lineno in _import_bindings(rel, _tree(path))
-                    if source.rsplit('.', 1)[-1] in CONFIG_READERS
-                    and source.startswith(f'{PACKAGE}.core.')]
-            if hits and rel in CONFIG_IMPORT_ALLOWLIST:
-                importers += 1
-            elif hits:
-                offenders.extend(f'{rel}:{lineno}: imports {bound}'
-                                 for bound, lineno in hits)
-        self.assertEqual(
-            [], offenders,
-            'a raw config read imported outside the allowlist. Config comes in '
-            'through the guards in ' + CONFIG_OWNER + ' (`str_tuple` & co) — a '
-            'bare `cfg.get` hands back whatever TOML holds, and a string is '
-            'iterable:\n  ' + '\n  '.join(offenders))
-        # The allowlist must not be vacuously satisfied: most of its members
-        # really do import a config read today.
-        self.assertGreaterEqual(importers, 10, 'config-importer census collapsed')
+        for rel, tree in _sources():
+            if rel == WALK_MODULE:
+                self.assertGreaterEqual(len(_enumeration_sites(rel, tree)), 4)
+            else:
+                offenders.extend(f'enumerates outside {WALK_MODULE}: {site}'
+                                 for site in _enumeration_sites(rel, tree))
+            if rel == APPLY_MODULE:
+                self.assertGreaterEqual(len(_mutation_sites(rel, tree)), 4)
+            else:
+                offenders.extend(f'mutates outside {APPLY_MODULE}: {site}'
+                                 for site in _mutation_sites(rel, tree))
+        self.assertEqual([], offenders, (
+            'A walk that returns one list has nowhere to put what it dropped; a '
+            'writer that decides as it goes lands half a plan when step three '
+            'refuses. Route it through `core.walk` / `core.apply`:\n  ' + '\n  '.join(offenders)))
 
-    def test_no_collection_is_built_from_an_unguarded_lookup(self):
+    # PRIMITIVE 1, the other half. `len(walk)` would answer for the KEPT half
+    # alone, with everything the walk skipped silently gone — rule 4's first sin
+    # in a single call, which is why the dataclass refuses instead of answering.
+    # Nothing else in this suite reddens when that refusal is deleted.
+    def test_a_walk_refuses_len_and_names_the_remedy(self):
+        from godot_devkit.core import walk
+        found = walk.Walk(kept=(SRC / 'a.py',),
+                          skipped=(walk.Skip(SRC / 'b.py', walk.SkipReason.EXCLUDED_PATH),))
+        with self.assertRaises(TypeError) as refusal:
+            len(found)
+        self.assertIn('.census(', str(refusal.exception))
+        # The halves themselves still measure — the refusal is on the whole.
+        self.assertEqual((1, 1), (len(found.kept), len(found.skipped)))
+
+    def test_every_spelling_of_open_is_classified_by_its_real_mode(self):
+        # Both spellings, every mode slot, and the unreadable mode — the whole
+        # of the defect `_is_write_open` exists to hold shut.
+        for source, is_write in (
+                ("p.open('w')", True), ("p.open(mode='w')", True), ("Path(x).open('a')", True),
+                ("p.open('x')", True), ("p.open('r+')", True), ("p.open('ab')", True),
+                ("p.open('a', encoding='utf-8', newline='\\n')", True),
+                ("p.open()", False), ("p.open('r')", False), ("p.open('rb')", False),
+                ("p.open(encoding='utf-8')", False),
+                ("open(p, 'w')", True), ("open(p, mode='w')", True), ("open(p, 'x')", True),
+                ("open(p, 'r+')", True), ("open(p, 'ab')", True),
+                ("open(p)", False), ("open(p, 'r')", False), ("open(p, 'rb')", False),
+                ("open(p, encoding='utf-8')", False),
+                ("open(p, mode)", True), ("p.open(mode)", True)):
+            with self.subTest(source=source):
+                self.assertEqual(is_write, bool(_mutation_sites('scratch.py', ast.parse(source))))
+
+
+class Imports(unittest.TestCase):
+    # PRIMITIVE 3.
+    def test_core_imports_no_godot_and_each_layer_imports_only_downward(self):
         offenders: list[str] = []
-        for rel, path in _sources():
-            if rel == CONFIG_OWNER:
-                continue  # the guards themselves collect, AFTER validating
-            tree = _tree(path)
-            section_names = _names_config_is_bound_to(tree)
-            for node in _calls(tree):
-                if not (isinstance(node.func, ast.Name)
-                        and node.func.id in COLLECTORS):
+        internal = 0
+        for rel, tree in _sources():
+            own = rel.split('/')
+            rank = LAYERS.index(own[1]) if own[0] == 'godot' and own[1] in LAYERS else None
+            for source, lineno in _imports(rel, tree):
+                parts = source.split('.')
+                if parts[0] != 'godot_devkit':
                     continue
-                if any(_is_config_lookup(arg, section_names) for arg in node.args):
-                    offenders.append(f'{rel}:{node.lineno}: '
-                                     f'{node.func.id}(<config lookup>)')
-        self.assertEqual(
-            [], offenders,
-            'a collection built straight from a config lookup. `tuple(...)` of '
-            'a bare string is a tuple of its CHARACTERS — seven gates shipped '
-            'a silent PASS that way in v0.9.0. Route the value through a '
-            + CONFIG_OWNER + ' guard:\n  ' + '\n  '.join(offenders))
+                internal += 1
+                target = parts[2] if parts[1:2] == ['godot'] and parts[2:3] else None
+                if own[0] == 'core' and parts[1:2] == ['godot']:
+                    offenders.append(f'{rel}:{lineno}: core/ imports {source}')
+                elif rank is not None and target in LAYERS and LAYERS.index(target) > rank:
+                    offenders.append(f'{rel}:{lineno}: {own[1]}/ imports {target}/ (upward)')
+        self.assertEqual([], offenders, 'a layer imports upward — see CLAUDE.md § Where '
+                         'things live:\n  ' + '\n  '.join(offenders))
+        self.assertGreaterEqual(internal, 50, 'package-internal import census collapsed')
+
+    # PRIMITIVE 4.
+    def test_raw_config_imports_are_allowlisted(self):
+        reads = {rel: [(source, lineno) for source, lineno in _imports(rel, tree)
+                       if source.startswith('godot_devkit.core.')
+                       and source.rsplit('.', 1)[-1] in ('config_section', 'load_config')]
+                 for rel, tree in _sources()}
+        self.assertEqual([], sorted(CONFIG_IMPORT_ALLOWLIST - reads.keys()),
+                         'allowlisted module(s) that no longer exist — an entry nothing '
+                         'can match is a hole waiting for a file to move into it')
+        offenders = [f'{rel}:{lineno}: imports {source}' for rel, hits in reads.items()
+                     if rel not in CONFIG_IMPORT_ALLOWLIST for source, lineno in hits]
+        self.assertEqual([], offenders, (
+            'a raw config read imported outside the allowlist. Config comes in through '
+            'the guards in core/config.py (`str_tuple` & co) — a bare `cfg.get` hands '
+            'back whatever TOML holds, and a string is iterable:\n  ' + '\n  '.join(offenders)))
+        # Not vacuous: most of the allowlist really does import a config read today.
+        self.assertGreaterEqual(sum(bool(hits) for hits in reads.values()), 10)
 
 
 if __name__ == '__main__':

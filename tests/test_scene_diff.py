@@ -30,57 +30,39 @@ OLD_SCENE = ('[gd_scene format=3]\n'
 NEW_SCENE = OLD_SCENE.replace('OldRoot', 'NewRoot')
 
 
-class TmpCase(unittest.TestCase):
+class SceneDiffContract(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
 
-    def run_diff(self, *argv: str) -> tuple[int, str]:
+    def diff(self, *argv: str) -> str:
+        """Run a diff that must exit 0; its report."""
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = scene_diff.main([*argv])
-        return code, out.getvalue()
+            self.assertEqual(scene_diff.main([*argv]), 0)
+        return out.getvalue()
 
-
-class RootRowIsWriteInput(TmpCase):
     def test_a_root_rename_is_a_change_on_dot_not_a_remove_add(self) -> None:
         old = self.tmp / 'old.tscn'
         new = self.tmp / 'new.tscn'
         old.write_text(OLD_SCENE, encoding='utf-8')
         new.write_text(NEW_SCENE, encoding='utf-8')
-        code, text = self.run_diff(str(old), str(new))
-        self.assertEqual(code, 0)
+        text = self.diff(str(old), str(new))
         self.assertIn('~ .', text)                    # the write verbs' root address
         self.assertIn(f'name: OldRoot {REF_ARROW} NewRoot', text)
         self.assertNotIn('+ NewRoot', text)           # not a whole-tree swap
         self.assertNotIn('- OldRoot', text)
+        # The other output shape: identical scenes still say so.
+        self.assertIn('no structural differences', self.diff(str(old), str(old)))
 
-    def test_identical_scenes_still_report_no_differences(self) -> None:
-        old = self.tmp / 'old.tscn'
-        new = self.tmp / 'new.tscn'
-        old.write_text(OLD_SCENE, encoding='utf-8')
-        new.write_text(OLD_SCENE, encoding='utf-8')
-        code, text = self.run_diff(str(old), str(new))
-        self.assertEqual(code, 0)
-        self.assertIn('no structural differences', text)
-
-
-class GitEnvironmentErrorsExit2(TmpCase):
     def test_a_ref_git_cannot_serve_exits_2_not_1(self) -> None:
         scene = self.tmp / 'scene.tscn'
         scene.write_text(OLD_SCENE, encoding='utf-8')
         subprocess.run(['git', 'init', '-q'], cwd=self.tmp, check=True)
-        previous = Path.cwd()
+        self.addCleanup(os.chdir, Path.cwd())
         os.chdir(self.tmp)                            # a repo with NO commits: HEAD is unservable
-        try:
-            with contextlib.redirect_stderr(io.StringIO()), \
-                    contextlib.redirect_stdout(io.StringIO()):
-                with self.assertRaises(SystemExit) as caught:
-                    scene_diff.main(['scene.tscn', '--git', 'HEAD'])
-        finally:
-            os.chdir(previous)
+        with contextlib.redirect_stderr(io.StringIO()), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaises(SystemExit) as caught:
+            scene_diff.main(['scene.tscn', '--git', 'HEAD'])
         self.assertEqual(caught.exception.code, 2)
-
-
-if __name__ == '__main__':
-    unittest.main()

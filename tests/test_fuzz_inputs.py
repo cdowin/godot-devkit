@@ -51,8 +51,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from support import FIXTURES  # noqa: E402
+from support import FIXTURES
 
 # Teeth-proof overlay: point the harness at another src tree (see docstring).
 # Purging godot_devkit from sys.modules makes the overlay win even when another

@@ -44,6 +44,12 @@ its consumers do. Which repos consume this one is none of its business (rule 8).
    `tests/fixtures/`, and a consumer proves its own integration when it bumps its pin — a gate that
    somebody else's uncommitted work can redden is not a gate. Prose names a SHAPE ("a project whose
    `check` carries extra gates"), never a repo.
+9. **Test what BITES, the cheapest way that can fail.** A test earns its place by gating something
+   that would cost real time if it broke — a scene write verb, one of the eight gates, the runners
+   installer, parse→serialise byte-identity, or one of rule 4's two sins; coverage is not the goal.
+   Prove it ONCE: a function call before a temp tree, a temp tree before a process — a rule proven at
+   two altitudes is one altitude of cost for no coverage. Before a new test, name the one that already
+   covers it or can be amended; the default is that a new test is not warranted. A slower tier is a finding.
 
 ## Where things live
 
@@ -65,6 +71,8 @@ its consumers do. Which repos consume this one is none of its business (rule 8).
   Godot does; read output must be valid write input.
 - **Every config value goes through `src/godot_devkit/core/config.py`.** Never `tuple(cfg.get(...))` — a bare string
   is iterable, and that is how a silent PASS over an empty census ships.
+- **Known gap:** `refs` does not index autoload NAMES (declared in `project.godot`, not via
+  `class_name`) — fix upstream here, not in consumers.
 
 ## The ladder, as this repo runs it
 
@@ -84,12 +92,10 @@ that is not a target gets a target first.
 | closing a milestone | `make milestone`, then `agentic-sdlc release <version>` | `check` + `matrix`: every interpreter, the floor runs everything and the rest `-m "not shell"`; it runs LAST, after the review |
 | a pin bump | `agentic-sdlc adopt <version>` | what proves the bump; `install-* --diff` shows a hand-edit |
 
-Costs are the ledger's: `agentic-sdlc verify --plan` prints each rung with what it last took, and
-`[tests] budget` / `[tests] cases` in `devkit.toml` are the ceilings `agentic-sdlc check budget` grades.
+Costs are the ledger's (`agentic-sdlc verify --plan`); `[tests] budget` / `cases` in `devkit.toml` are the ceilings `check budget` grades.
 
-- **Every gate prints ONE verdict line** naming its transcript under `.gate-reports/`; `VERBOSE=1`
-  streams it. A new target routes through `$(call gdk_gate,…)` like the rest; never grep a gate's
-  output for its result. Held by `tests/test_makefile_gates.py`.
+- **Every gate prints ONE verdict line** naming its transcript under `.gate-reports/`; `VERBOSE=1` streams
+  it. A new target routes through `$(call gdk_gate,…)`; never grep a gate's output for its result.
 - **The `shell` mark is derived** per module in `tests/conftest.py` from what the source does; a
   hand-written one is a collection refusal.
 - **Verify against source, never a cached wheel:** `PYTHONPATH=src python3 -m godot_devkit.cli …`.
@@ -100,7 +106,6 @@ Costs are the ledger's: `agentic-sdlc verify --plan` prints each rung with what 
 - **A gate-semantics change needs a deliberately-broken probe:** introduce the drift class in a
   scratch copy of a fixture repo and confirm the gate FAILS; prove the config path too — a bad value
   for that section exits 2, and a zero-file census FAILS.
-- **A review is part of a release, not a courtesy**, and it runs before the gate — [`SDLC.md`](SDLC.md).
 
 ## Self-hosting
 
@@ -142,8 +147,3 @@ the thing being decided **in the message** — a path, a commit hash, or the con
 
 `agentic-sdlc release <version>` is the belt; the `/release` skill carries the ceremony around it —
 the reviewer first, the gate last, both version sites together. Never tag by hand.
-
-## Known gaps
-
-`refs` has a known blind spot: autoload NAMES (declared in `project.godot`, not via `class_name`)
-are not indexed — fix upstream here, not in consumers.

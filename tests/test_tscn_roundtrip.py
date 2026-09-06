@@ -7,7 +7,9 @@ carries every awkward construct we have met in real files, and against the
 committed corpus of scrubbed real-world scenes under tests/fixtures/corpus/.
 Both run everywhere, including CI, and both are entirely inside this checkout:
 a corpus that needs a particular repo cloned on a particular laptop proves
-something different on every machine.
+something different on every machine. Each fidelity case first proves its
+subject's census (rule 4): a fidelity test over a fixture that exercises
+nothing proves nothing.
 """
 from __future__ import annotations
 
@@ -38,35 +40,23 @@ AWKWARD_CONSTRUCTS = (
 
 
 class RoundTripFidelity(unittest.TestCase):
-    def test_kitchen_sink_fixture_is_byte_identical(self) -> None:
+    def test_kitchen_sink_covers_the_awkward_constructs_and_is_byte_identical(self) -> None:
         path = FIXTURES / 'kitchen_sink.tscn'
         original = path.read_text(encoding='utf-8')
-        self.assertEqual(TscnDocument(original, path).text, original)
-
-    def test_fixture_actually_covers_the_awkward_constructs(self) -> None:
-        """A fidelity test over a fixture that exercises nothing proves nothing."""
-        text = (FIXTURES / 'kitchen_sink.tscn').read_text(encoding='utf-8')
         for construct in AWKWARD_CONSTRUCTS:
-            self.assertIn(construct, text)
-
-    def test_inline_comment_is_not_swallowed_into_the_value(self) -> None:
-        sections = parse_text('[node name="A" type="Node"]\nlayer = 16 ; why\n')
-        self.assertEqual(sections[0].props, [('layer', '16')])
-        self.assertEqual(sections[0].entries[0].comment, '; why')
+            self.assertIn(construct, original)
+        self.assertEqual(TscnDocument(original, path).text, original)
 
     def test_trailing_newline_and_crlf_survive(self) -> None:
         for text in ('[gd_scene format=3]\n', '[gd_scene format=3]',
                      '[gd_scene format=3]\r\n\r\n[node name="A" type="Node"]\r\n'):
             with self.subTest(text=repr(text)):
                 self.assertEqual(TscnDocument(text).text, text)
-
-    def test_parse_is_unfazed_by_crlf(self) -> None:
-        """The endings live in the line store, not the line contents — a CRLF
-        header must parse to the same sections as its LF spelling."""
+        # The endings live in the line store, not the line contents — a CRLF
+        # header parses to the same sections as its LF spelling.
         lf = '[node name="A" type="Node"]\nlayer = 16\n'
-        crlf = lf.replace('\n', '\r\n')
         self.assertEqual(parse_text(lf)[0].props,
-                         TscnDocument(crlf).sections[0].props)
+                         TscnDocument(lf.replace('\n', '\r\n')).sections[0].props)
 
 
 # The committed corpus: real-world scenes, VENDORED, in two slices that fail
@@ -126,7 +116,7 @@ class CommittedCorpusRoundTrip(unittest.TestCase):
     """Real-world structure, vendored: CI exercises scenes an engine and a
     human actually wrote, not only the hand-built kitchen_sink fixture."""
 
-    def test_census_meets_the_floor_from_both_slices(self) -> None:
+    def test_census_meets_the_floor_from_both_slices_and_covers_the_constructs(self) -> None:
         files = corpus_files()
         self.assertGreaterEqual(len(files), CORPUS_FLOOR,
                                 'corpus shrank — a deleted file must lower the floor here, deliberately')
@@ -135,33 +125,18 @@ class CommittedCorpusRoundTrip(unittest.TestCase):
                 any(f.is_relative_to(CORPUS / slice_name) for f in files),
                 f'no corpus files under {slice_name}/ — the two halves fail '
                 f'differently, and one of them just stopped being proven')
+        texts = [p.read_text(encoding='utf-8') for p in files]
+        missing = [name for name, needle in CORPUS_CONSTRUCTS.items()
+                   if not any(needle in text for text in texts)]
+        self.assertEqual(missing, [])
+        self.assertTrue(any(INLINE_COMMENT_AFTER_VALUE.search(text) for text in texts),
+                        'no corpus file carries an inline comment after a value')
 
     def test_every_corpus_file_round_trips_in_memory(self) -> None:
         for path in corpus_files():
             original = path.read_text(encoding='utf-8')
             if TscnDocument(original, path).text != original:
                 self.fail(f'round trip changed {path.relative_to(CORPUS)}')
-
-    def test_every_corpus_file_survives_a_load_save_cycle(self) -> None:
-        tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp)
-        for path in corpus_files():
-            raw = path.read_bytes()
-            copy = tmp / path.name
-            copy.write_bytes(raw)
-            TscnDocument.load(copy).save()
-            if copy.read_bytes() != raw:
-                self.fail(f'load/save changed {path.relative_to(CORPUS)}')
-
-    def test_corpus_actually_covers_the_constructs_it_was_selected_for(self) -> None:
-        """A fidelity test over a corpus that exercises nothing proves nothing
-        — the kitchen_sink guard above, applied to the committed corpus."""
-        texts = [p.read_text(encoding='utf-8') for p in corpus_files()]
-        missing = [name for name, needle in CORPUS_CONSTRUCTS.items()
-                   if not any(needle in text for text in texts)]
-        self.assertEqual(missing, [])
-        self.assertTrue(any(INLINE_COMMENT_AFTER_VALUE.search(text) for text in texts),
-                        'no corpus file carries an inline comment after a value')
 
 
 MIXED = (b'[gd_scene format=3]\r\n'
@@ -190,17 +165,9 @@ class LoadSaveNewlineFidelity(unittest.TestCase):
         self.path.write_bytes(raw)
         return TscnDocument.load(self.path)
 
-    def test_a_crlf_file_survives_load_save_byte_for_byte(self) -> None:
-        raw = (FIXTURES / 'kitchen_sink.tscn').read_text(
-            encoding='utf-8').replace('\n', '\r\n').encode()
-        self._load(raw).save()
-        self.assertEqual(self.path.read_bytes(), raw)
-
-    def test_a_mixed_endings_file_survives_load_save_byte_for_byte(self) -> None:
+    def test_a_mixed_endings_file_survives_load_save_and_an_in_place_edit(self) -> None:
         self._load(MIXED).save()
         self.assertEqual(self.path.read_bytes(), MIXED)
-
-    def test_an_in_place_edit_keeps_every_lines_own_ending(self) -> None:
         doc = self._load(MIXED)
         doc.set_prop('.', 'x', '2')                  # a CRLF-terminated line
         doc.save()
@@ -217,7 +184,3 @@ class LoadSaveNewlineFidelity(unittest.TestCase):
         self.assertIn(b'fresh = 9\r\n', out)         # newcomer takes the majority ending
         self.assertIn(b'x = 1\n', out)
         self.assertNotIn(b'x = 1\r\n', out)          # the deviant line stays deviant
-
-
-if __name__ == '__main__':
-    unittest.main()

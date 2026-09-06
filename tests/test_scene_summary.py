@@ -9,13 +9,13 @@ input: the sub_resource id printed is the exact address the future
 
 Contract guards, one per failure class:
 
-  * values render under --props (the pre-fix failure was their ABSENCE);
+  * values render under --props (the pre-fix failure was their ABSENCE), and
+    a value that references other resources renders as the existing ref
+    notation, so ids stay visible even inside typed arrays;
   * default (no --props) output stays name-preview only — the existing lines
     are a grepped contract and this feature is purely additive;
   * bulky packed/tile data ELIDES exactly as node props already do — the
-    summary must stay smaller than the raw file on the heaviest corpus file;
-  * a value that references other resources renders as the existing ref
-    notation, so ids stay visible even inside typed arrays.
+    summary must stay smaller than the raw file on the heaviest corpus file.
 
 Corpus files are read-only test subjects — never mutated here.
 """
@@ -36,79 +36,41 @@ JOB_TRES = CORPUS / 'hand_authored' / 'data' / 'jobs' / 'forager.tres'
 ANIM_TRES = CORPUS / 'editor_written' / 'data' / 'animations' / 'door_base.tres'
 # The heaviest corpus file (521 raw lines, 31 sub_resources).
 THEME_TRES = CORPUS / 'editor_written' / 'resources' / 'themes' / 'menu_theme.tres'
-# A .tscn with sub_resources, to prove the scene path renders values too.
-SCENE_TSCN = CORPUS / 'hand_authored' / 'scenes' / 'modals' / 'rest_moment.tscn'
 
 
 def summarize(path, *flags: str) -> str:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = scene_summary.main([str(path), *flags])
-    assert code == 0
+        assert scene_summary.main([str(path), *flags]) == 0
     return out.getvalue()
 
 
 class ResourceValues(unittest.TestCase):
-    """[resource] body of a .tres — previously absent from the output entirely."""
-
-    def test_props_renders_resource_values(self):
+    def test_props_renders_resource_and_sub_resource_values_with_refs_resolved(self):
         out = summarize(JOB_TRES, '--props')
-        self.assertIn('## resource (JobDefinition)', out)
-        self.assertIn('id=&"forager"', out)
-        self.assertIn('display_name="Zephyr"', out)
-        self.assertIn('script=→job_definition.gd', out)
+        for line in ('## resource (JobDefinition)',
+                     'id=&"forager"',
+                     'display_name="Zephyr"',
+                     'script=→job_definition.gd',
+                     # `effects = Array[Resource]([SubResource("e_on_trail"), ...])`
+                     # keeps its member ids visible — they are write-verb addresses.
+                     'effects: [→e_on_trail, →e_wear]',
+                     'demand_contributions: [→o_want_tools]',
+                     # A sub_resource's own script ref resolves like a node's does,
+                     # and SubResource refs inside a sub_resource render as →id.
+                     'script=→location_condition.gd',
+                     'fire_condition=→c_on_trail'):
+            self.assertIn(line, out)
 
-    def test_ref_arrays_render_as_ref_lists(self):
-        # `effects = Array[Resource]([SubResource("e_on_trail"), ...])` must
-        # keep its member ids visible — they are write-verb addresses.
-        out = summarize(JOB_TRES, '--props')
-        self.assertIn('effects: [→e_on_trail, →e_wear]', out)
-        self.assertIn('demand_contributions: [→o_want_tools]', out)
-
-    def test_default_shows_resource_names_not_values(self):
-        out = summarize(JOB_TRES)
-        self.assertIn('## resource (JobDefinition)', out)
-        self.assertIn('script, id, display_name', out)      # name preview
-        self.assertNotIn('&"forager"', out)                 # no values w/o --props
-
-
-class SubResourceValues(unittest.TestCase):
-    def test_props_renders_sub_resource_values(self):
+    def test_props_renders_sub_resource_values_and_elides_packed_data(self):
         out = summarize(ANIM_TRES, '--props')
-        # The id line is the write address, spelled as the file spells it.
-        self.assertIn('[Animation_door_close] Animation', out)
-        self.assertIn('resource_name="door_close"', out)
-        self.assertIn('length=0.15', out)
-
-    def test_sub_resource_ref_values_resolve(self):
-        out = summarize(JOB_TRES, '--props')
-        # A sub_resource's own script ref resolves like a node's does.
-        self.assertIn('script=→location_condition.gd', out)
-        # SubResource refs inside a sub_resource render as →id.
-        self.assertIn('fire_condition=→c_on_trail', out)
-
-    def test_tscn_sub_resources_render_values_too(self):
-        out = summarize(SCENE_TSCN, '--props')
-        self.assertIn('[Animation_open] Animation', out)
-        self.assertIn('resource_name="', out)  # a real value line, not just names
-
-    def test_default_output_is_name_preview_only(self):
-        # The long-standing default lines are a contract: id + type + key
-        # names, and NOT one value line more.
-        out = summarize(ANIM_TRES)
-        self.assertIn('[Animation_door_close] Animation  resource_name, length, step', out)
-        self.assertNotIn('resource_name="door_close"', out)
-        self.assertNotIn('length=0.15', out)
-
-
-class Elision(unittest.TestCase):
-    def test_packed_data_elides(self):
-        out = summarize(ANIM_TRES, '--props')
-        # Track keys carry PackedFloat32Arrays inside a dictionary — the
-        # bytes must never be dumped, only summarized.
-        self.assertIn('tracks/0/keys', out)
+        for line in ('[Animation_door_close] Animation',   # the write address, as the file spells it
+                     'resource_name="door_close"',
+                     'length=0.15',
+                     'tracks/0/keys',                     # PackedFloat32Arrays inside a dict:
+                     'elided'):                           # summarized, never dumped
+            self.assertIn(line, out)
         self.assertNotIn('PackedFloat32Array(0, 0.04', out)
-        self.assertIn('elided', out)
 
     def test_summary_stays_smaller_than_raw_on_heaviest_file(self):
         raw_lines = THEME_TRES.read_text(encoding='utf-8').count('\n')
@@ -116,6 +78,13 @@ class Elision(unittest.TestCase):
         self.assertLess(out.count('\n'), raw_lines)
         self.assertNotIn('PackedVector2Array(', out)
 
-
-if __name__ == '__main__':
-    unittest.main()
+    def test_default_output_is_a_name_preview_and_not_one_value_line_more(self):
+        # The long-standing default lines are a grepped contract.
+        out = summarize(JOB_TRES)
+        for line in ('## resource (JobDefinition)', 'script, id, display_name'):
+            self.assertIn(line, out)
+        self.assertNotIn('&"forager"', out)                 # no values w/o --props
+        out = summarize(ANIM_TRES)
+        self.assertIn('[Animation_door_close] Animation  resource_name, length, step', out)
+        for value in ('resource_name="door_close"', 'length=0.15'):
+            self.assertNotIn(value, out)

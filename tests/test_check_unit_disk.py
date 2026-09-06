@@ -10,8 +10,7 @@ The false-positive cases matter as much: a call NAMED in an assert message or a
 doc comment is not a call, and a call given its throwaway root explicitly is
 the shape the gate exists to ask for.
 """
-from __future__ import annotations
-
+import subprocess
 import unittest
 
 from support import run_check, temp_repo
@@ -19,17 +18,7 @@ from support import run_check, temp_repo
 from godot_devkit.core.config import ConfigError
 from godot_devkit.godot.checks import unit_disk
 
-BASE = ['project.godot']
-CLEAN = [*BASE, 'tests/unit/clean.gd', 'tests/support/helper.gd']
-PLANTED = [
-    *CLEAN,
-    'tests/unit/planted_user_path.gd',
-    'tests/unit/planted_slot.gd',
-    'tests/unit/planted_path_const.gd',
-    'tests/unit/planted_save.gd',
-    'tests/unit/planted_scan.gd',
-    'tests/unit/planted_settings.gd',
-]
+CLEAN = ['project.godot', 'tests/unit/clean.gd', 'tests/support/helper.gd']
 # The consumer's five checks, restated as config. The prose that used to live
 # in the scan's header is the label — it rides every finding.
 CONSUMER = r'''[unit_disk]
@@ -49,102 +38,78 @@ min_args = { "SaveService.save" = 2, "SaveService.load" = 2, "SaveSlotIndex.scan
 '''
 
 
-def _config(root, body: str) -> None:
-    (root / 'devkit.toml').write_text(body, encoding='utf-8')
+def _gate(only, config=None):
+    """One run of the gate in a throwaway repo holding `only`, under `config`."""
+    with temp_repo('unit_disk_repo', only=only) as root:
+        if config:
+            (root / 'devkit.toml').write_text(config, encoding='utf-8')
+        return run_check(unit_disk)
 
 
 class TheStockGate(unittest.TestCase):
-    """What it knows with no config at all: `user://` is a real path."""
+    # What it knows with no config at all: `user://` is a real path.
 
     def test_a_user_path_literal_is_a_finding(self) -> None:
-        with temp_repo('unit_disk_repo', only=[*CLEAN, 'tests/unit/planted_user_path.gd']):
-            code, out = run_check(unit_disk)
+        code, out = _gate([*CLEAN, 'tests/unit/planted_user_path.gd'])
         self.assertEqual(code, 1, out)
         self.assertIn('DISK-WRITE  tests/unit/planted_user_path.gd:4', out)
         self.assertIn('a real user:// path', out)
 
-    def test_the_clean_test_passes(self) -> None:
-        with temp_repo('unit_disk_repo', only=CLEAN):
-            code, out = run_check(unit_disk)
+    def test_the_clean_test_passes_and_a_file_outside_the_roots_is_not_scanned(self) -> None:
+        # The shared helper lives outside the scan root ON PURPOSE — it is the
+        # thing tests are supposed to route through.
+        code, out = _gate(CLEAN)
         self.assertEqual(code, 0, out)
         self.assertIn('[check:unit-disk] PASS — 1 test file(s)', out)
-
-    def test_a_file_outside_the_roots_is_not_scanned(self) -> None:
-        """The shared helper lives outside the scan root ON PURPOSE — it is the
-        thing tests are supposed to route through."""
-        with temp_repo('unit_disk_repo', only=CLEAN):
-            code, out = run_check(unit_disk)
-        self.assertEqual(code, 0)
         self.assertNotIn('tests/support/helper.gd', out)
 
 
 class TheConsumersFiveChecks(unittest.TestCase):
-    def test_every_planted_violation_is_caught(self) -> None:
-        with temp_repo('unit_disk_repo', only=PLANTED) as root:
-            _config(root, CONSUMER)
-            code, out = run_check(unit_disk)
+    def test_every_planted_violation_is_caught_and_names_the_arity_it_needed(self) -> None:
+        code, out = _gate([*CLEAN, 'tests/unit/planted_user_path.gd', 'tests/unit/planted_slot.gd',
+                           'tests/unit/planted_path_const.gd', 'tests/unit/planted_save.gd',
+                           'tests/unit/planted_scan.gd', 'tests/unit/planted_settings.gd'],
+                          CONSUMER)
         self.assertEqual(code, 1, out)
-        for planted in ('planted_user_path', 'planted_slot', 'planted_path_const',
-                        'planted_save', 'planted_scan', 'planted_settings'):
-            self.assertIn(planted, out)
-        self.assertIn('6 violation(s)', out)
+        for phrase in ('planted_user_path', 'planted_slot', 'planted_path_const',
+                       'planted_save', 'planted_scan', 'planted_settings',
+                       '6 violation(s)',
+                       'SaveService.save given 1 argument(s), needs 2',
+                       'SaveSlotIndex.scan given 0 argument(s), needs 1'):
+            self.assertIn(phrase, out)
 
-    def test_a_default_root_call_names_the_arity_it_needed(self) -> None:
-        with temp_repo('unit_disk_repo', only=PLANTED) as root:
-            _config(root, CONSUMER)
-            code, out = run_check(unit_disk)
-        self.assertEqual(code, 1)
-        self.assertIn('SaveService.save given 1 argument(s), needs 2', out)
-        self.assertIn('SaveSlotIndex.scan given 0 argument(s), needs 1', out)
-
-    def test_the_sanctioned_redirect_shape_is_spared(self) -> None:
-        """An explicit throwaway root, a call named in an assert message, a doc
-        comment naming `user://`, and a lone STRING argument — none is a
-        finding. The last one is why quoted spans are masked rather than
-        deleted: `scan("res://throwaway")` is one argument, not zero."""
-        with temp_repo('unit_disk_repo', only=CLEAN) as root:
-            _config(root, CONSUMER)
-            code, out = run_check(unit_disk)
-        self.assertEqual(code, 0, out)
-
-
-class RefusesRatherThanGuesses(unittest.TestCase):
-    def test_an_unbalanced_call_is_declined_not_guessed_at(self) -> None:
+    def test_the_sanctioned_redirect_shape_and_an_unbalanced_call_are_spared(self) -> None:
+        # An explicit throwaway root, a call named in an assert message, a doc
+        # comment naming `user://`, and a lone STRING argument — none is a
+        # finding. The last one is why quoted spans are masked rather than
+        # deleted: `scan("res://throwaway")` is one argument, not zero. Nor
+        # is a call whose parenthesis closes on a later line: declined, not
+        # guessed at. (Staged, because the gate scans `git ls-files`.)
         with temp_repo('unit_disk_repo', only=CLEAN) as root:
             (root / 'tests/unit/wrapped.gd').write_text(
                 'func _s(uuid: String) -> bool:\n\treturn SaveService.save(\n\t\tuuid)\n',
                 encoding='utf-8')
-            _config(root, CONSUMER)
+            subprocess.run(['git', 'add', 'tests/unit/wrapped.gd'], cwd=root, check=True)
+            (root / 'devkit.toml').write_text(CONSUMER, encoding='utf-8')
             code, out = run_check(unit_disk)
         self.assertEqual(code, 0, out)
+        self.assertIn('2 test file(s)', out)
 
-    def test_a_min_args_floor_below_one_is_refused(self) -> None:
-        with temp_repo('unit_disk_repo', only=PLANTED) as root:
-            _config(root, '[unit_disk]\nmin_args = { "SaveService.save" = 0 }\n')
-            with self.assertRaises(ConfigError) as caught:
-                run_check(unit_disk)
-        self.assertIn('at least 1', str(caught.exception))
 
-    def test_a_non_integer_floor_is_refused(self) -> None:
-        with temp_repo('unit_disk_repo', only=PLANTED) as root:
-            _config(root, '[unit_disk]\nmin_args = { "SaveService.save" = "2" }\n')
-            with self.assertRaises(ConfigError):
-                run_check(unit_disk)
+class RefusesRatherThanGuesses(unittest.TestCase):
+    BAD_CONFIG = (
+        ('[unit_disk]\nmin_args = { "SaveService.save" = 0 }\n', 'at least 1'),
+        ('[unit_disk]\nmin_args = { "SaveService.save" = "2" }\n', 'must be an integer'),
+        ('[unit_disk]\nforbidden_calls = { "bad" = ["Save((" ] }\n', 'not a valid regex'),
+    )
 
-    def test_a_broken_regex_is_exit_two_not_a_traceback(self) -> None:
-        with temp_repo('unit_disk_repo', only=PLANTED) as root:
-            _config(root, '[unit_disk]\nforbidden_calls = { "bad" = ["Save((" ] }\n')
-            with self.assertRaises(ConfigError) as caught:
-                run_check(unit_disk)
-        self.assertIn('not a valid regex', str(caught.exception))
+    def test_a_bad_config_value_is_exit_two_not_a_traceback(self) -> None:
+        for body, reason in self.BAD_CONFIG:
+            with self.subTest(config=body), self.assertRaises(ConfigError) as caught:
+                _gate(CLEAN, body)
+            self.assertIn(reason, str(caught.exception))
 
     def test_a_root_holding_no_tests_fails_loudly(self) -> None:
-        with temp_repo('unit_disk_repo', only=CLEAN) as root:
-            _config(root, '[unit_disk]\nroots = ["tests/nowhere"]\n')
-            code, out = run_check(unit_disk)
+        code, out = _gate(CLEAN, '[unit_disk]\nroots = ["tests/nowhere"]\n')
         self.assertEqual(code, 1, out)
         self.assertIn('[unit_disk] roots', out)
-
-
-if __name__ == '__main__':
-    unittest.main()

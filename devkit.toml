@@ -55,8 +55,8 @@ milestone = "make milestone"
 # that grows past its number, or a case count that climbs, is a finding to
 # explain in the commit that caused it — never a number to raise in passing.
 [tests]
-budget = { pyunit = 3, test = 55 }
-cases  = { pyunit = 125, test = 635 }
+budget = { pyunit = 2, test = 35 }
+cases  = { pyunit = 44, test = 215 }
 
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines

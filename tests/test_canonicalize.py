@@ -7,97 +7,74 @@ shows up as a diff. The same proof at SCALE, over scrubbed real-world scenes, is
 """
 from __future__ import annotations
 
-import contextlib
-import io
 import re
 import unittest
+from types import SimpleNamespace
 
-from support import FIXTURES, temp_repo
+from support import run_check, temp_repo
 
 from godot_devkit.godot.write import scene_canonicalize
-from godot_devkit.godot.format.tscn_document import read_scene_text
-from godot_devkit.godot.index.uid_index import UidIndex
-from godot_devkit.core.project import repo_root
+
+EDITABLE_SECTION = re.compile(r'^\[editable path="([^"]*)"\]', re.M)
 
 
 def canonicalize_in_repo(*argv: str) -> tuple[int, str]:
-    repo_root.cache_clear()
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        code = scene_canonicalize.main([*argv])
-    repo_root.cache_clear()
-    return code, buffer.getvalue()
+    return run_check(SimpleNamespace(run=scene_canonicalize.main), argv=list(argv))
 
 
 class RestoresWhatPackDrops(unittest.TestCase):
-    def test_restores_all_three_losses(self) -> None:
+    def test_restores_all_three_losses_idempotently_keeping_crlf_endings(self) -> None:
+        # On a CRLF copy of the fixture: canonicalize restores what pack()
+        # dropped — it does not get to normalize every line ending in the
+        # file on the way through.
         with temp_repo('canon_repo') as root:
+            scene = root / 'scenes/packed.tscn'
+            scene.write_bytes(scene.read_text(encoding='utf-8').replace('\n', '\r\n').encode())
             code, out = canonicalize_in_repo('scenes/packed.tscn')
-            text = (root / 'scenes/packed.tscn').read_text(encoding='utf-8')
+            raw = scene.read_bytes()
+            again_code, again_out = canonicalize_in_repo('scenes/packed.tscn')
+            twice = scene.read_bytes()
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
+        text = raw.decode('utf-8')
         # 1. uid-in-refs, from the .gd sidecar and from the .tscn's own header
         self.assertIn('uid="uid://dcanonlogic" path="res://systems/logic.gd"', text)
         self.assertIn('uid="uid://dcanonpanel" path="res://scenes/panel.tscn"', text)
         # 2. the file's own header uid, recovered from what already references it
         self.assertIn('[gd_scene load_steps=3 format=3 uid="uid://dcanonpacked"]', text)
-        # 3. index= — without it this override reloads as a NEW SIBLING
+        # 3. index= — without it this override reloads as a NEW SIBLING. Footer
+        #    is the SECOND child of panel.tscn's root: counted, never guessed.
         self.assertIn('[node name="Footer" parent="Panel" index="1"]', text)
-        # There is no fourth: `[editable]` is authored state, not a pack() loss
-        # — see EditableMarkersAreAuthoredNotDerived below.
-
-    def test_index_is_counted_off_the_base_scene_not_guessed(self) -> None:
-        """Footer is the SECOND child of panel.tscn's root, so index must be 1."""
-        with temp_repo('canon_repo') as root:
-            canonicalize_in_repo('scenes/packed.tscn')
-            text = (root / 'scenes/packed.tscn').read_text(encoding='utf-8')
-        self.assertIn('index="1"', text)
         self.assertNotIn('index="0"', text)
-
-    def test_is_idempotent(self) -> None:
-        with temp_repo('canon_repo') as root:
-            canonicalize_in_repo('scenes/packed.tscn')
-            once = (root / 'scenes/packed.tscn').read_text(encoding='utf-8')
-            code, out = canonicalize_in_repo('scenes/packed.tscn')
-            twice = (root / 'scenes/packed.tscn').read_text(encoding='utf-8')
-        self.assertEqual(twice, once)
-        self.assertIn('already canonical', out)
-        self.assertEqual(code, scene_canonicalize.EXIT_OK)
-
-    def test_a_crlf_file_keeps_its_endings_through_a_restoration(self) -> None:
-        """Canonicalize restores what pack() dropped — it does not get to
-        normalize every line ending in the file on the way through."""
-        with temp_repo('canon_repo') as root:
-            scene = root / 'scenes/packed.tscn'
-            crlf = scene.read_text(encoding='utf-8').replace('\n', '\r\n').encode()
-            scene.write_bytes(crlf)
-            code, out = canonicalize_in_repo('scenes/packed.tscn')
-            raw = scene.read_bytes()
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn(b'uid="uid://dcanonlogic"', raw)          # it DID restore
+        # There is no fourth: `[editable]` is authored state, not a pack() loss
+        # — packed.tscn overrides panel.tscn's Footer, which is an override and
+        # not an editable instance, and Godot writes exactly this file without
+        # a marker (see EditableMarkersAreAuthoredNotDerived).
+        self.assertEqual(EDITABLE_SECTION.findall(text), [], text)
+        self.assertNotIn('EDITABLE', out, out)
         self.assertNotIn(b'\n', raw.replace(b'\r\n', b''),
                          'restoration minted lone-LF lines in a CRLF file')
+        self.assertEqual(twice, raw)
+        self.assertIn('already canonical', again_out)
+        self.assertEqual(again_code, scene_canonicalize.EXIT_OK)
 
-    def test_a_non_utf8_file_is_refused_not_a_traceback(self) -> None:
-        with temp_repo('canon_repo') as root:
-            scene = root / 'scenes/packed.tscn'
-            scene.write_bytes(b'[gd_scene format=3]\n\xff\xfe not utf-8\n')
-            code, out = canonicalize_in_repo('scenes/packed.tscn')
-        self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS)
-        self.assertIn('REFUSED', out)
-
-    def test_reports_and_refuses_a_uid_it_cannot_resolve(self) -> None:
-        """A uid that cannot be derived is left alone and named — inventing one
-        would be worse than the missing ref."""
+    def test_refuses_a_uid_it_cannot_resolve_and_a_file_that_is_not_utf8(self) -> None:
+        # A uid that cannot be derived is left alone and named — inventing one
+        # would be worse than the missing ref. Bytes that do not decode are
+        # refused, never a traceback.
         with temp_repo('canon_repo') as root:
             scene = root / 'scenes/packed.tscn'
             scene.write_text(scene.read_text(encoding='utf-8').replace(
                 'res://systems/logic.gd', 'res://systems/ghost.gd'), encoding='utf-8')
             code, out = canonicalize_in_repo('scenes/packed.tscn')
             text = scene.read_text(encoding='utf-8')
+            scene.write_bytes(b'[gd_scene format=3]\n\xff\xfe not utf-8\n')
+            bad_code, bad_out = canonicalize_in_repo('scenes/packed.tscn')
         self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS)
         self.assertIn('UNRESOLVED', out)
         self.assertIn('ghost.gd', out)
         self.assertIn('path="res://systems/ghost.gd"', text)
+        self.assertEqual(bad_code, scene_canonicalize.EXIT_FINDINGS)
+        self.assertIn('REFUSED', bad_out)
 
 
 # --- [editable] is authored, never derived ------------------------------------
@@ -115,59 +92,15 @@ class RestoresWhatPackDrops(unittest.TestCase):
 # The corpus says the same thing without the engine: it holds 21 markers on
 # hosts and 7 scenes whose instance children are overridden with NO marker —
 # the two facts are independent in BOTH directions, which no derivation rule
-# can produce.
-CORPUS = FIXTURES / 'corpus'
-# Floors, so a corpus that rots into vacuity fails here instead of proving
-# less. 7 scenes reproduce the invention; quarantine.tscn carries the 21
-# markers that prove the opposite failure would be caught.
-OVERRIDDEN_SCENE_FLOOR = 7
-DECLARED_MARKER_FLOOR = 21
-EDITABLE_SECTION = re.compile(r'^\[editable path="([^"]*)"\]', re.M)
-
-
-def editable_paths(text: str) -> list[str]:
-    return EDITABLE_SECTION.findall(text)
-
+# can produce. The invent direction is pinned on packed.tscn above; the
+# opposite direction — and it would be worse — is here: a scene that DOES
+# declare Editable Children, carrying the two degradations `pack()` applies (a
+# ref that lost its uid, an override that lost its `index=`), must come back
+# with both restored and its marker untouched, neither duplicated nor dropped.
+# It keeps its own header uid so the run has nothing unresolved to report.
 
 class EditableMarkersAreAuthoredNotDerived(unittest.TestCase):
-    """The committed corpus is real consumer structure that runs on CI too, so
-    this is the bug's own 21-file corpus made portable."""
-
-    def test_no_corpus_scene_gains_or_loses_a_marker(self) -> None:
-        scenes = overridden = declared = 0
-        for slice_name in ('editor_written', 'hand_authored'):
-            root = CORPUS / slice_name
-            uids = UidIndex(root)
-            bases = scene_canonicalize.BaseScenes(root)
-            for path in sorted(root.rglob('*.tscn')):
-                before = read_scene_text(path)
-                after, _report = scene_canonicalize.canonicalize(
-                    path, root, uids, bases)
-                self.assertEqual(
-                    editable_paths(after), editable_paths(before),
-                    f'{path.relative_to(CORPUS)}: canonicalize changed the '
-                    f'[editable] sections')
-                scenes += 1
-                doc = scene_canonicalize.TscnDocument(before, path)
-                if any('type' not in n.attrs and 'instance' not in n.attrs
-                       for n in doc.nodes):
-                    overridden += 1
-                declared += len(editable_paths(before))
-        self.assertGreaterEqual(overridden, OVERRIDDEN_SCENE_FLOOR,
-                                f'{scenes} scenes scanned but only {overridden} '
-                                'carry an instance-child override — the corpus '
-                                'no longer reproduces the bug')
-        self.assertGreaterEqual(declared, DECLARED_MARKER_FLOOR,
-                                'the corpus no longer carries a scene whose '
-                                'markers a removal would destroy')
-
     def test_a_declared_marker_survives_a_restoration(self) -> None:
-        """The OPPOSITE failure, and it would be worse: a scene that DOES
-        declare Editable Children, carrying the two degradations `pack()`
-        applies — a ref that lost its uid, an override that lost its `index=`
-        — must come back with both restored and its marker untouched, neither
-        duplicated nor dropped. It keeps its own header uid so the run has
-        nothing unresolved to report; that third loss is the case above."""
         marked = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonmarked"]\n\n'
                   '[ext_resource type="PackedScene"'
                   ' path="res://scenes/panel.tscn" id="1_panel"]\n\n'
@@ -183,7 +116,7 @@ class EditableMarkersAreAuthoredNotDerived(unittest.TestCase):
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertIn('uid="uid://dcanonpanel"', text)   # it DID restore
         self.assertIn('index="1"', text)
-        self.assertEqual(editable_paths(text), ['Panel'], text)
+        self.assertEqual(EDITABLE_SECTION.findall(text), ['Panel'], text)
 
 
 # --- an INHERITED scene's root IS an instancing ancestor ----------------------
@@ -208,8 +141,10 @@ SHELL_BASE = ('[gd_scene format=3 uid="uid://dcanonshell"]\n\n'
               '[node name="Border" type="Panel" parent="Inner"]\n\n'
               '[node name="Content" type="Control" parent="Inner"]\n')
 # The inherited scene, canonical. Two overrides — one of a base child of the
-# root, one of a base GRANDchild whose only instancing ancestor is the root —
-# and two nodes this scene creates, which carry no index and must not gain one.
+# root (Inner is the shell's SECOND child, so 1), one of a base GRANDchild whose
+# only instancing ancestor is the root (Content is the THIRD child of Inner, so
+# 2) — and two nodes this scene creates, which carry no index and must not gain
+# one.
 INHERITED = ('[gd_scene load_steps=2 format=3 uid="uid://dcanoninherit"]\n\n'
              '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
              ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
@@ -228,11 +163,14 @@ def strip_indexes(text: str) -> str:
                      for line in text.split('\n'))
 
 
-def over_shell(scene_text: str) -> tuple[int, str, str]:
+def over_shell(scene_text: str, mid: str | None = None) -> tuple[int, str, str]:
     """Canonicalize `scene_text` in a repo whose `res://scenes/shell.tscn` is
-    SHELL_BASE -> (exit code, report, the file as it was left)."""
+    SHELL_BASE — and, given `mid`, whose `res://scenes/mid.tscn` is that text
+    -> (exit code, report, the file as it was left)."""
     with temp_repo('canon_repo') as root:
         (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
+        if mid is not None:
+            (root / 'scenes/mid.tscn').write_text(mid, encoding='utf-8')
         (root / 'scenes/subject.tscn').write_text(scene_text, encoding='utf-8')
         code, out = canonicalize_in_repo('scenes/subject.tscn')
         text = (root / 'scenes/subject.tscn').read_text(encoding='utf-8')
@@ -240,47 +178,20 @@ def over_shell(scene_text: str) -> tuple[int, str, str]:
 
 
 class AnInheritedRootIsAnInstanceHost(unittest.TestCase):
-    def test_an_override_under_an_inherited_root_gets_its_index_back(self) -> None:
-        """`Inner` is the SECOND child of shell.tscn's root, so index must be 1
-        — and the walk has to reach the root to say so."""
-        code, out, text = over_shell(strip_indexes(INHERITED))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Inner" parent="." index="1"]', text)
-        self.assertNotIn('UNRESOLVED', out)
-
-    def test_an_override_of_a_base_grandchild_counts_through_the_root(self) -> None:
-        """`Content` is the THIRD child of the base's `Inner` (Paper, Border,
-        Content), so index must be 2. Nothing between it and the root instances
-        anything, so this resolves only if the root is a candidate host."""
-        code, out, text = over_shell(strip_indexes(INHERITED))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Content" parent="Inner" index="2"]', text)
-
     def test_the_whole_inherited_scene_round_trips_byte_for_byte(self) -> None:
-        """The whole property at unit scale: strip what `save()` drops,
-        restore, and get the committed bytes back — no more and no less."""
+        # The whole property at unit scale: strip what `save()` drops,
+        # restore, and get the committed bytes back — no more and no less.
+        # Both overrides get their ordinal counted through the root, and
+        # neither created node gains one.
+        self.assertNotEqual(strip_indexes(INHERITED), INHERITED)
         code, out, text = over_shell(strip_indexes(INHERITED))
         self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
         self.assertEqual(text, INHERITED)
 
-    def test_a_node_the_scene_creates_gains_no_index(self) -> None:
-        """The invent direction, and the one the sibling bug was. `Body` is
-        built by this scene (`type=`) and `Nested` is instanced by it; no base
-        places either, so neither has an ordinal to count and neither may gain
-        one — not even the plausible 'next free slot'.
-
-        A CONTROL: green before the inherited-root fix and after it, red only
-        if the restoration over-corrects into inventing."""
-        _code, _out, text = over_shell(strip_indexes(INHERITED))
-        self.assertIn('[node name="Body" type="VBoxContainer" '
-                      'parent="Inner/Content"]\n', text)
-        self.assertIn('[node name="Nested" parent="." '
-                      'instance=ExtResource("1_shell")]\n', text)
-
     def test_an_override_the_base_does_not_place_is_refused_not_guessed(self) -> None:
-        """A type-less node under an inherited root IS an override — but if the
-        base has no such child there is no ordinal, and the run says so instead
-        of picking one."""
+        # A type-less node under an inherited root IS an override — but if the
+        # base has no such child there is no ordinal, and the run says so
+        # instead of picking one.
         orphan = INHERITED.replace('[node name="Inner" parent="." index="1"]',
                                    '[node name="Ghost" parent="."]')
         code, out, text = over_shell(strip_indexes(orphan))
@@ -318,62 +229,20 @@ CHAINED = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonchain"]\n\n'
            '[node name="Inner" parent="." index="1"]\nmodulate = Color(1, 0, 0, 1)\n')
 
 
-def over_chain(scene_text: str) -> tuple[int, str, str]:
-    """Canonicalize `scene_text` against a TWO-level chain: shell.tscn is a
-    plain scene, mid.tscn inherits it, and the subject inherits mid."""
-    with temp_repo('canon_repo') as root:
-        (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
-        (root / 'scenes/mid.tscn').write_text(MID, encoding='utf-8')
-        (root / 'scenes/subject.tscn').write_text(scene_text, encoding='utf-8')
-        code, out = canonicalize_in_repo('scenes/subject.tscn')
-        text = (root / 'scenes/subject.tscn').read_text(encoding='utf-8')
-    return code, out, text
-
-
 class AChainedBaseIsRefusedNotCounted(unittest.TestCase):
-    def test_the_ordinal_that_would_be_written_is_the_WRONG_one(self) -> None:
-        """The fixture's own claim, so no case below can pass on a chain that
-        was never chained: counting mid.tscn's sections gives 0, and the truth
-        the shell states is 1."""
-        with temp_repo('canon_repo') as root:
-            (root / 'scenes/shell.tscn').write_text(SHELL_BASE, encoding='utf-8')
-            (root / 'scenes/mid.tscn').write_text(MID, encoding='utf-8')
-            bases = scene_canonicalize.BaseScenes(root)
-            self.assertTrue(bases.root_is_instanced('res://scenes/mid.tscn'))
-            self.assertFalse(bases.root_is_instanced('res://scenes/shell.tscn'))
-            self.assertEqual(
-                bases.child_index('res://scenes/shell.tscn', [], 'Inner'), 1,
-                'the shell places Inner second — the fixture is wrong')
-            self.assertIsNone(
-                bases.child_index('res://scenes/mid.tscn', [], 'Inner'),
-                'mid.tscn lists only what it overrides, so nothing there is '
-                'countable — this is the value the verb used to write')
-
-    def test_an_override_under_a_chained_base_is_refused_not_guessed(self) -> None:
-        """The verb's hard rule: it cannot guarantee a correct result, so it
-        refuses, says why, writes nothing and exits non-zero."""
-        code, out, text = over_chain(strip_indexes(CHAINED))
+    def test_an_override_under_a_chained_base_is_refused_naming_the_chain(self) -> None:
+        # The verb's hard rule: it cannot guarantee a correct result, so it
+        # refuses, says why, writes nothing and exits non-zero. And the why is
+        # the reason that is actually true: `Inner` IS in mid.tscn, so a
+        # refusal saying "cannot count Inner in mid.tscn" sends a reader to
+        # look for it, find it, and conclude the tool is broken.
+        code, out, text = over_shell(strip_indexes(CHAINED), mid=MID)
         self.assertEqual(code, scene_canonicalize.EXIT_FINDINGS, out)
         self.assertIn('UNRESOLVED', out)
-        self.assertNotIn('index=', text.split('\n')[4])
-        self.assertEqual(text, strip_indexes(CHAINED),
-                         'a refusal wrote to the file')
-
-    def test_the_refusal_names_the_chain_rather_than_the_missing_name(self) -> None:
-        """`Inner` IS in mid.tscn. A refusal saying "cannot count Inner in
-        mid.tscn" sends a reader to look for it, find it, and conclude the tool
-        is broken — so the refusal names the reason that is actually true."""
-        _code, out, _text = over_chain(strip_indexes(CHAINED))
         self.assertIn('itself an inherited scene', out)
         self.assertIn('res://scenes/mid.tscn', out)
-
-    def test_a_plain_base_one_level_down_still_resolves(self) -> None:
-        """The refusal is scoped to a base whose OWN root is instanced. An
-        ordinary inherited scene over a plain base is the case the same release
-        fixed, and it must stay fixed."""
-        code, out, text = over_shell(strip_indexes(INHERITED))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Inner" parent="." index="1"]', text)
+        self.assertEqual(text, strip_indexes(CHAINED),
+                         'a refusal wrote to the file')
 
 
 # --- a node the scene CREATES gains no index, wherever its PARENT came from ---
@@ -399,10 +268,16 @@ class AChainedBaseIsRefusedNotCounted(unittest.TestCase):
 # refused: the rule as filed invents 38 `index=` on the hand-authored tree and
 # 87 on the editor-written one, and takes the latter from 0 round-trip failures
 # to 26. Narrowed to inherited scenes it still invents 4. Each fixture below is
-# one of those shapes, and the ordinal named in each docstring is what the rule
-# would have written. Both measurements are RECORDED here, not re-runnable:
+# one of those shapes, and the ordinal a parent-keyed rule would have written
+# is named beside it. Both measurements are RECORDED here, not re-runnable:
 # nothing in this package reaches outside its own checkout (CLAUDE.md rule 8),
 # and what the fixtures below pin is the resulting BEHAVIOUR.
+#
+# PLAIN_HOST: `Added` hangs off the instance node itself (an append is 2);
+# `Deep` off a base child with 3 children of its own (3); `Slot0/1/2` fill a
+# base container the base leaves empty — the shape a next-free-slot fallback
+# turns into 0, 1, 2, and the shape that made that fallback invent 505
+# attributes across the two trees.
 PLAIN_HOST = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonplain"]\n\n'
               '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
               ' path="res://scenes/shell.tscn" id="1_shell"]\n\n'
@@ -415,10 +290,12 @@ PLAIN_HOST = ('[gd_scene load_steps=2 format=3 uid="uid://dcanonplain"]\n\n'
               '[node name="Slot1" type="Label" parent="Shell/Inner/Content"]\n\n'
               '[node name="Slot2" type="Label" parent="Shell/Inner/Content"]\n')
 # The inherited half. `FirstBody`/`SecondBody` sit exactly where the measured
-# tree splits 10-for/10-against; `Slot` appends into a base container the base
-# leaves empty (6 real scenes, all `Card/Inner/Content/Body` shaped); `Row`
-# hangs off a node this scene created, inside an instanced subtree (one real
-# scene where 2 of 15 siblings carry a hand-typed index).
+# tree splits 10-for/10-against (an append is 2 and 3 — THE disputed position);
+# `Slot` appends into a base container the base leaves empty (0 — no less
+# invented for being the only number available; 6 real scenes, all
+# `Card/Inner/Content/Body` shaped); `Row` hangs off a node this scene created,
+# inside an instanced subtree (one real scene where 2 of 15 siblings carry a
+# hand-typed index).
 INHERITED_CREATES_BODIES = (
     '[gd_scene load_steps=2 format=3 uid="uid://dcanonbodies"]\n\n'
     '[ext_resource type="PackedScene" uid="uid://dcanonshell"'
@@ -432,96 +309,16 @@ INHERITED_CREATES_BODIES = (
 
 
 class ACreatedNodeGainsNoIndexWhateverItsParentIs(unittest.TestCase):
-    """The refusal matrix for the created-node position. Every case names the
-    ordinal a parent-keyed rule would write, and asserts the node line as the
-    file spells it — bare, with no `index=` appended."""
-
-    def test_a_created_node_under_the_instance_node_itself_gains_none(self) -> None:
-        """`Added` hangs off `Shell`, which instances the base. The base root
-        places 2 children, so an append is `2`. One real editor-written scene is
-        this shape six times over and carries no index on any of them."""
-        code, out, text = over_shell(strip_indexes(PLAIN_HOST))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Added" type="Label" parent="Shell"]\n', text)
-
-    def test_a_created_node_under_a_base_child_gains_none(self) -> None:
-        """`Deep` hangs off `Shell/Inner`, a node the base provides and gives 3
-        children of its own, so an append is `3`."""
-        code, out, text = over_shell(strip_indexes(PLAIN_HOST))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Deep" type="Label" parent="Shell/Inner"]\n', text)
-
-    def test_created_siblings_gain_no_run_of_sequential_ordinals(self) -> None:
-        """`Slot0/1/2` fill a base container the base leaves empty — the shape a
-        next-free-slot fallback turns into `0`, `1`, `2`, and the shape that
-        made that fallback invent 505 attributes across the two trees. All three
-        stay bare, and none of the three numbers appears anywhere in the file."""
-        code, out, text = over_shell(strip_indexes(PLAIN_HOST))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        for name in ('Slot0', 'Slot1', 'Slot2'):
-            self.assertIn(f'[node name="{name}" type="Label" '
-                          f'parent="Shell/Inner/Content"]\n', text)
-        self.assertEqual(text.count('index="'), 1, 'only the override is indexed')
-
-    def test_a_created_body_under_an_inherited_root_gains_none(self) -> None:
-        """THE disputed position, and the one this bug was filed to restore.
-        The base root places 2 children, so an append is `2` for `FirstBody` and
-        `3` for `SecondBody` — the numbers the measured tree's 10 indexed bodies
-        carry and its 4 unindexed ones, same position, do not."""
-        code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="FirstBody" type="VBoxContainer" parent="."]\n', text)
-        self.assertIn('[node name="SecondBody" type="VBoxContainer" parent="."]\n', text)
-
-    def test_a_created_node_appending_into_an_empty_base_container_gains_none(self) -> None:
-        """`Slot` goes into `Inner/Content`, which the base leaves childless. An
-        append is `0`, and `index="0"` is no less invented for being the only
-        number available."""
-        code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Slot" type="Label" parent="Inner/Content"]\n', text)
-
-    def test_a_created_node_under_a_locally_created_parent_gains_none(self) -> None:
-        """`Row`'s parent is a node this scene built. It is inside an instanced
-        subtree — the root instances the base — so a rule that asks only "is the
-        parent within an instance?" reaches it, and no base places its siblings."""
-        code, out, text = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('[node name="Row" type="Label" parent="FirstBody"]\n', text)
+    """The refusal matrix for the created-node position, as one byte-for-byte
+    round trip per fixture: every created node line comes back bare, and the
+    one override in each — `Inner`, the base root's SECOND child — comes back
+    as `1` under an instance node and under an inherited root alike, which is
+    the control that stops the case from passing on a tool that does nothing."""
 
     def test_both_fixtures_round_trip_byte_for_byte(self) -> None:
-        """The whole property in one assertion: strip what `save()` drops, and
-        get the committed bytes back — no more and no less."""
         for fixture in (PLAIN_HOST, INHERITED_CREATES_BODIES):
             with self.subTest(fixture=fixture.split('\n')[0]):
+                self.assertNotEqual(strip_indexes(fixture), fixture)
                 code, out, text = over_shell(strip_indexes(fixture))
                 self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
                 self.assertEqual(text, fixture)
-
-    def test_the_override_in_each_fixture_still_gets_its_index_back(self) -> None:
-        """The control that stops every case above from passing on a tool that
-        does nothing: `Inner` is the base root's SECOND child in both fixtures,
-        and it must come back as `1` under an instance node and under an
-        inherited root alike."""
-        _code, _out, plain = over_shell(strip_indexes(PLAIN_HOST))
-        _code, _out, inherited = over_shell(strip_indexes(INHERITED_CREATES_BODIES))
-        self.assertIn('[node name="Inner" parent="Shell" index="1"]\n', plain)
-        self.assertIn('[node name="Inner" parent="." index="1"]\n', inherited)
-
-
-class NoMarkerIsInventedForAnOverriddenInstance(unittest.TestCase):
-    def test_the_packed_fixture_gains_no_editable_section(self) -> None:
-        """`canon_repo/scenes/packed.tscn` instances `panel.tscn` and overrides
-        its `Footer` child. That is an override, not an editable instance, and
-        Godot writes exactly this file without a marker."""
-        with temp_repo('canon_repo') as root:
-            code, out = canonicalize_in_repo('scenes/packed.tscn')
-            text = (root / 'scenes/packed.tscn').read_text(encoding='utf-8')
-        self.assertEqual(code, scene_canonicalize.EXIT_OK, out)
-        self.assertIn('index="1"', text, 'the fixture stopped restoring at all')
-        self.assertEqual(editable_paths(text), [], text)
-        self.assertNotIn('EDITABLE', out, out)
-
-
-if __name__ == '__main__':
-    unittest.main()
