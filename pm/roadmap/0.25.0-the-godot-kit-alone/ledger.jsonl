@@ -215,3 +215,5 @@
 {"ts":"2026-09-06T16:49:43Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":29353,"census":201}
 {"ts":"2026-09-06T16:50:43Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30807,"census":201}
 {"ts":"2026-09-06T16:50:43Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves","from":"building","to":"done"}
+{"ts":"2026-09-06T16:50:54Z","kind":"status","grain":"0.25.0","from":"building","to":"reviewing"}
+{"ts":"2026-09-06T16:50:55Z","kind":"status","grain":"0.25.0","from":"reviewing","to":"accepted"}
