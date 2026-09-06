@@ -197,3 +197,5 @@
 {"ts":"2026-09-06T14:55:50Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":4612}
 {"ts":"2026-09-06T15:25:12Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1100,"census":40}
 {"ts":"2026-09-06T15:25:40Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":27549,"census":196}
+{"ts":"2026-09-06T15:29:45Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1239,"census":40}
+{"ts":"2026-09-06T15:29:45Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/04-the-suite-is-the-godot-kits-and-lean","from":"building","to":"done"}

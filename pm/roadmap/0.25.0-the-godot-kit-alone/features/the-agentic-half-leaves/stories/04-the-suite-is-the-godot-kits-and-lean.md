@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves/04-the-suite-is-the-godot-kits-and-lean
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: The tests that leave go with the family, and what remains bites at the cheapest tier
-status: building
+status: done
 owner:
 depends_on: []
 ---
