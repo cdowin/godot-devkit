@@ -167,3 +167,9 @@
 {"ts":"2026-09-06T14:08:40Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":355}
 {"ts":"2026-09-06T14:09:27Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":46351,"census":576}
 {"ts":"2026-09-06T14:09:28Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":54617}
+{"ts":"2026-09-06T14:09:32Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1880,"census":114}
+{"ts":"2026-09-06T14:09:32Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/04-the-suite-is-the-godot-kits-and-lean","from":"building","to":"done"}
+{"ts":"2026-09-06T14:10:01Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":4421}
+{"ts":"2026-09-06T14:10:03Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":362}
+{"ts":"2026-09-06T14:10:50Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":46816,"census":576}
+{"ts":"2026-09-06T14:10:51Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":55190}
