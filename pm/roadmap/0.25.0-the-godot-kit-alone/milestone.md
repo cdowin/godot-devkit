@@ -1,7 +1,7 @@
 ---
 id: "0.25.0"
 name: the Godot kit alone
-status: accepted
+status: done
 depends_on: []
 branch: milestone/0.25.0-the-godot-kit-alone
 ---

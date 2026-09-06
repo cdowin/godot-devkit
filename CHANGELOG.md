@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.25.0 — 2026-09-06
+
 - **At the pin bump — the consolidated list, because this release is BREAKING and a review asked for
   it.** In order: **add `DEVKIT_VERSION` above the include** and run agentic-sdlc's `install-gates` —
   this package no longer writes `Makefile.devkit`, and without that pin `make check`, `precommit` and
