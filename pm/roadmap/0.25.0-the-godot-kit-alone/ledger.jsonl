@@ -109,3 +109,5 @@
 {"ts":"2026-09-06T13:38:37Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":81130}
 {"ts":"2026-09-06T13:39:15Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":2474}
 {"ts":"2026-09-06T13:39:15Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/03-the-eight-godot-checks-are-this-packages-own","from":"building","to":"done"}
+{"ts":"2026-09-06T13:39:20Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":4124}
+{"ts":"2026-09-06T13:39:39Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":4463}

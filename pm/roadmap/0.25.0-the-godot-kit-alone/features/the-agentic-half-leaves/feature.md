@@ -43,7 +43,7 @@ One case per criterion at the cheapest tier; the deletions carry their reasons i
 
 1. `01-the-repo-family-leaves` · done (claude)
 2. `02-install-runners-is-the-godot-kits-installer` · done (claude)
-3. `03-the-eight-godot-checks-are-this-packages-own` · building (claude)
+3. `03-the-eight-godot-checks-are-this-packages-own` · done (claude)
 4. `04-the-suite-is-the-godot-kits-and-lean` · planning
 5. `05-every-surface-says-the-godot-kit-alone` · planning
 6. `06-the-tree-closes-through-the-belts` · planning
