@@ -11,10 +11,8 @@
 # `pm`, `help` and the `gdk_gate` capture define arrive from Makefile.devkit,
 # which `agentic-sdlc install-gates` writes from the pinned tag below — this
 # repo is a CONSUMER of agentic-sdlc, the same way its own consumers pin it.
-# What is this repo's: the Python it runs (below the pin), its tiers
-# (Makefile.tiers — the seam the include `-include`s), and the one target that
-# points the package's own gates at its own tree (`selfcheck`, joined to
-# `check` through `[gates] extra` in devkit.toml).
+# What is this repo's: the Python it runs (below the pin) and its tiers
+# (Makefile.tiers — the seam the include `-include`s).
 #
 # EVERY GATE PRINTS ONE LINE. The default output of a target here is its
 # verdict, naming the full transcript under .gate-reports/; `VERBOSE=1` streams
@@ -47,24 +45,3 @@ GODOT_DEVKIT ?= env PYTHONPATH=$(CURDIR)/src $(PY) -m godot_devkit.cli
 # from it. Bumping the tag is the whole adoption; `agentic-sdlc adopt` checks it.
 DEVKIT_VERSION := v0.2.0
 include Makefile.devkit
-
-.PHONY: selfcheck
-
-# The package's own repo-family gates, from source, on this tree. Self-hosting
-# is the behaviour proof: every check this package ships runs against something
-# committed here (CLAUDE.md, Self-hosting). A member of `make check` through
-# `[gates] extra`, so `precommit` and `milestone` pay it too.
-#
-# Named, not `check all`: the roster `[checks] all` declares is the pinned
-# kit's, run by `check` ahead of this. Two of this package's own gates are
-# left out ON PURPOSE, because this tree is no longer the tree they describe:
-#   doc  its include-follower skips a path holding a make variable, so it
-#        cannot see the tiers behind `-include $(GDK_TIERS_MK)` and reports
-#        every `make test` in every doc as dead;
-#   pm   the PM tree is rendered by the pinned kit's `pm sync` now, and V6
-#        compares against THIS package's renderer — a different one.
-# The pinned kit's `doc` and `pm` gates resolve both and have already run by
-# the time this target does. Both blind spots leave with the family (0.25.0).
-SELFCHECK_GATES := shell hooks
-selfcheck: ## This package's own repo-family gates ($(SELFCHECK_GATES)), from src/, on this repo ([gates] extra)
-	$(call gdk_gate,selfcheck,SELFCHECK,$(GDK_SUM_CHECKS),sh -c 'for g in $(SELFCHECK_GATES); do $(GODOT_DEVKIT) check $$g || exit 1; done')

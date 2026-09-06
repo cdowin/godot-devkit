@@ -22,14 +22,6 @@
 # and on for the repo that told them to.
 all = ["doc", "pm", "shell", "hooks"]
 
-# This package's OWN gates, as make targets `make check` runs after the roster
-# above. `selfcheck` is the package's repo-family checks from src/ pointed at
-# this tree — the self-hosting proof (CLAUDE.md). The Godot gates
-# (`check uid|tres|props|…`) are NOT here: this tree holds no scene outside its
-# fixtures, and a 0-file census is a FAIL by rule 4, not a roster entry.
-[gates]
-extra = ["selfcheck"]
-
 # The verification ladder `agentic-sdlc verify` runs, one make target per rung.
 # story is the inner loop (the suite minus the spawns, seconds); feature is the
 # close of a feature (the whole suite on the floor, minutes); milestone is the

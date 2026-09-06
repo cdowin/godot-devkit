@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **BREAKING — the repo-discipline family leaves (0.25.0).** `pm`, `init`, `check doc|shell|pm|hooks|
+  repo-hygiene`, `gates-extra` and every installer but `install-runners` are gone from this package; each
+  of those verbs now exits 2 with one line naming `agentic-sdlc`, the package they moved to. A consumer
+  adds a second pin (`DEVKIT_VERSION` for agentic-sdlc's gate framework, hooks, CI, PM tree and release
+  belts) and keeps this one for the scene tooling and the eight Godot gates. `src/godot_devkit/repo/` is
+  deleted with its tests; the Godot installables move to `src/godot_devkit/godot/installables/`.
+
 ## v0.24.0 — 2026-09-04
 
 - **At the pin bump — the consolidated list, because three review passes asked for it separately.** In

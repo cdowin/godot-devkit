@@ -32,7 +32,7 @@ from support import REPO_ROOT  # noqa: E402
 pytestmark = pytest.mark.skipif(shutil.which('bash') is None,
                                 reason='needs bash')
 
-INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
+INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 SCAN = INSTALLABLES / 'hermetic_run_scan.sh'
 LIBRARY = INSTALLABLES / 'gdk_runners.sh'
 

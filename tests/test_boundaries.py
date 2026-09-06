@@ -73,15 +73,6 @@ METHOD_OPEN_MODE_ARG = 0
 # Python itself does; an absent mode is a read, because that is the default.
 OPEN_MODE_KEYWORD = 'mode'
 DEFAULT_OPEN_MODE = 'r'
-# The ONE sanctioned writer outside APPLY_MODULE, pinned by PATH **and** MODE
-# rather than by a blanket allowlist. `ledger.append_row` opens its file in
-# append mode deliberately (0.22.0/ledger decision D1): a read-modify-write
-# drops rows when two appenders collide and rewrites the bytes `merge=union`
-# depends on nobody rewriting. Append is a different primitive, not a variant of
-# overwrite — so a `'w'` in THIS file is still a finding, and an `'a'` in any
-# other module is too.
-APPEND_ONLY_MODULE = 'repo/pm/ledger.py'
-APPEND_MODES = ('a', 'ab')
 
 
 def _sources() -> list[tuple[str, Path]]:
@@ -147,21 +138,6 @@ def _is_write_open(node: ast.Call) -> bool:
     return any(ch in mode for ch in WRITE_MODES)
 
 
-def _is_sanctioned_append(rel: str, node: ast.Call) -> bool:
-    """True for the one append `APPEND_ONLY_MODULE` is allowed to make.
-
-    By path AND by mode: a `'w'` in that same file is not sanctioned, and an
-    `'a'` anywhere else is not either. A non-literal mode (None) matches no
-    entry in `APPEND_MODES`, so an unreadable mode cannot buy the exception.
-    """
-    return rel == APPEND_ONLY_MODULE and _open_mode(node) in APPEND_MODES
-
-
-def _is_unsanctioned_write_open(rel: str, node: ast.Call) -> bool:
-    """A write-mode `open(...)` that is not the ledger's sanctioned append."""
-    return _is_write_open(node) and not _is_sanctioned_append(rel, node)
-
-
 def _calls(tree: ast.Module):
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -200,7 +176,7 @@ def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
     for node in _calls(tree):
         func = node.func
         if isinstance(func, ast.Name):
-            if func.id == 'open' and _is_unsanctioned_write_open(rel, node):
+            if func.id == 'open' and _is_write_open(node):
                 out.append(f'{rel}:{node.lineno}: open(..., write mode)')
             continue
         if not isinstance(func, ast.Attribute):
@@ -212,7 +188,7 @@ def _mutation_sites(rel: str, tree: ast.Module) -> list[str]:
             out.append(f'{rel}:{node.lineno}: {func.attr}()')
         elif func.attr == 'replace' and _replace_is_a_path_replace(node):
             out.append(f'{rel}:{node.lineno}: replace() (one arg — Path.replace)')
-        elif func.attr == 'open' and _is_unsanctioned_write_open(rel, node):
+        elif func.attr == 'open' and _is_write_open(node):
             out.append(f'{rel}:{node.lineno}: .open(..., write mode)')
     return out
 
@@ -270,7 +246,7 @@ class OneApply(unittest.TestCase):
             [], offenders,
             'filesystem mutation outside ' + APPLY_MODULE + '. A writer that '
             'decides as it goes lands half a plan when step three refuses, '
-            'which is how the scaffolder, install-agents and `pm collapse` each '
+            'which is how three writers in this package\'s history each '
             'left a tree neither before nor after. Route it through '
             '`core.apply`, which decides the whole plan and then applies it:\n  '
             + '\n  '.join(offenders))
@@ -318,13 +294,13 @@ OPEN_SPELLINGS = (
     ("open(p, mode)", True),
     ("p.open(mode)", True),
 )
-# A module path that is emphatically NOT the ledger, for proving the exception
-# is pinned to one file rather than granted to append mode generally.
-SCRATCH_MODULE = 'repo/pm/scratch_not_the_ledger.py'
-# The floor under the `open` census, in the same spirit as MIN_SOURCES: well
-# under the real count (7 at the time of writing) and well over zero, so the
-# classifier cannot be declared correct over a tree it never read.
-MIN_OPEN_CALLS = 4
+# A module path that is not a real one: the gate is being MUTATED here, not
+# observed.
+SCRATCH_MODULE = 'godot/scratch_not_a_real_module.py'
+# The floor under the `open` census, in the same spirit as MIN_SOURCES: under
+# the real count (5 at the time of writing) and over zero, so the classifier
+# cannot be declared correct over a tree it never read.
+MIN_OPEN_CALLS = 3
 
 
 def _sites_for(source: str, rel: str = SCRATCH_MODULE) -> list[str]:
@@ -382,64 +358,20 @@ class TheOpenModeIsReadFromTheRightArgument(unittest.TestCase):
             'still a gate that checks nothing.')
 
 
-class TheLedgerAppendIsTheOneException(unittest.TestCase):
-    """PRIMITIVE 2, continued — the single sanctioned writer outside apply.
+class AppendIsAWriteToo(unittest.TestCase):
+    """PRIMITIVE 2, continued — there is no sanctioned writer outside apply.
 
-    Decision D1 of `0.22.0/ledger`: `ledger.append_row` owns append as a
-    PRIMITIVE, because a read-modify-write drops rows when two appenders
-    collide. The exception it earns is one file in one mode — not an allowlist
-    entry that would also excuse an overwrite, a `mkdir`, or a `write_text`.
+    The pm ledger once held a one-file, one-mode exception for its append
+    (0.22.0/ledger decision D1); it left with the pm tracker (0.25.0), and the
+    exception went with it. What stays is the rule it was carved out of: an
+    `'a'` is a write, in every module, and no path buys a mode.
     """
 
-    def test_append_is_admitted_in_the_ledger(self):
-        for source in ("p.open('a')", "p.open('ab')",
-                       "p.open(mode='a')",
-                       "p.open('a', encoding='utf-8', newline='\\n')"):
-            with self.subTest(source=source):
-                self.assertEqual([], _sites_for(source, APPEND_ONLY_MODULE))
-
-    def test_an_overwrite_in_the_ledger_is_still_a_finding(self):
-        for source in ("p.open('w')", "open(p, 'w')", "p.open('w+')",
-                       "p.open(mode='w')", "p.open('x')"):
-            with self.subTest(source=source):
-                self.assertNotEqual(
-                    [], _sites_for(source, APPEND_ONLY_MODULE),
-                    'the ledger exception is append-only — an overwrite there '
-                    'rewrites the bytes `merge=union` relies on nobody '
-                    'rewriting, which is the defect D1 exists to prevent')
-
-    def test_the_exception_does_not_excuse_other_mutations(self):
-        for source in ('p.write_text(x)', 'p.mkdir()', 'p.unlink()',
-                       'os.remove(p)'):
-            with self.subTest(source=source):
-                self.assertNotEqual([], _sites_for(source, APPEND_ONLY_MODULE),
-                                    'the exception is by MODE, not a blanket '
-                                    'allowlist for the file')
-
-    def test_append_anywhere_else_is_a_finding(self):
-        for rel in (SCRATCH_MODULE, 'cli.py', 'repo/pm/model.py'):
+    def test_append_anywhere_is_a_finding(self):
+        for rel in (SCRATCH_MODULE, 'cli.py', 'core/apply.py'):
             for source in ("p.open('a')", "open(p, 'a')", "p.open('ab')"):
                 with self.subTest(rel=rel, source=source):
                     self.assertNotEqual([], _sites_for(source, rel))
-
-    def test_an_unreadable_mode_does_not_buy_the_exception(self):
-        self.assertNotEqual([], _sites_for('p.open(mode)', APPEND_ONLY_MODULE))
-
-    def test_the_ledger_really_does_append(self):
-        """The exception must not outlive the append it was granted for.
-
-        An allowlist entry nothing matches is a hole waiting for a file to move
-        into it — the same reasoning `CONFIG_IMPORT_ALLOWLIST` prunes for.
-        """
-        tree = _tree(SRC / APPEND_ONLY_MODULE)
-        appends = [f'{APPEND_ONLY_MODULE}:{node.lineno}'
-                   for node in _calls(tree)
-                   if _is_an_open_call(node)
-                   and _is_sanctioned_append(APPEND_ONLY_MODULE, node)]
-        self.assertEqual(
-            1, len(appends),
-            f'{APPEND_ONLY_MODULE} should hold exactly ONE sanctioned append; '
-            f'found {appends}. If the append is gone, delete the exception.')
 
 
 class WalkHasNoLength(unittest.TestCase):
@@ -486,11 +418,6 @@ CONFIG_OWNER = 'core/config.py'
 CONFIG_IMPORT_ALLOWLIST = frozenset((
     CONFIG_OWNER,                 # the guard module itself
     'cli.py',
-    'repo/pm/model.py',
-    'repo/checks/doc.py',
-    'repo/checks/repo_hygiene.py',
-    'repo/checks/shell.py',
-    'repo/gates_extra.py',
     'godot/checks/defaults.py',
     'godot/checks/props.py',
     'godot/checks/rng.py',
@@ -509,15 +436,14 @@ COLLECTORS = ('tuple', 'set', 'list', 'frozenset')
 # (directory prefix, module prefixes it must NEVER import, census floor).
 # format/ is the floor of godot/ (the one upward edge there ever was —
 # `_uid_of` importing `uid_index` — is now an injected resolver); index/ sits
-# on format/ only; repo/ has no Godot in it, which is what keeps CLAUDE.md
-# rule 2's exit clause real; core/ knows about neither family.
+# on format/ only; core/ knows nothing about godot/ — the one-way edge that
+# let the repo family leave (0.25.0) without a scene parser noticing.
 LAYER_RULES = (
-    ('core/', ('godot_devkit.godot', 'godot_devkit.repo'), 4),
+    ('core/', ('godot_devkit.godot',), 4),
     ('godot/format/', ('godot_devkit.godot.index', 'godot_devkit.godot.read',
                        'godot_devkit.godot.write', 'godot_devkit.godot.checks'), 4),
     ('godot/index/', ('godot_devkit.godot.read', 'godot_devkit.godot.write',
                       'godot_devkit.godot.checks'), 4),
-    ('repo/', ('godot_devkit.godot',), 4),
 )
 PACKAGE = 'godot_devkit'
 
@@ -681,9 +607,9 @@ class NoImportIsDead(unittest.TestCase):
 
 
 class LayersPointDownward(unittest.TestCase):
-    """PRIMITIVE 4b — format/ -> index/ -> read/+write/ -> checks/; repo/ has
-    no Godot in it; core/ knows about neither family. An upward import is the
-    architecture running backwards, however locally convenient."""
+    """PRIMITIVE 4b — format/ -> index/ -> read/+write/ -> checks/; core/
+    knows nothing about godot/. An upward import is the architecture running
+    backwards, however locally convenient."""
 
     def test_no_layer_imports_upward(self):
         sources = _sources()
@@ -703,8 +629,8 @@ class LayersPointDownward(unittest.TestCase):
         self.assertEqual(
             [], offenders,
             'an import against the layering. A layer imports DOWNWARD only '
-            '(format -> index -> read/write -> checks; repo/ never godot/; '
-            'core/ neither family):\n  ' + '\n  '.join(offenders))
+            '(format -> index -> read/write -> checks; core/ never godot/):'
+            '\n  ' + '\n  '.join(offenders))
 
 
 if __name__ == '__main__':

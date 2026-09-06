@@ -48,66 +48,37 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # base64 is regenerated
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
-Project management (engine-agnostic; the PM tree is markdown + frontmatter):
-    godot-devkit pm story <wip|review|blocked> <story-id>
-    godot-devkit pm feature <ready|building|review> <feature-id>
-    godot-devkit pm feature done <feature-id> [--review-record <path>]
-    godot-devkit pm milestone <ready|building|done> <milestone-id>
-    godot-devkit pm status [<milestone>]
-    godot-devkit pm vocabulary --json   # the closed state set + the rule ids
-    godot-devkit pm validate            # ids/parentage/refs/graph integrity
-    godot-devkit pm install-skills      # the shared rule + operations skill
-    godot-devkit pm init                # stand up a tree in a repo with none
-    godot-devkit pm new <milestone|feature|story|bug> ...
-    (moves a `status:` through code rather than a regex; `check pm` reports a
-     tree whose statuses contradict each other, off the SAME predicates)
-
-Installers (write the file once; after that it is the repo's):
-    godot-devkit init               # a blank Godot 4 project, wired: every
-                                    # installer below in order, plus the two
-                                    # files nothing else writes (devkit.toml
-                                    # and your two-line Makefile), the PM tree,
-                                    # the .gitignore entries and a CLAUDE.md
-                                    # skeleton. Idempotent; --force touches the
-                                    # devkit-owned files only
-    godot-devkit install-ci         # the workflow that runs `make milestone`
-    godot-devkit install-agents     # the review + build contract, as agent
-                                    # definitions (a rules file never reaches
-                                    # a subagent's spawn context; a definition
-                                    # does)
-    godot-devkit install-hooks      # the shared-tree commit guard, the
-                                    # raw-engine-boot guard, and setup-hooks.sh
-    godot-devkit install-runners    # the sandboxed headless-run shell library
-                                    # + the import-cache runner (gdk_* library)
-    (each takes --force to overwrite a differing destination, and --diff to
-     print what would change without writing)
+The installer (writes each file once; after that it is the repo's):
+    godot-devkit install-runners [--force] [--diff]
+                                    # the sandboxed headless-run shell library
+                                    # and the runners that source it, the
+                                    # compile sweep they boot, the Claude Code
+                                    # engine-boot guard, the uid-drift workflow.
+                                    # --force overwrites a differing
+                                    # destination; --diff prints what would
+                                    # change and writes nothing
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid [--fix] | tres | props | defaults | doc | shell
-                      | repo-hygiene | pm | hooks | rng | tres-comment
-                      | unit-disk | test-shape
+    godot-devkit check uid [--fix] | tres | props | defaults | rng
+                      | tres-comment | unit-disk | test-shape
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
                                     # rewritten to the sidecar's, non-canonical
                                     # spellings canonicalized (same id), and
                                     # orphan .gd.uid sidecars deleted
-    godot-devkit check all          # the offline fast set (uid+tres+props+doc+shell).
-                                    # Every other gate stays explicit — see
-                                    # KNOWN_GATES for the reason each is out.
-                                    # `[checks] all` in devkit.toml names the
-                                    # roster for THIS repo — a repo with no
-                                    # Godot tree runs the repo-family gates
-                                    # instead of failing five Godot ones over a
-                                    # 0-file census.
-    godot-devkit gates-extra        # `[gates] extra`, one make target per line:
-                                    # the project's OWN gate targets, which
-                                    # Makefile.devkit's `check` runs after the
-                                    # devkit ones. The include shells out to
-                                    # this rather than parsing TOML in make.
+    godot-devkit check all          # the Godot roster. `[checks] all` in
+                                    # devkit.toml names the members for THIS
+                                    # repo; an unknown name is refused, never
+                                    # skipped
 
 Per-project config: devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
+
+What is NOT here (0.25.0): the repo-discipline family — `pm`, `init`,
+`check doc|shell|pm|hooks|repo-hygiene`, `gates-extra` and every other
+`install-*` — is agentic-sdlc's, a second pin. Each of those verbs exits 2
+here naming it.
 """
 from __future__ import annotations
 
@@ -128,41 +99,49 @@ RETARGET_FLAG = '--retarget'
 # The `False` gates are out of the DEFAULT aggregate, each for its own reason:
 # `defaults` reports thousands of findings on a tree that has never been
 # canonicalized, so folding it in would redden every existing consumer on a
-# version bump — wire it explicitly, after the one-time cleanup pass;
-# `repo-hygiene` is close-time and hits the network; `pm` would fail a repo for
-# not having a PM tree at all; `hooks` would fail one that has not run
-# `install-hooks`, and arming is a decision a consumer makes once — the gate is
-# for a repo that HAS decided, and would otherwise be told so by a red run on
-# the day it upgraded.
-# The four ported project scans are all False for one shared reason and one
-# each: none of them can state a stock scope that is true of every repo. `rng`
-# defaults to the WHOLE tree and would redden a consumer's cosmetic jitter on a
-# pin bump; `unit-disk` and `test-shape` name test roots a fresh project does
-# not have yet, and rule 4 correctly reddens a 0-file census; `tres-comment`
-# would redden any tree that has never been swept. Each is one `[checks] all`
-# entry away, once the repo has declared its scope — which is the adoption step,
-# not a default.
+# version bump — wire it explicitly, after the one-time cleanup pass. The four
+# ported project scans are all False for one shared reason and one each: none
+# of them can state a stock scope that is true of every repo. `rng` defaults
+# to the WHOLE tree and would redden a consumer's cosmetic jitter on a pin
+# bump; `unit-disk` and `test-shape` name test roots a fresh project does not
+# have yet, and rule 4 correctly reddens a 0-file census; `tres-comment` would
+# redden any tree that has never been swept. Each is one `[checks] all` entry
+# away, once the repo has declared its scope — which is the adoption step, not
+# a default.
 KNOWN_GATES = {
-    'uid': True, 'tres': True, 'props': True, 'doc': True, 'shell': True,
-    'defaults': False, 'repo-hygiene': False, 'pm': False, 'hooks': False,
-    'rng': False, 'tres-comment': False, 'unit-disk': False,
-    'test-shape': False,
+    'uid': True, 'tres': True, 'props': True,
+    'defaults': False, 'rng': False, 'tres-comment': False,
+    'unit-disk': False, 'test-shape': False,
 }
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
 FIXABLE_CHECKS = frozenset({'uid'})
 
+# The verbs that LEFT with the repo-discipline family (0.25.0), each mapped to
+# the spelling that runs it now. Routed to one line and exit 2 rather than
+# falling through to `unknown command`: a consumer whose Makefile still says
+# `godot-devkit pm` should be told where the verb went, not that it never
+# existed. Exit 2 is the usage-error code (rule 6), and it is deliberately not
+# 0 — a retired verb that exits 0 is a gate that silently stopped gating.
+SECOND_PIN = 'agentic-sdlc'
+RETIRED_COMMANDS = frozenset({
+    'pm', 'init', 'gates-extra',
+    'install-ci', 'install-agents', 'install-hooks', 'install-gates',
+    'install-sdlc',
+})
+RETIRED_CHECKS = frozenset({'doc', 'shell', 'pm', 'hooks', 'repo-hygiene'})
+
 
 def all_roster() -> tuple[str, ...]:
     """Which gates `check all` runs HERE — `[checks] all`, else the defaults.
 
-    Applicability is per-repo and the aggregate is where it shows. Five of the
-    eight gates read `.tscn`/`.tres`/shell, so a repo holding none of those
-    (this package itself; a PM-tree-only consumer) gets five 0-file censuses,
-    and rule 4 correctly turns every one of them red. That is not drift and it
-    is not a reason to weaken a gate — it is the roster being wrong for the
-    repo, which is exactly the kind of variation rule 5 puts in devkit.toml.
+    Applicability is per-repo and the aggregate is where it shows. Most of the
+    roster reads `.tscn`/`.tres`/`.gd`, so a repo holding none of those gets
+    a handful of 0-file censuses, and rule 4 correctly turns every one of them
+    red. That is not drift and it is not a reason to weaken a gate — it is the
+    roster being wrong for the repo, which is exactly the kind of variation
+    rule 5 puts in devkit.toml.
 
     An unknown name is REFUSED rather than skipped: a typo would otherwise
     narrow the aggregate in silence, which is the cardinal sin with a config
@@ -180,23 +159,22 @@ def all_roster() -> tuple[str, ...]:
     return tuple(dict.fromkeys(roster))
 
 
-def install_commands() -> tuple[str, ...]:
-    """The `install-*` verbs, from the installer's own plan table.
-
-    Asked rather than restated: a second list here would be a second name for
-    the same fact, and the failure mode is a verb documented in one place and
-    dispatched in neither.
-    """
-    from godot_devkit.repo.install import PLANS
-    return tuple(PLANS)
-
-
 def _usage() -> int:
     print(__doc__.strip())
     return 2
 
 
+def _retired(verb: str) -> int:
+    """One line, exit 2: the verb is the second pin's now."""
+    print(f'godot-devkit: {verb!r} left this package in 0.25.0 — it is '
+          f'{SECOND_PIN}\'s: pin that package and run `{SECOND_PIN} {verb}`',
+          file=sys.stderr)
+    return 2
+
+
 def _run_check(name: str, flags: list[str]) -> int:
+    if name in RETIRED_CHECKS:
+        return _retired(f'check {name}')
     if any(flag in HELP_FLAGS for flag in flags):
         # A gate's contract, its config section and its honest scope are in its
         # module docstring — the one copy, so `--help` cannot drift from it.
@@ -253,21 +231,6 @@ def _check_module(name: str):
     if name == 'test-shape':
         from godot_devkit.godot.checks import test_shape
         return test_shape
-    if name == 'doc':
-        from godot_devkit.repo.checks import doc
-        return doc
-    if name == 'shell':
-        from godot_devkit.repo.checks import shell
-        return shell
-    if name == 'repo-hygiene':
-        from godot_devkit.repo.checks import repo_hygiene
-        return repo_hygiene
-    if name == 'pm':
-        from godot_devkit.repo.checks import pm
-        return pm
-    if name == 'hooks':
-        from godot_devkit.repo.checks import hooks
-        return hooks
     return None
 
 
@@ -334,18 +297,11 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'autoloads':
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
-    if cmd == 'pm':
-        from godot_devkit.repo.pm import cli as pm_cli
-        return pm_cli.main(rest)
-    if cmd == 'init':
-        from godot_devkit.repo import init
-        return init.main(rest)
-    if cmd == 'gates-extra':
-        from godot_devkit.repo import gates_extra
-        return gates_extra.main(rest)
-    if cmd in install_commands():
-        from godot_devkit.repo import install
-        return install.main(cmd, rest)
+    if cmd == 'install-runners':
+        from godot_devkit.godot import install
+        return install.main(rest)
+    if cmd in RETIRED_COMMANDS:
+        return _retired(cmd)
     if cmd == 'check':
         if not rest:
             return _usage()

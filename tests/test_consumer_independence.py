@@ -92,10 +92,7 @@ NOT_CONTENT = {'.git', '.gate-reports', '.pytest_cache', '.ruff_cache', '.venv',
 # regexes, which the same regexes do not match, so it needs no exemption and a
 # bare name added here in future is caught like anywhere else.
 TOMBSTONES = {
-    'tests/test_ci_workflows.py': 'guards the workflows against the same names',
-    'tests/test_makefile_include.py': 'guards Makefile.devkit against them',
     'tests/test_runners_installable.py': 'guards every install-runners file',
-    'tests/test_install.py': 'guards every installed hook',
 }
 
 # Rule 4: a census that collapses must FAIL, not pass over nothing. The tree is
@@ -369,16 +366,14 @@ def test_the_full_gate_is_a_composition_of_self_contained_targets():
     """`make milestone` must not acquire a member that needs another repo. The
     composition itself is the pinned include's (Makefile.devkit: `check` plus
     GDK_MILESTONE_TIERS); what is THIS repo's is the tier list in
-    Makefile.tiers and the `[gates] extra` member the Makefile defines, and
-    every one of those reads this checkout alone — which is why CI and a
-    laptop reach the same verdict."""
+    Makefile.tiers, and every member of it reads this checkout alone — which
+    is why CI and a laptop reach the same verdict."""
     tiers = (REPO_ROOT / 'Makefile.tiers').read_text(encoding='utf-8')
     match = re.search(r'^GDK_MILESTONE_TIERS\s*:?=(.*)$', tiers, re.M)
     assert match, 'Makefile.tiers no longer declares GDK_MILESTONE_TIERS'
     members = match.group(1).split()
     assert members == ['matrix'], members
-    own = (REPO_ROOT / 'Makefile').read_text(encoding='utf-8')
-    for member, body in [('matrix', tiers), ('selfcheck', own)]:
+    for member, body in [('matrix', tiers)]:
         recipe = re.search(rf'^{member}:.*?\n((?:\t.*\n|\n)*)', body, re.M)
         assert recipe, f'{member} has no recipe in its makefile'
         assert not re.search(r'\.\./|~/|\$\(HOME\)|\$\$HOME', recipe.group(1)), (

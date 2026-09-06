@@ -3,20 +3,13 @@
 WHY THIS EXISTS
 Every release review of this package so far has returned NOT RELEASE-SAFE, and
 the blocker has always been the same shape: a docstring's universal negative
-("this cannot write a sibling grain") that no test attacked, because builders
-write existential tests for intended behavior. The v0.16.0 blocker —
-`pm bug fixed '0.1/bugs/../features/alpha/feature'` traversed and wrote a
-bug-vocabulary status into the sibling FEATURE file — sat behind exactly such a
-docstring. This harness is the standing adversarial stage: a seeded mangler
-composes hostile ids/paths (traversal, empty and dot segments, backslashes,
-globs, absolute paths, URL-ish schemes, whitespace, newlines, quotes, unicode
-confusables, over-long strings) and drives them through the REAL CLI against a
-scratch tree, asserting two properties the docstrings claim:
-
-  GRAIN CONTAINMENT (pm) — for every id fed to status verbs / set / get /
-  move / decide: either the command refuses (exit 1/2, whole scratch tree
-  byte-identical, proven by snapshot), or every file it touched realpaths
-  INSIDE pm/roadmap/<milestone>/ in the slot the verb's grain kind owns.
+("this cannot write a file it was not asked about") that no test attacked,
+because builders write existential tests for intended behavior. This harness
+is the standing adversarial stage: a seeded mangler composes hostile
+paths/ids (traversal, empty and dot segments, backslashes, globs, absolute
+paths, URL-ish schemes, whitespace, newlines, quotes, unicode confusables,
+over-long strings) and drives them through the REAL CLI against a scratch
+tree, asserting the property the write verbs' docstrings claim:
 
   VERB REFUSAL TOTALITY (scene / refs --retarget) — for every mangled node
   path / sub_resource id / res:// path: exit 0 with the edit confined to the
@@ -24,29 +17,22 @@ scratch tree, asserting two properties the docstrings claim:
   exception escaping `cli.main` (the real CLI's traceback), never a write to a
   file the command did not name.
 
-TEETH — proven against the pre-fix code, not assumed
-The pre-fix package (commit 76e28fb~1, the code the v0.16.0 release review
-caught) is runnable under this same harness via a PYTHONPATH overlay:
+The GRAIN CONTAINMENT property this harness also carried — the pm verbs'
+promise that a mangled id never writes a sibling grain, and the v0.16.0
+blocker it was built to catch — left with the pm tracker (0.25.0); that
+family and its fuzz are agentic-sdlc's now.
 
-    git archive 76e28fb~1 src | tar -x -C /tmp/prefix
+TEETH — proven against pre-fix code, not assumed
+Another src tree is runnable under this same harness via a PYTHONPATH overlay:
+
+    git archive <ref> src | tar -x -C /tmp/prefix
     DEVKIT_FUZZ_TARGET_SRC=/tmp/prefix/src \
         uv run --with pytest python -m pytest tests/test_fuzz_inputs.py -q
 
-Run 2026-08-30 against that snapshot: test_grain_containment... FAILED with 4
-violations — ('pm', 'bug', 'fixed', '0.1/bugs/../features/alpha/feature') and
-its nested-slug twin exited 0 and wrote
-pm/roadmap/0.1-demo/features/alpha/feature.md (a bug-kind write landing on a
-feature grain), and `pm set` rode the same traversal twice. Same file, same
-seed, green on HEAD. The
-committed floor beneath that one-time run is
-`test_the_corpus_separates_the_pre_fix_resolver`, which keeps a transcription
-of the rejected resolver in-tree and proves the corpus still reaches it.
-
-The three findings this harness caught on its first run (decide dot-segment
-traversal, the absolute-milestone-id NotImplementedError, the overlong scene
-path OSError) were pinned as known findings, fixed in 0.17.0, and their pins
-replaced by the explicit refusal tests at the bottom of this file — both
-properties now run at full strength with no judge carve-outs.
+The overlong scene path OSError this harness caught on its first run was
+pinned as a known finding, fixed in 0.17.0, and its pin replaced by the
+explicit refusal test at the bottom of this file — the property now runs at
+full strength with no judge carve-outs.
 """
 from __future__ import annotations
 
@@ -80,14 +66,12 @@ if _TARGET_SRC:
         del sys.modules[_name]
 
 from godot_devkit import cli  # noqa: E402
-from godot_devkit.repo.pm.ledger import LEDGER_FILE_NAME  # noqa: E402
 
 pytestmark = pytest.mark.fuzz
 
 # The seed is part of the gate. Changing it changes which hostile inputs are
 # covered, so it moves only with a recorded reason.
 SEED = 20260830
-PM_CASES = 320
 SCENE_CASES = 320
 RETARGET_CASES = 100
 
@@ -257,167 +241,7 @@ def _scratch(build) -> tuple[Path, Path]:
             os.chdir(previous)
 
 
-# --- property (a): grain containment ------------------------------------------
-_PM_BASES = ('0.1', '0.1/alpha', '0.1/beta', '0.1/alpha/s0', '0.1/alpha/s1',
-             '0.1/beta/b0', '0.1/bugs/crash', '0.1/bugs/sub/nested')
-
-# The fixed refusal matrix under the fuzz: canonical hostile shapes, including
-# the v0.16.0 blocker id verbatim, run against every verb regardless of what
-# the seeded stream generates.
-_KILLERS = (
-    '0.1/bugs/../features/alpha/feature',
-    '0.1/bugs/sub/../../features/alpha/feature',
-    '0.1/bugs/',
-    '0.1/bugs/../../../outside',
-    '0.1/../0.1/alpha/s0',
-    '../repo/pm/roadmap/0.1-demo/features/alpha/feature',
-    '/etc/hosts',
-    '0.1/alpha/../../0.1/bugs/crash',
-)
-
-_PM_VERBS = ('story', 'bug', 'feature', 'milestone', 'set', 'get', 'move',
-             'decide')
-
-
-def _grain_front(path: Path, front: dict[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ['---'] + [f'{k}: {v}' for k, v in front.items()] + ['---', '', 'x', '']
-    path.write_text('\n'.join(lines), encoding='utf-8')
-
-
-def _build_pm(outer: Path, root: Path) -> None:
-    (outer / 'outside.md').write_text('---\nstatus: decoy\n---\n', encoding='utf-8')
-    m = root / 'pm' / 'roadmap' / '0.1-demo'
-    _grain_front(m / 'milestone.md',
-                 {'id': '"0.1"', 'name': 'Demo', 'status': 'building'})
-    for slug in ('alpha', 'beta'):
-        _grain_front(m / 'features' / slug / 'feature.md',
-                     {'id': f'0.1/{slug}', 'milestone': '"0.1"', 'name': slug,
-                      'status': 'building', 'reviewed': ''})
-    for fid, sslug in (('alpha', 's0'), ('alpha', 's1'), ('beta', 'b0')):
-        _grain_front(m / 'features' / fid / 'stories' / f'{sslug}.md',
-                     {'id': f'0.1/{fid}/{sslug}', 'feature': f'0.1/{fid}',
-                      'milestone': '"0.1"', 'name': sslug, 'status': 'ready'})
-    _grain_front(m / 'bugs' / 'crash.md',
-                 {'id': '0.1/bugs/crash', 'milestone': '"0.1"', 'status': 'open'})
-    _grain_front(m / 'bugs' / 'sub' / 'nested.md',
-                 {'id': '0.1/bugs/sub/nested', 'milestone': '"0.1"',
-                  'status': 'open'})
-
-
-def _pm_argv(rng: random.Random, verb: str,
-             gid: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """(argv, the caller-supplied grain ids inside it)."""
-    if verb == 'story':
-        return ('pm', 'story', 'building', gid), (gid,)
-    if verb == 'bug':
-        return ('pm', 'bug', 'fixed', gid), (gid,)
-    if verb == 'feature':
-        return ('pm', 'feature', 'planning', gid), (gid,)
-    if verb == 'milestone':
-        return ('pm', 'milestone', 'ready', gid), (gid,)
-    if verb == 'set':
-        return ('pm', 'set', gid, 'status', 'wombat'), (gid,)
-    if verb == 'get':
-        return ('pm', 'get', gid, 'status'), (gid,)
-    if verb == 'decide':
-        return ('pm', 'decide', gid, 'fuzz', 'entry'), (gid,)
-    if rng.random() < 0.5:
-        return ('pm', 'move', gid, '0.1/beta'), (gid, '0.1/beta')
-    return ('pm', 'move', '0.1/alpha/s0', gid), ('0.1/alpha/s0', gid)
-
-
-def _grain_shaped(path: Path) -> bool:
-    return (path.name in ('feature.md', 'milestone.md')
-            or 'stories' in path.parts or 'bugs' in path.parts)
-
-
-_KIND_OK = {
-    'story': lambda p: 'stories' in p.parts,
-    'bug': lambda p: 'bugs' in p.parts,
-    'feature': lambda p: p.name == 'feature.md',
-    'milestone': lambda p: p.name == 'milestone.md',
-    'set': _grain_shaped,
-    'move': lambda p: 'stories' in p.parts,
-    'decide': lambda p: p.name == 'decisions.md',
-}
-
-
-def _literal_segments(gid: str) -> bool:
-    return all(s not in ('', '.', '..')
-               for s in gid.replace('\\', '/').split('/'))
-
-
-def _judge_pm(verb: str, argv: tuple[str, ...], ids: tuple[str, ...],
-              code, out: str, escaped, delta: list[str],
-              outer: Path, roadmap: Path) -> str | None:
-    where = f'{argv!r} -> code={code} delta={delta} out={out[:160]!r}'
-    if escaped is not None:
-        return f'TRACEBACK {type(escaped).__name__}: {escaped!r} on {where}'
-    if code not in (0, 1, 2):
-        return f'EXIT CODE outside the contract on {where}'
-    if code != 0 and delta:
-        return f'REFUSAL WROTE on {where}'
-    if code == 0 and verb == 'get' and delta:
-        return f'READ VERB WROTE on {where}'
-    if code == 0:
-        for rel in delta:
-            resolved = (outer / rel.rstrip('/')).resolve()
-            if not resolved.is_relative_to(roadmap):
-                return f'ESCAPED pm/roadmap/: {rel} on {where}'
-            if resolved.name == LEDGER_FILE_NAME:
-                # Every WRITING verb appends a row (D6/D8), so the question
-                # for the ledger is not which verb wrote it but WHERE: it is
-                # legal in a milestone directory and nowhere else in the tree.
-                if resolved.parent.parent != roadmap:
-                    return f'LEDGER OUTSIDE A MILESTONE DIR: {rel} on {where}'
-                continue
-            if not _KIND_OK[verb](Path(rel)):
-                return f'WRONG GRAIN KIND: {rel} on {where}'
-        if delta:
-            for gid in ids:
-                if not _literal_segments(gid):
-                    return f'NON-LITERAL ID ACCEPTED: {gid!r} on {where}'
-    return None
-
-
-@functools.lru_cache(maxsize=1)
-def _pm_results() -> tuple[tuple[str, ...], dict]:
-    rng = random.Random(SEED)
-    violations: list[str] = []
-    census: Counter = Counter()
-    cases = [(verb, gid) for gid in _KILLERS for verb in _PM_VERBS]
-    cases += [(rng.choice(_PM_VERBS), _mangle(rng, _PM_BASES))
-              for _ in range(PM_CASES)]
-    with _scratch(_build_pm) as (outer, root):
-        roadmap = (root / 'pm' / 'roadmap').resolve()
-        base = _snap(outer)
-        for verb, gid in cases:
-            argv, ids = _pm_argv(rng, verb, gid)
-            code, out, escaped = _run(argv)
-            delta = _delta(base, _snap(outer))
-            verdict = _judge_pm(verb, argv, ids, code, out, escaped, delta,
-                                outer, roadmap)
-            if verdict:
-                violations.append(verdict)
-            census['refused'] += 1 if code in (1, 2) else 0
-            census['accepted-write'] += 1 if code == 0 and delta else 0
-            census['ok-no-write'] += 1 if code == 0 and not delta else 0
-            for cls in _classes_of(gid):
-                census[f'class:{cls}'] += 1
-            if delta:
-                _restore(outer, base)
-    return tuple(violations), dict(census)
-
-
-def test_grain_containment_under_mangled_ids():
-    violations, _ = _pm_results()
-    assert not violations, (
-        f'{len(violations)} containment violations (seed {SEED}):\n\n'
-        + '\n\n'.join(violations[:8]))
-
-
-# --- property (b): verb refusal totality --------------------------------------
+# --- the property: verb refusal totality --------------------------------------
 _NODE_BASES = ('.', 'Inner', 'Footer', 'Panel/Inner')
 _SUB_BASES = ('1_abc', 'StyleBoxFlat_1')
 _SCENE = 'scenes/panel.tscn'
@@ -495,6 +319,10 @@ def _scene_results() -> tuple[tuple[str, ...], dict]:
                 violations.append(verdict)
             census['refused'] += 1 if code in (1, 2) else 0
             census['accepted-write'] += 1 if code == 0 and delta else 0
+            # The class census is over the ARGUMENTS the mangler produced —
+            # every element, since any of them may be the hostile one.
+            for cls in {c for arg in argv for c in _classes_of(arg)}:
+                census[f'class:{cls}'] += 1
             if delta:
                 _restore(outer, base)
     return tuple(violations), dict(census)
@@ -552,6 +380,8 @@ def _retarget_results() -> tuple[tuple[str, ...], dict]:
                             f'WROTE OUTSIDE THE SWEEP: {rel} on {where}')
             census['refused'] += 1 if code in (1, 2) and not delta else 0
             census['accepted-write'] += 1 if delta else 0
+            for cls in _classes_of(old) | _classes_of(new):
+                census[f'class:{cls}'] += 1
             if delta:
                 _restore(outer, base)
     return tuple(violations), dict(census)
@@ -571,104 +401,21 @@ def test_the_corpus_actually_exercises_every_hostile_class_and_both_verdicts():
     Two censuses, asserted rather than trusted: the generator must still emit
     every hostile input class it advertises, and the runs must contain both
     refusals AND accepted writes — a corpus the CLI always refuses would let
-    the containment clauses rot unexercised.
+    the containment clauses rot unexercised. The class floor is asked of the
+    two corpora TOGETHER: the mangler is one generator, and which corpus a
+    class lands in is the seed's business, not the property's.
     """
-    _, pm = _pm_results()
     _, scene = _scene_results()
     _, retarget = _retarget_results()
     for cls in ('dot-segment', 'empty-segment', 'backslash', 'glob',
                 'absolute', 'scheme', 'whitespace', 'newline', 'quote',
                 'confusable', 'overlong', 'dash'):
-        assert pm.get(f'class:{cls}', 0) >= 8, (cls, pm)
-    assert pm['refused'] >= 150, pm
-    assert pm['accepted-write'] >= 5, pm
+        seen = scene.get(f'class:{cls}', 0) + retarget.get(f'class:{cls}', 0)
+        assert seen >= 8, (cls, scene, retarget)
     assert scene['refused'] >= 100, scene
     assert scene['accepted-write'] >= 5, scene
     assert retarget['refused'] >= 30, retarget
     assert retarget['accepted-write'] >= 3, retarget
-
-
-def _pre_fix_bug_resolver(mdir: Path, gid: str) -> Path | None:
-    """The v0.16.0 resolver, kept on purpose — transcribed from
-    `git show 76e28fb~1:src/godot_devkit/repo/pm/cli.py` `_grain_file`:
-    partition on '/bugs/', join the slug half, no segment guard. This is the
-    code the release review rejected; the corpus must still reach it."""
-    _, _, rest = gid.partition('/bugs/')
-    bf = mdir / 'bugs' / f'{rest}.md'
-    try:
-        return bf if bf.is_file() else None
-    except OSError:
-        return None
-
-
-def test_the_corpus_separates_the_pre_fix_resolver():
-    """The harness proven to have teeth, not just to be green.
-
-    Path-level: the generated stream (not just the fixed matrix) must keep
-    producing bug ids whose slug half resolves OUTSIDE bugs/. Live-fire: at
-    least one corpus id must make the pre-fix resolver hand back an EXISTING
-    sibling grain file — the exact cross-grain write of the v0.16.0 blocker.
-    """
-    rng = random.Random(SEED)
-    generated = [_mangle(rng, _PM_BASES) for _ in range(PM_CASES)]
-    bug_ids = [g for g in generated if '/bugs/' in g]
-    assert len(bug_ids) >= 20, len(bug_ids)
-    escapes = 0
-    for gid in bug_ids:
-        rest = gid.partition('/bugs/')[2]
-        resolved = os.path.normpath(os.path.join('bugs', rest + '.md'))
-        if not resolved.startswith('bugs' + os.sep):
-            escapes += 1
-    assert escapes >= 5, (
-        f'only {escapes} of {len(bug_ids)} generated bug ids escape the '
-        f'bugs/ slot at the path level — the fuzz has lost its teeth')
-    with _scratch(_build_pm) as (_, root):
-        mdir = root / 'pm' / 'roadmap' / '0.1-demo'
-        live = [gid for gid in list(_KILLERS) + bug_ids
-                if (hit := _pre_fix_bug_resolver(mdir, gid)) is not None
-                and not hit.resolve().is_relative_to((mdir / 'bugs').resolve())]
-        assert live, ('no corpus id makes the pre-fix resolver return an '
-                      'existing sibling grain — the blocker shape is gone')
-
-
-def test_decide_refuses_dot_segment_traversal_without_writing():
-    """Replaced the known-finding pin (0.17.0 decide-dot-segment-traversal).
-
-    At the pinned HEAD, `pm decide '0.1/..'` wrote the MILESTONE's
-    decisions.md through `features/..` and `pm decide '0.1/.'` minted
-    `features/decisions.md` — a slot the schema does not have — both at
-    exit 0. The resolver now refuses the segment before the join.
-    """
-    with _scratch(_build_pm) as (outer, root):
-        mdir = root / 'pm' / 'roadmap' / '0.1-demo'
-        base = _snap(outer)
-        for gid in ('0.1/..', '0.1/.', '0.1/..\\..'):
-            code, out, escaped = _run(('pm', 'decide', gid, 'pin', 'probe'))
-            assert escaped is None, (gid, escaped)
-            assert code == 2, (gid, code, out)
-        # Deeper spellings refuse on their own (story/bug) precondition —
-        # what matters is refusal WITHOUT a write, either exit code.
-        code, out, escaped = _run(('pm', 'decide', '0.1//', 'pin', 'probe'))
-        assert escaped is None and code in (1, 2), (code, out)
-        assert not (mdir / 'decisions.md').is_file()
-        assert not (mdir / 'features' / 'decisions.md').is_file()
-        assert _delta(base, _snap(outer)) == []
-
-
-def test_absolute_milestone_id_is_refused_not_a_glob_crash():
-    """Replaced the known-finding pin (0.17.0 absolute-milestone-id-crash).
-
-    At the pinned HEAD an absolute milestone id reached `Path.glob` as a
-    non-relative pattern and escaped as NotImplementedError — a traceback
-    where exit 2 belongs. The resolver now refuses before the glob.
-    """
-    with _scratch(_build_pm) as (outer, _):
-        base = _snap(outer)
-        for mid in ('/etc/hosts', '/', '\\\\host\\share', 'a/b', '..'):
-            code, out, escaped = _run(('pm', 'milestone', 'ready', mid))
-            assert escaped is None, (mid, escaped)
-            assert code == 2, (mid, code, out)
-        assert _delta(base, _snap(outer)) == []
 
 
 def test_overlong_path_arguments_are_refused_across_the_scene_plane():

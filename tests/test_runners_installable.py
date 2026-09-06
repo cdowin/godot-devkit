@@ -36,20 +36,23 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from support import REPO_ROOT  # noqa: E402
 
-from godot_devkit.repo import install  # noqa: E402
+from godot_devkit.godot import install  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which('bash') is None,
                                 reason='needs bash')
 
-INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
+INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 LIBRARY = INSTALLABLES / 'gdk_runners.sh'
 RUNNER = INSTALLABLES / 'import_cache.sh'
-# Every shell runner install-runners ships. Each one carries --help and
-# --self-test, and the argument surface below is fired at all of them: a runner
-# added to the plan and not here would be a runner nothing holds to the shape.
+# Every shell RUNNER install-runners ships — the library and what lands under
+# tools/dev/. Each one carries --help and --self-test, and the argument surface
+# below is fired at all of them: a runner added to the plan and not here would
+# be a runner nothing holds to the shape. The engine-boot guard ships on the
+# same plan but is a Claude Code hook, not a runner: its surface is a JSON
+# payload on stdin, and tests/test_hooks_payloads.py is its matrix.
 SCRIPTS = tuple(INSTALLABLES / name
-                for name, _rel in install.PLANS['install-runners']
-                if name.endswith('.sh'))
+                for name, rel in install.PLAN
+                if name.endswith('.sh') and rel.startswith('tools/dev/'))
 
 # The one line shape a consumer greps. Changing it is a minor bump at least.
 VERDICT = '[PARSE] PASS (2 files) — full log: .gate-reports/parse.log'
@@ -683,7 +686,7 @@ def test_a_consumer_sourcing_the_library_shellchecks_clean(tmp_path):
 @pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.stem)
 def test_every_shipped_runner_shellchecks_clean(script):
     """`shellcheck -x` on the installables themselves. They land in consumer
-    trees whose own `check shell` gate runs over tools/ — a finding shipped
+    trees whose own shell gate runs over tools/ — a finding shipped
     from here reddens somebody else's commit gate."""
     done = subprocess.run(['shellcheck', '-x', script.name],
                           cwd=script.parent, text=True, capture_output=True)
@@ -700,7 +703,7 @@ CONSUMER_NAMES = (r'\bnullbound\b', r'\bNULLBOUND\b', r'\btrail\b', r'\bTRAIL\b'
 
 
 @pytest.mark.parametrize('name', [name for name, _rel
-                                  in install.PLANS['install-runners']],
+                                  in install.PLAN],
                          ids=lambda n: n)
 def test_no_installable_names_the_consumer_it_was_extracted_from(name):
     body = (INSTALLABLES / name).read_text(encoding='utf-8')

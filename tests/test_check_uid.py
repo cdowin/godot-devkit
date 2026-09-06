@@ -10,6 +10,7 @@ a repair that does not converge is worse than no repair.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -504,6 +505,42 @@ class CliRouting(unittest.TestCase):
             code, _ = self.run_cli('check', 'all', '--fix')
         self.assertEqual(code, 2)
 
+    # The verb surface after the repo family left (0.25.0). One tuple, asked
+    # of both `--help` and the router: a verb documented and not routed, or
+    # routed and not documented, is the drift this pins.
+    GODOT_VERBS = ('scene', 'tiles', 'scene-diff', 'refs', 'orphans',
+                   'autoloads', 'install-runners', 'check')
+    RETIRED = ('pm', 'init', 'gates-extra', 'install-ci', 'install-agents',
+               'install-hooks', 'install-gates', 'install-sdlc')
+
+    def test_help_lists_exactly_the_godot_verbs(self) -> None:
+        from godot_devkit import cli
+        code, out = self.run_cli('--help')
+        self.assertEqual(code, 0)
+        documented = {m.group(1) for m in re.finditer(
+            r'^\s+godot-devkit ([a-z-]+)', out, re.M)}
+        self.assertEqual(documented, set(self.GODOT_VERBS), documented)
+        self.assertEqual(set(self.RETIRED), set(cli.RETIRED_COMMANDS))
+        self.assertEqual(set(cli.KNOWN_GATES),
+                         {'uid', 'tres', 'props', 'defaults', 'rng',
+                          'tres-comment', 'unit-disk', 'test-shape'})
+
+    def test_a_retired_verb_exits_2_naming_the_second_pin(self) -> None:
+        # One line, exit 2, and the line says where the verb went: a consumer
+        # whose Makefile still says `godot-devkit pm` is told about the second
+        # pin rather than about an unknown command.
+        retired = ([(verb,) for verb in self.RETIRED]
+                   + [('check', gate) for gate in
+                      ('doc', 'shell', 'pm', 'hooks', 'repo-hygiene')])
+        for argv in retired:
+            with self.subTest(argv=argv):
+                with temp_repo('uid_repo', only=CLEAN):
+                    code, out = self.run_cli(*argv)
+                self.assertEqual(code, 2, out)
+                self.assertEqual(len(out.strip().splitlines()), 1, out)
+                self.assertIn('agentic-sdlc', out)
+                self.assertNotIn('unknown command', out)
+
 
 class AggregateRoster(unittest.TestCase):
     """`[checks] all` — which gates apply to THIS repo. Most of the roster
@@ -528,10 +565,9 @@ class AggregateRoster(unittest.TestCase):
         # accepts is a name `check <name>` runs. A gate in one and not the
         # other is either unreachable or a silent hole in the typo refusal.
         #
-        # A SUBPROCESS per gate, for the reason `check doc` binds its scope and
-        # its repo root at IMPORT: running the roster in-process leaves that
-        # module pointing at a deleted temp dir and the next test inherits it.
-        # The assertion is routing only — a gate's own verdict is its own test.
+        # A SUBPROCESS per gate, so nothing a gate caches at import outlives
+        # the temp repo it was pointed at. The assertion is routing only — a
+        # gate's own verdict is its own test.
         import subprocess
         from godot_devkit import cli
         with temp_repo('uid_repo', only=CLEAN) as root:

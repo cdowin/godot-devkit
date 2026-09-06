@@ -117,10 +117,11 @@ an agent to grep a gate's output for its result. Enforced by `tests/test_makefil
 (`unit`, `test`, `fuzz`, `matrix`) live in `Makefile.tiers`. `agentic-sdlc adopt <milestone>`
 is what proves a pin bump; a hand-edit of an installed file is what `install-* --diff` shows.
 
-- Behavior gate: `make selfcheck` — `godot-devkit check all` (from `src/`) over this
-  repo's own tree, which is a real Godot-less project with a real PM tree. It is a member
-  of `make check` through `[gates] extra`, after the pinned kit's own checks. Self-hosting
-  is the behavior proof: every check runs against something committed here.
+- Behavior gate: the installables are proven by installing them into a temp repo and
+  running them there (`tests/test_runners_installable.py`, `tests/test_hooks_payloads.py`),
+  never by this repo's copies; the eight Godot checks are proven on the fixture repos under
+  `tests/fixtures/`. This tree holds no scene outside its fixtures, so a Godot gate pointed
+  at it reports a 0-file census — rule 4 working, not a gate to add.
 - Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
   exactly rather than being re-derived; `make test` runs them too.
 - **A write verb under test writes to scratch, never to a fixture in place.** Copy the
@@ -136,7 +137,7 @@ is what proves a pin bump; a hand-edit of an installed file is what `install-* -
 
 This package runs its own tooling on its own tree, and that is a gate, not a demo.
 
-- `pm/roadmap/` is a real PM tree, operated by the PINNED kit's `pm` (`make pm ARGS="…"`; `[pm.states.<kind>]` in `devkit.toml` is its flow, written by `pm init`), and `devkit.toml` turns on **every** rule except D8 (which encodes bump-at-START; we bump at close). `agentic-sdlc check all` must exit 0 here, and so must `make selfcheck` — this package's own `check shell` and `check hooks` from `src/`. Its own `check doc` and `check pm` are NOT run on this tree: the first cannot see through `-include $(GDK_TIERS_MK)`, the second's V6 compares against a renderer this tree no longer uses. They stay proven on the fixture trees until the family leaves (0.25.0).
+- `pm/roadmap/` is a real PM tree, operated by the PINNED kit's `pm` (`make pm ARGS="…"`; `[pm.states.<kind>]` in `devkit.toml` is its flow, written by `pm init`), and `devkit.toml` turns on **every** rule except D8 (which encodes bump-at-START; we bump at close). `agentic-sdlc check all` must exit 0 here. The repo-family gates (`doc`, `shell`, `pm`, `hooks`) are that kit's now — this package ships none of them (0.25.0).
 - Work follows the milestone-branch flow — [`SDLC.md`](SDLC.md) §1 — the same as its consumers: `main` is merge-commit-only, at close. D9 + D10 in `[pm] checks` are what hold this tree to it.
 - CI is `.github/workflows/verify.yml`, whose one job runs `make milestone` — the same target the local full gate is. The same target is not the same ANSWER: a gate that reads repo-LOCAL state answers differently in a checkout, and `core.hooksPath` is the measured case (nothing tracked carries it, so `check hooks` was UNARMED on every CI run while every developer's tree was armed). Whatever the gate needs and the checkout lacks is a step ahead of it — the arming script behind `hashFiles('tools/setup-hooks.sh')`. It is INSTALLED by `agentic-sdlc install-ci`, not hand-written, and after the write it is this repo's: `install-ci --diff` shows what a re-install would change.
 - The review + build contract under `.claude/agents/verification-*.md` is INSTALLED by `agentic-sdlc install-agents`, not hand-written; this repo carries the pair it runs and none of the base roster. `code-reviewer.md` is this repo's own. This package's OWN installables under `src/godot_devkit/repo/installables/` are proven by installing them into a temp repo, never by this repo's copies.

@@ -9,10 +9,11 @@ That is a contract, not a preference. Before it, an agent running the full gate
 here had to invent `… | grep -E "MATRIX|check:doc\\]|check:pm\\] (PASS|FAIL)|
 passed|failed" | tail -8` — five output shapes, guessed at, per session.
 
-Two kinds of case, and the split is deliberate: `gates` is exercised for REAL
-(it runs in under a second, and behavior is the only proof that matters), while
-the slow targets — `test`, `matrix` — are held by a census over the Makefile
-itself. Running the whole suite inside the suite is not a test, and a
+Two kinds of case, and the split is deliberate: the gate SHAPE is exercised for
+REAL — `unit` run against a stand-in pytest that prints the summary line and
+runs nothing, so the capture, the verdict and the failure excerpt are behavior
+rather than a claim — while every target is held by a census over the
+Makefile itself. Running the whole suite inside the suite is not a test, and a
 census asked of the FILE catches the thing that actually happens: somebody adds
 a target and forgets the helper.
 """
@@ -39,11 +40,27 @@ MAKEFILE = REPO_ROOT / 'Makefile'
 # reads both files this repo owns. Makefile.devkit itself is the pinned
 # kit's, held current by `agentic-sdlc adopt`, and is not this file's to census.
 OWN_MAKEFILES = (MAKEFILE, REPO_ROOT / 'Makefile.tiers')
-VERDICT = re.compile(r'^\[SELFCHECK\] .+ — full log: \.gate-reports/selfcheck\.log$')
 
 # Nothing this repo defines is exempt: `help`, `pm`, `check`, `precommit` and
 # `milestone` come from the include and never appear in the files censused.
 NOT_A_GATE: set[str] = set()
+
+# A stand-in pytest: prints the one summary line the tier's `SUM_PYTEST` reads
+# back, runs nothing. `GDK_STANDIN_FAIL` makes it red the way pytest is red —
+# a `FAILED` line the gate's failure excerpt has to surface, then a non-zero
+# exit. The recipe under test is the REAL `unit` recipe; only the interpreter
+# behind `PYTEST=` is swapped, the same way the matrix cases swap `UV=`.
+PYTEST_STANDIN = """\
+#!/usr/bin/env bash
+echo "stand-in pytest ran with: $*"
+if [ -n "${GDK_STANDIN_FAIL:-}" ]; then
+  echo "FAILED tests/test_stand_in.py::test_red - assert False"
+  echo "1 failed, 2 passed in 0.01s"
+  exit 1
+fi
+echo "3 passed in 0.01s"
+"""
+STANDIN_RAN = 'stand-in pytest ran with:'
 
 
 def make(*args: str, **env_extra: str) -> subprocess.CompletedProcess:
@@ -86,49 +103,70 @@ def recipes() -> dict[str, str]:
     return {name: '\n'.join(body) for name, body in found.items()}
 
 
-# --- the behavior, on the one target fast enough to prove it -----------------
-def test_a_gate_prints_exactly_one_verdict_line_naming_its_log():
-    done = make('selfcheck')
+# --- the behavior, on the tier every edit runs, behind a stand-in ------------
+def unit_run(tmp_path: Path, *args: str, **env_extra: str
+             ) -> tuple[subprocess.CompletedProcess, Path, re.Pattern]:
+    """`make unit` with the stand-in behind PYTEST, logging under tmp_path.
+
+    The report dir is redirected on purpose: this suite runs INSIDE `make
+    unit`, whose transcript is `.gate-reports/unit.log`, and a nested run into
+    the same slot would truncate the outer gate's log and hand its summary the
+    stand-in's `3 passed`. Returns the run, the log, and the verdict shape.
+    """
+    standin = tmp_path / 'pytest-standin'
+    standin.write_text(PYTEST_STANDIN, encoding='utf-8')
+    standin.chmod(0o755)
+    reports = tmp_path / 'reports'
+    done = make('unit', f'PYTEST={standin}', *args,
+                GDK_GATE_REPORT_DIR=str(reports), **env_extra)
+    log = reports / 'unit.log'
+    verdict = re.compile(rf'^\[UNIT\] .+ — full log: {re.escape(str(log))}$')
+    return done, log, verdict
+
+
+def test_a_gate_prints_exactly_one_verdict_line_naming_its_log(tmp_path):
+    done, log, verdict = unit_run(tmp_path)
     assert done.returncode == 0, done.stdout + done.stderr
     lines = done.stdout.splitlines()
     assert len(lines) == 1, done.stdout
-    assert VERDICT.match(lines[0]), lines[0]
+    assert verdict.match(lines[0]), lines[0]
+    assert '3 passed' in lines[0], lines[0]
 
-    log = REPO_ROOT / '.gate-reports' / 'selfcheck.log'
     assert log.exists(), 'the verdict named a log that was never written'
-    assert '[check:shell]' in log.read_text(encoding='utf-8'), (
+    assert STANDIN_RAN in log.read_text(encoding='utf-8'), (
         'the transcript the verdict points at does not hold the run')
 
 
-def test_an_ambient_verbose_does_not_turn_the_quiet_run_loud(monkeypatch):
+def test_an_ambient_verbose_does_not_turn_the_quiet_run_loud(tmp_path, monkeypatch):
     """The installed CI exports VERBOSE=1 for the whole `make milestone` step,
     and this suite runs inside it: the static gate printed seven lines there
     and one under bare pytest. The default the case above speaks of is VERBOSE
     UNSET, whatever the environment the suite was started from says."""
     monkeypatch.setenv('VERBOSE', '1')
-    test_a_gate_prints_exactly_one_verdict_line_naming_its_log()
+    test_a_gate_prints_exactly_one_verdict_line_naming_its_log(tmp_path)
 
 
-def test_verbose_streams_the_transcript_and_still_ends_with_the_verdict():
-    done = make('selfcheck', VERBOSE='1')
+def test_verbose_streams_the_transcript_and_still_ends_with_the_verdict(tmp_path):
+    done, _, verdict = unit_run(tmp_path, VERBOSE='1')
     assert done.returncode == 0, done.stdout + done.stderr
     lines = done.stdout.splitlines()
     assert len(lines) > 1, 'VERBOSE=1 printed no more than the verdict'
-    assert '[check:shell]' in done.stdout
-    assert VERDICT.match(lines[-1]), lines[-1]
+    assert STANDIN_RAN in done.stdout
+    assert verdict.match(lines[-1]), lines[-1]
 
 
-def test_a_failing_gate_shows_what_broke_and_exits_nonzero():
+def test_a_failing_gate_shows_what_broke_and_exits_nonzero(tmp_path):
     """The quiet default is only safe if a FAILURE is still legible without
     going to find the log. A verdict alone would have made every red run a
     two-step."""
-    devkit = f'env PYTHONPATH={REPO_ROOT}/src python3 -m godot_devkit.cli check nosuchcheck'
-    done = make('selfcheck', f'GODOT_DEVKIT={devkit}')
+    done, _, verdict = unit_run(tmp_path, GDK_STANDIN_FAIL='1')
     assert done.returncode != 0
-    assert 'nosuchcheck' in done.stdout + done.stderr, done.stdout + done.stderr
-    verdict = [ln for ln in done.stdout.splitlines() if ln.startswith('[SELFCHECK]')]
-    assert len(verdict) == 1, done.stdout
-    assert 'FAIL' in verdict[0], verdict[0]
+    assert 'FAILED tests/test_stand_in.py::test_red' in done.stdout, (
+        done.stdout + done.stderr)
+    lines = [ln for ln in done.stdout.splitlines() if ln.startswith('[UNIT]')]
+    assert len(lines) == 1, done.stdout
+    assert verdict.match(lines[0]), lines[0]
+    assert 'FAIL' in lines[0] and '1 failed' in lines[0], lines[0]
 
 
 # --- the census: no target gets to stay loud ---------------------------------
@@ -136,7 +174,7 @@ def test_every_gate_shaped_target_routes_through_the_shipped_helper():
     bodies = recipes()
     gates = {name: body for name, body in bodies.items()
              if body.strip() and name not in NOT_A_GATE}
-    assert len(gates) >= 5, (
+    assert len(gates) >= 4, (
         f'census collapsed to {sorted(gates)} — a parse that finds no targets '
         f'would pass this file vacuously')
     loud = sorted(name for name, body in gates.items()

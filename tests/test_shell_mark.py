@@ -38,33 +38,30 @@ SUPPORT = TESTS / 'support'
 # are what the modules under tests/ currently do, and a module that changes
 # sides changes them. Marked is a COUNT — a peer adding a test to a spawning
 # module must never have to touch this file. Unmarked is the roster, because
-# the nine that do not spawn are the nine three interpreters still run, and
+# the seven that do not spawn are the seven three interpreters still run, and
 # each one is worth naming.
-MARKED_MODULES = 36
+MARKED_MODULES = 19
 UNMARKED_MODULES = (
     'test_apply.py',
     'test_boundaries.py',
     'test_consumer_independence.py',
-    'test_fuzz_markdown.py',
     'test_scene_summary.py',
     'test_tiles.py',
     'test_tscn_roundtrip.py',
     'test_uid_codec.py',
-    'test_verdict.py',
 )
 
-# The `tests/support` names whose use means a spawn. Five of the package's 23
-# helpers: `temp_repo` and `tree` (`git init` a scratch repo), `git`, and
-# `commit`/`porcelain`, which reach it through `git`. The other eighteen —
-# `run_check`, `run_cli`, `run_gate`, the ledger line builders — run in
-# process, which is exactly why the derivation reads the call graph instead of
-# the module's import list.
-SPAWNING_HELPERS = frozenset({'commit', 'git', 'porcelain', 'temp_repo', 'tree'})
+# The `tests/support` names whose use means a spawn. One of the package's two
+# helpers: `temp_repo` (`git init` a scratch repo). The other, `run_check`,
+# runs in process, which is exactly why the derivation reads the call graph
+# instead of the module's import list. (The pm support module, with `tree`,
+# `git`, `commit` and `porcelain`, left with the pm tracker in 0.25.0.)
+SPAWNING_HELPERS = frozenset({'temp_repo'})
 
 # A broken SUPPORT path makes `support_spawn_names()` empty and silently
-# unmarks a third of the suite, so the census asserts the package was found at
-# all. A floor, not the exact 24: it is here to catch a moved root.
-MIN_SUPPORT_HELPERS = 15
+# unmarks most of the suite, so the census asserts the package was found at
+# all. The package is two helpers today, so the floor is the count itself.
+MIN_SUPPORT_HELPERS = 2
 
 # Ways to start a process that the derivation does NOT read. Anything reached
 # off the `subprocess` name is exempt — that import is the signal it DOES read.
@@ -158,7 +155,8 @@ class NotEveryMentionIsASpawn(unittest.TestCase):
     def test_a_module_importing_only_the_repo_root_is_not_a_spawn(self):
         # `from support import REPO_ROOT` is how half the suite puts src/ on
         # the path. Naming the spawning package is not using it.
-        self.assertFalse(conftest.module_spawns(TESTS / 'test_verdict.py'))
+        self.assertFalse(conftest.module_spawns(
+            TESTS / 'test_consumer_independence.py'))
 
 
 class NoUnreadSpawnSpelling(unittest.TestCase):

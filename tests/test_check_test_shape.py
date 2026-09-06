@@ -148,22 +148,30 @@ GOOD_HEADER = ('extends "res://tests/integration/support/scenario_base.gd"\n'
                'func run() -> void:\n\tpass\n')
 
 
-INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'repo' / 'installables'
+INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 INTEGRATION_RUNNER = INSTALLABLES / 'integration.sh'
-MAKEFILE_DEVKIT = INSTALLABLES / 'Makefile.devkit'
 RUNNER_REL = 'tools/dev/runners/integration.sh'
 CAPTURE = 'tests/integration/thing_capture.gd'
 SUPPORT_STUB = 'tests/integration/support/stub.gd'
 KEEP_LIST = {'GDK_CAPTURE_GATE_RE': '^(thing_capture)$'}
 # The two lines a consumer's Makefile is, per the README.
 CONSUMER_MAKEFILE = 'DEVKIT_VERSION := v0.0.0\ninclude Makefile.devkit\n'
+# The include the consumer's two lines pull in, reduced to the one target the
+# gate asks of it — the `integration-list` recipe as the standard set spells
+# it. The Godot target roster left `Makefile.devkit` with the repo family
+# (0.25.0): the include is agentic-sdlc's now, and the Godot targets ride on
+# the tier file `install-runners` writes beside it.
+INCLUDE_STUB = ('GDK_RUNNERS_DIR ?= tools/dev/runners\n'
+                '.PHONY: integration-list\n'
+                'integration-list:\n'
+                '\t@bash $(GDK_RUNNERS_DIR)/integration.sh --list\n')
 
 
 def _makefile(root, extra: str = '') -> None:
     """The consumer's Makefile: the pin, the include, and whatever it exports
     to its runners — which is where a keep-list lives, and why the roster is
     asked through `make integration-list` rather than `bash … --list`."""
-    shutil.copy2(MAKEFILE_DEVKIT, root / 'Makefile.devkit')
+    (root / 'Makefile.devkit').write_text(INCLUDE_STUB, encoding='utf-8')
     (root / 'Makefile').write_text(extra + CONSUMER_MAKEFILE, encoding='utf-8')
 
 
