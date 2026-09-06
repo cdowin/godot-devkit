@@ -210,3 +210,5 @@
 {"ts":"2026-09-06T16:47:26Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":4687}
 {"ts":"2026-09-06T16:47:28Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":380}
 {"ts":"2026-09-06T16:48:44Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/06-the-tree-closes-through-the-belts","from":"planning","to":"building"}
+{"ts":"2026-09-06T16:49:06Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1240,"census":43}
+{"ts":"2026-09-06T16:49:06Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/06-the-tree-closes-through-the-belts","from":"building","to":"done"}

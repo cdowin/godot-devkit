@@ -3,7 +3,7 @@ id: 0.25.0/the-agentic-half-leaves/06-the-tree-closes-through-the-belts
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: Every story, this feature and the milestone close through the pinned belts
-status: building
+status: done
 owner:
 depends_on: []
 ---
