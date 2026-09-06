@@ -3,8 +3,8 @@ id: 0.25.0/the-agentic-half-leaves/02-install-runners-is-the-godot-kits-installe
 feature: 0.25.0/the-agentic-half-leaves
 milestone: "0.25.0"
 name: install-runners writes the Godot tiers, runners, sandbox hook and Makefile.tiers into a consumer
-status: planning
-owner:
+status: building
+owner: claude
 depends_on: []
 ---
 
@@ -28,3 +28,7 @@ depends_on: []
 ## Out of scope
 
 `Makefile.devkit`. It is agentic-sdlc's; a consumer gets it from that pin.
+
+## Close
+
+done: ad47964 — install-runners writes the runners, compile sweep, sandbox hook, uid-guard workflow and a new Makefile.tiers (the Godot roster, GDK_PRECOMMIT/MILESTONE_TIERS, godot-check) reading GODOT_DEVKIT_VERSION; idempotent, --diff, collision and header-only refusals proven, `make -n precommit|milestone` resolve on a fixture holding both pins; this repo self-hosts the file (Python tier renamed pyunit).

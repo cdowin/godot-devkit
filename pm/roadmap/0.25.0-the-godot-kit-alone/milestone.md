@@ -68,5 +68,5 @@ with it, and **`Makefile.devkit` is the entire middle tier**: it carries the gat
 
 **phase 1**
 
-1. `the-agentic-half-leaves` · building · 0/6 stories
+1. `the-agentic-half-leaves` · building · 1/6 stories
 <!-- /pm:execution -->
