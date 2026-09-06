@@ -53,8 +53,8 @@ def file_exists(path: Path) -> bool:
     so a write verb handed an over-long path came out as a raw traceback or as
     a refusal depending on which interpreter `uvx` picked. False is the answer
     both readings want: nothing is there, and the caller's own missing-file
-    refusal names the path. The write plane's copy of the guard the pm plane
-    grew for exactly this (`repo/pm/cli._exists`).
+    refusal names the path. The guard the retired tracker grew for exactly
+    this, kept on the write plane.
     """
     try:
         return path.is_file()

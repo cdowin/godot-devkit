@@ -4,7 +4,7 @@ The same review that found six silent censuses found six half-writes: three
 scaffolder refusal paths that raised with an earlier rename already on disk (and
 already in the git INDEX, via `git mv --force`), a symlinked slot written
 THROUGH to a file outside the grain it was asked to fill, `install-agents`
-half-installing twice, and `pm collapse` deleting uncommitted prose. Every one
+half-installing twice, and a tree collapse deleting uncommitted prose. Every one
 of them printed "nothing was written" while something had been.
 
 The shape is that a writer DECIDES AS IT GOES. `target.write_text(...)` inside a

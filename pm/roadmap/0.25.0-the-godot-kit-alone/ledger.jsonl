@@ -173,3 +173,9 @@
 {"ts":"2026-09-06T14:10:03Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":362}
 {"ts":"2026-09-06T14:10:50Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":46816,"census":576}
 {"ts":"2026-09-06T14:10:51Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":55190}
+{"ts":"2026-09-06T14:10:52Z","kind":"status","grain":"0.25.0/the-agentic-half-leaves/05-every-surface-says-the-godot-kit-alone","from":"planning","to":"building"}
+{"ts":"2026-09-06T14:18:14Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":4431}
+{"ts":"2026-09-06T14:19:04Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":4475}
+{"ts":"2026-09-06T14:19:06Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":376}
+{"ts":"2026-09-06T14:19:56Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":49033,"census":576}
+{"ts":"2026-09-06T14:19:57Z","kind":"gate","gate":"precommit","verdict":"PASS","duration_ms":57470}

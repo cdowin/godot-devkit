@@ -45,6 +45,6 @@ One case per criterion at the cheapest tier; the deletions carry their reasons i
 2. `02-install-runners-is-the-godot-kits-installer` · done (claude)
 3. `03-the-eight-godot-checks-are-this-packages-own` · done (claude)
 4. `04-the-suite-is-the-godot-kits-and-lean` · done
-5. `05-every-surface-says-the-godot-kit-alone` · planning
+5. `05-every-surface-says-the-godot-kit-alone` · building
 6. `06-the-tree-closes-through-the-belts` · planning
 <!-- /pm:execution -->

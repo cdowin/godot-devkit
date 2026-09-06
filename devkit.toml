@@ -32,6 +32,14 @@ all = ["doc", "pm", "shell", "hooks"]
 [gates]
 extra = ["godot-check"]
 
+# What the pinned kit's `check doc` holds to the tree: the always-loaded files
+# (its stock scope) plus the surfaces a consumer reads first. Every backtick
+# path and `make <target>` in them must resolve; docs/reviews/ is records.
+[doc]
+scope = ["CLAUDE.md", "README.md", "SDLC.md", "docs/*.md", "docs/design/*.md",
+         ".claude/rules/*.md", ".claude/agents/*.md"]
+ephemeral = ["docs/reviews/"]
+
 # The verification ladder `agentic-sdlc verify` runs, one make target per rung.
 # story is the inner loop (the suite minus the spawns, seconds); feature is the
 # close of a feature (the whole suite on the floor, minutes); milestone is the

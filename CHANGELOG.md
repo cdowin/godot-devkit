@@ -25,6 +25,21 @@
   `[checks] all` because that key is agentic-sdlc's roster in the same file, and two kits each refusing
   the other's names cannot share one list. A consumer joins the eight to `make check` with
   `[gates] extra = ["godot-check"]` — the target `install-runners` writes into `Makefile.tiers`.
+- **The suite is the Godot kit's, and lean — and `pyunit` is the story rung.** The modules that proved
+  the repo family left with it; of what remained, every case that proved a rule at a second altitude,
+  replayed a row the shipped corpora already hold, or added no failure mode went, each named with its
+  subsumer in the commit: 679 → 576 collected, `make test` 72s → 47s, test-to-source statements 1.15 →
+  1.10. Fifteen deliberately-broken probes — one per Godot gate, per write verb, the installer and the
+  parse→serialise identity — redden what is left; `check tres` was the one a blind detector slipped past,
+  and its cheapest case now carries the finding. `make pyunit` (the suite minus the spawns, seconds) is
+  `[verify] story`; `make test` is `[verify] feature`. `[tests] budget` and `[tests] cases` in
+  `devkit.toml` hold both tiers ten percent above the measurement, graded by `agentic-sdlc check budget`
+  off a census the tier recipes now file on the ledger row.
+- **Every surface says the Godot kit alone.** `README.md` is the scene verbs, the eight gates, the two
+  pins and `install-runners`; `CLAUDE.md` is the hard rules of a scene kit and the ladder as this repo
+  runs it; `SDLC.md` points at `docs/sdlc-protocol.md` and keeps only this repo's own conventions;
+  `docs/design/two-kits.md` is the shape as shipped. `[doc] scope` widened to hold all four plus
+  `docs/*.md`. Both version sites say 0.25.0.
 
 ## v0.24.0 — 2026-09-04
 

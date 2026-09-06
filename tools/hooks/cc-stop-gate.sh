@@ -10,7 +10,7 @@ set -eu
 # --- project config (yours to edit after install — the file is your repo's) --
 # The static slice of the gate, run first; cheap enough to pay on every agent stop.
 # godot-devkit: `check` is the agentic-sdlc gates plus this package's own
-# `selfcheck` ([gates] extra), under a second together.
+# `godot-check` ([gates] extra), seconds together.
 GATE_STATIC=(make check)
 # The unit tier, run as "${GATE_UNIT[@]}" SYS="<slices>"; an empty SYS is the whole tier.
 # godot-devkit: `pyunit` is the suite minus the spawns (-m "not shell"), seconds;
