@@ -1,0 +1,6 @@
+config_version=5
+
+[application]
+
+config/name="godot project fixture"
+config/features=PackedStringArray("4.4")

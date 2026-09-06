@@ -543,32 +543,54 @@ class CliRouting(unittest.TestCase):
 
 
 class AggregateRoster(unittest.TestCase):
-    """`[checks] all` — which gates apply to THIS repo. Most of the roster
-    reads `.tscn`/`.tres`/`.gd`/shell, so a repo holding none of them gets a
+    """`[checks] godot` — which gates apply to THIS repo. Most of the roster
+    reads `.tscn`/`.tres`/`.gd`, so a repo holding none of them gets a
     handful of 0-file censuses and rule 4 correctly reddens every one; that is
-    the roster being wrong for the repo, not a reason to weaken a gate."""
+    the roster being wrong for the repo, not a reason to weaken a gate. The
+    key is `godot`, not `all`: `all` is agentic-sdlc's roster in the same
+    devkit.toml, and each kit refuses a name it does not know."""
 
     run_cli = CliRouting.run_cli
+    THE_EIGHT = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+                 'unit-disk', 'test-shape')
 
-    def test_the_default_roster_is_every_gate_flagged_for_it(self) -> None:
-        # ONE roster, with the answer to "is this in the default aggregate?"
-        # on the gate itself. Two lists were two chances for a gate to be
-        # dispatchable and invisible to `[checks] all`, or the reverse.
+    def _check_all(self, root: Path) -> tuple[int, str]:
+        # A fresh process, so two runs compare bytes and not cache state.
+        proc = subprocess.run(
+            [sys.executable, '-m', 'godot_devkit.cli', 'check', 'all'],
+            cwd=root, capture_output=True, text=True,
+            env={**os.environ, 'PYTHONPATH': str(REPO_ROOT / 'src')})
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def test_the_stock_roster_is_the_eight_and_declaring_them_changes_nothing(self) -> None:
+        # ONE roster: the eight, in the order they run, and a repo with NO
+        # devkit.toml gets byte-identical output to one declaring exactly
+        # that (rule 5). Asked of the committed clean Godot project, where
+        # all eight PASS — the tree `make godot-check` stages for this repo's
+        # own `make check`, so what is proven here is what that gate runs.
         from godot_devkit import cli
-        with temp_repo('uid_repo', only=CLEAN):
-            self.assertEqual(
-                cli.all_roster(),
-                tuple(n for n, on in cli.KNOWN_GATES.items() if on))
+        self.assertEqual(cli.KNOWN_GATES, self.THE_EIGHT)
+        with temp_repo('godot_project') as root:
+            self.assertEqual(cli.all_roster(), self.THE_EIGHT)
+            stock_code, stock = self._check_all(root)
+            (root / 'devkit.toml').write_text(
+                '[checks]\ngodot = [' + ', '.join(f'"{g}"' for g in self.THE_EIGHT)
+                + ']\n', encoding='utf-8')
+            declared_code, declared = self._check_all(root)
+        self.assertEqual(stock_code, 0, stock)
+        self.assertEqual(declared_code, 0, declared)
+        self.assertEqual(stock, declared)
+        for gate in self.THE_EIGHT:
+            self.assertIn(f'[check:{gate}] PASS', stock)
 
     def test_every_known_gate_is_dispatchable(self) -> None:
-        # The property the split list could not state: a name `[checks] all`
-        # accepts is a name `check <name>` runs. A gate in one and not the
-        # other is either unreachable or a silent hole in the typo refusal.
+        # The property the split list could not state: a name `[checks]
+        # godot` accepts is a name `check <name>` runs. A gate in one and not
+        # the other is either unreachable or a silent hole in the typo refusal.
         #
         # A SUBPROCESS per gate, so nothing a gate caches at import outlives
         # the temp repo it was pointed at. The assertion is routing only — a
         # gate's own verdict is its own test.
-        import subprocess
         from godot_devkit import cli
         with temp_repo('uid_repo', only=CLEAN) as root:
             for name in cli.KNOWN_GATES:
@@ -586,7 +608,6 @@ class AggregateRoster(unittest.TestCase):
         # copy, so the help and the contract cannot drift apart. A gate whose
         # docstring never names its config section is a gate whose scope a
         # consumer has to read the source to discover.
-        import subprocess
         from godot_devkit import cli
         with temp_repo('uid_repo', only=CLEAN) as root:
             for name in cli.KNOWN_GATES:
@@ -609,16 +630,27 @@ class AggregateRoster(unittest.TestCase):
     def test_a_declared_roster_runs_exactly_what_it_names(self) -> None:
         with temp_repo('uid_repo', only=CLEAN) as root:
             (root / 'devkit.toml').write_text(
-                '[checks]\nall = ["uid"]\n', encoding='utf-8')
+                '[checks]\ngodot = ["uid"]\n', encoding='utf-8')
             code, out = self.run_cli('check', 'all')
         self.assertEqual(code, 0, out)
         self.assertIn('[check:uid]', out)
         self.assertNotIn('[check:tres]', out)
 
+    def test_the_other_kits_roster_key_is_not_read(self) -> None:
+        # `[checks] all` is agentic-sdlc's, and it names gates this package
+        # has never heard of. Reading it would refuse every two-pin tree.
+        with temp_repo('uid_repo', only=CLEAN) as root:
+            (root / 'devkit.toml').write_text(
+                '[checks]\nall = ["doc", "pm"]\ngodot = ["uid"]\n',
+                encoding='utf-8')
+            code, out = self.run_cli('check', 'all')
+        self.assertEqual(code, 0, out)
+        self.assertIn('[check:uid]', out)
+
     def test_an_unknown_gate_name_is_exit_2_not_a_narrowed_run(self) -> None:
         with temp_repo('uid_repo', only=CLEAN) as root:
             (root / 'devkit.toml').write_text(
-                '[checks]\nall = ["uid", "tres!"]\n', encoding='utf-8')
+                '[checks]\ngodot = ["uid", "tres!"]\n', encoding='utf-8')
             code, out = self.run_cli('check', 'all')
         self.assertEqual(code, 2, out)
         self.assertIn('unknown gate(s) tres!', out)
@@ -626,7 +658,7 @@ class AggregateRoster(unittest.TestCase):
     def test_a_bare_string_is_refused_rather_than_iterated(self) -> None:
         with temp_repo('uid_repo', only=CLEAN) as root:
             (root / 'devkit.toml').write_text(
-                '[checks]\nall = "uid"\n', encoding='utf-8')
+                '[checks]\ngodot = "uid"\n', encoding='utf-8')
             code, out = self.run_cli('check', 'all')
         self.assertEqual(code, 2, out)
         self.assertIn('must be a list of strings', out)

@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://8mqusi7gts8g"]
+
+[ext_resource type="Script" uid="uid://bpjfgww1sv2s2" path="res://systems/mover.gd" id="1_mover"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_mover")
+speed = 2.0

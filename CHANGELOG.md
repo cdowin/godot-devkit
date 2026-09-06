@@ -18,6 +18,13 @@
   whole-file writes, a differing destination refused naming `--force`, `--diff` writes nothing, a
   header-only edit of the sandbox hook reported as such; the run prints the `.claude/settings.json`
   entry that fires the hook. `Makefile.devkit` is no longer written here — it is agentic-sdlc's.
+- **`check all` is the eight Godot gates, stock — and the roster key is `[checks] godot`.** Five gates
+  that were out of the default aggregate (`defaults`, `rng`, `tres-comment`, `unit-disk`, `test-shape`)
+  are in it now; a repo narrows with `[checks] godot = [...]`, an unknown name there exits 2, and a repo
+  with no `devkit.toml` gets byte-identical output to one declaring the eight. The key moved off
+  `[checks] all` because that key is agentic-sdlc's roster in the same file, and two kits each refusing
+  the other's names cannot share one list. A consumer joins the eight to `make check` with
+  `[gates] extra = ["godot-check"]` — the target `install-runners` writes into `Makefile.tiers`.
 
 ## v0.24.0 — 2026-09-04
 

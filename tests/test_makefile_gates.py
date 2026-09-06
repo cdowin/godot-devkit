@@ -178,6 +178,28 @@ def test_a_failing_gate_shows_what_broke_and_exits_nonzero(tmp_path):
     assert 'FAIL' in lines[0] and '1 failed' in lines[0], lines[0]
 
 
+def test_make_check_runs_the_pinned_roster_and_then_the_godot_roster(tmp_path):
+    """This repo's static gate is two rosters through one seam: the pinned
+    kit's `check all` (`[CHECK]`), then `godot-check` from `[gates] extra` —
+    Makefile.tiers' target, `godot-devkit check all` over the committed clean
+    Godot project (`[GODOT]`). Two verdict lines, nothing else on stdout; the
+    second says all eight ran. The real gate, run for real — `make check` is
+    seconds, and a census over the files could not prove the seam fires."""
+    reports = tmp_path / 'reports'
+    done = make('check', GDK_GATE_REPORT_DIR=str(reports))
+    assert done.returncode == 0, done.stdout + done.stderr
+    lines = done.stdout.splitlines()
+    assert len(lines) == 2, done.stdout
+    assert re.match(r'^\[CHECK\] \d+ check\(s\) PASS — full log: ', lines[0]), lines[0]
+    assert lines[0].endswith(str(reports / 'check.log')), lines[0]
+    assert lines[1] == (f'[GODOT] 8 check(s) PASS — full log: '
+                        f'{reports / "godot-check.log"}'), lines[1]
+    transcript = (reports / 'godot-check.log').read_text(encoding='utf-8')
+    for gate in ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+                 'unit-disk', 'test-shape'):
+        assert f'[check:{gate}] PASS' in transcript, gate
+
+
 # --- the census: no target gets to stay loud ---------------------------------
 def publishes_a_verdict(body: str) -> bool:
     """Whether this recipe ends in ONE verdict line — by the helper in the

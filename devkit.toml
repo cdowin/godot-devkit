@@ -7,20 +7,30 @@
 # this file, and this file is the proof it can.
 
 [checks]
-# The roster `check all` runs HERE. Four of the eight gates read .tscn/.tres,
-# and this package holds none outside its FIXTURES — so on the default roster
-# those four report a 0-file census and rule 4 correctly reddens every one.
-# That is the roster being wrong for the repo, not a reason to soften a gate:
-# `check uid|tres|props` still run here on demand and still say exactly what
-# they scanned. The repo-family two apply, and `shell` joined them when the
-# repo started self-hosting its own hook corpus under tools/ (0.23.0).
+# `all` is the PINNED kit's roster — what `agentic-sdlc check all` runs here,
+# and the first half of `make check`. The four repo-discipline gates all
+# apply to this tree: `shell` since the repo started self-hosting its hook
+# corpus under tools/ (0.23.0), and `hooks` because the sentence was not
+# enough — `core.hooksPath` was unset in every checkout of this repo for two
+# releases while CLAUDE.md said the corpus was armed, and no target looked.
+# It is stock-OFF for consumers (arming is a decision each makes once) and on
+# for the repo that told them to.
 #
-# `hooks` is the other half of that self-hosting, and it is here because the
-# sentence was not enough: `core.hooksPath` was unset in every checkout of this
-# repo for two releases while CLAUDE.md said the corpus was armed, and no target
-# looked. It is stock-OFF for consumers — arming is a decision each makes once —
-# and on for the repo that told them to.
+# `godot` is THIS package's roster — what `godot-devkit check all` runs — and
+# it is deliberately NOT set: the stock eight, on the committed clean Godot
+# project that `godot-check` stages (tools/dev/godot_devkit_on_fixture.sh),
+# with no devkit.toml in that scratch tree either. Two kits read one file, so
+# each roster has its own key; a name in the wrong one is refused by both.
 all = ["doc", "pm", "shell", "hooks"]
+
+# This package's OWN gates, as make targets `make check` runs after the roster
+# above — the same seam a consumer uses. `godot-check` is Makefile.tiers'
+# (`install-runners` writes it): `godot-devkit check all`, the eight Godot
+# gates, run against the committed clean Godot project rather than this tree,
+# which holds no scene outside its fixtures (a 0-file census is a FAIL by
+# rule 4, not a roster entry).
+[gates]
+extra = ["godot-check"]
 
 # The verification ladder `agentic-sdlc verify` runs, one make target per rung.
 # story is the inner loop (the suite minus the spawns, seconds); feature is the

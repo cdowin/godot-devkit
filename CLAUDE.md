@@ -117,11 +117,14 @@ an agent to grep a gate's output for its result. Enforced by `tests/test_makefil
 (`pyunit`, `test`, `fuzz`, `matrix`) live in `Makefile.tiers`, below the Godot roster `install-runners` writes. `agentic-sdlc adopt <milestone>`
 is what proves a pin bump; a hand-edit of an installed file is what `install-* --diff` shows.
 
-- Behavior gate: the installables are proven by installing them into a temp repo and
-  running them there (`tests/test_runners_installable.py`, `tests/test_hooks_payloads.py`),
-  never by this repo's copies; the eight Godot checks are proven on the fixture repos under
-  `tests/fixtures/`. This tree holds no scene outside its fixtures, so a Godot gate pointed
-  at it reports a 0-file census — rule 4 working, not a gate to add.
+- Behavior gate: `make godot-check` — `godot-devkit check all` (from `src/`, the stock
+  eight) over `tests/fixtures/godot_project/`, the committed clean Godot project, staged into
+  a scratch git repo by `tools/dev/godot_devkit_on_fixture.sh`. It is a member of `make check`
+  through `[gates] extra`, after the pinned kit's own checks — the same seam a consumer uses.
+  This tree holds no scene outside its fixtures, so a Godot gate pointed at the repo itself
+  reports a 0-file census — rule 4 working, not a gate to add. The installables are proven by
+  installing them into a temp repo (`tests/test_runners_installable.py`,
+  `tests/test_hooks_payloads.py`), never by this repo's copies.
 - Differential + replay harnesses: `make fuzz`. Seeded, so a divergence reproduces
   exactly rather than being re-derived; `make test` runs them too.
 - **A write verb under test writes to scratch, never to a fixture in place.** Copy the

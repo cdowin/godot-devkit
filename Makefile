@@ -36,10 +36,15 @@ PYTEST_Q  ?= -q
 # gate that checks the last release tells you nothing about the change in
 # front of you. No wheel build, no venv, no network — the package imports from
 # src/ with the stdlib. (The test targets above DO use uv, for pytest.)
-# `env` is load-bearing: the gate helper runs an ARGV, not a shell line, so a
-# leading VAR=value assignment needs a command to carry it.
+#
+# GODOT_DEVKIT is what Makefile.tiers' `godot-check` and `uid-scan` run (a
+# consumer resolves it from GODOT_DEVKIT_VERSION; this tree sets it ahead of
+# the include, so the tier file resolves nothing). It is the package from
+# src/ INSIDE a scratch copy of the committed clean Godot project — this tree
+# is not a Godot project, and the self-hosting proof is the eight gates over
+# something committed here, not a 0-file census over the repo itself.
 PY          ?= python3
-GODOT_DEVKIT ?= env PYTHONPATH=$(CURDIR)/src $(PY) -m godot_devkit.cli
+GODOT_DEVKIT ?= bash tools/dev/godot_devkit_on_fixture.sh
 
 # The pin, and the include that derives `DEVKIT` (the agentic-sdlc command)
 # from it. Bumping the tag is the whole adoption; `agentic-sdlc adopt` checks it.

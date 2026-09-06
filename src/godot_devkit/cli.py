@@ -67,10 +67,12 @@ Static gates (exit 1 on findings; run from anywhere inside the repo):
                                     # rewritten to the sidecar's, non-canonical
                                     # spellings canonicalized (same id), and
                                     # orphan .gd.uid sidecars deleted
-    godot-devkit check all          # the Godot roster. `[checks] all` in
-                                    # devkit.toml names the members for THIS
-                                    # repo; an unknown name is refused, never
-                                    # skipped
+    godot-devkit check all          # the eight Godot gates, stock. `[checks]
+                                    # godot` in devkit.toml narrows the roster
+                                    # for THIS repo; an unknown name is
+                                    # refused, never skipped. (`[checks] all`
+                                    # is agentic-sdlc's roster in the same
+                                    # file — two kits, two keys.)
 
 Per-project config: devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
@@ -91,28 +93,29 @@ FIX_FLAG = '--fix'
 HELP_FLAGS = ('-h', '--help')
 RETARGET_FLAG = '--retarget'
 
-# THE gate roster: {name: in the default `check all`?}. One list, because two
-# were one list with the answer to a single question split across them — and a
-# gate added to one and forgotten in the other is either undispatchable or
-# invisible to `[checks] all`'s own typo refusal.
+# THE gate roster, in the order `check all` runs it. One list: a gate that is
+# dispatchable is in the stock aggregate, and a name `[checks] godot` may
+# carry is a name `check <name>` runs — there is no second list for either
+# fact to drift from. Eight ship; eight stay (0.25.0).
 #
-# The `False` gates are out of the DEFAULT aggregate, each for its own reason:
-# `defaults` reports thousands of findings on a tree that has never been
-# canonicalized, so folding it in would redden every existing consumer on a
-# version bump — wire it explicitly, after the one-time cleanup pass. The four
-# ported project scans are all False for one shared reason and one each: none
-# of them can state a stock scope that is true of every repo. `rng` defaults
-# to the WHOLE tree and would redden a consumer's cosmetic jitter on a pin
-# bump; `unit-disk` and `test-shape` name test roots a fresh project does not
-# have yet, and rule 4 correctly reddens a 0-file census; `tres-comment` would
-# redden any tree that has never been swept. Each is one `[checks] all` entry
-# away, once the repo has declared its scope — which is the adoption step, not
-# a default.
-KNOWN_GATES = {
-    'uid': True, 'tres': True, 'props': True,
-    'defaults': False, 'rng': False, 'tres-comment': False,
-    'unit-disk': False, 'test-shape': False,
-}
+# Stock is ALL EIGHT, and a repo narrows by config, never the other way
+# round. Until 0.25.0 five of these were out of the default — `defaults`
+# floods a never-canonicalized tree, `rng` scans the whole tree by default,
+# `unit-disk` and `test-shape` name test roots a fresh project lacks,
+# `tres-comment` reddens a never-swept tree — and each was one config entry
+# away. That was the right default for a kit whose `check all` was mostly
+# repo-discipline gates. It is the wrong one for the Godot kit alone: a roster
+# that runs three of eight and prints PASS is the quieter cardinal sin, and a
+# project on the first day sees exactly which gates its tree is not shaped
+# for, each naming the section that scopes it.
+KNOWN_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+               'unit-disk', 'test-shape')
+
+# The devkit.toml key that narrows the roster. NOT `[checks] all`: that key
+# is agentic-sdlc's, read by ITS `check all` in the same file, and each kit
+# refuses a name it does not know — one key read by two refusers is a file
+# neither can accept. Two kits, two keys.
+ROSTER_KEY = 'godot'
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
@@ -134,26 +137,27 @@ RETIRED_CHECKS = frozenset({'doc', 'shell', 'pm', 'hooks', 'repo-hygiene'})
 
 
 def all_roster() -> tuple[str, ...]:
-    """Which gates `check all` runs HERE — `[checks] all`, else the defaults.
+    """Which gates `check all` runs HERE — `[checks] godot`, else all eight.
 
     Applicability is per-repo and the aggregate is where it shows. Most of the
     roster reads `.tscn`/`.tres`/`.gd`, so a repo holding none of those gets
     a handful of 0-file censuses, and rule 4 correctly turns every one of them
     red. That is not drift and it is not a reason to weaken a gate — it is the
     roster being wrong for the repo, which is exactly the kind of variation
-    rule 5 puts in devkit.toml.
+    rule 5 puts in devkit.toml. A repo with no devkit.toml and one declaring
+    the eight get byte-identical output (rule 5, proven in the suite).
 
     An unknown name is REFUSED rather than skipped: a typo would otherwise
     narrow the aggregate in silence, which is the cardinal sin with a config
     file in front of it.
     """
-    default = tuple(name for name, on in KNOWN_GATES.items() if on)
-    roster = str_tuple(config_section('checks'), 'checks', 'all', default)
+    roster = str_tuple(config_section('checks'), 'checks', ROSTER_KEY,
+                       KNOWN_GATES)
     unknown = [c for c in roster if c not in KNOWN_GATES]
     if unknown:
         raise ConfigError(
-            f'[checks] all names unknown gate(s) {", ".join(unknown)} — '
-            f'known gates are {" ".join(KNOWN_GATES)}')
+            f'[checks] {ROSTER_KEY} names unknown gate(s) {", ".join(unknown)} '
+            f'— known gates are {" ".join(KNOWN_GATES)}')
     # `all` naming itself would recurse forever; it is the one name that cannot
     # appear, and KNOWN_GATES already excludes it.
     return tuple(dict.fromkeys(roster))
