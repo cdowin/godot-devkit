@@ -8,6 +8,16 @@
   adds a second pin (`DEVKIT_VERSION` for agentic-sdlc's gate framework, hooks, CI, PM tree and release
   belts) and keeps this one for the scene tooling and the eight Godot gates. `src/godot_devkit/repo/` is
   deleted with its tests; the Godot installables move to `src/godot_devkit/godot/installables/`.
+- **`install-runners` is the Godot kit's installer, and it writes `Makefile.tiers`.** The plan is the
+  library, the nine runners with `compile_sweep.gd` (+ `.uid`), `tools/hooks/cc-godot-sandbox.sh`,
+  `.github/workflows/uid-guard.yml` and a new `Makefile.tiers` at the root: the Godot target roster
+  (`parse lint warnings unit integration scenario capture import-cache hermetic-scan …`) on the seam
+  agentic-sdlc's `Makefile.devkit` `-include`s, declaring `GDK_PRECOMMIT_TIERS` / `GDK_MILESTONE_TIERS`
+  and a `godot-check` target (`check all`) for `[gates] extra`. It reads a second pin,
+  `GODOT_DEVKIT_VERSION`, set in the consumer's Makefile above the include. Same contract as before:
+  whole-file writes, a differing destination refused naming `--force`, `--diff` writes nothing, a
+  header-only edit of the sandbox hook reported as such; the run prints the `.claude/settings.json`
+  entry that fires the hook. `Makefile.devkit` is no longer written here — it is agentic-sdlc's.
 
 ## v0.24.0 — 2026-09-04
 

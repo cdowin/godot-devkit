@@ -1,10 +1,13 @@
-"""test_runners_installable.py — the shell runners, RUN rather than read.
+"""test_runners_installable.py — the shell runners, RUN rather than read, and
+the one verb that installs them.
 
 `gdk_runners.sh` is the library every Godot-booting gate in a consumer routes
 through, and `import_cache.sh` is the one runner that ships with it. Neither is
 Python and neither can boot an engine here, so the contract is proven the way
 the hook corpus is: each script carries a `--self-test`, and this file drives
-it through a subprocess and holds it to its published shape.
+it through a subprocess and holds it to its published shape. The install verb
+is proven at the bottom: what it writes, that it refuses, and that the tier
+file it writes composes under the pinned include.
 
 Two things this file adds on top of firing the corpus:
 
@@ -24,6 +27,8 @@ fired at fake files.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -36,6 +41,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from support import REPO_ROOT  # noqa: E402
 
+from godot_devkit.core.project import load_config, repo_root  # noqa: E402
 from godot_devkit.godot import install  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which('bash') is None,
@@ -1026,3 +1032,228 @@ def test_an_empty_roster_is_a_fail_naming_the_directory(tmp_path):
     assert done.returncode == 1, done.stdout + done.stderr
     assert 'EMPTY' in done.stderr and 'tests/integration/tools_only' in done.stderr, done.stderr
     assert done.stdout == ''
+
+
+# --- the install verb: whole-file writes, once ---------------------------------
+# The verb's contract is the one every installer this package ever shipped
+# had: write each file once, refuse a differing destination by name (`--force`
+# replaces it whole), `--diff` prints and writes nothing, a second run is a
+# no-op, every `.sh` lands executable. tests/fixtures/agentic_sdlc/
+# Makefile.devkit is agentic-sdlc v0.2.0's `install-gates` output, VENDORED
+# (rule 8): the include the written tier file composes under, held here so the
+# composition is proven on every machine and never against a neighbouring
+# checkout.
+INCLUDE = REPO_ROOT / 'tests' / 'fixtures' / 'agentic_sdlc' / 'Makefile.devkit'
+CONSUMER_MAKEFILE = ('DEVKIT_VERSION := v0.2.0\n'
+                     'GODOT_DEVKIT_VERSION := v0.25.0\n'
+                     'include Makefile.devkit\n')
+# The roster, by destination — pinned rather than read off the plan, because a
+# file dropped from the plan is a file a consumer silently stops getting.
+DESTINATIONS = {
+    'tools/dev/gdk_runners.sh',
+    'tools/dev/runners/import_cache.sh', 'tools/dev/runners/parse.sh',
+    'tools/dev/runners/compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd.uid',
+    'tools/dev/runners/lint.sh', 'tools/dev/runners/warnings.sh',
+    'tools/dev/runners/unit.sh', 'tools/dev/runners/scenario.sh',
+    'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
+    'tools/dev/runners/hermetic_run_scan.sh',
+    'tools/hooks/cc-godot-sandbox.sh',
+    '.github/workflows/uid-guard.yml',
+    'Makefile.tiers',
+}
+HOOK_ENTRY = '"command": "bash tools/hooks/cc-godot-sandbox.sh"'
+# The nine Godot targets the story names, plus the one `[gates] extra` names.
+GODOT_TARGETS = ('parse', 'lint', 'warnings', 'unit', 'integration', 'scenario',
+                 'capture', 'import-cache', 'hermetic-scan', 'godot-check')
+
+
+@contextlib.contextmanager
+def consumer_repo(tmp_path: Path, makefile: bool = False):
+    """An empty git repo, cwd'd into with the config caches cleared; with
+    `makefile`, the consumer's three lines and the vendored include."""
+    root = tmp_path / 'repo'
+    root.mkdir()
+    subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+    if makefile:
+        shutil.copy2(INCLUDE, root / 'Makefile.devkit')
+        (root / 'Makefile').write_text(CONSUMER_MAKEFILE, encoding='utf-8')
+    previous = Path.cwd()
+    os.chdir(root)
+    repo_root.cache_clear()
+    load_config.cache_clear()
+    try:
+        yield root
+    finally:
+        os.chdir(previous)
+        repo_root.cache_clear()
+        load_config.cache_clear()
+
+
+def run_install(*flags: str) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = install.main(list(flags))
+    return code, out.getvalue(), err.getvalue()
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    return {rel: (root / rel).read_bytes() for rel in DESTINATIONS
+            if (root / rel).is_file()}
+
+
+def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
+    with consumer_repo(tmp_path) as root:
+        code, out, err = run_install()
+        assert code == 0, out + err
+        assert {rel for _name, rel in install.PLAN} == DESTINATIONS
+        for rel in DESTINATIONS:
+            assert (root / rel).is_file(), f'{rel} was not written'
+            assert f'[install] wrote {rel}' in out, out
+            if rel.endswith('.sh'):
+                assert os.access(root / rel, os.X_OK), f'{rel} is not executable'
+        for name, rel in install.PLAN:
+            assert (root / rel).read_text(encoding='utf-8') == install.body_of(name)
+        # The registration step, pasteable and LAST on stdout.
+        assert HOOK_ENTRY in out, out
+        assert out.rstrip().endswith('}'), out[-200:]
+        assert err == '', err
+
+        # A second run is a no-op that says so, and changes no byte.
+        before = _snapshot(root)
+        code, out, err = run_install()
+        assert code == 0, out + err
+        assert 'wrote' not in out and HOOK_ENTRY not in out, out
+        assert out.count('already current') == len(DESTINATIONS), out
+        assert _snapshot(root) == before
+
+
+def test_diff_prints_and_writes_nothing(tmp_path):
+    with consumer_repo(tmp_path) as root:
+        code, out, err = run_install('--diff')
+        assert code == 0, err
+        assert _snapshot(root) == {}, 'a --diff wrote a file'
+        assert out.count('does not exist — the whole file is an addition') == len(DESTINATIONS)
+
+        run_install()
+        tiers = root / 'Makefile.tiers'
+        tiers.write_text(tiers.read_text(encoding='utf-8') + '\nmine: ; @true\n',
+                         encoding='utf-8')
+        before = _snapshot(root)
+        code, out, _ = run_install('--diff')
+        assert code == 0
+        # a/ is what is on disk, b/ is what a run would write: the consumer's
+        # own line shows as what the install would TAKE.
+        assert '-mine: ; @true' in out, out
+        assert out.count('already current') == len(DESTINATIONS) - 1, out
+        assert _snapshot(root) == before, 'a --diff wrote a file'
+
+
+def test_a_differing_destination_is_refused_by_name_and_force_replaces_it(tmp_path):
+    with consumer_repo(tmp_path) as root:
+        run_install()
+        parse = root / 'tools/dev/runners/parse.sh'
+        parse.write_text(parse.read_text(encoding='utf-8') + '# mine\n',
+                         encoding='utf-8')
+        edited = parse.read_bytes()
+        code, out, err = run_install()
+        assert code == 1, out + err
+        assert 'tools/dev/runners/parse.sh exists and differs' in err, err
+        assert '--force' in err and 'nothing was written' in err, err
+        assert parse.read_bytes() == edited, 'a refusal wrote'
+        code, out, err = run_install('--force')
+        assert code == 0, out + err
+        assert '[install] wrote tools/dev/runners/parse.sh' in out, out
+        assert parse.read_text(encoding='utf-8') == install.body_of('parse.sh')
+
+
+def test_a_header_only_edit_of_the_sandbox_hook_is_reported_as_such(tmp_path):
+    """The `project config` block is the consumer's to edit, so an edit
+    confined to it is a different sentence: the rest of the file is
+    byte-current and there is nothing in it to take. Still exit 1 — the
+    replacement WAS withheld — and `--force` still takes the header too."""
+    with consumer_repo(tmp_path) as root:
+        run_install()
+        hook = root / 'tools/hooks/cc-godot-sandbox.sh'
+        body = hook.read_text(encoding='utf-8')
+        assert "SANDBOX_FUNCTION=''" in body
+        hook.write_text(body.replace("SANDBOX_FUNCTION=''",
+                                     "SANDBOX_FUNCTION='proj_boot'", 1),
+                        encoding='utf-8')
+        edited = hook.read_bytes()
+        code, out, err = run_install()
+        assert code == 1, out + err
+        assert 'differs ONLY inside its project-config header' in err, err
+        assert hook.read_bytes() == edited
+        code, out, _ = run_install('--diff')
+        assert code == 0
+        assert 'differs ONLY inside its project-config header' in out, out
+        assert "-SANDBOX_FUNCTION='proj_boot'" in out, out
+        assert hook.read_bytes() == edited, 'a --diff wrote a file'
+        assert run_install('--force')[0] == 0
+        assert hook.read_text(encoding='utf-8') == install.body_of('cc-godot-sandbox.sh')
+
+
+def test_an_unknown_flag_is_a_usage_error(tmp_path):
+    with consumer_repo(tmp_path) as root:
+        code, _, err = run_install('--fast')
+        assert code == 2 and 'unknown flag' in err, err
+        assert _snapshot(root) == {}
+
+
+def _tiers(name: str) -> list[str]:
+    """A tier list as the INSTALLABLE declares it."""
+    match = re.search(rf'^{name}\s*:=(.*)$', install.body_of('Makefile.tiers'), re.M)
+    assert match, f'Makefile.tiers no longer declares {name}'
+    return match.group(1).split()
+
+
+def _make_n(root: Path, *goals: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('MAKELEVEL', 'MAKEFLAGS', 'MFLAGS', 'VERBOSE')}
+    return subprocess.run(['make', '-n', *goals], cwd=root, text=True,
+                          capture_output=True, env=env)
+
+
+@pytest.mark.skipif(shutil.which('make') is None, reason='needs make')
+def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
+    """The seam, end to end: agentic-sdlc's include `-include`s the tier file
+    this verb wrote, reads its two lists, and `precommit` / `milestone` name
+    every tier — `make -n`, so nothing boots. The include refuses a tier no
+    makefile defines at parse time, so exit 0 here is the whole claim."""
+    with consumer_repo(tmp_path, makefile=True) as root:
+        assert run_install()[0] == 0
+        declared: set[str] = set()
+        for composition, var in (('precommit', 'GDK_PRECOMMIT_TIERS'),
+                                 ('milestone', 'GDK_MILESTONE_TIERS')):
+            tiers = _tiers(var)
+            assert tiers, f'{var} is empty'
+            declared.update(tiers)
+            done = _make_n(root, composition)
+            assert done.returncode == 0, done.stdout + done.stderr
+            # The sub-make is spelled `${MAKE:-make}` so `-n` runs nothing;
+            # the goals after it are the composition.
+            assert f'{{MAKE:-make}} check {" ".join(tiers)}' in done.stdout, done.stdout
+        # Every declared tier and every named Godot target is a goal make
+        # resolves — `integration-diff` / `integration-all` are the slices
+        # the compositions run, `integration` the one a hand takes ARGS to.
+        for target in sorted(declared | set(GODOT_TARGETS)):
+            done = _make_n(root, target)
+            assert done.returncode == 0, f'{target}: {done.stdout}{done.stderr}'
+        # `godot-check` is the pinned kit's `check all`, through the tag the
+        # consumer's Makefile pins.
+        done = _make_n(root, 'godot-check')
+        assert 'godot-devkit@v0.25.0' in done.stdout and 'check all' in done.stdout, done.stdout
+
+
+def test_this_repos_tier_file_starts_with_the_installable():
+    """New in 0.25.0 because the file is new: this repo's own Makefile.tiers
+    is what `install-runners` writes (self-hosting — the seam is proven on
+    the tree that ships it) followed by this repo's Python tiers. A byte of
+    drift at the top is a fork of the installable wearing its name, so the
+    prefix is held exactly, not approximately."""
+    own = (REPO_ROOT / 'Makefile.tiers').read_text(encoding='utf-8')
+    installable = install.body_of('Makefile.tiers')
+    assert own.startswith(installable), (
+        'Makefile.tiers no longer opens with the installable byte for byte — '
+        'edit the installable and re-compose, never the copy')
+    assert 'pyunit:' in own[len(installable):], 'the Python tiers are gone'

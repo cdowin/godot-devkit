@@ -369,9 +369,11 @@ def test_the_full_gate_is_a_composition_of_self_contained_targets():
     Makefile.tiers, and every member of it reads this checkout alone — which
     is why CI and a laptop reach the same verdict."""
     tiers = (REPO_ROOT / 'Makefile.tiers').read_text(encoding='utf-8')
-    match = re.search(r'^GDK_MILESTONE_TIERS\s*:?=(.*)$', tiers, re.M)
-    assert match, 'Makefile.tiers no longer declares GDK_MILESTONE_TIERS'
-    members = match.group(1).split()
+    # The LAST assignment is the one make keeps: the Godot roster the file
+    # opens with declares its own lists, and this repo's tiers below reassign.
+    declared = re.findall(r'^GDK_MILESTONE_TIERS\s*:?=(.*)$', tiers, re.M)
+    assert declared, 'Makefile.tiers no longer declares GDK_MILESTONE_TIERS'
+    members = declared[-1].split()
     assert members == ['matrix'], members
     for member, body in [('matrix', tiers)]:
         recipe = re.search(rf'^{member}:.*?\n((?:\t.*\n|\n)*)', body, re.M)

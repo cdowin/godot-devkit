@@ -13,9 +13,9 @@ set -eu
 # `selfcheck` ([gates] extra), under a second together.
 GATE_STATIC=(make check)
 # The unit tier, run as "${GATE_UNIT[@]}" SYS="<slices>"; an empty SYS is the whole tier.
-# godot-devkit: `unit` is the suite minus the spawns (-m "not shell"), seconds;
+# godot-devkit: `pyunit` is the suite minus the spawns (-m "not shell"), seconds;
 # it has no per-system slices, so SYS is accepted and ignored.
-GATE_UNIT=(make unit)
+GATE_UNIT=(make pyunit)
 # A changed top-level dir <d> with a <UNIT_SLICE_ROOT>/<d>/ becomes a slice.
 UNIT_SLICE_ROOT="tests/unit"
 # The diff base when the scope marker records none. godot-devkit works on

@@ -10,7 +10,7 @@ here had to invent `… | grep -E "MATRIX|check:doc\\]|check:pm\\] (PASS|FAIL)|
 passed|failed" | tail -8` — five output shapes, guessed at, per session.
 
 Two kinds of case, and the split is deliberate: the gate SHAPE is exercised for
-REAL — `unit` run against a stand-in pytest that prints the summary line and
+REAL — `pyunit` run against a stand-in pytest that prints the summary line and
 runs nothing, so the capture, the verdict and the failure excerpt are behavior
 rather than a claim — while every target is held by a census over the
 Makefile itself. Running the whole suite inside the suite is not a test, and a
@@ -40,15 +40,23 @@ MAKEFILE = REPO_ROOT / 'Makefile'
 # reads both files this repo owns. Makefile.devkit itself is the pinned
 # kit's, held current by `agentic-sdlc adopt`, and is not this file's to census.
 OWN_MAKEFILES = (MAKEFILE, REPO_ROOT / 'Makefile.tiers')
+# Makefile.tiers opens with the Godot roster `install-runners` writes (held
+# byte-current by tests/test_runners_installable.py); its runners live here.
+RUNNERS = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
+RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
 
-# Nothing this repo defines is exempt: `help`, `pm`, `check`, `precommit` and
-# `milestone` come from the include and never appear in the files censused.
-NOT_A_GATE: set[str] = set()
+# `help`, `pm`, `check`, `precommit` and `milestone` come from the include and
+# never appear in the files censused. Two targets this repo's files define
+# are NOT gates: `integration-list` prints the roster — the list IS the
+# output, and a verdict line would be a line `check test-shape` had to skip —
+# and `import-cache` rebuilds the engine's import cache, a tool with an
+# outcome rather than a gate with a verdict.
+NOT_A_GATE = {'integration-list', 'import-cache'}
 
 # A stand-in pytest: prints the one summary line the tier's `SUM_PYTEST` reads
 # back, runs nothing. `GDK_STANDIN_FAIL` makes it red the way pytest is red —
 # a `FAILED` line the gate's failure excerpt has to surface, then a non-zero
-# exit. The recipe under test is the REAL `unit` recipe; only the interpreter
+# exit. The recipe under test is the REAL `pyunit` recipe; only the interpreter
 # behind `PYTEST=` is swapped, the same way the matrix cases swap `UV=`.
 PYTEST_STANDIN = """\
 #!/usr/bin/env bash
@@ -106,21 +114,22 @@ def recipes() -> dict[str, str]:
 # --- the behavior, on the tier every edit runs, behind a stand-in ------------
 def unit_run(tmp_path: Path, *args: str, **env_extra: str
              ) -> tuple[subprocess.CompletedProcess, Path, re.Pattern]:
-    """`make unit` with the stand-in behind PYTEST, logging under tmp_path.
+    """`make pyunit` with the stand-in behind PYTEST, logging under tmp_path.
 
     The report dir is redirected on purpose: this suite runs INSIDE `make
-    unit`, whose transcript is `.gate-reports/unit.log`, and a nested run into
-    the same slot would truncate the outer gate's log and hand its summary the
-    stand-in's `3 passed`. Returns the run, the log, and the verdict shape.
+    pyunit`, whose transcript is `.gate-reports/pyunit.log`, and a nested run
+    into the same slot would truncate the outer gate's log and hand its
+    summary the stand-in's `3 passed`. Returns the run, the log, and the
+    verdict shape.
     """
     standin = tmp_path / 'pytest-standin'
     standin.write_text(PYTEST_STANDIN, encoding='utf-8')
     standin.chmod(0o755)
     reports = tmp_path / 'reports'
-    done = make('unit', f'PYTEST={standin}', *args,
+    done = make('pyunit', f'PYTEST={standin}', *args,
                 GDK_GATE_REPORT_DIR=str(reports), **env_extra)
-    log = reports / 'unit.log'
-    verdict = re.compile(rf'^\[UNIT\] .+ — full log: {re.escape(str(log))}$')
+    log = reports / 'pyunit.log'
+    verdict = re.compile(rf'^\[PYUNIT\] .+ — full log: {re.escape(str(log))}$')
     return done, log, verdict
 
 
@@ -163,22 +172,42 @@ def test_a_failing_gate_shows_what_broke_and_exits_nonzero(tmp_path):
     assert done.returncode != 0
     assert 'FAILED tests/test_stand_in.py::test_red' in done.stdout, (
         done.stdout + done.stderr)
-    lines = [ln for ln in done.stdout.splitlines() if ln.startswith('[UNIT]')]
+    lines = [ln for ln in done.stdout.splitlines() if ln.startswith('[PYUNIT]')]
     assert len(lines) == 1, done.stdout
     assert verdict.match(lines[0]), lines[0]
     assert 'FAIL' in lines[0] and '1 failed' in lines[0], lines[0]
 
 
 # --- the census: no target gets to stay loud ---------------------------------
+def publishes_a_verdict(body: str) -> bool:
+    """Whether this recipe ends in ONE verdict line — by the helper in the
+    recipe, or inside the runner it hands off to.
+
+    parse, lint, warnings, unit and import-cache are `@bash <runner>` and
+    nothing else: the runner sources the library and publishes its own
+    verdict, and wrapping it again would file that verdict in a log nobody
+    opens. Derived from the runner's SOURCE rather than allowlisted by name,
+    so a runner that stopped publishing would surface here.
+    """
+    if 'gdk_gate_verdict' in body or '$(call gdk_gate,' in body:
+        return True
+    handoff = RUNNER_CALL.search(body)
+    if handoff is None:
+        return False
+    runner = RUNNERS / handoff.group(1)
+    return runner.is_file() and 'gdk_gate_verdict' in runner.read_text(
+        encoding='utf-8')
+
+
 def test_every_gate_shaped_target_routes_through_the_shipped_helper():
     bodies = recipes()
     gates = {name: body for name, body in bodies.items()
              if body.strip() and name not in NOT_A_GATE}
-    assert len(gates) >= 4, (
+    assert len(gates) >= 5, (
         f'census collapsed to {sorted(gates)} — a parse that finds no targets '
         f'would pass this file vacuously')
     loud = sorted(name for name, body in gates.items()
-                  if 'gdk_gate_verdict' not in body and '$(call gdk_gate,' not in body)
+                  if not publishes_a_verdict(body))
     assert not loud, (
         f'{loud} print whatever their tool prints instead of one verdict line; '
         f'route them through $(call gdk_gate,...) or gdk_gate_verdict')

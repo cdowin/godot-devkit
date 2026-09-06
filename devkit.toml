@@ -27,7 +27,7 @@ all = ["doc", "pm", "shell", "hooks"]
 # close of a feature (the whole suite on the floor, minutes); milestone is the
 # full gate and what CI runs (check + the matrix). Makefile.tiers defines them.
 [verify]
-story = "make unit"
+story = "make pyunit"
 feature = "make test"
 milestone = "make milestone"
 

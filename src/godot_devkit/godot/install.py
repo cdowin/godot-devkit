@@ -108,6 +108,13 @@ PLAN: tuple[tuple[str, str], ...] = (
     # Godot's. The rest of CI (the full gate, the semver gate, the tag) is the
     # agentic kit's `install-ci`.
     ('ci-uid-guard.yml', '.github/workflows/uid-guard.yml'),
+    # The CALLERS, at the repo root: the Godot target roster, on the seam
+    # agentic-sdlc's Makefile.devkit `-include`s, declaring which tiers
+    # `precommit` and `milestone` run. It ships with the runners rather than
+    # under a verb of its own because neither half is usable alone — the
+    # runners are unreachable without targets pointing at them, and every
+    # target here is dead without its runner. One verb, one working `make`.
+    ('Makefile.tiers', 'Makefile.tiers'),
 )
 
 USAGE = """usage: godot-devkit install-runners [--force] [--diff]
@@ -127,9 +134,15 @@ tools/hooks/cc-godot-sandbox.sh — the Claude Code guard against a raw engine
 boot, whose stock roster is the library's own boot function (the run prints
 the .claude/settings.json entry that fires it) — and
 .github/workflows/uid-guard.yml (`check uid` on a PR and a push to staging).
+Plus Makefile.tiers at the repo root: the Godot targets that call the
+runners (parse lint warnings unit integration scenario capture import-cache
+hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
+GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS lists the include's compositions
+run. It reads GODOT_DEVKIT_VERSION from your Makefile.
 
 The gate framework (`check`, `precommit`, `milestone`, Makefile.devkit) is
-agentic-sdlc's: pin that package and run its `install-gates`.
+agentic-sdlc's: pin that package and run its `install-gates`; its include
+`-include`s Makefile.tiers.
 
 A destination that already exists and differs is REFUSED — that file, not the
 roster: the entries with nothing in their way are written, every collision is

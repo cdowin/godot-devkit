@@ -53,7 +53,7 @@ plus `export`), so `bash <runner> --list` spawned from the gate's own process
 answered with whatever the gate happened to inherit — 147 under `make check`,
 137 from the `tools/dev/devkit` shim or a bare `uvx` — a census that was a
 function of the CALLER, not of the tree. The gate therefore asks THROUGH the
-consumer's `make integration-list` (a `Makefile.devkit` target) with the
+consumer's `make integration-list` (a `Makefile.tiers` target) with the
 GDK_* and MAKE* variables of its own environment stripped: the roster is what
 a clean-shell `make integration` would boot, whoever runs the gate. No such
 target is exit 2 naming it. `[test_shape] runner` names the file (stock:
@@ -123,7 +123,7 @@ DEFAULT_RUNNER = 'tools/dev/runners/integration.sh'
 ROSTER_FLAG = '--list'
 # The roster is asked THROUGH the consumer's make, so every export its
 # Makefile hands `make integration` reaches `--list` the same way. The
-# target is Makefile.devkit's; a Makefile that lacks it is exit 2 naming it.
+# target is Makefile.tiers's (install-runners); a Makefile that lacks it is exit 2 naming it.
 MAKE = 'make'
 ROSTER_TARGET = 'integration-list'
 # What the gate's own environment must NOT contribute to that answer: the
@@ -222,15 +222,15 @@ def runner_roster(root: Path, runner: str) -> list[str]:
                    f'roster is what that target prints, so it must print the '
                    f'scenarios `{runner} {ROSTER_FLAG}` boots, one per line, or '
                    f'fail; `install-runners --force` writes the current runner and '
-                   f'`include Makefile.devkit` the current target')
+                   f'`install-runners --force` the current Makefile.tiers')
         return roster
     stderr_lines = done.stderr.strip().splitlines()
     if any(marker in done.stderr for marker in NO_TARGET_MARKERS):
         raise RosterUnavailable(
             2, f'`{MAKE} {ROSTER_TARGET}` is not a target here — the roster is '
                f'asked through your Makefile so the exports `make integration` '
-               f'boots with reach {ROSTER_FLAG} too; `include Makefile.devkit` '
-               f'defines it, and `install-runners --force` writes the current '
+               f'boots with reach {ROSTER_FLAG} too; Makefile.tiers (the tier file '
+               f'`install-runners` writes, which Makefile.devkit -includes) defines it, and `install-runners --force` writes the current '
                f'one')
     runner_exit = next((int(m.group(1)) for line in reversed(stderr_lines)
                         if (m := MAKE_ERROR_RE.search(line))), 2)

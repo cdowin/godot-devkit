@@ -154,24 +154,22 @@ RUNNER_REL = 'tools/dev/runners/integration.sh'
 CAPTURE = 'tests/integration/thing_capture.gd'
 SUPPORT_STUB = 'tests/integration/support/stub.gd'
 KEEP_LIST = {'GDK_CAPTURE_GATE_RE': '^(thing_capture)$'}
-# The two lines a consumer's Makefile is, per the README.
-CONSUMER_MAKEFILE = 'DEVKIT_VERSION := v0.0.0\ninclude Makefile.devkit\n'
-# The include the consumer's two lines pull in, reduced to the one target the
-# gate asks of it — the `integration-list` recipe as the standard set spells
-# it. The Godot target roster left `Makefile.devkit` with the repo family
-# (0.25.0): the include is agentic-sdlc's now, and the Godot targets ride on
-# the tier file `install-runners` writes beside it.
-INCLUDE_STUB = ('GDK_RUNNERS_DIR ?= tools/dev/runners\n'
-                '.PHONY: integration-list\n'
-                'integration-list:\n'
-                '\t@bash $(GDK_RUNNERS_DIR)/integration.sh --list\n')
+# The consumer's Makefile: the two pins and the include. The include is
+# agentic-sdlc's (its v0.2.0 `install-gates` output, vendored under
+# tests/fixtures/ — rule 8) and it `-include`s the tier file `install-runners`
+# writes, which is where `integration-list` lives.
+CONSUMER_MAKEFILE = ('DEVKIT_VERSION := v0.0.0\nGODOT_DEVKIT_VERSION := v0.0.0\n'
+                     'include Makefile.devkit\n')
+INCLUDE = REPO_ROOT / 'tests' / 'fixtures' / 'agentic_sdlc' / 'Makefile.devkit'
+TIERS = INSTALLABLES / 'Makefile.tiers'
 
 
 def _makefile(root, extra: str = '') -> None:
-    """The consumer's Makefile: the pin, the include, and whatever it exports
+    """The consumer's Makefile: the pins, the include, and whatever it exports
     to its runners — which is where a keep-list lives, and why the roster is
     asked through `make integration-list` rather than `bash … --list`."""
-    (root / 'Makefile.devkit').write_text(INCLUDE_STUB, encoding='utf-8')
+    shutil.copy2(INCLUDE, root / 'Makefile.devkit')
+    shutil.copy2(TIERS, root / 'Makefile.tiers')
     (root / 'Makefile').write_text(extra + CONSUMER_MAKEFILE, encoding='utf-8')
 
 
@@ -442,10 +440,10 @@ class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
         self.assertIn('1 the runner would boot', out)
 
     def test_a_makefile_without_the_target_is_a_config_error_naming_it(self) -> None:
-        """A consumer on a Makefile.devkit from before the target, or a
-        Makefile that never included one: exit 2, and the message names the
-        target and where it comes from — never a roster guessed some other
-        way. Red at HEAD: the gate never asked make, so this PASSed."""
+        """A consumer on a tier file from before the target, or a Makefile
+        that never included one: exit 2, and the message names the target and
+        where it comes from — never a roster guessed some other way. Red at
+        HEAD: the gate never asked make, so this PASSed."""
         with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
             _scenario(root, HEADED, GOOD_HEADER)
             _config(root, HEADER_ON)
@@ -454,7 +452,7 @@ class TheHeaderRuleIsAskedOfTheRunnersRoster(unittest.TestCase):
             code, out = run_check(test_shape)
         self.assertEqual(code, 2, out)
         self.assertIn('integration-list', out)
-        self.assertIn('Makefile.devkit', out)
+        self.assertIn('Makefile.tiers', out)
 
     def test_no_makefile_at_all_is_the_same_config_error(self) -> None:
         with temp_repo('test_shape_repo', only=self.ROSTER_REPO) as root:
