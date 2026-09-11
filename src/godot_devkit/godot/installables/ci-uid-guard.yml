@@ -6,11 +6,12 @@
 # tracked .uid, a non-canonical uid spelling. Pure parse + git — NO Godot
 # setup, so it is seconds, and it is independent of any build job.
 #
-# It runs on the two moments a local `make precommit` can be skipped: a PR into
-# the mainline, and a push to the integration branch. The branch names below
-# are the flow this toolkit's SDLC declares (staging -> main, merge-commit
-# only); `on:` filters take no expressions, so they are literals rather than
-# variables.
+# It runs where a local `make precommit` can be skipped: a PR into the
+# mainline, and a push to it. The branch names below are the flow agentic-sdlc
+# declares (main -> milestone branch -> main, merge-commit only), and they
+# match its verify.yml. `on:` filters take no expressions, so they are literals
+# rather than variables; to guard pushes to your milestone branches as well,
+# add their glob (e.g. "feat/**") to `push: branches`.
 #
 # NOT here: `check tres`. It is in the default `check all` roster, which
 # verify.yml runs on the same events — a second copy would be a second answer.
@@ -23,7 +24,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [staging]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

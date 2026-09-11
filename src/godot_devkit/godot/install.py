@@ -104,7 +104,7 @@ PLAN: tuple[tuple[str, str], ...] = (
     # runners because its STOCK roster is the library's own boot function:
     # the guard and the door it points at are one install.
     ('cc-godot-sandbox.sh', 'tools/hooks/cc-godot-sandbox.sh'),
-    # `check uid` on a PR and a push to staging — the one workflow that is
+    # `check uid` on a PR into main and a push to it — the one workflow that is
     # Godot's. The rest of CI (the full gate, the semver gate, the tag) is the
     # agentic kit's `install-ci`.
     ('ci-uid-guard.yml', '.github/workflows/uid-guard.yml'),
@@ -133,7 +133,7 @@ run's HOME self-destructs. Every one carries --help and --self-test. Plus
 tools/hooks/cc-godot-sandbox.sh — the Claude Code guard against a raw engine
 boot, whose stock roster is the library's own boot function (the run prints
 the .claude/settings.json entry that fires it) — and
-.github/workflows/uid-guard.yml (`check uid` on a PR and a push to staging).
+.github/workflows/uid-guard.yml (`check uid` on a PR into main and a push to it).
 Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint warnings unit integration scenario capture import-cache
 hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the

@@ -22,10 +22,19 @@ WARM_DIRS=()
 # Gitignored per-asset sidecars to mirror (e.g. "*.import"); empty = off.
 WARM_SIDECAR_GLOB=""
 # Where an agent branches from when no milestone declares an integration branch.
-FALLBACK_BASE="staging"
+# Empty = the remote's HEAD, read by `git symbolic-ref --short refs/remotes/origin/HEAD`.
+FALLBACK_BASE=""
 # The PM CLI as `make pm`; a project calling the CLI directly replaces the array.
 PM_CMD=(make -s pm)
 # -----------------------------------------------------------------------------
+
+# An empty FALLBACK_BASE is READ from the remote's HEAD, never guessed. A remote
+# with no HEAD (a `git remote add`, not a clone) leaves the name `origin/HEAD`,
+# which `new` then refuses by name.
+if [ -z "$FALLBACK_BASE" ]; then
+	FALLBACK_BASE="$(git symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null)"
+	[ -n "$FALLBACK_BASE" ] || FALLBACK_BASE="origin/HEAD"
+fi
 
 # integration_branch [toplevel] — the ACTIVE milestone's integration branch, or
 # nothing. Asked of the CLI by CATEGORY, never grepped from milestone.md, so a
@@ -36,7 +45,7 @@ PM_CMD=(make -s pm)
 integration_branch() {
 	local root="${1:-$MAIN_ROOT}"
 	local ask="list --kind milestone --category in_progress"
-	local out line _id _status _cat branch found="" count=0 answered=0
+	local out line _id _status _cat branch _rest found="" count=0 answered=0
 	out="$(cd "$root" && "${PM_CMD[@]}" ARGS="$ask" 2>&1)" || out=""
 	while IFS= read -r line; do
 		case "$line" in
@@ -44,11 +53,18 @@ integration_branch() {
 			*"	"*) ;;
 			*) continue ;;
 		esac
-		IFS=$'\t' read -r _id _status _cat branch <<-EOF
+		# `_rest` and not a bare `branch`: the LAST variable of a `read`
+		# absorbs every remaining field, so a fifth column (`pm list` has
+		# carried `name` since agentic-sdlc 0.4.0) would silently become part
+		# of the branch name.
+		IFS=$'\t' read -r _id _status _cat branch _rest <<-EOF
 		$line
 		EOF
+		# The trunk is `main` or the fallback itself, never a name the flow
+		# may not have: a declared `staging` in a tree with none is refused
+		# by name in `new`, not silently swapped for the fallback.
 		case "$branch" in
-			"" | - | staging | main) continue ;;
+			"" | - | main | "$FALLBACK_BASE") continue ;;
 		esac
 		found="$branch"
 		count=$((count + 1))
@@ -108,10 +124,11 @@ cmd_new() {
 		die "branch ${branch} already exists — pick a fresh slug or 'done' the old worktree"
 	fi
 	git rev-parse --verify --quiet "${base}" >/dev/null \
-		|| die "base branch '${base}' does not exist"
+		|| die "base '${base}' does not resolve — set FALLBACK_BASE in tools/dev/agent-worktree.sh, pass [base-branch], or run git remote set-head origin --auto"
 
-	# One git op creates both the branch and the linked worktree.
-	git worktree add -b "$branch" "$abs_path" "$base" >/dev/null \
+	# One git op creates both the branch and the linked worktree. --no-track:
+	# a base like origin/main must not become the branch's upstream.
+	git worktree add --no-track -b "$branch" "$abs_path" "$base" >/dev/null \
 		|| die "git worktree add failed"
 
 	# Pre-warm the caches by copy, never symlink, so each tree owns its own;

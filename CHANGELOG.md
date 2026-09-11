@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**The uid guard follows the branch flow, not `staging`.** The `uid-guard.yml` that `install-runners`
+writes used to trigger on pushes to `staging`, a branch that agentic-sdlc's main → milestone branch
+→ main flow never creates. It now triggers on a PR into `main` and a push to `main`, the same events
+as agentic-sdlc's `verify.yml` (agentic-sdlc #37 made the same move for its own scripts). To guard
+pushes to your milestone branches as well, add their glob to `push: branches`. A copy you already
+installed is yours: `install-runners --diff` shows the change.
+
 ## v1.0.0 — 2026-09-06
 
 First release of godot-devkit as a standalone Godot kit, and the first with a public history of
