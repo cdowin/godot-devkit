@@ -77,3 +77,7 @@
 {"ts":"2026-09-12T15:31:34Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":464,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T15:32:23Z","kind":"gate","gate":"matrix","verdict":"PASS","duration_ms":47966,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T15:32:23Z","kind":"gate","gate":"milestone","verdict":"PASS","duration_ms":57587,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:32:42Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":6465,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:32:43Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":275,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T16:24:43Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":5897,"branch":"milestone/1.1.1-the-runner-fails-fast"}
+{"ts":"2026-09-12T16:24:44Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":346,"branch":"milestone/1.1.1-the-runner-fails-fast"}
