@@ -1,16 +1,30 @@
 #!/usr/bin/env bash
 # prepare-commit-msg — tracked git hook (core.hooksPath=tools/hooks): append
 # the Co-Authored-By trailer to AGENT commits only, never the trunk tree's.
-# Idempotent. git passes $1 = message file, $2 = source
+# Idempotent against ANY trailer TRAILER_RE recognises, not only the one string
+# this file writes: a harness that signs its own session off names the MODEL,
+# and a fixed-string guard would stamp a second trailer beside it.
+# git passes $1 = message file, $2 = source
 # (message|template|merge|squash|commit), $3 = SHA (amend/-c).
+# `bash prepare-commit-msg --self-test` replays the message corpus.
+# Never blocks a commit (never exit 2): a hook that can stop a commit is a
+# hook that can strand an agent mid-belt, and this one only appends text.
 set -eu
 
 # --- project config (yours to edit after install — the file is your repo's) --
 # The trailer; keep it in step with the model line your agent prompts name.
 TRAILER="Co-Authored-By: Claude <noreply@anthropic.com>"
+# TRAILER: whatever else signs these commits — a harness naming the model —
+# must be recognised here, or this hook appends a second trailer beside it.
+TRAILER_RE='^Co-Authored-By: Claude.*<noreply@anthropic\.com>'
 # The per-agent worktree marker written by tools/dev/agent-worktree.sh.
 SCOPE_MARKER=".agent-scope"
 # -----------------------------------------------------------------------------
+
+# A header carried from an older install may lack a key: it runs at its stock value.
+declare -p TRAILER >/dev/null 2>&1 || TRAILER="Co-Authored-By: Claude <noreply@anthropic.com>"
+declare -p TRAILER_RE >/dev/null 2>&1 || TRAILER_RE='^Co-Authored-By: Claude.*<noreply@anthropic\.com>'
+declare -p SCOPE_MARKER >/dev/null 2>&1 || SCOPE_MARKER=".agent-scope"
 
 # Inline, not sourced: a library the repo may lack would fail the hook.
 is_agent_context() {
@@ -20,6 +34,96 @@ is_agent_context() {
 	[ -n "$root" ] && [ -f "${root}/${SCOPE_MARKER}" ]
 }
 
+# --- --self-test — the message corpus ----------------------------------------
+# Every case fires THIS file over a scratch message and counts the authorship
+# trailers the message ended up with. One is the contract; two is the defect
+# this hook's guard exists to prevent. Nothing here commits — git is used only
+# to give the scratch directory a toplevel of its own.
+HOOK_NAME="prepare-commit-msg"
+# ANY authorship trailer, whoever wrote it — a double stamp is what this counts.
+ANY_TRAILER_RE='^Co-Authored-By:'
+# The line a harness writes for its own session. It is not TRAILER, and a
+# `grep -F "$TRAILER"` guard never matched it: that was the double stamp.
+MODEL_NAMED_TRAILER="Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+
+self_test_says() {
+	local label="$1" got="$2" want="$3"
+	if [ "$got" = "$want" ]; then
+		return 0
+	fi
+	printf '  MISS — %s\n    wanted: %s\n    got: %s\n' \
+		"$label" "$want" "${got//$'\n'/ | }" >&2
+	return 1
+}
+
+# fire <message> <source> <scope> — run this hook over a scratch message file,
+# then print the file it left behind and `exit=<n>`.
+#
+# An empty <scope> is the NOT-an-agent case, and DEVKIT_AGENT_SCOPE is unset
+# for it rather than left alone: an operator with it exported would otherwise
+# turn the one case that asserts no stamp into a false pass.
+self_test_fire() {
+	local msg="$1" source="$2" scope="$3" rc=0 file
+	file="$SELF_TEST_DIR/COMMIT_EDITMSG"
+	printf '%s\n' "$msg" >"$file"
+	if [ -n "$scope" ]; then
+		(cd "$SELF_TEST_DIR" && env "DEVKIT_AGENT_SCOPE=$scope" \
+			bash "$SELF_TEST_HOOK" "$file" "$source") >/dev/null 2>&1 || rc=$?
+	else
+		(cd "$SELF_TEST_DIR" && env -u DEVKIT_AGENT_SCOPE \
+			bash "$SELF_TEST_HOOK" "$file" "$source") >/dev/null 2>&1 || rc=$?
+	fi
+	printf '%s\nexit=%s\n' "$(cat "$file")" "$rc"
+}
+
+# case <label> <message> <source> <scope> <trailers the message must end with>
+self_test_case() {
+	local label="$1" want="$5" got count
+	got="$(self_test_fire "$2" "$3" "$4")"
+	self_test_says "$label (exit code)" "${got##*$'\n'}" 'exit=0' || return 1
+	count="$(printf '%s\n' "$got" | grep -c "$ANY_TRAILER_RE" || true)"
+	self_test_says "$label (trailers)" "$count" "$want" || return 1
+}
+
+self_test() {
+	local rc=0
+	# Absolute, because every case runs from the scratch directory.
+	case "$0" in
+		/*) SELF_TEST_HOOK="$0" ;;
+		*) SELF_TEST_HOOK="$PWD/$0" ;;
+	esac
+	SELF_TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/${HOOK_NAME}-selftest.XXXXXX")"
+	# Its own toplevel, so no case inherits the scope marker of the tree it runs in.
+	git init -q "$SELF_TEST_DIR" >/dev/null 2>&1 || true
+
+	self_test_case 'an unsigned agent commit' \
+		'feat: a thing' message "$SELF_TEST_DIR" 1 || rc=1
+	self_test_case 'a message already carrying the trailer this hook writes' \
+		"feat: a thing"$'\n\n'"$TRAILER" message "$SELF_TEST_DIR" 1 || rc=1
+	self_test_case 'a message a harness already signed with a MODEL-NAMED trailer' \
+		"feat: a thing"$'\n\n'"$MODEL_NAMED_TRAILER" message "$SELF_TEST_DIR" 1 || rc=1
+	self_test_case 'a merge body, which is not agent-authored' \
+		'Merge branch feat/x' merge "$SELF_TEST_DIR" 0 || rc=1
+	self_test_case 'a commit outside any agent context' \
+		'docs: mine' message '' 0 || rc=1
+
+	rm -rf "$SELF_TEST_DIR"
+
+	if [ "$rc" -eq 0 ]; then
+		echo "[$HOOK_NAME] SELF-TEST OK — every case exits 0, the trunk is never stamped, and no message ends with two trailers"
+	else
+		echo "[$HOOK_NAME] SELF-TEST FAIL — see the case(s) above" >&2
+	fi
+	return "$rc"
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+	self_test_rc=0
+	self_test || self_test_rc=$?
+	exit "$self_test_rc"
+fi
+
+# --- the hook -----------------------------------------------------------------
 MSG_FILE="$1"
 MSG_SOURCE="${2:-}"
 
@@ -31,8 +135,9 @@ case "$MSG_SOURCE" in
 	merge|squash) exit 0 ;;
 esac
 
-# Idempotent: already trailered → nothing to do.
-if grep -qF "$TRAILER" "$MSG_FILE"; then
+# Idempotent: already trailered, by this hook or by whoever else signs these
+# commits → nothing to do.
+if grep -qE "$TRAILER_RE" "$MSG_FILE"; then
 	exit 0
 fi
 

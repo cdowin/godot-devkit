@@ -1,0 +1,8 @@
+{"ts":"2026-09-12T13:58:31Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1544,"census":43,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T13:59:23Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":29959,"census":201,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T13:59:58Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":5925,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T13:59:59Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":356,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:00:12Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":5913,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:00:14Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":349,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:01:08Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":6303,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:01:09Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":373,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}

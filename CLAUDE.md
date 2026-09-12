@@ -121,9 +121,8 @@ with its installable by something that runs, never by intention.
   `tools/hooks/` except the sandbox guard, `tools/setup-hooks.sh` and `tools/dev/agent-worktree.sh`
   (`install-hooks`, with `.claude/settings.json` carrying the entries it prints);
   `.github/workflows/verify.yml` (`install-ci`: one job, `make milestone`);
-  `.claude/agents/verification-builder.md` and `verification-reviewer.md` (`install-agents`;
-  `.claude/agents/code-reviewer.md` is this repo's own); `.claude/rules/pm-execution.md` and
-  `.claude/skills/pm-operations/SKILL.md` (`pm install-skills`); `docs/sdlc-protocol.md`
+  `.claude/agents/` except `code-reviewer.md`, which is this repo's own (`install-agents`);
+  `.claude/rules/pm-execution.md` and `.claude/skills/` except `release/` (`pm install-skills`); `docs/sdlc-protocol.md`
   (`install-sdlc`). `agentic-sdlc adopt` proves a pin bump; `install-* --diff` shows a hand-edit.
 - `pm/roadmap/` is a real PM tree, moved only through `make pm ARGS="…"`; `devkit.toml` turns on every
   `[pm]` rule except D8 (bump at start — this repo bumps at close). A rule that fails here gets its

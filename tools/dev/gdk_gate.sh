@@ -109,10 +109,24 @@ _gdk_ledger_note() {
 }
 
 # _gdk_ledger_sidecar <logfile> — this slot's start-time file; expansion, not spawns.
+#
+# **KEYED BY PID as well as by log path.** The log path alone is shared by every
+# concurrent run of the same gate in one checkout, so two `make check` runs used
+# one sidecar: the second `open` overwrote the first's start time and the first
+# `close` unlinked it, and one of the two runs filed no cost row at all — a gate
+# that ran, passed, and left no measurement. `$$` is the sourcing shell's, and
+# `open` and `close` are both called from it (`gdk_gate_log`,
+# `gdk_gate_verdict`), so the pair always agree.
+#
+# What this does NOT fix, and it is the same class one level up: the report
+# directory is cleared per run, so a run that clears it while another holds a
+# sidecar there still costs that one its row. Makefile.devkit's gate macros
+# capture into `<slot>.<pid>` and rename it onto the slot; a runner capturing
+# into the path `gdk_gate_log` returns still shares it with a concurrent run.
 _gdk_ledger_sidecar() {
 	case "$1" in
-		*/*) printf '%s/.%s.gdkms' "${1%/*}" "${1##*/}" ;;
-		*)   printf '.%s.gdkms' "$1" ;;
+		*/*) printf '%s/.%s.%s.gdkms' "${1%/*}" "${1##*/}" "$$" ;;
+		*)   printf '.%s.%s.gdkms' "$1" "$$" ;;
 	esac
 }
 

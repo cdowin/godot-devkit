@@ -5,7 +5,7 @@
 # is a courier: the verb parses, sums and refuses; this file never reads a
 # transcript or invents a row. It never blocks a stop (never exit 2): every
 # failure says so on stderr and exits 0.
-# Wire it `"async": true`; `install-hooks` prints the settings.json snippet.
+# Wire it `"async": true` from ANY scope; `install-hooks` emits that wiring.
 # `bash cc-ledger-subagent.sh --self-test` replays the fail-open matrix.
 set -eu
 
@@ -15,6 +15,9 @@ set -eu
 # environment through (every payload value travels as `GDK_LEDGER_*`).
 MAKE_PM=(make -s pm)
 # -----------------------------------------------------------------------------
+
+# A header carried from an older install may lack a key: it runs at its stock value.
+declare -p MAKE_PM >/dev/null 2>&1 || MAKE_PM=(make -s pm)
 
 # The event is a CONSTANT, not `hook_event_name` off the payload: a mis-wired
 # entry must not file a dispatch row for a session stop.
@@ -78,10 +81,20 @@ sys.stdout.write(json.dumps(event))
 ' "$@"
 }
 
-# fire <payload> — both streams, then `exit=<n>`.
+# fire <payload> [<grain>] [<root>] — both streams, then `exit=<n>`.
+#
+# The child's environment is BUILT, not inherited: the grain and the tree root
+# arrive that way, and an operator with either exported would turn every case
+# asserting its ABSENCE into a false pass. Every `-u` precedes every
+# assignment, because BSD `env` stops reading options at the first NAME=value.
 self_test_fire() {
 	local rc=0 out
-	out="$(printf '%s' "$1" | bash "$0" 2>&1)" || rc=$?
+	local child=(env)
+	[ -n "${2:-}" ] || child+=(-u GDK_LEDGER_GRAIN)
+	[ -n "${3:-}" ] || child+=(-u GDK_LEDGER_ROOT)
+	[ -z "${2:-}" ] || child+=("GDK_LEDGER_GRAIN=$2")
+	[ -z "${3:-}" ] || child+=("GDK_LEDGER_ROOT=$3")
+	out="$(printf '%s' "$1" | "${child[@]}" bash "$0" 2>&1)" || rc=$?
 	printf '%s\nexit=%s\n' "$out" "$rc"
 }
 
@@ -103,7 +116,7 @@ self_test_case() {
 }
 
 self_test() {
-	local rc=0 tmp repo argv want tilde
+	local rc=0 tmp repo other argv want tilde
 	# shellcheck disable=SC2088  # a LITERAL leading ~ is the payload under test
 	tilde='~/t.jsonl'
 	tmp="$(mktemp -d "${TMPDIR:-/tmp}/cc-ledger-selftest.XXXXXX")"
@@ -142,6 +155,51 @@ self_test() {
 				rc=1 ;;
 		esac
 		self_test_says 'a payload with no ids still records' "$argv" 'exit=0' || rc=1
+		# The grain is the same discipline, one source further out: it comes
+		# from the ENVIRONMENT rather than the payload, because no hook event
+		# carries a grain. The argv above was fired with GDK_LEDGER_GRAIN
+		# unset, so it is the negative.
+		case "$argv" in
+			*'ARG[--grain]'*)
+				printf '  MISS — an unset grain was passed as a flag\n    got: %s\n' \
+					"${argv//$'\n'/ | }" >&2
+				rc=1 ;;
+		esac
+		# And the positive. Every real grain id holds a `/`, so this is also the
+		# value most likely to be lost by a vehicle that re-splits or re-quotes.
+		argv="$(self_test_fire "$(self_test_payload "$EVENT" "$repo" 'sess-1' "$tilde" 'ag-1' 'developer')" \
+			'0.1/alpha/s0')"
+		for want in 'ARG[--grain]' 'ARG[0.1/alpha/s0]' 'exit=0'; do
+			self_test_says 'the grain travels' "$argv" "$want" || rc=1
+		done
+
+		# The TREE, from the environment. `other` is a git tree with no Makefile
+		# and `repo` has one, so which tree was derived is visible in the note.
+		other="$tmp/other"
+		mkdir -p "$other"
+		git -C "$other" init -q
+		argv="$(self_test_fire "$(self_test_payload \
+			"$EVENT" "$other" 'sess-1' "$tilde")")"
+		self_test_says 'a session rooted in another tree derives THAT tree' \
+			"$argv" 'has no Makefile' || rc=1
+		argv="$(self_test_fire "$(self_test_payload \
+			"$EVENT" "$other" 'sess-1' "$tilde")" '' "$repo")"
+		for want in 'ARG[ledger]' 'ARG[record]' "ARG[${HOME}/t.jsonl]" 'exit=0'; do
+			self_test_says 'GDK_LEDGER_ROOT files the row from another scope' \
+				"$argv" "$want" || rc=1
+		done
+		# A root naming no tree is a NOTE and exit 0, never a fall back to a cwd.
+		argv="$(self_test_fire "$(self_test_payload \
+			"$EVENT" "$repo" 'sess-1' "$tilde")" '' "$tmp/no-such-tree")"
+		for want in 'GDK_LEDGER_ROOT' 'not inside a git repository' 'exit=0'; do
+			self_test_says 'a root naming no tree is a note' "$argv" "$want" || rc=1
+		done
+		case "$argv" in
+			*'ARG[ledger]'*)
+				printf '  MISS — an unresolvable GDK_LEDGER_ROOT fell back to the cwd\n    got: %s\n' \
+					"${argv//$'\n'/ | }" >&2
+				rc=1 ;;
+		esac
 
 		# A non-bash vehicle under LC_ALL=C: a bash-quoted value would be a lost row
 		# with nothing red anywhere.
@@ -150,10 +208,20 @@ self_test() {
 			printf 'SHELL := %s\npm:\n\t@printf "ARG[%%s]\\n" $(ARGS)\n' \
 				"$(command -v dash)" >"$repo/Makefile"
 			awkward="$tmp/café dir/t.jsonl"
+			# The grain travels HERE too. A REACHABILITY proof, not a
+			# quoting one, and the difference is worth stating: the id
+			# grammar forbids spaces, so the grain cannot exercise the
+			# word-splitting this case's PATH assertion exists to catch.
+			# What it does prove is that the value arrives intact under
+			# the honest vehicle — dash, LC_ALL=C — rather than only
+			# under the bash the other cases run.
 			argv="$(LC_ALL=C self_test_fire "$(self_test_payload \
-				"$EVENT" "$repo" 'sess-1' "$awkward" 'ag-1' 'developer')")"
-			self_test_says 'a non-bash vehicle, a path bash would escape' \
-				"$argv" "ARG[$awkward]" || rc=1
+				"$EVENT" "$repo" 'sess-1' "$awkward" 'ag-1' 'developer')" '0.1/alpha/s0')"
+			for want in "ARG[$awkward]" 'ARG[--grain]' \
+					'ARG[0.1/alpha/s0]'; do
+				self_test_says 'a non-bash vehicle, a path bash would escape' \
+					"$argv" "$want" || rc=1
+			done
 		else
 			echo "  SKIP — dash is not on PATH; the non-bash vehicle case did not run" >&2
 		fi
@@ -218,9 +286,17 @@ if [ -z "$TRANSCRIPT" ]; then
 fi
 
 [ -n "$SESSION_CWD" ] || SESSION_CWD="$PWD"
-REPO_ROOT="$(git -C "$SESSION_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
+# The tree: named in the environment, else derived from the cwd — which a
+# session rooted above the repo cannot supply, and no gate here sees that.
+LEDGER_ROOT="$SESSION_CWD"
+ROOT_FROM="the $EVENT payload's cwd"
+if [ -n "${GDK_LEDGER_ROOT:-}" ]; then
+	LEDGER_ROOT="$(expand_tilde "$GDK_LEDGER_ROOT")"
+	ROOT_FROM="GDK_LEDGER_ROOT"
+fi
+REPO_ROOT="$(git -C "$LEDGER_ROOT" rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -z "$REPO_ROOT" ]; then
-	note "$SESSION_CWD is not inside a git repository — no ledger row"
+	note "$LEDGER_ROOT ($ROOT_FROM) is not inside a git repository — no ledger row"
 	exit 0
 fi
 
@@ -237,6 +313,13 @@ fi
 ARGS='ledger record'
 env_arg --from-transcript GDK_LEDGER_TRANSCRIPT "$TRANSCRIPT"
 ARGS="$ARGS --event $EVENT"
+# The grain, when the dispatch carried one. Through `env_arg` like every other
+# value: a grain id holds `/`, and the vehicle's shell may be dash under
+# LC_ALL=C. Absent is an OMITTED FLAG — never `--grain ""`, which the verb would
+# have to refuse, turning "nobody said" into a lost row.
+if [ -n "${GDK_LEDGER_GRAIN:-}" ]; then
+	env_arg --grain GDK_LEDGER_GRAIN "$GDK_LEDGER_GRAIN"
+fi
 if [ -n "$SESSION_ID" ]; then
 	env_arg --session-id GDK_LEDGER_SESSION_ID "$SESSION_ID"
 fi

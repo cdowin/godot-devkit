@@ -27,6 +27,23 @@ FALLBACK_BASE="staging"
 PM_CMD=(make -s pm)
 # -----------------------------------------------------------------------------
 
+# A header carried from an older install may lack a key: it runs at its stock value.
+declare -p WORKTREE_PARENT >/dev/null 2>&1 || WORKTREE_PARENT=".claude/worktrees"
+declare -p BRANCH_PREFIX >/dev/null 2>&1 || BRANCH_PREFIX="feat/"
+declare -p SCOPE_MARKER >/dev/null 2>&1 || SCOPE_MARKER=".agent-scope"
+declare -p WARM_DIRS >/dev/null 2>&1 || WARM_DIRS=()
+declare -p WARM_SIDECAR_GLOB >/dev/null 2>&1 || WARM_SIDECAR_GLOB=""
+declare -p FALLBACK_BASE >/dev/null 2>&1 || FALLBACK_BASE=""
+declare -p PM_CMD >/dev/null 2>&1 || PM_CMD=(make -s pm)
+
+# An empty FALLBACK_BASE is READ from the remote's HEAD, never guessed. A remote
+# with no HEAD (a `git remote add`, not a clone) leaves the name `origin/HEAD`,
+# which `new` then refuses by name.
+if [ -z "$FALLBACK_BASE" ]; then
+	FALLBACK_BASE="$(git symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null)"
+	[ -n "$FALLBACK_BASE" ] || FALLBACK_BASE="origin/HEAD"
+fi
+
 # integration_branch [toplevel] — the ACTIVE milestone's integration branch, or
 # nothing. Asked of the CLI by CATEGORY, never grepped from milestone.md, so a
 # renamed status word still matches. Exactly one milestone declaring a non-trunk
@@ -36,7 +53,7 @@ PM_CMD=(make -s pm)
 integration_branch() {
 	local root="${1:-$MAIN_ROOT}"
 	local ask="list --kind milestone --category in_progress"
-	local out line _id _status _cat branch found="" count=0 answered=0
+	local out line _id _status _cat branch _rest found="" count=0 answered=0
 	out="$(cd "$root" && "${PM_CMD[@]}" ARGS="$ask" 2>&1)" || out=""
 	while IFS= read -r line; do
 		case "$line" in
@@ -44,11 +61,19 @@ integration_branch() {
 			*"	"*) ;;
 			*) continue ;;
 		esac
-		IFS=$'\t' read -r _id _status _cat branch <<-EOF
+		# `_rest` and not a bare `branch`: the LAST variable of a `read`
+		# absorbs every remaining field, so a fifth column would silently
+		# become part of the branch name. 0.4.0 added `name` and this is
+		# what broke — a trailing catch-all is a consumer that only works
+		# while the payload never grows.
+		IFS=$'\t' read -r _id _status _cat branch _rest <<-EOF
 		$line
 		EOF
+		# The trunk is `main` or the fallback itself, never a name the flow
+		# may not have: a declared `staging` in a tree with none is refused
+		# by name in `new`, not silently swapped for the fallback.
 		case "$branch" in
-			"" | - | staging | main) continue ;;
+			"" | - | main | "$FALLBACK_BASE") continue ;;
 		esac
 		found="$branch"
 		count=$((count + 1))
@@ -108,10 +133,11 @@ cmd_new() {
 		die "branch ${branch} already exists — pick a fresh slug or 'done' the old worktree"
 	fi
 	git rev-parse --verify --quiet "${base}" >/dev/null \
-		|| die "base branch '${base}' does not exist"
+		|| die "base '${base}' does not resolve — set FALLBACK_BASE in tools/dev/agent-worktree.sh, pass [base-branch], or run git remote set-head origin --auto"
 
-	# One git op creates both the branch and the linked worktree.
-	git worktree add -b "$branch" "$abs_path" "$base" >/dev/null \
+	# One git op creates both the branch and the linked worktree. --no-track:
+	# a base like origin/main must not become the branch's upstream.
+	git worktree add --no-track -b "$branch" "$abs_path" "$base" >/dev/null \
 		|| die "git worktree add failed"
 
 	# Pre-warm the caches by copy, never symlink, so each tree owns its own;
