@@ -26,7 +26,7 @@ kit is the Godot tiers and gates.
 
 ```make
 DEVKIT_VERSION       := v0.2.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.0.0     # this kit — the Godot tiers and the eight gates
+GODOT_DEVKIT_VERSION := v1.0.1     # this kit — the Godot tiers and the eight gates
 include Makefile.devkit
 ```
 
@@ -35,7 +35,7 @@ the gates to `make check`:
 
 ```sh
 uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.2.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.0.0" godot-devkit install-runners  # Makefile.tiers + runners
+uvx --from "git+https://github.com/cdowin/godot-devkit@v1.0.1" godot-devkit install-runners  # Makefile.tiers + runners
 ```
 
 ```toml

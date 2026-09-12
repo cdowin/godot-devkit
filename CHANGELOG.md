@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.1 — 2026-09-11
+
 **The uid guard follows the branch flow, not `staging`.** The `uid-guard.yml` that `install-runners`
 writes used to trigger on pushes to `staging`, a branch that agentic-sdlc's main → milestone branch
 → main flow never creates. It now triggers on a PR into `main` and a push to `main`, the same events
