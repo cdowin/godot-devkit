@@ -32,11 +32,17 @@ devkit.toml:
     # not line numbers — a name survives edits above it, while a new bare call
     # in a different function of a listed file still trips the gate.
     allowlist = { "systems/hazards/wormhole_visual.gd:_ready" = "cosmetic pulse phase" }
+    # Existing debt, per file at its CURRENT count of bare-RNG lines — the
+    # adoption step before the allowlist's reasoned carve-outs. Held and counted
+    # on a BASELINED line; a file past its entry fails, and an entry above what
+    # is left fails until lowered — it only shrinks.
+    baseline = { "systems/progression/loot_roll.gd" = 4 }
 """
 from __future__ import annotations
 
 import re
 
+from godot_devkit.core.baseline import Baseline
 from godot_devkit.core.config import ConfigError, config_section, str_tuple, str_tuple_table
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.godot.index.gdscript import code_only
@@ -124,6 +130,7 @@ def run() -> int:
     sect = config_section(SECTION)
     roots = str_tuple(sect, SECTION, 'roots', DEFAULT_ROOTS)
     allowed = _allowlist(sect)
+    baseline = Baseline.read(sect, SECTION)
     root = repo_root()
     scanned = [rel for rel in git_lines('ls-files', '--', *roots)
                if rel.endswith(SUFFIX)]
@@ -143,13 +150,15 @@ def run() -> int:
             continue
         hits.extend(scan_text(text, rel))
 
-    findings: list[str] = []
+    bare: list[tuple[str, str]] = []
     matched = set()
     for hit in hits:
         if hit.key in allowed:
             matched.add(hit.key)
             continue
-        findings.append(f'  BARE-RNG  {hit}')
+        bare.append((hit.path, f'  BARE-RNG  {hit}'))
+    judged = baseline.judge(bare)
+    findings = judged.open
     # CHECK 3 — reported in the SAME run as CHECK 1/2, never after an early
     # exit: two findings classes are two things to fix, and a gate that reveals
     # the second only once you have fixed the first costs a round trip.
@@ -160,6 +169,7 @@ def run() -> int:
     if findings:
         for finding in findings:
             print(finding)
+        judged.report()
         print(f'\n{TAG} FAIL — {len(findings)} finding(s) across '
               f'{len(scanned)} script(s) under {", ".join(roots)}')
         print('  A run-scoped draw comes from a generator the caller owns, '
@@ -170,6 +180,11 @@ def run() -> int:
               'things — prune it.')
         return 1
 
+    judged.report()
+    if judged.failed:
+        print(judged.verdict(TAG, f'{len(scanned)} script(s) under '
+                                  f'{", ".join(roots)}'))
+        return 1
     print(f'{TAG} PASS — {len(scanned)} script(s) under {", ".join(roots)} draw '
           f'from an owned RNG; {len(allowed)} allowlisted site(s), each with a reason')
     return 0
