@@ -2,7 +2,7 @@
 id: 1.1.0/the-tiers-cost-is-boots
 milestone: "1.1.0"
 name: The scenario tier is graded on boots, which is what it costs
-status: planning
+status: building
 reviewed:
 phase:
 depends_on: []
@@ -31,6 +31,12 @@ grab-bag — and names what governs cost instead. `integration.sh` reports its b
 boot cost as a census line, in a shape `agentic-sdlc check budget` can grade, so a consumer's
 ceiling can be expressed in the unit it actually pays. The README's testing section carries the
 cost model in one sentence: merging two scenarios saves a boot, trimming lines saves nothing.
+
+GitHub #8, `integration` half: `integration`, `integration-all` and `integration-diff` pass
+`gdk_gate` its fifth argument, the count of scenarios the run booted, so the `gate` row carries a
+census and `[tests] cases` on those tiers grades instead of FAILing UNCOUNTED. That census IS the
+boot count — no second gate here; agentic-sdlc's `[tests] cases` is the ceiling (the milestone's
+first risk, decided).
 
 ## Proof budget
 

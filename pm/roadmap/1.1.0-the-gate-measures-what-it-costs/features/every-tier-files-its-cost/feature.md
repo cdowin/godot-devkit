@@ -2,7 +2,7 @@
 id: 1.1.0/every-tier-files-its-cost
 milestone: "1.1.0"
 name: Every tier files a cost row, including the cheap ones
-status: planning
+status: building
 reviewed:
 phase:
 depends_on: []
@@ -61,6 +61,10 @@ verdict they already publish, so the ledger can name the outcome without a secon
 double-wrap rule stands untouched. A failing run files FAIL, never PASS. `agentic-sdlc check
 budget` can then take a ceiling on `unit`, and `verify --plan` prints a number for every rung it
 declares.
+
+GitHub #7 (no row) and the `unit` half of #8 (no census): `unit.sh` also exports its test count as
+the census `gdk_gate` files on the row (the fifth-argument value the pytest tiers pass as
+`SUM_CASES`), so a consumer on agentic-sdlc >= 0.7.0 can declare `[tests] cases` on `unit`.
 
 ## Proof budget
 

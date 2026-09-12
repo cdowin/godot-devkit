@@ -1,0 +1,14 @@
+{"ts":"2026-09-12T14:04:46Z","kind":"status","grain":"1.1.0","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:46Z","kind":"disposition","grain":"1.1.0","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:47Z","kind":"status","grain":"1.1.0/a-new-gate-arrives-with-a-baseline","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:47Z","kind":"disposition","grain":"1.1.0/a-new-gate-arrives-with-a-baseline","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:47Z","kind":"status","grain":"1.1.0/every-config-key-shows-its-shape","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:47Z","kind":"disposition","grain":"1.1.0/every-config-key-shows-its-shape","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:48Z","kind":"status","grain":"1.1.0/every-tier-files-its-cost","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:48Z","kind":"disposition","grain":"1.1.0/every-tier-files-its-cost","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:49Z","kind":"status","grain":"1.1.0/the-tiers-cost-is-boots","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:49Z","kind":"disposition","grain":"1.1.0/the-tiers-cost-is-boots","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:50Z","kind":"status","grain":"1.1.0/the-two-pin-instruction-is-complete","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:50Z","kind":"disposition","grain":"1.1.0/the-two-pin-instruction-is-complete","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:51Z","kind":"status","grain":"ft-tres-canonical-respell-and-order","from":"planning","to":"building","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:04:51Z","kind":"disposition","grain":"ft-tres-canonical-respell-and-order","state":"building","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
