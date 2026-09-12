@@ -14,3 +14,13 @@
 {"ts":"2026-09-12T14:15:19Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1304,"census":51,"branch":"feat/1.1.0-baseline"}
 {"ts":"2026-09-12T14:15:49Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":852,"census":51,"branch":"feat/1.1.0-baseline"}
 {"ts":"2026-09-12T14:16:18Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":933,"census":46,"branch":"feat/1.1.0-baseline"}
+{"ts":"2026-09-12T14:18:41Z","kind":"gate","gate":"test","verdict":"FAIL","duration_ms":32218,"census":205,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:18:49Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":7298,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:19:27Z","kind":"gate","gate":"pyunit","verdict":"FAIL","duration_ms":1590,"census":47,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:20:03Z","kind":"gate","gate":"test","verdict":"FAIL","duration_ms":35106,"census":205,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:20:20Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1389,"census":47,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:20:51Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30527,"census":205,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:20:57Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":5906,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:20:59Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":370,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:22:34Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":53905,"census":205,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:22:45Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":10080,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
