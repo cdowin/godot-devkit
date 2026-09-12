@@ -2,12 +2,13 @@
 id: "1.2.0"
 kind: milestone
 name: the runner fails fast
-status: building
+status: packaging
 depends_on: []
 branch: milestone/1.1.1-the-runner-fails-fast
 mode:
 version: 1.2.0
 changelog: The scenario runner fails fast on a parse error, and the header ratchet adopts gradually.
+reviewed: docs/reviews/2026-09-12-1.2.0-milestone.md
 ---
 
 # 1.2.0 — the runner fails fast
