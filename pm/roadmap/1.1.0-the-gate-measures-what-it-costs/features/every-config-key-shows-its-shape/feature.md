@@ -7,6 +7,7 @@ reviewed: docs/reviews/2026-09-12-1.1.0-every-config-key-shows-its-shape.md
 phase:
 depends_on: []
 consumed_by: []
+changelog: The README devkit.toml block shows every key the kit reads, held by a census test.
 ---
 
 

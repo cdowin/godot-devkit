@@ -7,6 +7,7 @@ reviewed: docs/reviews/2026-09-12-1.1.0-a-new-gate-arrives-with-a-baseline.md
 phase:
 depends_on: []
 consumed_by: []
+changelog: Six gates take a per-file baseline in devkit.toml: adopt frozen, then pay the debt down; it only shrinks.
 ---
 
 

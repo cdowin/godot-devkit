@@ -7,6 +7,7 @@ reviewed: docs/reviews/2026-09-12-1.1.0-the-tiers-cost-is-boots.md
 phase:
 depends_on: []
 consumed_by: []
+changelog: The scenario tiers file their boot count as the census; test-shape --help names boots as the cost (#8).
 ---
 
 

@@ -5,6 +5,7 @@ status: packaging
 depends_on: []
 branch: milestone/1.1.0-the-gate-measures-what-it-costs
 reviewed: docs/reviews/2026-09-12-1.1.0-milestone.md
+changelog: Every tier files its cost, every gate can be adopted frozen, and .tres value spelling is canonicalized.
 ---
 
 # 1.1.0 — the gate measures what it costs

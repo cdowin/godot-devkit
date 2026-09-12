@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-12-1.1.0-ft-tres-canonical-respell-and-order.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: check canonical and scene canonicalize --respell/--order gate and fix .tres float spelling, typed arrays and scripted property order (#11).
 ---
 
 # .tres value spelling and property order are canonicalized and gated

@@ -7,6 +7,7 @@ reviewed: docs/reviews/2026-09-12-1.1.0-every-tier-files-its-cost.md
 phase:
 depends_on: []
 consumed_by: []
+changelog: parse, lint, warnings and unit file a ledger cost row; unit files its test count as the census (#7, #8).
 ---
 
 # Every tier files a cost row, including the cheap ones

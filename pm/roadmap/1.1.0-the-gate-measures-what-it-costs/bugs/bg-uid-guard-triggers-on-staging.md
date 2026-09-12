@@ -5,7 +5,7 @@ milestone: "1.1.0"
 name: uid-guard.yml triggers on staging, a flow agentic-sdlc does not have
 status: closed
 caused_by:
-changelog:
+changelog: none
 ---
 
 # uid-guard-triggers-on-staging
