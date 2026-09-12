@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `scenario.sh` (and so `integration.sh`) watches the live engine stream for Godot's GDScript
+  parse-error signature and stops the engine on the first one not in the noise allowlist — SIGTERM,
+  then SIGKILL after `GDK_TIMEOUT_KILL_AFTER`, through the new library helper `gdk_stop_bounded` —
+  printing `[SCENARIO] <name> FAIL — GDScript parse error: <line>` and exiting 1 within seconds,
+  where it used to sit out `GDK_SCENARIO_HARD_TIMEOUT` and blame a hang (#12). A run that still
+  reaches the hard timeout names a parse error in its transcript instead of "likely hang".
+
 ## v1.1.0 — 2026-09-12
 
 - README's `devkit.toml` block now shows every key the kit reads with an example of its own shape
