@@ -105,7 +105,7 @@ same command twice is a no-op the second time.
 | `scene rm <file> <node-path>` | remove a node with its descendants, connections and editable markers; prunes an ext_resource nothing else uses |
 | `scene reparent <file> <node-path> <new-parent>` | move a subtree and fix its NodePaths |
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | author or remove one `[connection]`; ambiguous matches are refused, `--flags` names one |
-| `scene canonicalize <file>... [--elide-defaults] [--respell] [--order]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default; `--respell` re-spells floats in the saver's shortest form and wraps a bare list on an `Array[T]` export as `Array[T]([...])`; `--order` puts a scripted section's properties in declaration order — line edits only, anything unprovable named and left alone |
+| `scene canonicalize <file>... [--elide-defaults] [--respell] [--order]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default; `--respell` re-spells floats in the saver's shortest form and wraps a bare list on an `Array[T]` export as `Array[T]([...])`; `--order` puts a scripted section's properties in declaration order — line edits only, anything unprovable named and left alone | <!-- doc-scan:allow -->
 | `refs --retarget <old-res-path> <new-res-path> [--dry-run]` | after a `git mv`: rewrite every `ext_resource` path and exact `preload`/`load` literal naming the old path; anything unprovable is SKIPPED with a reason, and skips exit 1 |
 | `tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` · `tiles erase …` | fill or clear a rectangle of one `TileMapLayer`; only that property's base64 is regenerated |
 
@@ -188,6 +188,8 @@ extra_properties = { MyWidget = ["virtual_prop"] }   # a `_get_property_list` sh
 [defaults]
 exclude_prefixes = ["addons/"]
 baseline = { "data/enemies/grunt.tres" = 3 }
+[canonical]                         # opt-in: name it in [checks] godot to run it in `check all`
+exclude_prefixes = ["addons/"]
 [rng]
 roots = ["systems/run/"]           # stock ".": keep it NARROW — the roots that hold run-scoped randomness
 allowlist = { "systems/run/dice.gd:roll" = "a cosmetic jitter; the reason is required" }

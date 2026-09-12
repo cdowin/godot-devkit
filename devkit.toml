@@ -56,7 +56,7 @@ milestone = "make milestone"
 # explain in the commit that caused it — never a number to raise in passing.
 [tests]
 budget = { pyunit = 2, test = 35 }
-cases  = { pyunit = 47, test = 221 }
+cases  = { pyunit = 51, test = 221 }
 
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines
