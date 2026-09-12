@@ -1,16 +1,16 @@
 ---
-id: "1.1.1"
+id: "1.2.0"
 kind: milestone
 name: the runner fails fast
 status: building
 depends_on: []
 branch: milestone/1.1.1-the-runner-fails-fast
 mode:
-version: 1.1.1
-changelog:
+version: 1.2.0
+changelog: The scenario runner fails fast on a parse error, and the header ratchet adopts gradually.
 ---
 
-# 1.1.1 — the runner fails fast
+# 1.2.0 — the runner fails fast
 
 Two defects found by a consumer adopting v1.0.0's scenario tier and `[test_shape] header`, filed as
 GitHub #12 and #13. Both cost real time in the loop an agent runs most: a parse error that reads as
