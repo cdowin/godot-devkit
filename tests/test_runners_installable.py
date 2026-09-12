@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -410,6 +411,31 @@ def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
     assert (root / STALE_MARKER).exists(), 'a sweep removed a shared cache'
     assert REMOVAL_NOTICE not in done.stderr, done.stderr
     assert 'rm -rf .godot' in done.stderr, done.stderr
+
+
+def test_a_parse_error_fails_fast_and_names_itself_instead_of_waiting_for_the_bound(tmp_path):
+    """GitHub #12. A runner whose load() came back null over a broken script
+    never quits, so the run sat out the whole hard timeout and blamed a hang
+    on what stderr had already named. The stub prints Godot's signature and
+    then outlives the bound; the watch must stop it within seconds — the run
+    returning at all proves the engine holding the pipe is gone."""
+    parse = ('echo \'SCRIPT ERROR: Parse Error: Identifier "nope" not declared'
+             ' in the current scope.\'; sleep 30')   # not exec'd: a wrapper's child
+    root, env, _ = _scenario_fixture(tmp_path, parse)
+    # The REAL timeout, not the exec stub: the stop is a signal to the bound,
+    # which forwards it to the engine's whole process group.
+    real = shutil.which('timeout') or shutil.which('gtimeout')
+    assert real, 'GNU coreutils timeout is required for this case'
+    (tmp_path / 'bin' / 'timeout').unlink()
+    (tmp_path / 'bin' / 'timeout').symlink_to(real)
+    started = time.monotonic()
+    done = _run_scenario(root, dict(env, GDK_SCENARIO_HARD_TIMEOUT='20'))
+    elapsed = time.monotonic() - started
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert elapsed < 10, f'{elapsed:.1f}s — the run waited on the engine'
+    assert done.stdout.startswith('[SCENARIO] alpha FAIL — GDScript parse error: '
+                                  'SCRIPT ERROR: Parse Error: Identifier "nope"'), done.stdout
+    assert 'likely hang' not in done.stdout and not done.stderr, done.stdout + done.stderr
 
 
 # --- the fan-out: integration.sh CALLS scenario.sh --------------------------

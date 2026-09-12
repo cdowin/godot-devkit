@@ -26,7 +26,7 @@ kit is the Godot tiers and gates.
 
 ```make
 DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.1.0     # this kit — the Godot tiers and the eight gates
+GODOT_DEVKIT_VERSION := v1.2.0     # this kit — the Godot tiers and the eight gates
 include Makefile.devkit
 ```
 
@@ -35,7 +35,7 @@ the gates to `make check`:
 
 ```sh
 uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.11.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.1.0" godot-devkit install-runners  # Makefile.tiers + runners
+uvx --from "git+https://github.com/cdowin/godot-devkit@v1.2.0" godot-devkit install-runners  # Makefile.tiers + runners
 ```
 
 ```toml
@@ -132,7 +132,7 @@ unless the whole picture resolved — anything unresolvable is censused `UNVERIF
 | `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes`, `baseline` |
 | `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args`, `baseline` |
 | `canonical` (opt-in) | tracked `.tres` values and property order against what Godot's saver writes, where a parse can prove it | a float the saver spells shorter (`0.30` -> `0.3`), a bare list on an `Array[T]` export, a scripted section out of declaration order — the churn an editor save of a hand-authored resource makes | `[canonical] exclude_prefixes`; not in the stock `check all` — name it in `[checks] godot` |
-| `test-shape` | the integration tier | a new scenario over the line cap, a ledgered one that grew, and — with `header = true` — a scenario with no `## covers:`/`## Boots because:` header, asked of the roster `make integration-list` boots | `[test_shape] scenario_root`, `cap`, `infra`, `ledger`, `header`, `header_ledger`, `runner` |
+| `test-shape` | the integration tier | a new scenario over the line cap, a ledgered one that grew, and — with `header = true` — a scenario with no `## covers:`/`## Boots because:` header (a ledgered one is held until it carries both), asked of the roster `make integration-list` boots | `[test_shape] scenario_root`, `cap`, `infra`, `ledger`, `header`, `header_ledger`, `runner` |
 
 **Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `devkit.toml`
 mistake is always `2`, so CI can never read a typo as drift, and a key this package does not honour
@@ -212,7 +212,7 @@ cap = 300                          # lines; a NEW scenario over it fails
 infra = ["scenario_base.gd"]       # basenames of the tier's shared harness, not priced as scenarios
 ledger = { "tests/integration/big_flow.gd" = 812 }   # existing debt at its CURRENT size; only shrinks
 header = true                      # every booted scenario declares `## covers:` and `## Boots because:`
-header_ledger = ["tests/integration/big_flow.gd"]    # scenarios exempt until touched; only shrinks
+header_ledger = ["tests/integration/big_flow.gd"]    # scenarios exempt until they carry both lines; only shrinks
 runner = "tools/dev/runners/integration.sh"
 
 [autoloads]

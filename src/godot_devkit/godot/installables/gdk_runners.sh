@@ -901,8 +901,8 @@ usage: source gdk_runners.sh            the normal use — a shell library
        bash gdk_runners.sh --help       this message
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
-gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded, gdk_timeout_is_hang,
-gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
+gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
+gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.
 USAGE_EOF

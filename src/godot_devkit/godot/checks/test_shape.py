@@ -40,16 +40,19 @@ a boot — or the existing scenario of the same shape it extends. `covers:` is
 the repo-relative path prefixes the scenario exercises, which is what the
 integration runner's `--diff <ref>` slices by. The same ratchet: every scenario
 already written enters `[test_shape] header_ledger`, and leaves it when it is
-touched and headed. A ledgered scenario that has GROWN a header is a finding
-naming the ledger line to drop, so the ledger cannot go stale upward either.
+touched and headed. A ledgered scenario that carries BOTH lines is a finding
+naming the ledger line to drop, so the ledger cannot go stale upward either;
+one with a single line (a `covers:` the runner already slices by, say) is
+still held — the ledger's question is whether the file answers both.
 
   CHECK 3  every scenario off the header ledger carries both lines, well
            formed: a `Boots because:` naming a `tests/` path, and `covers:`
            entries that are repo-relative prefixes (no absolute, no `..`, no
            scheme, no glob, no whitespace, no empty segment) each of which
            EXISTS in the tree. The grammar is the runner's, entry for entry.
-  CHECK 4  every scenario on the header ledger still exists, and carries no
-           header — one that does has ratcheted out and the ledger line goes.
+  CHECK 4  every scenario on the header ledger still exists, and does not
+           carry both lines — one that does has ratcheted out (validated as
+           CHECK 3) and the ledger line goes; one or neither is held.
 
 CHECK 3 and 4 are asked of THE RUNNER'S ROSTER — what `integration.sh --list`
 prints, which is what `--all` boots and the only set `--diff` can slice to.
@@ -348,9 +351,18 @@ def header_defects(root: Path, text_body: str) -> list[str]:
     return defects
 
 
+# What a ledgered scenario is excused: the line it has not written yet.
+MISSING_LINE_DEFECTS = frozenset((f'no `## {BOOTS_KEY}` line', f'no `## {COVERS_KEY}` line'))
+
+
 def has_any_header(text_body: str) -> bool:
     boots, covers = read_header(text_body)
     return boots is not None or covers is not None
+
+
+def has_both_header_lines(text_body: str) -> bool:
+    boots, covers = read_header(text_body)
+    return boots is not None and covers is not None
 
 
 def line_count(text_body: str) -> int:
@@ -427,8 +439,8 @@ def run() -> int:
                                        f'{runner} prints, not readable on disk')
                 continue
             if rel in header_ledger:
-                if has_any_header(body):
-                    # Ratcheted out: the file answered the question. Validate
+                if has_both_header_lines(body):
+                    # Ratcheted out: the file answered BOTH lines. Validate
                     # what it says, and the ledger line goes.
                     header_findings.append(
                         f'  HEADED  {rel} — carries its header; drop it from '
@@ -436,6 +448,13 @@ def run() -> int:
                     header_findings.extend(
                         f'  HEADER  {rel} — {why}'
                         for why in header_defects(root, body))
+                else:
+                    # Held for the line it lacks, never for the one it has: a
+                    # stale `covers:` drops the scenario from every --diff slice.
+                    header_findings.extend(
+                        f'  HEADER  {rel} — {why}'
+                        for why in header_defects(root, body)
+                        if why not in MISSING_LINE_DEFECTS)
                 continue
             defects = header_defects(root, body)
             if not has_any_header(body):

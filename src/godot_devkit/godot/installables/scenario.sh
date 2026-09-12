@@ -66,6 +66,11 @@ ENGINE_ERROR_PATTERN='^(SCRIPT ERROR|SCRIPT WARNING|USER ERROR|USER WARNING|ERRO
 # On an otherwise PASSING run that is a cache problem, not a scenario problem.
 COLD_CACHE_PATTERN='invalid UID.*using text path instead'
 FAILED_ASSERTION_PATTERN='\[fail\]'
+# Godot's GDScript parse-error signature. A runner whose load() came back null
+# over a broken script does not quit, so without a watch on the live stream the
+# only exit is the hard timeout — and a verdict that says "hang".
+# Anchored at the line's start, so a scenario's own log text quoting it is not one.
+PARSE_ERROR_PATTERN='^[[:space:]]*(SCRIPT ERROR: Parse Error|ERROR: .* - Parse Error:)'
 # The engine's import cache, which the recovery below may REMOVE. A literal,
 # never a configurable: it is the argument to an `rm -rf` inside a directory
 # holding somebody's project, and a name that can be set from outside is a name
@@ -459,23 +464,86 @@ trap 'exit 143' TERM
 # user:// sandbox — a scenario boots the project's whole autoload stack.
 gdk_sandbox_home
 
+ALLOW_REGEX="$(allowlist_regex "$GDK_SCENARIO_NOISE_ALLOWLIST")"
+
+# parse_error_line <report> — the first parse-error line the noise allowlist
+# does not admit, or return 1. The allowlist applies because a scenario that
+# loads a deliberately broken script has already said so there.
+parse_error_line() {
+	local line
+	if [ -n "$ALLOW_REGEX" ]; then
+		line="$(grep -E "$PARSE_ERROR_PATTERN" "$1" | grep -vE "$ALLOW_REGEX" | head -1)"
+	else
+		line="$(grep -E "$PARSE_ERROR_PATTERN" "$1" | head -1)"
+	fi
+	[ -n "$line" ] || return 1
+	printf '%s\n' "$line"
+}
+
+# tap_parse_errors <hits> — pass the live stream through untouched, appending
+# every parse-error line to <hits> AS IT ARRIVES. The watch cannot read the
+# report instead: `head -c` block-buffers into it, so a short transcript
+# reaches the disk only when the engine exits — which is the thing that never
+# happens.
+tap_parse_errors() {
+	PARSE_RE="$PARSE_ERROR_PATTERN" awk -v hits="$1" \
+		'{ print } $0 ~ ENVIRON["PARSE_RE"] { print >> hits; close(hits) }'
+}
+
+# watch_for_parse_error <pidfile> <hits> <marker> — poll the tapped lines; on
+# the first parse error the allowlist does not admit, write it to <marker> and
+# stop the engine through the bound's own kill path. Ends with this run's
+# shell, whichever way it ends.
+watch_for_parse_error() {
+	local pidfile="$1" hits="$2" marker="$3" line pid
+	while kill -0 "$$" 2>/dev/null; do
+		if line="$(parse_error_line "$hits")"; then
+			printf '%s\n' "$line" > "$marker"
+			pid="$(cat "$pidfile" 2>/dev/null)"
+			# The bound's own process: `timeout` forwards the TERM to the
+			# engine's whole group and escalates to KILL after its grace, so an
+			# engine a wrapper script started (not exec'd) is stopped too.
+			[ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null
+			return 0
+		fi
+		sleep 0.2
+	done
+}
+
 # Boot the scenario once, capturing the transcript. A function so the
 # cold-cache recovery below can re-run it without duplicating the plumbing.
+# The engine is exec'd through a shim that records its PARENT's pid — the
+# `timeout` bounding it — which is what the parse-error watch signals.
 run_scenario() {
+	local pidfile hits marker watch_pid
+	pidfile="$(gdk_sandbox_tmpfile engine-pid.XXXXXX)" || exit 2
+	hits="$(gdk_sandbox_tmpfile parse-hits.XXXXXX)" || exit 2
+	marker="$(gdk_sandbox_tmpfile parse-error.XXXXXX)" || exit 2
+	watch_for_parse_error "$pidfile" "$hits" "$marker" &
+	watch_pid=$!
+	# shellcheck disable=SC2016  # $$ and $0 are the shim's own, not ours
 	if [ "$VERBOSE_STREAM" -eq 1 ]; then
 		gdk_run_bounded "$HARD_TIMEOUT_SECONDS" -- \
+			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
 			"$GDK_GODOT" --path . --headless -- \
 			"$GDK_SCENARIO_USER_ARG" "$SCENARIO_NAME" 2>&1 \
+			| tap_parse_errors "$hits" \
 			| head -c "$GDK_LOG_CAP_BYTES" | tee "$RUN_REPORT"
 	else
 		gdk_run_bounded "$HARD_TIMEOUT_SECONDS" -- \
+			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
 			"$GDK_GODOT" --path . --headless -- \
 			"$GDK_SCENARIO_USER_ARG" "$SCENARIO_NAME" 2>&1 \
+			| tap_parse_errors "$hits" \
 			| head -c "$GDK_LOG_CAP_BYTES" > "$RUN_REPORT"
 	fi
-	# head -c is the last pipe element and exits 0 — the engine's own code is
-	# PIPESTATUS[0], exactly as gdk_gate_capture documents.
+	# head -c exits 0 — the engine's own code is PIPESTATUS[0], exactly as
+	# gdk_gate_capture documents.
 	godot_exit="${PIPESTATUS[0]}"
+	kill "$watch_pid" 2>/dev/null
+	wait "$watch_pid" 2>/dev/null
+	parse_error="$(cat "$marker")"
+	rm -f "$pidfile" "$hits" "$marker"
 }
 
 run_scenario
@@ -534,13 +602,26 @@ fi
 
 # A timeout kill means the run hung — the documented exit-3 verdict. The report
 # is truncated, so reading it for a result line is pointless.
+#
+# A parse error the watch caught is checked FIRST: stopping the engine can end
+# in the SIGKILL escalation, whose code reads as a hang.
+if [ -n "$parse_error" ]; then
+	echo "[$GATE_TAG] $SCENARIO_NAME FAIL — GDScript parse error: $parse_error"
+	echo "  full report: $REPORT_FILE"
+	exit 1
+fi
 if gdk_timeout_is_hang "$godot_exit"; then
-	echo "[$GATE_TAG] $SCENARIO_NAME HARD_TIMEOUT — exceeded ${HARD_TIMEOUT_SECONDS}s, killed (likely hang)"
+	# The backstop: a hang whose transcript names a parse error the watch
+	# missed says so, instead of sending the reader after a hang.
+	if parse_error="$(parse_error_line "$RUN_REPORT")"; then
+		echo "[$GATE_TAG] $SCENARIO_NAME HARD_TIMEOUT — exceeded ${HARD_TIMEOUT_SECONDS}s, killed (GDScript parse error: $parse_error)"
+	else
+		echo "[$GATE_TAG] $SCENARIO_NAME HARD_TIMEOUT — exceeded ${HARD_TIMEOUT_SECONDS}s, killed (likely hang)"
+	fi
 	echo "  full report: $REPORT_FILE"
 	exit 3
 fi
 
-ALLOW_REGEX="$(allowlist_regex "$GDK_SCENARIO_NOISE_ALLOWLIST")"
 if [ -n "$ALLOW_REGEX" ]; then
 	unexpected="$(grep -E "$ENGINE_ERROR_PATTERN" "$RUN_REPORT" | grep -vE "$ALLOW_REGEX" || true)"
 else
