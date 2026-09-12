@@ -238,7 +238,13 @@ class TheHeaderRule(unittest.TestCase):
     def test_a_ledgered_scenario_that_grew_a_header_names_the_line_to_drop(self) -> None:
         # The ratchet's other direction: the ledger only shrinks, and a file
         # that answered the question must leave it — otherwise the ledger is
-        # a permission list that never empties.
+        # a permission list that never empties. Answered means BOTH lines: a
+        # `covers:` alone (the runner's --diff already slices by it) is held.
+        covers_only = GOOD_HEADER.replace(BOOTS.split(' cannot')[0], '## Note:')
+        code, out = _gate(ROSTER_REPO, HEADER_ON + f'header_ledger = ["{HEADED}"]\n',
+                          [(HEADED, covers_only)], runner=RUNNER_REL)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('HEADED', out)
         code, out = _gate(ROSTER_REPO, HEADER_ON + f'header_ledger = ["{HEADED}"]\n',
                           [(HEADED, GOOD_HEADER)], runner=RUNNER_REL)
         self.assertEqual(code, 1, out)
