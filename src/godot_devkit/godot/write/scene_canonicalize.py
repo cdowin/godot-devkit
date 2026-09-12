@@ -1,6 +1,7 @@
 """scene_canonicalize.py — put back what `PackedScene.pack()` throws away.
 
-    godot-devkit scene canonicalize <file>... [--dry-run]
+    godot-devkit scene canonicalize <file>... [--dry-run] [--elide-defaults]
+                                    [--respell] [--order]
 
 Authoring a scene offline (build a tree in a headless script, `PackedScene.pack()`,
 `ResourceSaver.save()`) is the fastest way to produce a big scene and the fastest
@@ -51,6 +52,16 @@ because deleting them is only safe where the redundancy is PROVEN
 re-save it touches nothing else: comments, ordering, uids and value spellings all
 survive, which is what makes it safe to run over a whole tree.
 
+`--respell` and `--order` are the other two things an editor save of a `.tres`
+changes, each proven by `resource_canonical` from the section's own script:
+floats in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
+`Array[T]` export wrapped as `Array[T]([...])`, and a scripted section's
+properties in declaration order. Both are LINE edits — a respell rewrites
+tokens inside the lines a value occupies, a reorder moves whole property lines
+— so comments, `uid=` and every other line survive byte for byte, and what the
+tool cannot prove it names as UNRESOLVED and leaves alone. `check canonical`
+is the gate over the same analysis.
+
 Each is restored from evidence, never invented: a uid comes from the target's own
 `.uid` sidecar, its `[gd_scene/gd_resource]` header, or its `.import` file, and an
 `index` is counted off the base scene's actual children. Anything that cannot be
@@ -65,6 +76,7 @@ from pathlib import Path
 from godot_devkit.godot.index.gdscript import ScriptIndex
 from godot_devkit.core import apply
 from godot_devkit.core.project import git_lines, repo_root
+from godot_devkit.godot.index.resource_canonical import CanonicalAnalyzer
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import Section, node_own_path, parse, split_path
 from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
@@ -266,8 +278,37 @@ def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> l
     return report
 
 
+def respell_values(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
+    """Re-spell values the way the saver writes them — tokens, never lines."""
+    analysis = analyzer.analyze(doc.lines, doc.sections, order=False)
+    report = [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
+              for item in analysis.rewrites]
+    report += [_unresolved(refusal) for refusal in analysis.refusals]
+    doc.rewrite_props([(item.prop, item.lines) for item in analysis.rewrites])
+    return report
+
+
+def order_properties(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
+    """Move each scripted section's properties into the saver's order."""
+    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False)
+    report = []
+    for item in analysis.reorders:
+        doc.reorder_props(item.section, item.order)
+        report.append(f'  ORDER  {item.where}: {len(item.moved)} of '
+                      f'{len(item.order)} properties moved to declaration order')
+    report += [_unresolved(refusal) for refusal in analysis.refusals]
+    return report
+
+
+def _unresolved(refusal) -> str:
+    key = f'.{refusal.key}' if refusal.key else ''
+    return f'  UNRESOLVED  {refusal.where}{key}: {refusal.reason} — left as written'
+
+
 def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
-                 analyzer: DefaultAnalyzer | None = None) -> tuple[str, list[str]]:
+                 analyzer: DefaultAnalyzer | None = None,
+                 canonical: CanonicalAnalyzer | None = None, *,
+                 respell: bool = False, order: bool = False) -> tuple[str, list[str]]:
     """-> (canonical text, one report line per restoration or refusal)."""
     doc = TscnDocument(read_scene_text(path), path)
     try:
@@ -279,6 +320,10 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
     report += _restore_indexes(doc, bases)
     if analyzer is not None:
         report += _elide_redundant_defaults(doc, analyzer)
+    if canonical is not None and respell:
+        report += respell_values(doc, canonical)
+    if canonical is not None and order:
+        report += order_properties(doc, canonical)
     return doc.text, report
 
 
@@ -293,14 +338,26 @@ def main(argv: list[str]) -> int:
                         help='also DELETE assignments proven equal to the '
                              'script\'s @export default (what Godot\'s writer '
                              'omits); see `check defaults`')
+    parser.add_argument('--respell', action='store_true',
+                        help='also re-spell values as Godot\'s saver writes them: '
+                             'floats in their shortest form, a bare list on an '
+                             'Array[T] export wrapped as Array[T]([...]); see '
+                             '`check canonical`')
+    parser.add_argument('--order', action='store_true',
+                        help='also move a scripted section\'s properties into '
+                             'the saver\'s order (script, then declaration '
+                             'order); see `check canonical`')
     args = parser.parse_args(argv)
 
     root = repo_root()
     uids = UidIndex(root)
     bases = BaseScenes(root)
     analyzer = None
-    if args.elide_defaults:
-        analyzer = DefaultAnalyzer(ScriptIndex(root, git_lines('ls-files', '*.gd')))
+    canonical = None
+    if args.elide_defaults or args.respell or args.order:
+        scripts = ScriptIndex(root, git_lines('ls-files', '*.gd'))
+        analyzer = DefaultAnalyzer(scripts) if args.elide_defaults else None
+        canonical = CanonicalAnalyzer(scripts) if args.respell or args.order else None
     unresolved = 0
     refused = 0
     for name in args.files:
@@ -310,7 +367,8 @@ def main(argv: list[str]) -> int:
             return EXIT_USAGE
         try:
             before = read_scene_text(path)
-            after, report = canonicalize(path, root, uids, bases, analyzer)
+            after, report = canonicalize(path, root, uids, bases, analyzer, canonical,
+                                         respell=args.respell, order=args.order)
         except UnicodeDecodeError as err:
             print(f'REFUSED  {path}: {utf8_refusal_reason(err)}')
             refused += 1
