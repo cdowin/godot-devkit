@@ -245,6 +245,13 @@ class TheHeaderRule(unittest.TestCase):
                           [(HEADED, covers_only)], runner=RUNNER_REL)
         self.assertEqual(code, 0, out)
         self.assertNotIn('HEADED', out)
+        # Held for the missing line only: the line it HAS is still checked.
+        stale = covers_only.replace(COVERS, '## covers: systems/renamed_away')
+        code, out = _gate(ROSTER_REPO, HEADER_ON + f'header_ledger = ["{HEADED}"]\n',
+                          [(HEADED, stale)], runner=RUNNER_REL)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'HEADER  {HEADED}', out)
+        self.assertNotIn('HEADED', out)
         code, out = _gate(ROSTER_REPO, HEADER_ON + f'header_ledger = ["{HEADED}"]\n',
                           [(HEADED, GOOD_HEADER)], runner=RUNNER_REL)
         self.assertEqual(code, 1, out)

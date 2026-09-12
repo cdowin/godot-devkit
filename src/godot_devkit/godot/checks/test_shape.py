@@ -351,6 +351,10 @@ def header_defects(root: Path, text_body: str) -> list[str]:
     return defects
 
 
+# What a ledgered scenario is excused: the line it has not written yet.
+MISSING_LINE_DEFECTS = frozenset((f'no `## {BOOTS_KEY}` line', f'no `## {COVERS_KEY}` line'))
+
+
 def has_any_header(text_body: str) -> bool:
     boots, covers = read_header(text_body)
     return boots is not None or covers is not None
@@ -444,6 +448,13 @@ def run() -> int:
                     header_findings.extend(
                         f'  HEADER  {rel} — {why}'
                         for why in header_defects(root, body))
+                else:
+                    # Held for the line it lacks, never for the one it has: a
+                    # stale `covers:` drops the scenario from every --diff slice.
+                    header_findings.extend(
+                        f'  HEADER  {rel} — {why}'
+                        for why in header_defects(root, body)
+                        if why not in MISSING_LINE_DEFECTS)
                 continue
             defects = header_defects(root, body)
             if not has_any_header(body):
