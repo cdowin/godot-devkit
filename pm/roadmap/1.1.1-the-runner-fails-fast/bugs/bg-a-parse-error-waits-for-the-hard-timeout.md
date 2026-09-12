@@ -3,9 +3,10 @@ id: bg-a-parse-error-waits-for-the-hard-timeout
 kind: bug
 milestone: "1.2.0"
 name: A scenario with a GDScript parse error hangs to HARD_TIMEOUT instead of failing fast
-status: open
+status: fixed
 caused_by:
 changelog: A scenario whose script does not parse fails within seconds and names the parse error, instead of timing out as a hang (#12).
+reviewed: docs/reviews/2026-09-12-1.1.1-bg-a-parse-error-waits-for-the-hard-timeout.md
 ---
 
 # a-parse-error-waits-for-the-hard-timeout
