@@ -3,7 +3,7 @@ id: bg-header-ledger-cannot-hold-a-half-header
 kind: bug
 milestone: "1.2.0"
 name: test_shape header_ledger cannot hold a scenario with covers but no Boots because
-status: fixed
+status: closed
 caused_by:
 changelog: [test_shape] header_ledger holds a scenario until it carries both header lines, so covers-only trees can adopt the header gradually (#13).
 reviewed: docs/reviews/2026-09-12-1.1.1-bg-header-ledger-cannot-hold-a-half-header.md
