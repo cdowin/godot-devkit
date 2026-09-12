@@ -39,3 +39,5 @@
 {"ts":"2026-09-12T15:28:55Z","kind":"disposition","grain":"1.1.0","state":"accepted","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T15:28:56Z","kind":"status","grain":"1.1.0","from":"accepted","to":"packaging","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T15:28:56Z","kind":"disposition","grain":"1.1.0","state":"packaging","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:32:24Z","kind":"status","grain":"1.1.0","from":"packaging","to":"done","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:32:24Z","kind":"disposition","grain":"1.1.0","state":"done","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
