@@ -30,7 +30,7 @@ devkit.toml:
 """
 from __future__ import annotations
 
-from godot_devkit.core.baseline import Baseline
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.core.project import git_lines, repo_root
 
@@ -52,7 +52,7 @@ def run() -> int:
     sect = config_section(SECTION)
     excluded = str_tuple(sect, SECTION, 'exclude_prefixes',
                          DEFAULT_EXCLUDE_PREFIXES)
-    baseline = Baseline.read(sect, SECTION)
+    baseline = read_baseline(sect, SECTION)
     root = repo_root()
     tracked = [rel for rel in git_lines('ls-files')
                if rel.endswith(SUFFIXES)]

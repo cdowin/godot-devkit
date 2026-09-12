@@ -47,7 +47,7 @@ from pathlib import Path
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.index.gdscript import RES_PREFIX, Resolution, ScriptIndex
 from godot_devkit.core.project import git_lines, repo_root
-from godot_devkit.core.baseline import Baseline
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import config_section, str_tuple, str_tuple_table
 from godot_devkit.godot.format.tscn import (
     Section,
@@ -303,7 +303,7 @@ def run() -> int:
     config = config_section('props')
     exclude = str_tuple(config, 'props', 'exclude_prefixes', VENDORED_DEFAULT)
     extra = str_tuple_table(config, 'props', 'extra_properties', {})
-    baseline = Baseline.read(config, 'props')
+    baseline = read_baseline(config, 'props')
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])

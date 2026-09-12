@@ -84,11 +84,6 @@ class Baseline:
         self.section = section
         self.entries = dict(entries)
 
-    @classmethod
-    def read(cls, sect: dict, section: str) -> Baseline:
-        """From a loaded config section; a bad shape is ConfigError (exit 2)."""
-        return cls(section, path_count_table(sect, section, KEY))
-
     def judge(self, findings: Iterable[tuple[str, str]]) -> Judgement:
         """Split `(rel, line)` findings into held and open, and grade the entries.
 
@@ -123,3 +118,10 @@ class Baseline:
                     f'"{rel}" = {found}')
         judged.open = [line for rel, line in pairs if rel not in judged.frozen]
         return judged
+
+
+def read_baseline(sect: dict, section: str) -> Baseline:
+    """One gate's baseline from its loaded config section; a bad shape is
+    ConfigError (exit 2). A module function, not a classmethod, so the README
+    config census can follow `section` out to each gate's literal."""
+    return Baseline(section, path_count_table(sect, section, KEY))

@@ -20,7 +20,7 @@ devkit.toml: [tres] exclude_prefixes = ["addons/", ...]
 """
 from __future__ import annotations
 
-from godot_devkit.core.baseline import Baseline
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot import VENDORED_DEFAULT
@@ -33,7 +33,7 @@ def run() -> int:
     root = repo_root()
     sect = config_section(SECTION)
     exclude = str_tuple(sect, SECTION, 'exclude_prefixes', VENDORED_DEFAULT)
-    baseline = Baseline.read(sect, SECTION)
+    baseline = read_baseline(sect, SECTION)
     checked = 0
     # Every line in scan order, `(rel, line)` for a finding and `(None, line)`
     # for a disclosed skip — collected before printing so a baselined file's

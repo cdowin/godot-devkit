@@ -143,16 +143,17 @@ def repo_path_defect(rel: str) -> str | None:
     return None
 
 
-def path_count_table(sect: dict, name: str, key: str) -> dict[str, int]:
+def path_count_table(sect: dict, name: str, key: str,
+                     fallback: dict[str, int] | None = None) -> dict[str, int]:
     """A table mapping repo-relative FILE PATHS to POSITIVE counts — a baseline.
 
     `number_table`, with the two things a count-per-file must also be: a key
     that can name a file (an absolute path, a `res://` or a `..` never matches
     a finding, so it would report as permanently stale — a config typo wearing
     a finding's clothes), and a count of at least one (an entry of 0 freezes
-    nothing; the file has no debt, so the entry goes). Absent is `{}`.
+    nothing; the file has no debt, so the entry goes). Absent is `fallback`, or `{}`.
     """
-    out = number_table(sect, name, key, {})
+    out = number_table(sect, name, key, fallback or {})
     for rel, count in out.items():
         why = repo_path_defect(rel)
         if why:

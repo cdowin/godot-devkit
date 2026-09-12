@@ -37,7 +37,7 @@ from collections import Counter
 
 from godot_devkit.godot.index.gdscript import ScriptIndex
 from godot_devkit.core.project import git_lines, repo_root
-from godot_devkit.core.baseline import Baseline
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import parse
@@ -55,7 +55,7 @@ def run() -> int:
     config = config_section(CONFIG_SECTION)
     exclude = str_tuple(config, CONFIG_SECTION, 'exclude_prefixes',
                         VENDORED_DEFAULT)
-    baseline = Baseline.read(config, CONFIG_SECTION)
+    baseline = read_baseline(config, CONFIG_SECTION)
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])

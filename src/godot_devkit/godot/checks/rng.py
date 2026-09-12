@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import re
 
-from godot_devkit.core.baseline import Baseline
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import ConfigError, config_section, str_tuple, str_tuple_table
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.godot.index.gdscript import code_only
@@ -130,7 +130,7 @@ def run() -> int:
     sect = config_section(SECTION)
     roots = str_tuple(sect, SECTION, 'roots', DEFAULT_ROOTS)
     allowed = _allowlist(sect)
-    baseline = Baseline.read(sect, SECTION)
+    baseline = read_baseline(sect, SECTION)
     root = repo_root()
     scanned = [rel for rel in git_lines('ls-files', '--', *roots)
                if rel.endswith(SUFFIX)]

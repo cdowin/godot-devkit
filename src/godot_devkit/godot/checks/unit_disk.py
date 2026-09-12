@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import re
 
-from godot_devkit.core.baseline import Baseline
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import (ConfigError, config_section, number_table,
                                       str_tuple, str_tuple_table)
 from godot_devkit.core.project import git_lines, repo_root
@@ -152,7 +152,7 @@ def run() -> int:
     literals = _compiled(sect, 'forbidden_literals', DEFAULT_FORBIDDEN_LITERALS)
     calls = _compiled(sect, 'forbidden_calls', {})
     floors = _min_args(sect)
-    baseline = Baseline.read(sect, SECTION)
+    baseline = read_baseline(sect, SECTION)
     root = repo_root()
     scanned = [rel for rel in git_lines('ls-files', '--', *roots)
                if rel.endswith(SUFFIX)]
