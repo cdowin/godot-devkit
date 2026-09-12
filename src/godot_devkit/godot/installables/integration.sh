@@ -127,6 +127,10 @@ Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_JOBS                   parallelism (default: cores - 2, floor 1)
 Sets: GDK_SCENARIO_IN_SWEEP=1 on every job — the runner's import-cache
      recovery must not remove a .godot its peers are booting in.
+Cost: every scenario FILE is one cold engine boot, whatever its length, so a
+     run ends with `[INTEGRATION] BOOTS: <n> scenario(s) booted, <cpu>` above
+     its SUMMARY — the census Makefile.tiers files on the gate's cost row.
+     Merging two scenarios saves a boot; trimming lines saves nothing.
 Exit: 0 all passed | 1 any failed, or a slice selecting nothing | 2 usage/harness error
 USAGE_EOF
 }
@@ -361,6 +365,58 @@ detect_jobs() {
 	n="$( (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) )"
 	j=$((n - 2)); [ "$j" -lt 1 ] && j=1
 	printf '%s\n' "$j"
+}
+
+# --- what the tier costs: BOOTS ----------------------------------------------
+# A scenario FILE is one cold engine, and the boot is the cost: measured on a
+# consumer's tier, scenarios of 114, 358 and 325 lines each cost ~3.3s
+# standalone — the line count does not move the number. So the census this
+# runner reports is the boots, with the CPU they burned beside it: merging two
+# scenarios saves a boot, trimming lines saves nothing. Makefile.tiers reads
+# the count off the BOOTS line into the gate's cost row, where agentic-sdlc's
+# `[tests] cases` is the ceiling on it.
+
+# cpu_ms <XmY.YYYs> — one field of `times`, in milliseconds; empty when it is
+# not that shape. Bash writes the fraction with the locale's radix.
+cpu_ms() {
+	local t="$1" m s whole frac
+	case "$t" in *m*s) ;; *) return 0 ;; esac
+	m="${t%%m*}"; s="${t#*m}"; s="${s%s}"
+	whole="${s%%[.,]*}"; frac="${s#"$whole"}"; frac="${frac#[.,]}"
+	printf -v frac '%-3.3s' "$frac"; frac="${frac// /0}"
+	case "$m" in ''|*[!0-9]*) return 0 ;; esac
+	case "$whole" in ''|*[!0-9]*) return 0 ;; esac
+	case "$frac" in *[!0-9]*) return 0 ;; esac
+	printf '%s\n' $(( (10#$m * 60 + 10#$whole) * 1000 + 10#$frac ))
+}
+
+# children_cpu <scratch file> — set CHILD_CPU_MS to the CPU (user + sys) every
+# child this shell has reaped has spent; empty when `times` cannot be read. It
+# SETS rather than prints: inside a `$( )` it would read a subshell's `times`,
+# and a subshell has reaped nothing.
+children_cpu() {
+	local user='' sys='' u s
+	CHILD_CPU_MS=''
+	times > "$1" 2>/dev/null || return 0
+	{ read -r _ _ && read -r user sys; } < "$1" 2>/dev/null || return 0
+	u="$(cpu_ms "$user")"; s="$(cpu_ms "$sys")"
+	[ -n "$u" ] && [ -n "$s" ] || return 0
+	CHILD_CPU_MS=$((u + s))
+}
+
+# boots_line <boots> [cpu ms] — the census line. Makefile.tiers reads the count
+# back off `BOOTS: <n> `, so that prefix is contract.
+boots_line() {
+	local n="$1" ms="${2-}" cost='CPU unmeasured' per
+	if [ -n "$ms" ]; then
+		cost="$((ms / 1000)).$((ms % 1000 / 100))s CPU"
+		if [ "$n" -gt 0 ]; then
+			per=$((ms / n))
+			printf -v per '%d.%02d' $((per / 1000)) $((per % 1000 / 10))
+			cost="$cost, ${per}s per boot"
+		fi
+	fi
+	printf '[%s] BOOTS: %s scenario(s) booted, %s\n' "$GATE_TAG" "$n" "$cost"
 }
 
 # --- --self-test -------------------------------------------------------------
@@ -621,6 +677,29 @@ FIXTURE_EOF
 	[ "$(detect_jobs)" -ge 1 ] \
 		|| miss "the job count must be at least 1"
 
+	# --- the census: boots, and what they cost -------------------------------
+	cases=$((cases + 1))
+	out="$(cpu_ms 0m2.750s) $(cpu_ms 12m3,25s) $(cpu_ms 1m5s)"
+	[ "$out" = "2750 723250 65000" ] \
+		|| miss "a times field must read as ms whatever the radix, got '$out'"
+	cases=$((cases + 1))
+	out="$(cpu_ms nonsense)$(cpu_ms m.5s)$(cpu_ms 0mxs)"
+	[ -z "$out" ] || miss "a field that is not XmY.YYYs must read as EMPTY, got '$out'"
+	cases=$((cases + 1))
+	out="$(boots_line 272 748123)"
+	[ "$out" = "[$GATE_TAG] BOOTS: 272 scenario(s) booted, 748.1s CPU, 2.75s per boot" ] \
+		|| miss "the BOOTS line shape, got '$out'"
+	cases=$((cases + 1))
+	out="$(boots_line 0 '')"
+	[ "$out" = "[$GATE_TAG] BOOTS: 0 scenario(s) booted, CPU unmeasured" ] \
+		|| miss "an unmeasured sweep says so rather than printing 0s, got '$out'"
+	cases=$((cases + 1))
+	sleep 0 & wait "$!"
+	children_cpu "$scratch/times"
+	case "$CHILD_CPU_MS" in
+		''|*[!0-9]*) miss "this shell's own times must read as a count, got '$CHILD_CPU_MS'" ;;
+	esac
+
 	rm -rf "$scratch"
 
 	if [ "$failures" -eq 0 ]; then
@@ -759,6 +838,10 @@ trap 'rm -rf "$TMP"' EXIT
 #
 # The body is SINGLE-quoted, so nothing inside it may carry an apostrophe: the
 # quote ends the string and the sweep stops parsing.
+#
+# The CPU the fan-out burns is the difference of this shell's `times` across
+# it: every job is reaped through xargs before the pipeline returns.
+children_cpu "$TMP/times"; CPU_BEFORE="$CHILD_CPU_MS"
 # shellcheck disable=SC2016
 printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
 	name="$1"; tmp="$2"
@@ -768,6 +851,9 @@ printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
 	printf "%s\n" "$out" > "$tmp/$name.log"
 	printf "%s\t%s\n" "$name" "$code" >> "$tmp/results"
 ' _ {} "$TMP"
+children_cpu "$TMP/times"
+BOOT_CPU_MS=''
+[ -z "$CPU_BEFORE" ] || [ -z "$CHILD_CPU_MS" ] || BOOT_CPU_MS=$((CHILD_CPU_MS - CPU_BEFORE))
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 while IFS=$'\t' read -r name code; do
@@ -777,6 +863,10 @@ while IFS=$'\t' read -r name code; do
 		FAIL=$((FAIL + 1)); FAILED_NAMES+=("$name")
 	fi
 done < "$TMP/results"
+# What the run booted: every job that came back with a result ran scenario.sh.
+# Counted before the unreported are folded into FAIL below — a job that never
+# reported is a failure, and not a boot anyone can show happened.
+BOOTS=$((PASS + FAIL))
 
 # A job that never wrote a result line is a job that died before scenario.sh
 # could report — counted as a failure, because the alternative is a sweep that
@@ -807,6 +897,7 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 
 echo ""
+boots_line "$BOOTS" "$BOOT_CPU_MS"
 echo "[$GATE_TAG] SUMMARY: $PASS passed, $FAIL failed (of ${#NAMES[@]})$SLICE_NOTE"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
