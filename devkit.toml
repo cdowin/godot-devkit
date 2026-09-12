@@ -134,3 +134,7 @@ done        = ["done", "obe"]
 todo        = ["open"]
 in_progress = ["fixed"]
 done        = ["closed"]
+
+[dispatch]
+project = "godot-devkit — scene tooling and the eight Godot gates for Godot 4.x, a pinned-tag stdlib-only Python package. Pure parse, never boots Godot; the CLI is a published API. Public repo, MIT."
+contracts = ["CLAUDE.md", ".claude/rules/pm-execution.md"]
