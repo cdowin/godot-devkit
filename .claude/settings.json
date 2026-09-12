@@ -10,6 +10,10 @@
           },
           {
             "type": "command",
+            "command": "bash tools/hooks/cc-git-allowlist.sh"
+          },
+          {
+            "type": "command",
             "command": "bash tools/hooks/cc-godot-sandbox.sh"
           }
         ]
@@ -20,6 +24,25 @@
           {
             "type": "command",
             "command": "bash tools/hooks/cc-write-confine.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-agent-isolation.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash tools/hooks/cc-session-preflight.sh"
           }
         ]
       }
