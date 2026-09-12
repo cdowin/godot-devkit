@@ -35,11 +35,15 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # names old; anything unprovable is SKIPPED
                                     # with a reason, and skips exit 1
     godot-devkit scene canonicalize <file>... [--elide-defaults]
+                                    [--respell] [--order]
                                     # restore what PackedScene.pack() drops:
                                     # uid-in-refs, the header uid, index= on
                                     # instance children; --elide-defaults also
                                     # removes assignments equal to the script's
-                                    # @export default (what the editor omits)
+                                    # @export default (what the editor omits);
+                                    # --respell / --order re-spell floats and
+                                    # typed arrays and reorder properties the
+                                    # way the editor's save would
     godot-devkit tiles paint <file> --layer NAME --region X0,Y0,X1,Y1
                                     --tile SRC/AX,AY[/ALT]
     godot-devkit tiles erase <file> --layer NAME --region X0,Y0,X1,Y1
@@ -61,6 +65,7 @@ The installer (writes each file once; after that it is the repo's):
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | rng
                       | tres-comment | unit-disk | test-shape
+                      | canonical     # opt-in: not in the stock `check all`
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
@@ -111,6 +116,12 @@ RETARGET_FLAG = '--retarget'
 KNOWN_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
                'unit-disk', 'test-shape')
 
+# Gates that dispatch and that `[checks] godot` may name, but that the STOCK
+# roster leaves out: each starts red on any tree its fixer never ran over, so
+# shipping it in `check all` would redden every consumer on a pin bump. A repo
+# opts in by naming it; the aggregate never grows under anyone.
+OPT_IN_GATES = ('canonical',)
+
 # The devkit.toml key that narrows the roster. NOT `[checks] all`: that key
 # is agentic-sdlc's, read by ITS `check all` in the same file, and each kit
 # refuses a name it does not know — one key read by two refusers is a file
@@ -153,11 +164,11 @@ def all_roster() -> tuple[str, ...]:
     """
     roster = str_tuple(config_section('checks'), 'checks', ROSTER_KEY,
                        KNOWN_GATES)
-    unknown = [c for c in roster if c not in KNOWN_GATES]
+    unknown = [c for c in roster if c not in (*KNOWN_GATES, *OPT_IN_GATES)]
     if unknown:
         raise ConfigError(
             f'[checks] {ROSTER_KEY} names unknown gate(s) {", ".join(unknown)} '
-            f'— known gates are {" ".join(KNOWN_GATES)}')
+            f'— known gates are {" ".join((*KNOWN_GATES, *OPT_IN_GATES))}')
     # `all` naming itself would recurse forever; it is the one name that cannot
     # appear, and KNOWN_GATES already excludes it.
     return tuple(dict.fromkeys(roster))
@@ -235,12 +246,15 @@ def _check_module(name: str):
     if name == 'test-shape':
         from godot_devkit.godot.checks import test_shape
         return test_shape
+    if name == 'canonical':
+        from godot_devkit.godot.checks import canonical
+        return canonical
     return None
 
 
 def _unknown_check(name: str) -> int:
     print(f'godot-devkit: unknown check {name!r} '
-          f'(expected: {", ".join((*KNOWN_GATES, "all"))})',
+          f'(expected: {", ".join((*KNOWN_GATES, *OPT_IN_GATES, "all"))})',
           file=sys.stderr)
     return 2
 

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Item" load_steps=2 format=3 uid="uid://dcanonclean"]
+
+[ext_resource type="Script" uid="uid://dcanonitem" path="res://systems/item.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+weight = 0.3
+tags = Array[StringName]([&"a"])
+price = 12.0
+scale = Vector2(1.5, 2)
+ratios = Array[float]([1.0, 0.25])
+count = 3
+notes = [0.1, "x"]

@@ -35,6 +35,7 @@
   the row's census (`GDK_CENSUS_BOOTS`), so `[tests] cases` on them grades instead of FAILing
   UNCOUNTED. `check test-shape --help` now says it is a readability gate and names boots and
   `[tests] cases` as what governs the tier's cost.
+- **`check canonical` and `scene canonicalize --respell` / `--order`** — the two dimensions of `.tres` editor-save churn `check defaults` leaves out, proven by pure parse from the section's own script: floats in the saver's shortest spelling (`0.30` -> `0.3`, emitted only where the 32- and 64-bit forms agree), a bare list on an `Array[T]` export wrapped as `Array[T]([...])`, and a scripted section's properties in declaration order. Line edits only — comments, `uid=` and every untouched line byte-identical, a second run a no-op; an enum element type, an export with an accessor or a section holding an engine property is named or counted, never guessed. The gate is opt-in: not in the stock `check all`, nameable in `[checks] godot`. New config section `[canonical] exclude_prefixes`.
 
 ## v1.0.0 — 2026-09-06
 
