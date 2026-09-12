@@ -30,6 +30,13 @@
 # in a log nobody opens); the rest go through the include's `gdk_gate`.
 # `import-cache` and `integration-list` are tools, not gates: the first has an
 # outcome, the second's output IS the list. GNU make 3.81 is the floor.
+#
+# EVERY TIER FILES A COST ROW. The four unwrapped runners name their outcome in
+# GDK_GATE_VERDICT (and `unit` its GUT test count in GDK_GATE_CENSUS), and
+# gdk_runners.sh hands both to the include's library (GDK_GATE_LIB, exported
+# below) — the row a wrapper would file, without the second wrapper. The
+# scenario tiers pass `gdk_gate` a census of BOOTS: a scenario file is one cold
+# engine whatever its length, so `[tests] cases` on them caps what they cost.
 
 # The godot-devkit pin: GODOT_DEVKIT_VERSION, set in your Makefile above the
 # include — or GODOT_DEVKIT set to the command itself, and there is nothing to
@@ -59,6 +66,12 @@ GDK_GODOT          ?=
 GDK_SMOKE_SCENARIO ?=
 GDK_GUT_CMDLN      ?=
 export GDK_GODOT GDK_SMOKE_SCENARIO GDK_GUT_CMDLN
+# The include's library, where the unwrapped runners file their cost row.
+export GDK_GATE_LIB
+
+# The census the scenario tiers file: the count on integration.sh's
+# `[INTEGRATION] BOOTS: <n> …` line. No such line leaves the row without one.
+GDK_CENSUS_BOOTS := sed -n 's/^\[INTEGRATION\] BOOTS: \([0-9][0-9]*\) .*/\1/p' "$$log" | tail -1
 
 # Arguments, overridden on the command line (ARGS is the include's):
 #   SYS  — unit slice(s)            make unit SYS="input protocol"
@@ -141,10 +154,10 @@ unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
 # hand-run flag for the ENGINE transcript, which lands in .scenario-reports/
 # and is named in the runner's own output.)
 integration: ## Integration tier. Pass ARGS="--all|--system <dir>|--diff <ref>|<names>"
-	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
+	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all),$(GDK_CENSUS_BOOTS))
 
 integration-all: ## Every integration scenario, one process each, N in parallel
-	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
+	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all,$(GDK_CENSUS_BOOTS))
 
 # The per-change slice: every scenario whose header declares it covers a path
 # the diff against REF touched, plus the smoke scenario. A touched scenario runs;
@@ -152,7 +165,7 @@ integration-all: ## Every integration scenario, one process each, N in parallel
 # runners) makes the whole tier the honest slice. REF defaults to HEAD — the
 # uncommitted change — so a clean tree runs exactly what `smoke` runs.
 integration-diff: ## The scenarios covering what the diff against REF touched, plus smoke
-	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF))
+	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF),$(GDK_CENSUS_BOOTS))
 
 # The roster `--all` boots, one repo-relative path per line, booting nothing.
 # Not a gate — the list IS the output — and it lives here rather than as a
@@ -168,7 +181,7 @@ scenario: ## One scenario, cold:  make scenario NAME=<scenario>
 	$(call gdk_gate,scenario,SCENARIO,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/scenario.sh $(NAME))
 
 smoke: ## The smoke scenario (GDK_SMOKE_SCENARIO) — the shortest proof the game boots
-	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke)
+	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke,$(GDK_CENSUS_BOOTS))
 
 capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }

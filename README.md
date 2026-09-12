@@ -256,6 +256,14 @@ Every runner carries `--help` and a `--self-test` corpus; `make runners-self-tes
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
 
+**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `check budget` can
+put a ceiling on each: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
+(`unit` with its GUT test count as the census), and the scenario tiers carry a census of **boots**.
+A scenario file is one cold engine boot whatever its length, so the scenario tier's cost is its
+file count: merging two scenarios saves a boot, trimming lines saves nothing. `[tests] cases` on
+`integration-all` / `integration-diff` is the ceiling on it; `check test-shape`'s line cap is a
+readability gate, not a cost one.
+
 ## Development
 
 `make help` lists every target; never hand-roll an incantation. `make check` is the static gate,

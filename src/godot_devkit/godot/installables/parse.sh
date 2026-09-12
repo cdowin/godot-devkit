@@ -165,6 +165,10 @@ gdk_sandbox_home
 # ONE transcript for both stages, published where a reader can still open it
 # after the run (the sandbox HOME self-destructs, so it cannot live there).
 LOG="$(gdk_gate_log "$GATE_SLOT")"
+# The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
+# one PASS below says otherwise: a boot that exits 0 and prints errors is a
+# FAIL its exit code would have filed as PASS.
+export GDK_GATE_VERDICT=FAIL
 
 # --- Stage 1: boot -----------------------------------------------------------
 gdk_gate_capture "$LOG" -- gdk_run_bounded "$BOOT_TIMEOUT_SECONDS" -- \
@@ -172,6 +176,7 @@ gdk_gate_capture "$LOG" -- gdk_run_bounded "$BOOT_TIMEOUT_SECONDS" -- \
 BOOT_EXIT="$GDK_GATE_EXIT"
 
 if gdk_timeout_is_hang "$BOOT_EXIT"; then
+	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
 		"FAIL — the boot exceeded ${BOOT_TIMEOUT_SECONDS}s, killed" "$LOG"
 	exit 1
@@ -196,6 +201,7 @@ gdk_gate_capture "$LOG" -- gdk_run_bounded "$SWEEP_TIMEOUT_SECONDS" -- \
 SWEEP_EXIT="$GDK_GATE_EXIT"
 
 if gdk_timeout_is_hang "$SWEEP_EXIT"; then
+	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
 		"FAIL — the compile sweep exceeded ${SWEEP_TIMEOUT_SECONDS}s, killed" "$LOG"
 	exit 1
@@ -223,6 +229,7 @@ if [ -n "$FAILED_PATHS" ]; then
 	exit 1
 fi
 
+GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (boot clean; ${COMPILED}/${TOTAL} scripts compiled)" "$LOG"
 exit 0

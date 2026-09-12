@@ -24,3 +24,6 @@
 {"ts":"2026-09-12T14:20:59Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":370,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T14:22:34Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":53905,"census":205,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T14:22:45Z","kind":"gate","gate":"check","verdict":"FAIL","duration_ms":10080,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:18:45Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1492,"census":43,"branch":"feat/1.1.0-cost"}
+{"ts":"2026-09-12T14:19:25Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":35158,"census":202,"branch":"feat/1.1.0-cost"}
+{"ts":"2026-09-12T14:20:43Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":784,"census":43,"branch":"feat/1.1.0-cost"}

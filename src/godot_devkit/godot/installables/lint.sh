@@ -200,6 +200,9 @@ if [ "${#SCAN_DIRS[@]}" -eq 0 ]; then
 fi
 
 LOG="$(gdk_gate_log "$GATE_SLOT")"
+# The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
+# one PASS below says otherwise.
+export GDK_GATE_VERDICT=FAIL
 gdk_gate_capture "$LOG" -- "$GDK_LINT_CMD" "${SCAN_DIRS[@]}"
 LINT_EXIT="$GDK_GATE_EXIT"
 
@@ -210,6 +213,7 @@ if [ "$LINT_EXIT" -ne 0 ]; then
 	exit 1
 fi
 
+GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (${#SCAN_DIRS[@]} source dir(s): ${SCAN_DIRS[*]})" "$LOG"
 exit 0

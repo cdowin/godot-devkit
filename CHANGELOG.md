@@ -23,6 +23,18 @@
   left fails until lowered (`  SHRUNK  …`) or dropped (`  STALE  …`) — the baseline only shrinks.
   A malformed entry (not a table, a non-integer or `0`, an absolute, `res://` or `..` path) exits
   2. No baseline declared: output is byte-identical to before.
+- **Every tier files a cost row, including the four the Makefile does not wrap** (#7). `parse`,
+  `lint`, `warnings` and `unit` export `GDK_GATE_VERDICT` — FAIL unless the run reached its PASS,
+  HANG on a timeout — and `gdk_runners.sh` hands `gdk_gate_log`/`gdk_gate_verdict` to agentic-sdlc's
+  `gdk_gate.sh` (new `GDK_GATE_LIB`, stock: beside it; `Makefile.tiers` exports the include's), so
+  the ledger row the wrapper would file is filed without a second wrapper. `unit` also files its
+  GUT test count as the census, so `[tests] budget` and `cases` can take a ceiling on the story rung.
+- **The scenario tiers are graded on boots** (#8). `integration.sh` prints
+  `[INTEGRATION] BOOTS: <n> scenario(s) booted, <cpu>s CPU, <per>s per boot` above its SUMMARY, and
+  `integration`, `integration-all`, `integration-diff` and `smoke` pass that count to `gdk_gate` as
+  the row's census (`GDK_CENSUS_BOOTS`), so `[tests] cases` on them grades instead of FAILing
+  UNCOUNTED. `check test-shape --help` now says it is a readability gate and names boots and
+  `[tests] cases` as what governs the tier's cost.
 
 ## v1.0.0 — 2026-09-06
 
