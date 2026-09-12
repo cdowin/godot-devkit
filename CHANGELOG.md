@@ -5,6 +5,12 @@
 - `[test_shape] header_ledger` holds a ledgered scenario until it carries BOTH `## Boots because:`
   and `## covers:`; only then is it `HEADED` (drop the entry). A scenario with `covers:` alone —
   what the runner's `--diff` slices by — can now be ledgered instead of failing either way.
+- `scenario.sh` (and so `integration.sh`) watches the live engine stream for Godot's GDScript
+  parse-error signature and stops the engine on the first one not in the noise allowlist — SIGTERM,
+  then SIGKILL after `GDK_TIMEOUT_KILL_AFTER`, through the new library helper `gdk_stop_bounded` —
+  printing `[SCENARIO] <name> FAIL — GDScript parse error: <line>` and exiting 1 within seconds,
+  where it used to sit out `GDK_SCENARIO_HARD_TIMEOUT` and blame a hang (#12). A run that still
+  reaches the hard timeout names a parse error in its transcript instead of "likely hang".
 
 ## v1.1.0 — 2026-09-12
 

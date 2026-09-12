@@ -374,6 +374,25 @@ gdk_run_bounded() {
 	"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" "$@"
 }
 
+# gdk_stop_bounded <pid> — fire a bound's kill path early, from outside it:
+# SIGTERM, then SIGKILL once GDK_TIMEOUT_KILL_AFTER has passed with the process
+# still alive, so a run stopped on evidence leaves no orphaned engine either.
+# The grace is read as whole seconds (`5` or `5s`); any other spelling of it
+# falls back to the stock 5.
+gdk_stop_bounded() {
+	local pid="${1:?usage: gdk_stop_bounded <pid>}" grace="${GDK_TIMEOUT_KILL_AFTER%s}" ticks=0
+	case "$grace" in ''|*[!0-9]*) grace=5 ;; esac
+	kill -TERM "$pid" 2>/dev/null || return 0
+	while gdk_pid_is_live "$pid" && [ "$ticks" -lt $((grace * 10)) ]; do
+		sleep 0.1
+		ticks=$((ticks + 1))
+	done
+	if gdk_pid_is_live "$pid"; then
+		kill -KILL "$pid" 2>/dev/null
+	fi
+	return 0
+}
+
 # --- gate output: a summary on the console, the full transcript on disk ------
 # A headless gate used to STREAM its whole boot to the console: `make parse`
 # printed 273 lines of which two mattered (the verdict, and any error line);
@@ -901,8 +920,8 @@ usage: source gdk_runners.sh            the normal use — a shell library
        bash gdk_runners.sh --help       this message
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
-gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded, gdk_timeout_is_hang,
-gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
+gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded, gdk_stop_bounded,
+gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.
 USAGE_EOF
