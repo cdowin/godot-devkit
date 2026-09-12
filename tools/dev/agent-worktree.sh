@@ -21,8 +21,8 @@ SCOPE_MARKER=".agent-scope"           # the marker the installed hooks read
 WARM_DIRS=()
 # Gitignored per-asset sidecars to mirror (e.g. "*.import"); empty = off.
 WARM_SIDECAR_GLOB=""
-# Where an agent branches from when no milestone declares an integration branch.
-FALLBACK_BASE="staging"
+# Where an agent branches from when no milestone declares one; empty = origin/HEAD.
+FALLBACK_BASE=""
 # The PM CLI as `make pm`; a project calling the CLI directly replaces the array.
 PM_CMD=(make -s pm)
 # -----------------------------------------------------------------------------
