@@ -2,7 +2,7 @@
 id: "1.1.1"
 kind: milestone
 name: the runner fails fast
-status: planning
+status: building
 depends_on: []
 branch: milestone/1.1.1-the-runner-fails-fast
 mode:
