@@ -90,7 +90,7 @@ same command twice is a no-op the second time.
 | `scene rm <file> <node-path>` | remove a node with its descendants, connections and editable markers; prunes an ext_resource nothing else uses |
 | `scene reparent <file> <node-path> <new-parent>` | move a subtree and fix its NodePaths |
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | author or remove one `[connection]`; ambiguous matches are refused, `--flags` names one |
-| `scene canonicalize <file>... [--elide-defaults]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default |
+| `scene canonicalize <file>... [--elide-defaults] [--respell] [--order]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default; `--respell` re-spells floats in the saver's shortest form and wraps a bare list on an `Array[T]` export as `Array[T]([...])`; `--order` puts a scripted section's properties in declaration order — line edits only, anything unprovable named and left alone |
 | `refs --retarget <old-res-path> <new-res-path> [--dry-run]` | after a `git mv`: rewrite every `ext_resource` path and exact `preload`/`load` literal naming the old path; anything unprovable is SKIPPED with a reason, and skips exit 1 |
 | `tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` · `tiles erase …` | fill or clear a rectangle of one `TileMapLayer`; only that property's base64 is regenerated |
 
@@ -116,6 +116,7 @@ unless the whole picture resolved — anything unresolvable is censused `UNVERIF
 | `rng` | `.gd` under the configured roots | a bare `randi()`/`randf()`/`randi_range()`/`randf_range()` or any `randomize()` — a draw a seeded run does not own | `[rng] roots`, `allowlist` |
 | `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes` |
 | `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args` |
+| `canonical` (opt-in) | tracked `.tres` values and property order against what Godot's saver writes, where a parse can prove it | a float the saver spells shorter (`0.30` -> `0.3`), a bare list on an `Array[T]` export, a scripted section out of declaration order — the churn an editor save of a hand-authored resource makes | `[canonical] exclude_prefixes`; not in the stock `check all` — name it in `[checks] godot` |
 | `test-shape` | the integration tier | a new scenario over the line cap, a ledgered one that grew, and — with `header = true` — a scenario with no `## covers:`/`## Boots because:` header, asked of the roster `make integration-list` boots | `[test_shape] scenario_root`, `cap`, `infra`, `ledger`, `header`, `header_ledger`, `runner` |
 
 **Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `devkit.toml`
@@ -125,7 +126,8 @@ is named at exit 2, never ignored.
 **Adopting the gates on an existing tree**, in order, because some start red by design: `check uid`
 (commit sidecars with their scripts; `--fix` clears stale refs, spellings and orphans) →
 migrate to uid-in-refs, then `check tres` → `check props` (findings are real renamed-export bugs) →
-`scene canonicalize --elide-defaults`, then `check defaults` → wire `check all`. Steps two and four
+`scene canonicalize --elide-defaults`, then `check defaults` → `scene canonicalize --respell --order`,
+then `check canonical` (add it to `[checks] godot`) → wire `check all`. Steps two and four
 are also the cure for `.tscn`/`.tres` churn — files you did not edit turning up in every commit.
 
 **Migrating to uid-in-refs:** for a target whose header has no uid at all, mint one with Godot's own
