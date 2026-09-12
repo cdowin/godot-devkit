@@ -231,6 +231,10 @@ fi
 gdk_sandbox_home
 
 LOG="$(gdk_gate_log "$GATE_SLOT")"
+# The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
+# one PASS below says otherwise: a sweep that exits 0 over promoted warnings is
+# a FAIL its exit code would have filed as PASS.
+export GDK_GATE_VERDICT=FAIL
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 reap_dead_run_mirrors "$TMP_ROOT"
@@ -274,6 +278,7 @@ gdk_gate_capture "$LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
 IMPORT_EXIT="$GDK_GATE_EXIT"
 
 if gdk_timeout_is_hang "$IMPORT_EXIT"; then
+	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
 		"FAIL — the import pass exceeded ${TIMEOUT_SECONDS}s, killed" "$LOG"
 	exit 1
@@ -289,6 +294,7 @@ gdk_gate_capture "$LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
 SWEEP_EXIT="$GDK_GATE_EXIT"
 
 if gdk_timeout_is_hang "$SWEEP_EXIT"; then
+	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
 		"FAIL — the compile sweep exceeded ${TIMEOUT_SECONDS}s, killed" "$LOG"
 	exit 1
@@ -317,6 +323,7 @@ TOTAL="$(gdk_sweep_result_field "$RESULT_LINE" 2)"
 # A script the sweep could not compile for a reason OTHER than a promoted
 # warning is parse.sh's finding, not this gate's — but it is not a script this
 # gate analyzed either, so the count says so rather than claiming N/N.
+GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (promoted: ${GDK_WARNING_CATEGORIES}; ${ANALYZED}/${TOTAL} scripts analyzed)" "$LOG"
 exit 0

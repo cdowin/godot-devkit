@@ -154,6 +154,18 @@ class TheCap(unittest.TestCase):
         self.assertNotIn('scenario_base.gd', out)
         self.assertEqual(out.count('OVERCAP'), 1, out)
 
+    def test_help_calls_the_cap_readability_and_names_boots_as_the_cost(self) -> None:
+        """#8. A consumer that followed the cap faithfully split its files, and
+        a split adds a boot: the gate pushed the tier slower while it read as
+        the tier's cost control. `check test-shape --help` prints this
+        docstring (cli._run_check), so the docstring IS the help, asked here
+        at the cheapest altitude."""
+        doc = test_shape.__doc__ or ''
+        self.assertIn('READABILITY gate', doc)
+        self.assertIn('WHAT THIS DOES NOT GOVERN: COST', doc)
+        self.assertIn('BOOTS census', doc)
+        self.assertIn('`[tests] cases`', doc)
+
 
 class TheRatchet(unittest.TestCase):
     def test_a_ledgered_file_passes_at_its_size_and_fails_one_line_bigger(self) -> None:

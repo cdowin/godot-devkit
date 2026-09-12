@@ -16,3 +16,6 @@ tools/hooks/*.local
 # never committed: this tree is public and the names are the maintainer's own
 # repositories. See tests/support/consumers.py.
 .consumer-names
+
+# Lane checkouts planted by tools/dev/agent-worktree.sh.
+.claude/worktrees/

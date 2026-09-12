@@ -25,8 +25,8 @@ and the SDLC (`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the rel
 kit is the Godot tiers and gates.
 
 ```make
-DEVKIT_VERSION       := v0.2.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.0.1     # this kit — the Godot tiers and the eight gates
+DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
+GODOT_DEVKIT_VERSION := v1.1.0     # this kit — the Godot tiers and the eight gates
 include Makefile.devkit
 ```
 
@@ -34,8 +34,8 @@ include Makefile.devkit
 the gates to `make check`:
 
 ```sh
-uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.2.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.0.1" godot-devkit install-runners  # Makefile.tiers + runners
+uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.11.0" agentic-sdlc install-gates    # Makefile.devkit
+uvx --from "git+https://github.com/cdowin/godot-devkit@v1.1.0" godot-devkit install-runners  # Makefile.tiers + runners
 ```
 
 ```toml
@@ -45,9 +45,24 @@ extra = ["godot-check"]     # `godot-devkit check all`, the target install-runne
 ```
 
 `make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make precommit` and
-`make milestone` run the Godot tiers `Makefile.tiers` declares. Adopting a bump is a read of the
-CHANGELOG and `install-runners --diff`, which prints what a re-install would change and writes
-nothing. Every machine and CI runs the same gate code because the pin is a tag.
+`make milestone` run the Godot tiers `Makefile.tiers` declares. Every machine and CI runs the same
+gate code because the pin is a tag.
+
+**A repo with a PM tree has a third step.** agentic-sdlc's flow — the states `pm` moves work
+through, `[pm.states.*]` in `devkit.toml` — has no default, so a repo that skips this step has a
+working gate set and a `pm` that refuses every verb that moves work:
+
+```sh
+make pm ARGS='init'         # writes the flow; a fresh repo can run `agentic-sdlc init` instead,
+                            # which is this plus install-gates, devkit.toml and the rest
+make pm ARGS='vocabulary'   # reads back the states it wrote, by category
+```
+
+- **A fresh repo:** the two pins, `install-gates` (or `agentic-sdlc init`) and `install-runners`,
+  `[gates] extra`, then `pm init` and `pm vocabulary`.
+- **A consumer bumping a pin:** read both CHANGELOGs; re-run `pm init` once, then `pm vocabulary`;
+  `install-runners --diff` prints what a re-install would change and writes nothing;
+  `agentic-sdlc adopt <version>` proves the bump.
 
 ## Quickstart
 
@@ -90,7 +105,7 @@ same command twice is a no-op the second time.
 | `scene rm <file> <node-path>` | remove a node with its descendants, connections and editable markers; prunes an ext_resource nothing else uses |
 | `scene reparent <file> <node-path> <new-parent>` | move a subtree and fix its NodePaths |
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | author or remove one `[connection]`; ambiguous matches are refused, `--flags` names one |
-| `scene canonicalize <file>... [--elide-defaults]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default |
+| `scene canonicalize <file>... [--elide-defaults] [--respell] [--order]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default; `--respell` re-spells floats in the saver's shortest form and wraps a bare list on an `Array[T]` export as `Array[T]([...])`; `--order` puts a scripted section's properties in declaration order — line edits only, anything unprovable named and left alone | <!-- doc-scan:allow -->
 | `refs --retarget <old-res-path> <new-res-path> [--dry-run]` | after a `git mv`: rewrite every `ext_resource` path and exact `preload`/`load` literal naming the old path; anything unprovable is SKIPPED with a reason, and skips exit 1 |
 | `tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` · `tiles erase …` | fill or clear a rectangle of one `TileMapLayer`; only that property's base64 is regenerated |
 
@@ -110,12 +125,13 @@ unless the whole picture resolved — anything unresolvable is censused `UNVERIF
 | gate | scans | fails on | config |
 |---|---|---|---|
 | `uid` | tracked `.tscn`/`.tres` Script refs against `.gd.uid` sidecars; new `.gd` (untracked or staged); tracked sidecars | a stale ref uid, a script with no sidecar, an orphan sidecar, a non-canonical uid spelling — `--fix` repairs what has a should-be value | `[uid] exclude_prefixes` |
-| `tres` | tracked `.tscn`/`.tres` `ext_resource` lines | a path-only ref (no `uid=`), which Godot 4.4+ rewrites silently on the next editor pass | `[tres] exclude_prefixes` |
-| `props` | every property assignment in tracked scenes, against the script's `@export`s and Godot's ClassDB | an assignment to a property that does not exist (a renamed export, a mistyped built-in) | `[props] exclude_prefixes`, `extra_properties` |
-| `defaults` | tracked `.tres` assignments against the script's declared `@export` defaults | an assignment equal to its default — the churn Godot's writer omits and a hand-authored file spells out | `[defaults] exclude_prefixes` |
-| `rng` | `.gd` under the configured roots | a bare `randi()`/`randf()`/`randi_range()`/`randf_range()` or any `randomize()` — a draw a seeded run does not own | `[rng] roots`, `allowlist` |
-| `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes` |
-| `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args` |
+| `tres` | tracked `.tscn`/`.tres` `ext_resource` lines | a path-only ref (no `uid=`), which Godot 4.4+ rewrites silently on the next editor pass | `[tres] exclude_prefixes`, `baseline` |
+| `props` | every property assignment in tracked scenes, against the script's `@export`s and Godot's ClassDB | an assignment to a property that does not exist (a renamed export, a mistyped built-in) | `[props] exclude_prefixes`, `extra_properties`, `baseline` |
+| `defaults` | tracked `.tres` assignments against the script's declared `@export` defaults | an assignment equal to its default — the churn Godot's writer omits and a hand-authored file spells out | `[defaults] exclude_prefixes`, `baseline` |
+| `rng` | `.gd` under the configured roots | a bare `randi()`/`randf()`/`randi_range()`/`randf_range()` or any `randomize()` — a draw a seeded run does not own | `[rng] roots`, `allowlist`, `baseline` |
+| `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes`, `baseline` |
+| `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args`, `baseline` |
+| `canonical` (opt-in) | tracked `.tres` values and property order against what Godot's saver writes, where a parse can prove it | a float the saver spells shorter (`0.30` -> `0.3`), a bare list on an `Array[T]` export, a scripted section out of declaration order — the churn an editor save of a hand-authored resource makes | `[canonical] exclude_prefixes`; not in the stock `check all` — name it in `[checks] godot` |
 | `test-shape` | the integration tier | a new scenario over the line cap, a ledgered one that grew, and — with `header = true` — a scenario with no `## covers:`/`## Boots because:` header, asked of the roster `make integration-list` boots | `[test_shape] scenario_root`, `cap`, `infra`, `ledger`, `header`, `header_ledger`, `runner` |
 
 **Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `devkit.toml`
@@ -125,8 +141,18 @@ is named at exit 2, never ignored.
 **Adopting the gates on an existing tree**, in order, because some start red by design: `check uid`
 (commit sidecars with their scripts; `--fix` clears stale refs, spellings and orphans) →
 migrate to uid-in-refs, then `check tres` → `check props` (findings are real renamed-export bugs) →
-`scene canonicalize --elide-defaults`, then `check defaults` → wire `check all`. Steps two and four
+`scene canonicalize --elide-defaults`, then `check defaults` → `scene canonicalize --respell --order`,
+then `check canonical` (add it to `[checks] godot`) → wire `check all`. Steps two and four
 are also the cure for `.tscn`/`.tres` churn — files you did not edit turning up in every commit.
+
+**Adopting a gate frozen.** Six gates — `tres`, `props`, `defaults`, `rng`, `tres-comment`,
+`unit-disk` — take a `baseline` in their own section: one entry per file, at the number of findings
+it carries today. Those findings are held, and every run prints `  BASELINED  N finding(s) in M
+file(s) frozen by [<section>] baseline` so the debt stays visible. A file whose findings grow past
+its entry fails with every one of them listed; a file that now carries fewer fails until its entry
+is lowered (`SHRUNK`) or dropped (`STALE`) — the baseline only shrinks. It is per file on purpose:
+a single total would let a fix in one file pay for new drift in another. `test-shape` has the same
+ratchet as its `ledger`, measured in lines.
 
 **Migrating to uid-in-refs:** for a target whose header has no uid at all, mint one with Godot's own
 `ResourceUID.create_id()` in a headless pass (never hand-author a uid string — an invalid uid
@@ -151,27 +177,42 @@ extra = ["godot-check"]            # joins `check all` to `make check`
 exclude_prefixes = ["addons/"]     # scopes every uid check
 [tres]
 exclude_prefixes = ["addons/"]
+baseline = { "scenes/legacy/hub.tscn" = 7 }   # existing debt, per file at its CURRENT finding
+                                   # count; held and counted every run, and only shrinks
 [props]
 exclude_prefixes = ["addons/"]
+baseline = { "scenes/legacy/hub.tscn" = 2 }
 extra_properties = { MyWidget = ["virtual_prop"] }   # a `_get_property_list` shape the scanner
                                    # cannot see; the key is the class_name (or an ancestor's) or
                                    # the engine type, and the carve-out applies only to it
 [defaults]
 exclude_prefixes = ["addons/"]
+baseline = { "data/enemies/grunt.tres" = 3 }
+[canonical]                         # opt-in: name it in [checks] godot to run it in `check all`
+exclude_prefixes = ["addons/"]
 [rng]
 roots = ["systems/run/"]           # stock ".": keep it NARROW — the roots that hold run-scoped randomness
 allowlist = { "systems/run/dice.gd:roll" = "a cosmetic jitter; the reason is required" }
+baseline = { "systems/run/loot_roll.gd" = 4 }
 [tres_comment]
 exclude_prefixes = ["addons/"]
+baseline = { "data/legacy/tuning.tres" = 12 }
 [unit_disk]
 roots = ["tests/unit"]
+forbidden_literals = { "a real save path" = ["user://saves/", "user://settings\\.json"] }
+                                   # a TABLE, reason = [regexes], like forbidden_calls — not a
+                                   # list; stock { "a real user:// path" = ["user://"] }
 forbidden_calls = { "the live settings autoload" = ["SettingsManager\\.(save|load)_settings\\("] }
 min_args = { "SaveService.save" = 2 }
+baseline = { "tests/unit/test_save_roundtrip.gd" = 3 }
 [test_shape]
 scenario_root = "tests/integration"
+unit_root = "tests/unit"           # the other side of the tier-balance line
 cap = 300                          # lines; a NEW scenario over it fails
+infra = ["scenario_base.gd"]       # basenames of the tier's shared harness, not priced as scenarios
 ledger = { "tests/integration/big_flow.gd" = 812 }   # existing debt at its CURRENT size; only shrinks
 header = true                      # every booted scenario declares `## covers:` and `## Boots because:`
+header_ledger = ["tests/integration/big_flow.gd"]    # scenarios exempt until touched; only shrinks
 runner = "tools/dev/runners/integration.sh"
 
 [autoloads]
@@ -218,6 +259,14 @@ tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
+
+**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `check budget` can
+put a ceiling on each: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
+(`unit` with its GUT test count as the census), and the scenario tiers carry a census of **boots**.
+A scenario file is one cold engine boot whatever its length, so the scenario tier's cost is its
+file count: merging two scenarios saves a boot, trimming lines saves nothing. `[tests] cases` on
+`integration-all` / `integration-diff` is the ceiling on it; `check test-shape`'s line cap is a
+readability gate, not a cost one.
 
 ## Development
 

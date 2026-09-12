@@ -32,6 +32,11 @@ devkit.toml: [props] exclude_prefixes = ["addons/"]
              (the key names the script's `class_name` — or an ancestor's — or
               the node's engine type; the carve-out applies ONLY to sections of
               that class, never to the whole tree)
+             [props] baseline = { "scenes/legacy/hub.tscn" = 2 }
+             (existing debt, per file at its CURRENT count of dead
+              assignments: held and counted on a BASELINED line; a file past
+              its entry fails, and an entry above what is left fails until
+              lowered — it only shrinks)
 """
 from __future__ import annotations
 
@@ -42,6 +47,7 @@ from pathlib import Path
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.index.gdscript import RES_PREFIX, Resolution, ScriptIndex
 from godot_devkit.core.project import git_lines, repo_root
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import config_section, str_tuple, str_tuple_table
 from godot_devkit.godot.format.tscn import (
     Section,
@@ -188,7 +194,7 @@ class Report:
     """
 
     def __init__(self) -> None:
-        self.dead: list[str] = []
+        self.dead: list[tuple[str, str]] = []   # (rel, finding line)
         self.unverified = Counter()
         self.skipped = Counter()
         self.verified = 0
@@ -279,8 +285,8 @@ def _check_section(section: Section, rel: str, ext: dict[str, dict], scripts: Sc
         if key in resolved.exports:
             report.verified += 1
             continue
-        report.dead.append(f'  DEAD  {rel} : {where}.node_paths lists {key!r} — '
-                           f'not an @export of {script_rel}')
+        report.dead.append((rel, f'  DEAD  {rel} : {where}.node_paths lists '
+                                 f'{key!r} — not an @export of {script_rel}'))
     for entry in section.entries:
         if _is_unverifiable_key(entry.key):
             report.skipped['engine-synthesized key (script / _x / a/b form)'] += 1
@@ -288,8 +294,8 @@ def _check_section(section: Section, rel: str, ext: dict[str, dict], scripts: Sc
         if entry.key in allowed:
             report.verified += 1
             continue
-        report.dead.append(f'  DEAD  {rel} : {where}.{entry.key} — not {origin}'
-                           f'a property of {bases}')
+        report.dead.append((rel, f'  DEAD  {rel} : {where}.{entry.key} — not '
+                                 f'{origin}a property of {bases}'))
 
 
 def run() -> int:
@@ -297,6 +303,7 @@ def run() -> int:
     config = config_section('props')
     exclude = str_tuple(config, 'props', 'exclude_prefixes', VENDORED_DEFAULT)
     extra = str_tuple_table(config, 'props', 'extra_properties', {})
+    baseline = read_baseline(config, 'props')
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])
@@ -329,8 +336,10 @@ def run() -> int:
     for rel in unreadable:
         print(f'  UNVERIFIED  {rel} — tracked in git but not readable on '
               f'disk; not scanned')
-    for line in report.dead:
+    judged = baseline.judge(report.dead)
+    for line in judged.open:
         print(line)
+    judged.report()
     census = ', '.join(f'{count} {reason}' for reason, count in report.unverified.most_common())
     skipped = ', '.join(f'{count} {reason}' for reason, count in report.skipped.most_common())
     if report.accounted != report.seen:
@@ -344,8 +353,8 @@ def run() -> int:
               f'{len(git_lines("ls-files", "*.tscn", "*.tres"))} tracked '
               f'.tscn/.tres; check [props] exclude_prefixes')
         return 1
-    if report.dead:
-        print(f'[check:props] FAIL — {len(report.dead)} assignment(s) point at a property '
+    if judged.open:
+        print(f'[check:props] FAIL — {len(judged.open)} assignment(s) point at a property '
               f'that does not exist')
         print('  Fix: rename the assignment to the current @export, or re-add the export.')
         print(f'  verified {report.verified} across {report.sections} scripted section(s) '
@@ -353,6 +362,9 @@ def run() -> int:
         print(f'  UNVERIFIED (not a finding): {census or "none"}')
         print(f'  NOT APPLICABLE: {skipped or "none"} '
               f'[{report.seen} properties seen, all accounted for]')
+        return 1
+    if judged.failed:
+        print(judged.verdict('[check:props]', f'{report.files} file(s)'))
         return 1
     print(f'[check:props] PASS — {report.verified} assignment(s) verified across '
           f'{report.sections} scripted section(s) in {report.files} file(s) '

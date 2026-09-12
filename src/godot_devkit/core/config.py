@@ -128,6 +128,43 @@ def number_table(sect: dict, name: str, key: str,
     return out
 
 
+def repo_path_defect(rel: str) -> str | None:
+    """Why `rel` is not a repo-relative file path, or None when it is."""
+    if not rel:
+        return 'is empty'
+    if rel.startswith('/'):
+        return 'is absolute — write the repo-relative path'
+    if '\\' in rel:
+        return 'carries a backslash'
+    if '://' in rel:
+        return 'carries a scheme — write the repo-relative path, not res://'
+    if any(seg in ('', '.', '..') for seg in rel.split('/')):
+        return 'carries a dot or empty segment'
+    return None
+
+
+def path_count_table(sect: dict, name: str, key: str,
+                     fallback: dict[str, int] | None = None) -> dict[str, int]:
+    """A table mapping repo-relative FILE PATHS to POSITIVE counts — a baseline.
+
+    `number_table`, with the two things a count-per-file must also be: a key
+    that can name a file (an absolute path, a `res://` or a `..` never matches
+    a finding, so it would report as permanently stale — a config typo wearing
+    a finding's clothes), and a count of at least one (an entry of 0 freezes
+    nothing; the file has no debt, so the entry goes). Absent is `fallback`, or `{}`.
+    """
+    out = number_table(sect, name, key, fallback or {})
+    for rel, count in out.items():
+        why = repo_path_defect(rel)
+        if why:
+            raise ConfigError(f'[{name}] {key} entry {rel!r} {why}')
+        if count < 1:
+            raise ConfigError(
+                f'[{name}] {key}.{rel!r} is {count} — an entry freezes at least '
+                f'one finding; a file with none has no entry')
+    return out
+
+
 def pattern(sect: dict, name: str, key: str, fallback: str) -> str:
     """A regex setting, COMPILED at load so a bad one is exit 2, not a finding."""
     import re as _re

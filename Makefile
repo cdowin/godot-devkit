@@ -48,5 +48,5 @@ GODOT_DEVKIT ?= bash tools/dev/godot_devkit_on_fixture.sh
 
 # The pin, and the include that derives `DEVKIT` (the agentic-sdlc command)
 # from it. Bumping the tag is the whole adoption; `agentic-sdlc adopt` checks it.
-DEVKIT_VERSION := v0.2.0
+DEVKIT_VERSION := v0.11.0
 include Makefile.devkit

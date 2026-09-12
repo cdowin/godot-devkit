@@ -194,6 +194,29 @@ def test_a_mis_set_report_dir_is_refused_before_anything_is_removed(tmp_path):
 
 
 # --- unit.sh's coverage gate, driven through the RUNNER ----------------------
+# The gate framework's library as this repo's pin installed it: the one a
+# consumer's `install-gates` puts beside gdk_runners.sh, and the owner of the
+# ledger row. Its recorder is GDK_LEDGER_CMD, stood in for by a script that
+# writes down what it was asked to file.
+GATE_LIB = REPO_ROOT / 'tools' / 'dev' / 'gdk_gate.sh'
+ROW = re.compile(r'^pm ledger record --gate (\S+) --verdict (\S+) '
+                 r'--duration-ms \d+(?: --census (\d+))?$')
+
+
+def _recorder(tmp_path: Path, ledger: Path) -> Path:
+    recorder = tmp_path / 'recorder.sh'
+    recorder.write_text(f'printf "%s\\n" "$*" >> "{ledger}"\n', encoding='utf-8')
+    return recorder
+
+
+def _rows(ledger: Path) -> list[tuple[str, str, str]]:
+    """(gate, verdict, census) per filed row; a line of any other shape fails."""
+    lines = ledger.read_text(encoding='utf-8').splitlines() if ledger.exists() else []
+    rows = [ROW.match(line) for line in lines]
+    assert all(rows), lines
+    return [(m.group(1), m.group(2), m.group(3) or '') for m in rows]
+
+
 GUT_TRANSCRIPT = ('#!/usr/bin/env bash\n'
                   'echo "Running tests..."\n'
                   'echo "Totals"\n'
@@ -211,15 +234,25 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     `Scripts 0` into `PASS (0/0 scripts loaded - full coverage)` (MAJOR-2,
     rule 4's sin on the tier a consumer slices by hand every day). A stub
     prints the GUT transcript and unit.sh does everything else for real; the
-    reconciled run is the control the two failures are measured against."""
+    reconciled run is the control the two failures are measured against.
+
+    #7/#8, on the same three runs: each files ONE ledger row through the
+    gate framework's own library (the pin's gdk_gate.sh, beside the runner
+    library where `install-gates` puts it) with the outcome the runner NAMED
+    and GUT's test count as the census. The mismatch is the case that bites:
+    GUT exits 0 there, so a verdict read off the exit code would file PASS."""
     root = tmp_path / 'repo'
     _project(root, UNIT)
+    shutil.copy2(GATE_LIB, root / 'tools' / 'dev' / 'gdk_gate.sh')
     tier = root / 'tests' / 'unit' / 'stats'
     tier.mkdir(parents=True)
     for index in range(2):
         (tier / f'test_{index}.gd').write_text('', encoding='utf-8')
     stub = _stub_engine(tmp_path, GUT_TRANSCRIPT.format(scripts=2))
-    env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home')}
+    ledger = tmp_path / 'ledger.txt'
+    env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
+           'HOME': str(tmp_path / 'home'),
+           'GDK_LEDGER_CMD': f'bash {_recorder(tmp_path, ledger)}'}
 
     def unit(*argv: str) -> subprocess.CompletedProcess:
         return subprocess.run(['bash', 'tools/dev/runners/unit.sh', *argv], cwd=root,
@@ -227,13 +260,15 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
 
     done = unit()
     assert done.returncode == 0, done.stdout + done.stderr
-    assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout, done.stdout
+    assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout.splitlines()[-1], done.stdout
+    assert _rows(ledger) == [('unit', 'PASS', '2')], done.stderr
 
     (tier / 'test_2.gd').write_text('', encoding='utf-8')
     done = unit()
     assert done.returncode == 1, done.stdout + done.stderr
     assert '3 test script(s) on disk, 2 run' in done.stdout, done.stdout
     assert 'COVERAGE FAIL (script count mismatch)' in done.stdout, done.stdout
+    assert _rows(ledger)[1:] == [('unit', 'FAIL', '2')], done.stderr
 
     (stub / 'godot').write_text(GUT_TRANSCRIPT.format(scripts=0), encoding='utf-8')
     done = unit('typo')
@@ -243,6 +278,18 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     # It names the DIRECTORY it scanned: the repair is one of two spellings
     # and a verdict that does not name it chooses neither.
     assert 'tests/unit/typo' in done.stdout, done.stdout
+    assert [row[1] for row in _rows(ledger)] == ['PASS', 'FAIL', 'FAIL'], _rows(ledger)
+
+    # A gate library that defines neither call (empty, renamed upstream) once
+    # sent the cost row back into the runner's own wrapper until fork failed,
+    # while the run still printed PASS. Now: the verdict stands, no row, one note.
+    (root / 'tools' / 'dev' / 'gdk_gate.sh').write_text('', encoding='utf-8')
+    (stub / 'godot').write_text(GUT_TRANSCRIPT.format(scripts=3), encoding='utf-8')
+    done = subprocess.run(['bash', 'tools/dev/runners/unit.sh'], cwd=root, text=True,
+                          capture_output=True, env=env, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert 'defines no gdk_gate_verdict' in done.stderr, done.stderr
+    assert len(_rows(ledger)) == 3, _rows(ledger)
 
 
 # --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
@@ -397,18 +444,32 @@ def test_the_fan_out_runs_a_runner_with_no_exec_bit_and_tells_every_job_it_has_p
     sets the marker: asserted through the REAL fan-out, because the marker
     lives inside a single-quoted xargs body — the place a plausible edit
     silently stops running (an apostrophe in a comment there ended the string
-    and broke the whole sweep, once)."""
+    and broke the whole sweep, once).
+
+    #8, on the same sweep: the run reports its BOOTS — one per scenario file,
+    the tier's real cost unit — and the census command the installed
+    Makefile.tiers passes `gdk_gate` reads that count back off the transcript,
+    so the `gate` row `[tests] cases` grades carries it."""
     runner = _fanout_fixture(
         tmp_path, 'echo "${GDK_SCENARIO_IN_SWEEP:-unset}" > "$PWD/sweep.txt"\n'
                   'echo "[SCENARIO] $1 PASS"\n', mode=0o644)
     done = subprocess.run(['bash', str(runner), 'alpha', 'beta'], cwd=tmp_path,
                           text=True, capture_output=True, env=FANOUT_ENV)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert SWEEP_SUMMARY in done.stdout, done.stdout
+    assert done.stdout.splitlines()[-1] == SWEEP_SUMMARY, done.stdout
     assert 'Permission denied' not in done.stdout + done.stderr
     marker = tmp_path / 'sweep.txt'
     assert marker.exists(), done.stdout + done.stderr
     assert marker.read_text(encoding='utf-8').strip() == '1', marker.read_text()
+    assert re.search(r'^\[INTEGRATION\] BOOTS: 2 scenario\(s\) booted, \d+\.\ds CPU, '
+                     r'\d+\.\d\ds per boot$', done.stdout, re.M), done.stdout
+    census = re.search(r'^GDK_CENSUS_BOOTS := (.*)$', install.body_of('Makefile.tiers'), re.M)
+    assert census, 'Makefile.tiers no longer declares the scenario tiers\' census'
+    log = tmp_path / 'integration.log'
+    log.write_text(done.stdout, encoding='utf-8')
+    read = subprocess.run(['bash', '-c', 'log="$1"; ' + census.group(1).replace('$$', '$'),
+                           '_', str(log)], text=True, capture_output=True)
+    assert read.stdout == '2\n', read.stdout + read.stderr
 
 
 def test_a_failing_scenario_with_no_summary_line_still_gets_a_diagnosis(tmp_path):
@@ -709,6 +770,8 @@ DESTINATIONS = {
     'Makefile.tiers',
 }
 HOOK_ENTRY = '"command": "bash tools/hooks/cc-godot-sandbox.sh"'
+UID_GUARD = '.github/workflows/uid-guard.yml'
+UID_GUARD_PUSH = 'branches: [main]'
 # The nine Godot targets the story names, plus the one `[gates] extra` names.
 GODOT_TARGETS = ('parse', 'lint', 'warnings', 'unit', 'integration', 'scenario',
                  'capture', 'import-cache', 'hermetic-scan', 'godot-check')
@@ -764,6 +827,12 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
                 assert os.access(root / rel, os.X_OK), f'{rel} is not executable'
         for name, rel in install.PLAN:
             assert (root / rel).read_text(encoding='utf-8') == install.body_of(name)
+        # The uid guard fires on the flow agentic-sdlc runs — a push to the
+        # mainline, as its verify.yml does — never on a `staging` it does not
+        # have (#9, v1.0.1).
+        guard = (root / UID_GUARD).read_text(encoding='utf-8')
+        push = guard.split('\n  push:\n', 1)[1].split('\n  workflow_dispatch:', 1)[0]
+        assert UID_GUARD_PUSH in push and 'staging' not in guard, guard
         # The registration step, pasteable and LAST on stdout.
         assert HOOK_ENTRY in out, out
         assert out.rstrip().endswith('}'), out[-200:]

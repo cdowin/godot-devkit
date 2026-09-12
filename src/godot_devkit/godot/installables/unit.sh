@@ -108,12 +108,17 @@ USAGE_EOF
 # Both readers take their input on a pipe so the self-test can fire them at a
 # fixture transcript with no engine anywhere.
 
-# gut_scripts_run — read a GUT transcript on stdin, print the `Scripts` count
-# from its totals block. Empty when there is no totals block at all, which is a
-# HARNESS failure and never a pass.
+# gut_total <row> — read a GUT transcript on stdin, print one count from its
+# totals block (`Scripts`, `Tests`). Empty when there is no totals block at
+# all, which is a HARNESS failure and never a pass — and never a census of 0.
+gut_total() {
+	awk -v row="$1" '/^Totals/ { seen = 1; next }
+	     seen && $1 == row && $2 ~ /^[0-9]+$/ { print $2; exit }'
+}
+
+# gut_scripts_run — the `Scripts` count the coverage gate reconciles.
 gut_scripts_run() {
-	awk '/^Totals/ { seen = 1; next }
-	     seen && /^Scripts[[:space:]]+[0-9]+/ { print $2; exit }'
+	gut_total Scripts
 }
 
 # gut_skipped_scripts — read a transcript on stdin, print every line in which
@@ -179,6 +184,18 @@ self_test() {
 		| gut_scripts_run)"
 	[ "$out" = "14" ] \
 		|| { echo "  MISS — the Scripts count must parse as 14, got '$out'" >&2; failures=$((failures + 1)); }
+
+	# The census the cost row carries is the TESTS row of the same block — the
+	# count `[tests] cases` grades — and no totals block is NO census, never 0.
+	cases=$((cases + 1))
+	out="$(printf '%s\n' 'Tests            99' 'Totals' 'Scripts 14' 'Tests            100' \
+		| gut_total Tests)"
+	[ "$out" = "100" ] \
+		|| { echo "  MISS — the census must be the totals block's Tests count (100), got '$out'" >&2; failures=$((failures + 1)); }
+	cases=$((cases + 1))
+	out="$(printf 'the engine crashed on boot\n' | gut_total Tests)"
+	[ -z "$out" ] \
+		|| { echo "  MISS — no totals block must be NO census, got '$out'" >&2; failures=$((failures + 1)); }
 
 	# `Scripts` BEFORE the totals block is GUT's own progress chatter, not the
 	# count. A parser that took the first match would read the wrong number and
@@ -319,6 +336,10 @@ fi
 gdk_sandbox_home
 
 LOG="$(gdk_gate_log "$GATE_SLOT")"
+# The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
+# one PASS below says otherwise, so a verdict path that forgets to set it files
+# a FAIL — never the PASS its exit code might imply.
+export GDK_GATE_VERDICT=FAIL
 
 # Build the -gdir args. SCAN_DIRS mirrors them on disk so the coverage gate
 # counts exactly the scripts this invocation asked GUT to run.
@@ -341,11 +362,16 @@ GODOT_EXIT=$?
 
 PLAIN="$(printf '%s\n' "$RAW" | strip_ansi)"
 gdk_gate_publish "$LOG" "$RAW"
+# The census on the row: the tests GUT counted, what `[tests] cases` grades.
+# Empty (no totals block) leaves the row without one, never with a 0.
+GDK_GATE_CENSUS="$(printf '%s\n' "$PLAIN" | gut_total Tests)"
+export GDK_GATE_CENSUS
 
 # The summary: counts, plus anything that failed, refused to load, or went risky.
 printf '%s\n' "$PLAIN" | grep -E "$SUMMARY_PATTERN" | sed 's/^/  /' || true
 
 if gdk_timeout_is_hang "$GODOT_EXIT"; then
+	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
 		"HARD_TIMEOUT — exceeded ${TIMEOUT_SECONDS}s, killed" "$LOG"
 	exit 2
@@ -404,6 +430,7 @@ fi
 
 # GUT's -gexit returns non-zero when any test fails or errors; 0 on all-pass.
 if [ "$GODOT_EXIT" -eq 0 ]; then
+	GDK_GATE_VERDICT=PASS
 	gdk_gate_verdict "$GATE_TAG" \
 		"PASS (${RAN_SCRIPTS}/${DISK_SCRIPTS} scripts loaded — full coverage${GUARD_NOTE})" "$LOG"
 	exit 0

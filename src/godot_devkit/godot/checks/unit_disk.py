@@ -33,14 +33,20 @@ devkit.toml:
 
     [unit_disk]
     roots = ["tests/unit"]
+    forbidden_literals = { "a real save path" = ["user://saves/", "user://settings\\\\.json"] }
     forbidden_calls = { "the live settings autoload" = [
         "SettingsManager\\\\.(save_settings|load_settings|reset_to_defaults)\\\\(" ] }
     min_args = { "SaveService.save" = 2, "SaveSlotIndex.scan" = 1 }
+    # Existing debt, per file at its CURRENT count of violations: held and
+    # counted on a BASELINED line; a file past its entry fails, and an entry
+    # above what is left fails until lowered — it only shrinks.
+    baseline = { "tests/unit/test_save_roundtrip.gd" = 3 }
 """
 from __future__ import annotations
 
 import re
 
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import (ConfigError, config_section, number_table,
                                       str_tuple, str_tuple_table)
 from godot_devkit.core.project import git_lines, repo_root
@@ -147,6 +153,7 @@ def run() -> int:
     literals = _compiled(sect, 'forbidden_literals', DEFAULT_FORBIDDEN_LITERALS)
     calls = _compiled(sect, 'forbidden_calls', {})
     floors = _min_args(sect)
+    baseline = read_baseline(sect, SECTION)
     root = repo_root()
     scanned = [rel for rel in git_lines('ls-files', '--', *roots)
                if rel.endswith(SUFFIX)]
@@ -156,17 +163,21 @@ def run() -> int:
               f'check [{SECTION}] roots')
         return 1
 
-    findings: list[str] = []
+    found: list[tuple[str, str]] = []
     for rel in scanned:
         try:
             text = (root / rel).read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
-        findings.extend(scan_text(text, rel, literals, calls, floors))
+        found.extend((rel, f'  DISK-WRITE  {finding}')
+                     for finding in scan_text(text, rel, literals, calls, floors))
+    judged = baseline.judge(found)
+    findings = judged.open
 
     if findings:
         for finding in findings:
-            print(f'  DISK-WRITE  {finding}')
+            print(finding)
+        judged.report()
         print(f'\n{TAG} FAIL — {len(findings)} violation(s) across '
               f'{len(scanned)} test file(s) under {", ".join(roots)}')
         print('  A unit test constructs what it needs and destroys it — it '
@@ -175,6 +186,11 @@ def run() -> int:
               'root parameter, never a "am I being tested" branch.')
         return 1
 
+    judged.report()
+    if judged.failed:
+        print(judged.verdict(TAG, f'{len(scanned)} test file(s) under '
+                                  f'{", ".join(roots)}'))
+        return 1
     print(f'{TAG} PASS — {len(scanned)} test file(s) under '
           f'{", ".join(roots)} touch no real persistent state '
           f'({len(literals)} literal(s), {len(calls)} call(s), '

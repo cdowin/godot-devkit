@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## v1.1.0 — 2026-09-12
+
+- README's `devkit.toml` block now shows every key the kit reads with an example of its own shape
+  — `[unit_disk] forbidden_literals` (a reason-to-patterns TABLE, not a list) and `[test_shape]
+  unit_root`, `infra`, `header_ledger` were missing — and a census test derives the key set from
+  the config readers and fails on any key the block lacks or shows in a shape its reader refuses.
+- README § Install — two pins names the third step for a repo with a PM tree: `pm init`, then
+  `pm vocabulary` to read the flow back, because the flow has no default and a repo that skips it
+  has working gates and a `pm` that refuses every work-moving verb; the fresh-repo and
+  bumping-consumer paths are written out separately.
+- **A gate can be adopted frozen, then paid down.** `tres`, `props`, `defaults`, `rng`,
+  `tres-comment` and `unit-disk` each accept a `baseline` in their own `devkit.toml` section —
+  `{ "path/rel.tres" = N }`, one entry per file at its current finding count, the shape
+  `[test_shape] ledger` already uses. Held findings are not printed; every run with a baseline
+  prints `  BASELINED  N finding(s) in M file(s) frozen by [<section>] baseline`. A file whose
+  findings grow past its entry fails with all of them listed (`  GREW  …`); an entry above what is
+  left fails until lowered (`  SHRUNK  …`) or dropped (`  STALE  …`) — the baseline only shrinks.
+  A malformed entry (not a table, a non-integer or `0`, an absolute, `res://` or `..` path) exits
+  2. No baseline declared: output is byte-identical to before.
+- **Every tier files a cost row, including the four the Makefile does not wrap** (#7). `parse`,
+  `lint`, `warnings` and `unit` export `GDK_GATE_VERDICT` — FAIL unless the run reached its PASS,
+  HANG on a timeout — and `gdk_runners.sh` hands `gdk_gate_log`/`gdk_gate_verdict` to agentic-sdlc's
+  `gdk_gate.sh` (new `GDK_GATE_LIB`, stock: beside it; `Makefile.tiers` exports the include's), so
+  the ledger row the wrapper would file is filed without a second wrapper. `unit` also files its
+  GUT test count as the census, so `[tests] budget` and `cases` can take a ceiling on the story rung.
+- **The scenario tiers are graded on boots** (#8). `integration.sh` prints
+  `[INTEGRATION] BOOTS: <n> scenario(s) booted, <cpu>s CPU, <per>s per boot` above its SUMMARY, and
+  `integration`, `integration-all`, `integration-diff` and `smoke` pass that count to `gdk_gate` as
+  the row's census (`GDK_CENSUS_BOOTS`), so `[tests] cases` on them grades instead of FAILing
+  UNCOUNTED. `check test-shape --help` now says it is a readability gate and names boots and
+  `[tests] cases` as what governs the tier's cost.
+- **`check canonical` and `scene canonicalize --respell` / `--order`** — the two dimensions of `.tres` editor-save churn `check defaults` leaves out, proven by pure parse from the section's own script: floats in the saver's shortest spelling (`0.30` -> `0.3`, emitted only where the 32- and 64-bit forms agree), a bare list on an `Array[T]` export wrapped as `Array[T]([...])`, and a scripted section's properties in declaration order. Line edits only — comments, `uid=` and every untouched line byte-identical, a second run a no-op; an enum element type, an export with an accessor or a section holding an engine property is named or counted, never guessed. The gate is opt-in: not in the stock `check all`, nameable in `[checks] godot`. New config section `[canonical] exclude_prefixes`.
+
 ## v1.0.1 — 2026-09-11
 
 **The uid guard follows the branch flow, not `staging`.** The `uid-guard.yml` that `install-runners`

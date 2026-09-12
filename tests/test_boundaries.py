@@ -46,6 +46,7 @@ LAYERS = ('format', 'index', 'read', 'write', 'checks')
 # crosses a `core/config.py` guard (`str_tuple` & co).
 CONFIG_IMPORT_ALLOWLIST = frozenset((
     'core/config.py', 'cli.py',
+    'godot/checks/canonical.py',
     'godot/checks/defaults.py', 'godot/checks/props.py', 'godot/checks/rng.py',
     'godot/checks/test_shape.py', 'godot/checks/tres.py', 'godot/checks/tres_comment.py',
     'godot/checks/uid.py', 'godot/checks/unit_disk.py',
@@ -305,6 +306,190 @@ class ConfigValuesCrossTheGuards(unittest.TestCase):
         self.assertEqual('d', config.text({}, 's', 'k', 'd'))
         self.assertIs(False, config.flag({}, 's', 'k', False))
         self.assertEqual(1, config.number({}, 's', 'k', 1))
+
+
+# --- the README's `devkit.toml` block against the keys the readers accept.
+# A consumer copies that block before writing config; a key absent from it is
+# guessed at, and `[unit_disk] forbidden_literals` — a TABLE beside a LIST-shaped
+# `exclude_prefixes` — was guessed as a list by the first consumer to need it.
+README = REPO_ROOT / 'README.md'
+CONFIG_HEADING = '## Configuration'
+CONFIG_FENCE = '```toml'
+CONFIG_MODULE = 'core/config.py'
+# A keyed guard reads `(sect, name, key, fallback)`; `config_section(name)` is
+# the table read and has no key. Derived from the signature, so a new guard
+# joins the census without an edit here.
+READER_PARAMS = ['sect', 'name', 'key']
+# Floors under the census (rule 4): 8 guards and 28 keys today.
+MIN_READERS = 8
+MIN_KEYS = 20
+# How far a key may be passed down through helper parameters before the scan
+# gives up and names the call site as unresolvable.
+MAX_RESOLVE_DEPTH = 4
+
+
+def _config_readers() -> frozenset[str]:
+    import inspect
+    from godot_devkit.core import config
+    return frozenset(
+        name for name, fn in vars(config).items()
+        if inspect.isfunction(fn) and fn.__module__ == config.__name__
+        and list(inspect.signature(fn).parameters)[:len(READER_PARAMS)] == READER_PARAMS)
+
+
+def _dotted(rel: str) -> str:
+    return 'godot_devkit.' + rel[:-len('.py')].replace('/', '.')
+
+
+class _Module:
+    """One parsed module: its string constants, its functions, and every call
+    in it paired with the function it sits in."""
+
+    def __init__(self, rel: str, tree: ast.Module):
+        self.rel, self.dotted = rel, _dotted(rel)
+        self.constants = {t.id: node.value.value for node in tree.body
+                          if isinstance(node, ast.Assign)
+                          and isinstance(node.value, ast.Constant)
+                          and isinstance(node.value.value, str)
+                          for t in node.targets if isinstance(t, ast.Name)}
+        # local name -> dotted source, for every `from x import y [as z]`; a
+        # relative import resolved against the module's own package, as `_imports` does.
+        package = ['godot_devkit'] + rel.split('/')[:-1]
+        self.imported: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                base = package[:len(package) - node.level + 1] if node.level else []
+                source = '.'.join(base + ([node.module] if node.module else []))
+                self.imported.update({(alias.asname or alias.name): f'{source}.{alias.name}'
+                                      for alias in node.names})
+        self.calls: list[tuple[ast.Call, ast.FunctionDef | None]] = []
+        self._collect(tree, None)
+
+    def _collect(self, node: ast.AST, owner: ast.FunctionDef | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = child if isinstance(child, ast.FunctionDef) else owner
+            if isinstance(child, ast.Call):
+                self.calls.append((child, owner))
+            self._collect(child, inner)
+
+    def callee(self, call: ast.Call) -> str | None:
+        """The dotted target of a bare-name or `module.name` call, else None."""
+        func = call.func
+        if isinstance(func, ast.Name):
+            return self.imported.get(func.id, f'{self.dotted}.{func.id}')
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            return f'{self.imported.get(func.value.id, func.value.id)}.{func.attr}'
+        return None
+
+
+def _argument(call: ast.Call, fn: ast.FunctionDef, param: str) -> ast.expr | None:
+    """What `call` binds to `fn`'s `param`: by keyword, by position, or the default."""
+    for kw in call.keywords:
+        if kw.arg == param:
+            return kw.value
+    positional = [a.arg for a in (*fn.args.posonlyargs, *fn.args.args)]
+    if param in positional and positional.index(param) < len(call.args):
+        return call.args[positional.index(param)]
+    defaults = dict(zip(positional[len(positional) - len(fn.args.defaults):],
+                        fn.args.defaults))
+    defaults.update({a.arg: d for a, d in zip(fn.args.kwonlyargs, fn.args.kw_defaults)
+                     if d is not None})
+    return defaults.get(param)
+
+
+def _resolve(expr: ast.expr | None, mod: _Module, owner: ast.FunctionDef | None,
+             modules: list[_Module], depth: int = 0) -> set[str] | None:
+    """Every string `expr` can be: a literal, a module constant, or a parameter
+    followed out to each call site that binds it. None when any path is not
+    one of those — the census names it rather than skipping it."""
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return {expr.value}
+    if not isinstance(expr, ast.Name) or depth > MAX_RESOLVE_DEPTH:
+        return None
+    params = set() if owner is None else {
+        a.arg for a in (*owner.args.posonlyargs, *owner.args.args, *owner.args.kwonlyargs)}
+    if expr.id not in params:
+        return {mod.constants[expr.id]} if expr.id in mod.constants else None
+    target = f'{mod.dotted}.{owner.name}'
+    out: set[str] = set()
+    sites = 0
+    for caller in modules:
+        for call, caller_owner in caller.calls:
+            if caller.callee(call) != target:
+                continue
+            sites += 1
+            found = _resolve(_argument(call, owner, expr.id), caller, caller_owner,
+                             modules, depth + 1)
+            if found is None:
+                return None
+            out |= found
+    return out if sites else None
+
+
+def _keys_the_readers_accept() -> tuple[dict[tuple[str, str], str], list[str], int]:
+    """({(section, key): reader}, unresolvable call sites, readers found)."""
+    readers = _config_readers()
+    modules = [_Module(rel, tree) for rel, tree in _sources()]
+    reader_targets = {f'{_dotted(CONFIG_MODULE)}.{name}': name for name in readers}
+    keys: dict[tuple[str, str], str] = {}
+    unresolved: list[str] = []
+    for mod in modules:
+        if mod.rel == CONFIG_MODULE:
+            continue
+        for call, owner in mod.calls:
+            reader = reader_targets.get(mod.callee(call) or '')
+            if reader is None:
+                continue
+            sections = _resolve(call.args[1] if len(call.args) > 1 else None,
+                                mod, owner, modules)
+            names = _resolve(call.args[2] if len(call.args) > 2 else None,
+                             mod, owner, modules)
+            if sections is None or names is None:
+                unresolved.append(f'{mod.rel}:{call.lineno}: {reader}()')
+                continue
+            keys.update({(s, k): reader for s in sections for k in names})
+    return keys, unresolved, len(readers)
+
+
+def _readme_config_block() -> dict:
+    import tomllib
+    text = README.read_text(encoding='utf-8')
+    section = text.split(f'\n{CONFIG_HEADING}', 1)[1]
+    block = section.split(CONFIG_FENCE + '\n', 1)[1].split('\n```', 1)[0]
+    return tomllib.loads(block)
+
+
+class EveryConfigKeyShowsItsShape(unittest.TestCase):
+    # The README block is the only place a consumer looks before writing
+    # config. Walk the readers — every guard call in src/, its section and key
+    # resolved from the code — and require one example per key, fed back
+    # through the SAME guard so the example is of the shape the reader accepts.
+    def test_every_key_a_reader_accepts_has_an_example_of_its_shape_in_the_readme(self):
+        from godot_devkit.core import config
+        keys, unresolved, readers = _keys_the_readers_accept()
+        self.assertGreaterEqual(readers, MIN_READERS, 'config guard census collapsed')
+        self.assertGreaterEqual(len(keys), MIN_KEYS, 'config key census collapsed')
+        self.assertEqual([], unresolved, (
+            'a config read whose section or key is not a literal, a module constant '
+            'or a parameter bound by one — the census cannot say what it reads:\n  '
+            + '\n  '.join(unresolved)))
+        doc = _readme_config_block()
+        missing, misshapen = [], []
+        for (section, key), reader in sorted(keys.items()):
+            value = doc.get(section, {})
+            if key not in value:
+                missing.append(f'[{section}] {key}  ({reader})')
+                continue
+            try:
+                getattr(config, reader)(value, section, key, None)
+            except config.ConfigError as err:
+                misshapen.append(f'[{section}] {key}: {err}')
+        self.assertEqual([], missing, (
+            f'key(s) the readers accept with no example in README.md § {CONFIG_HEADING[3:]}'
+            " — a consumer guesses a key's shape when there is nothing to copy:\n  "
+            + '\n  '.join(missing)))
+        self.assertEqual([], misshapen, 'README example(s) their own reader refuses:\n  '
+                         + '\n  '.join(misshapen))
 
 
 if __name__ == '__main__':

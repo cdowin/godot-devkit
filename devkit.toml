@@ -56,7 +56,7 @@ milestone = "make milestone"
 # explain in the commit that caused it — never a number to raise in passing.
 [tests]
 budget = { pyunit = 2, test = 35 }
-cases  = { pyunit = 47, test = 221 }
+cases  = { pyunit = 51, test = 221 }
 
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines
@@ -98,14 +98,14 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 # tree working on main while telling its consumers not to — D10 is what stops
 # that recurring silently.
 checks = [
-    "D1", "D2", "D3", "D4", "D5", "D6",
-    "D9", "D10",
-    "V1", "V2", "V3", "V4", "V5", "V6",
+    "D1", "D2", "D4", "D5", "D6",
+    "D9", "D10", "D11", "D12",
+    "V1", "V4", "V5", "V7",
+    "U1",
 ]
-# V6 is named on purpose, and it is the one rule here that is NOT stock. This
-# tree keeps generated execution lists and is small enough for `pm sync` to be
-# cheap, so the gate holds the view to the tree. A project whose lists go stale
-# on ordinary work should leave it off and reach for `pm sync --check`.
+# D11 replaced D3 in agentic-sdlc 0.6.0 (open children, at every level); V2, V3
+# and V6 were retired in 0.4.0 with the path-as-identity and generated
+# execution lists they graded.
 # Nothing else is set. The prose ratchets, their six line caps and their three
 # grandfather ledgers were deleted in 0.15.0, and every key they read is now
 # named at exit 2 by `check pm` — so this file declares scope and roster, and
@@ -134,3 +134,7 @@ done        = ["done", "obe"]
 todo        = ["open"]
 in_progress = ["fixed"]
 done        = ["closed"]
+
+[dispatch]
+project = "godot-devkit — scene tooling and the eight Godot gates for Godot 4.x, a pinned-tag stdlib-only Python package. Pure parse, never boots Godot; the CLI is a published API. Public repo, MIT."
+contracts = ["CLAUDE.md", ".claude/rules/pm-execution.md"]

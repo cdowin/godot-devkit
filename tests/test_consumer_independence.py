@@ -58,6 +58,10 @@ NOT_CONTENT = {'.git', '.gate-reports', '.pytest_cache', '.ruff_cache', '.venv',
 # never committed, and excluded by name rather than tombstoned: a tombstone is
 # for a file in the tree, and this one only exists on a maintainer's disk.
 NOT_CONTENT_FILES = {'.consumer-names'}
+# Other checkouts of this repo that `tools/dev/agent-worktree.sh` plants inside
+# this one (gitignored). Each is its own tree and is swept by its own run; read
+# from here, its pm/ is not under LOG_PATHS and its log prose reads as a finding.
+OTHER_CHECKOUTS = ('.claude/worktrees/',)
 TOMBSTONES: dict[str, str] = {
     # Empty since 0.25.0: no file in the tree needs to spell a banned name.
 }
@@ -81,7 +85,7 @@ def scanned_files(root: Path = REPO_ROOT) -> list[Path]:
         rel = path.relative_to(root)
         if (not path.is_file() or path.is_symlink() or set(rel.parts) & NOT_CONTENT
                 or rel.as_posix() in NOT_CONTENT_FILES
-                or rel.as_posix().startswith(LOG_PATHS)
+                or rel.as_posix().startswith(LOG_PATHS + OTHER_CHECKOUTS)
                 or path.name in DENY_NAMES or path.suffix.lower() in DENY_SUFFIXES):
             continue
         out.append(path)

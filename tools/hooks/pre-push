@@ -15,6 +15,11 @@ PUSH_GATE=(make check)
 SCOPE_MARKER=".agent-scope"
 # -----------------------------------------------------------------------------
 
+# A header carried from an older install may lack a key: it runs at its stock value.
+declare -p PROTECTED_BRANCHES >/dev/null 2>&1 || PROTECTED_BRANCHES="main"
+declare -p PUSH_GATE >/dev/null 2>&1 || PUSH_GATE=(make check)
+declare -p SCOPE_MARKER >/dev/null 2>&1 || SCOPE_MARKER=".agent-scope"
+
 # Inline, not sourced: a library the repo may lack would fail the hook.
 is_agent_context() {
 	local root

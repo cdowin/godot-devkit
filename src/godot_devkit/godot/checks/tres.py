@@ -12,21 +12,33 @@ CHECK (HARD): every ext_resource ref in a tracked non-excluded .tres/.tscn
               carries a uid= (no path-only refs remain).
 
 devkit.toml: [tres] exclude_prefixes = ["addons/", ...]
+             [tres] baseline = { "scenes/legacy/hub.tscn" = 7 }
+             (existing debt, per file at its CURRENT count of path-only refs:
+              held and counted on a BASELINED line; a file past its entry
+              fails, and an entry above what is left fails until lowered — it
+              only shrinks)
 """
 from __future__ import annotations
 
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.project import git_lines, repo_root
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot import VENDORED_DEFAULT
 
+SECTION = 'tres'
+TAG = '[check:tres]'
 
 
 def run() -> int:
     root = repo_root()
-    exclude = str_tuple(config_section('tres'), 'tres', 'exclude_prefixes',
-                        VENDORED_DEFAULT)
-    hard = 0
+    sect = config_section(SECTION)
+    exclude = str_tuple(sect, SECTION, 'exclude_prefixes', VENDORED_DEFAULT)
+    baseline = read_baseline(sect, SECTION)
     checked = 0
+    # Every line in scan order, `(rel, line)` for a finding and `(None, line)`
+    # for a disclosed skip — collected before printing so a baselined file's
+    # findings can be held without reordering anything around them.
+    lines: list[tuple[str | None, str]] = []
 
     print('[check:tres] CHECK — every ext_resource ref carries a uid (canonical uid-in-refs)')
     for rel in git_lines('ls-files', '*.tres', '*.tscn'):
@@ -39,16 +51,21 @@ def run() -> int:
             # mid-rebase). No evidence to scan — a censused, disclosed skip
             # (rule 4), never a traceback and never a finding: a working-tree
             # gap is not ref-format drift.
-            print(f'  UNVERIFIED  {rel} — tracked in git but not readable on '
-                  f'disk; not scanned')
+            lines.append((None, f'  UNVERIFIED  {rel} — tracked in git but '
+                                f'not readable on disk; not scanned'))
             continue
         checked += 1
         for n, line in enumerate(text.splitlines(), start=1):
             if (line.startswith('[ext_resource ') and 'path="' in line
                     and 'uid="uid://' not in line):
-                print(f'  PATH-ONLY  {rel}:{n}:{line.strip()}')
-                hard += 1
+                lines.append((rel, f'  PATH-ONLY  {rel}:{n}:{line.strip()}'))
 
+    judged = baseline.judge((rel, line) for rel, line in lines if rel is not None)
+    hard = len(judged.open)
+    for rel, line in lines:
+        if rel is None or rel not in judged.frozen:
+            print(line)
+    judged.report()
     if hard:
         print(f'[check:tres] FAIL — {hard} path-only ext_resource ref(s) across {checked} file(s)')
         print('  Fix: rewrite each to uid-in-refs form; mint MISSING header uids with')
@@ -63,6 +80,9 @@ def run() -> int:
         print(f'[check:tres] FAIL — scanned 0 of '
               f'{len(git_lines("ls-files", "*.tres", "*.tscn"))} tracked '
               f'.tres/.tscn; check [tres] exclude_prefixes')
+        return 1
+    if judged.failed:
+        print(judged.verdict(TAG, f'{checked} file(s)'))
         return 1
     print(f'[check:tres] PASS — all ext_resource refs canonical across {checked} .tres/.tscn')
     return 0

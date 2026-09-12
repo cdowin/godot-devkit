@@ -16,8 +16,9 @@ declaration order, respells typed arrays (`[a, b]` -> `Array[Resource]([a, b])`)
 and floats (`0.30` -> `0.3`), mints `ext_resource` entries for typed-array
 element types, and drops every `;` comment in the file. A PASS here means "no
 redundant defaults", NOT "the editor would leave this file alone". Saying more
-than that would be the false-PASS sin; the other dimensions are not decidable by
-parse, because reproducing them means reimplementing `ResourceFormatSaverText`.
+than that would be the false-PASS sin. Float spelling, typed-array wrapping and
+scripted property order are `check canonical`'s, where a parse can prove them;
+the rest would mean reimplementing `ResourceFormatSaverText`.
 
 Precision is the design constraint, exactly as in `check props`. Both sides of
 every comparison must normalise into one small closed value language, or the
@@ -25,6 +26,11 @@ assignment is censused as UNVERIFIED and never reported. Fix a finding with
 `godot-devkit scene canonicalize --elide-defaults <file>`.
 
 devkit.toml: [defaults] exclude_prefixes = ["addons/"]
+             [defaults] baseline = { "data/enemies/grunt.tres" = 3 }
+             (existing debt, per file at its CURRENT count of redundant
+              assignments: held and counted on a BASELINED line; a file past
+              its entry fails, and an entry above what is left fails until
+              lowered — it only shrinks)
 """
 from __future__ import annotations
 
@@ -32,12 +38,14 @@ from collections import Counter
 
 from godot_devkit.godot.index.gdscript import ScriptIndex
 from godot_devkit.core.project import git_lines, repo_root
+from godot_devkit.core.baseline import read_baseline
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.godot.index.resource_defaults import DefaultAnalyzer
 from godot_devkit.godot.format.tscn import parse
 from godot_devkit.godot import VENDORED_DEFAULT
 
 CONFIG_SECTION = 'defaults'
+TAG = '[check:defaults]'
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 MAX_LISTED = 40
@@ -48,14 +56,14 @@ def run() -> int:
     config = config_section(CONFIG_SECTION)
     exclude = str_tuple(config, CONFIG_SECTION, 'exclude_prefixes',
                         VENDORED_DEFAULT)
+    baseline = read_baseline(config, CONFIG_SECTION)
 
     scripts = ScriptIndex(root, [p for p in git_lines('ls-files', '*.gd')
                                  if not p.startswith(exclude)])
     analyzer = DefaultAnalyzer(scripts)
     census: Counter = Counter()
-    findings: list[str] = []
+    found: list[tuple[str, str]] = []
     files = 0
-    dirty_files = 0
 
     print('[check:defaults] CHECK — no .tres assignment repeats its script\'s '
           'declared @export default')
@@ -64,18 +72,20 @@ def run() -> int:
             continue
         files += 1
         redundant = analyzer.analyze(parse(str(root / rel)), census)
-        if redundant:
-            dirty_files += 1
         for item in redundant:
-            findings.append(
+            found.append((rel,
                 f'  REDUNDANT  {rel} : {item.where}.{item.prop.key} = '
                 f'{item.prop.value} — equals the declared default '
-                f'({item.default})')
+                f'({item.default})'))
+    judged = baseline.judge(found)
+    findings = judged.open
+    dirty_files = len({rel for rel, _ in found if rel not in judged.frozen})
 
     for line in findings[:MAX_LISTED]:
         print(line)
     if len(findings) > MAX_LISTED:
         print(f'  … and {len(findings) - MAX_LISTED} more')
+    judged.report()
     census_line = ', '.join(f'{count} {reason}'
                             for reason, count in census.most_common())
     if files == 0:
@@ -87,6 +97,10 @@ def run() -> int:
               f'in {dirty_files} of {files} .tres file(s); Godot\'s writer will '
               f'delete them on the next editor save')
         print('  Fix: godot-devkit scene canonicalize --elide-defaults <file>...')
+        print(f'  NOT A FINDING: {census_line or "none"}')
+        return EXIT_FINDINGS
+    if judged.failed:
+        print(judged.verdict(TAG, f'{files} .tres file(s)'))
         print(f'  NOT A FINDING: {census_line or "none"}')
         return EXIT_FINDINGS
     print(f'[check:defaults] PASS — no redundant default assignment in '
