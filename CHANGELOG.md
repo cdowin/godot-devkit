@@ -10,10 +10,6 @@
   `pm vocabulary` to read the flow back, because the flow has no default and a repo that skips it
   has working gates and a `pm` that refuses every work-moving verb; the fresh-repo and
   bumping-consumer paths are written out separately.
-- `uid-guard.yml` (written by `install-runners`) now triggers on a push to `milestone/**`, the
-  branches agentic-sdlc's flow uses, instead of a `staging` branch it does not have, and says the
-  list is yours to edit (#9). The file is yours once written: `install-runners --diff` shows the
-  change, `--force` takes it.
 - **A gate can be adopted frozen, then paid down.** `tres`, `props`, `defaults`, `rng`,
   `tres-comment` and `unit-disk` each accept a `baseline` in their own `devkit.toml` section —
   `{ "path/rel.tres" = N }`, one entry per file at its current finding count, the shape
@@ -36,6 +32,15 @@
   UNCOUNTED. `check test-shape --help` now says it is a readability gate and names boots and
   `[tests] cases` as what governs the tier's cost.
 - **`check canonical` and `scene canonicalize --respell` / `--order`** — the two dimensions of `.tres` editor-save churn `check defaults` leaves out, proven by pure parse from the section's own script: floats in the saver's shortest spelling (`0.30` -> `0.3`, emitted only where the 32- and 64-bit forms agree), a bare list on an `Array[T]` export wrapped as `Array[T]([...])`, and a scripted section's properties in declaration order. Line edits only — comments, `uid=` and every untouched line byte-identical, a second run a no-op; an enum element type, an export with an accessor or a section holding an engine property is named or counted, never guessed. The gate is opt-in: not in the stock `check all`, nameable in `[checks] godot`. New config section `[canonical] exclude_prefixes`.
+
+## v1.0.1 — 2026-09-11
+
+**The uid guard follows the branch flow, not `staging`.** The `uid-guard.yml` that `install-runners`
+writes used to trigger on pushes to `staging`, a branch that agentic-sdlc's main → milestone branch
+→ main flow never creates. It now triggers on a PR into `main` and a push to `main`, the same events
+as agentic-sdlc's `verify.yml` (agentic-sdlc #37 made the same move for its own scripts). To guard
+pushes to your milestone branches as well, add their glob to `push: branches`. A copy you already
+installed is yours: `install-runners --diff` shows the change.
 
 ## v1.0.0 — 2026-09-06
 
