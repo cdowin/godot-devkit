@@ -325,6 +325,41 @@ class TscnDocument:
             self._reparse()
         return len(props)
 
+    def rewrite_props(self, rewrites: list[tuple[Prop, list[str]]]) -> int:
+        """Replace each property's lines with the SAME NUMBER of new lines.
+
+        Batch, and line-count-preserving by contract: no span shifts, so every
+        rewrite is computed from one parse, each line keeps its own ending,
+        and a value's inline comment rides along inside the line it was on.
+        A rewrite that would change the count is refused, never absorbed.
+        """
+        for prop, lines in rewrites:
+            if len(lines) != prop.end - prop.start:
+                raise TscnError(f'rewrite of {prop.key!r} changes its line count')
+        for prop, lines in rewrites:
+            self.lines[prop.start:prop.end] = lines
+        if rewrites:
+            self._reparse()
+        return len(rewrites)
+
+    def reorder_props(self, section: Section, ordered: list[Prop]) -> None:
+        """Rewrite a section's body with its properties in `ordered` order.
+
+        Only a body that is NOTHING but properties may move: a comment or a
+        blank line among them documents a neighbour, and moving the lines
+        around it would silently re-attach it — so that is refused. Each
+        property moves whole (a multi-line value, its inline comment); the
+        line endings stay where they were, so the file's ending pattern is
+        unchanged even where the edit reached.
+        """
+        first = section.header_line + 1
+        if sorted(p.key for p in ordered) != sorted(p.key for p in section.entries) \
+                or sum(p.end - p.start for p in ordered) != section.body_end - first:
+            raise TscnError(f'cannot reorder {section.kind}: its body is not only '
+                            f'the properties being moved')
+        moved = [line for prop in ordered for line in self.lines[prop.start:prop.end]]
+        self._splice(first, section.body_end, moved)
+
     # --- structure ----------------------------------------------------------
     def rename_node(self, node_path: str, new_name: str) -> None:
         section = self.node(node_path)
