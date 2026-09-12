@@ -407,8 +407,11 @@ _gdk_cost_row() {
 			"$GDK_LIB_TAG" "$GDK_GATE_LIB" >&2
 		return 0
 	fi
+	# The library must define the call itself: with this file's own wrapper
+	# still in scope, a library that lacks it would re-enter here forever.
 	# shellcheck source=/dev/null
-	( . "$GDK_GATE_LIB" && "$@" ) >/dev/null || true
+	( unset -f gdk_gate_log gdk_gate_verdict
+	  . "$GDK_GATE_LIB" && declare -F "$1" >/dev/null && "$@" ) >/dev/null || true
 	return 0
 }
 

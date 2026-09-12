@@ -36,6 +36,7 @@ ROOT = FIXTURES / 'canonical_repo'
 SCRIPTS = ['systems/item.gd', 'systems/base_item.gd']
 DRIFTED = 'data/drifted.tres'
 CLEAN = 'data/clean.tres'
+UNPROVEN = object()               # left alone and counted: no edit, no refusal
 
 # The drifted fixture after `--respell --order`: every changed line, keyed by
 # the line it replaces. Anything not here must come through byte-identical.
@@ -90,15 +91,22 @@ class FloatSpelling(unittest.TestCase):
             ('.5', COMPONENT_CONTEXT): '0.5',
             # 32- and 64-bit shortest forms disagree: build-dependent, refused.
             ('0.1234567890', VARIANT_CONTEXT): None,
-            ('0.00001', VARIANT_CONTEXT): None,             # exponent range
             ('0.30', OPAQUE_CONTEXT): None,                 # type unknowable
+            # Where a shortest-form writer may use an exponent (and every token
+            # spelled in one): left alone and counted, never rewritten or named.
+            ('0.00001', VARIANT_CONTEXT): UNPROVEN, ('1e-04', VARIANT_CONTEXT): UNPROVEN,
+            ('0.0001', VARIANT_CONTEXT): UNPROVEN, ('100000.0', VARIANT_CONTEXT): UNPROVEN,
+            ('1e+05', VARIANT_CONTEXT): UNPROVEN,
         }
         for (token, context), wanted in cases.items():
             with self.subTest(token=token, context=context):
                 text = f'x = {token}'
                 tokens, _ = scan_value(text, 2)
                 result = respell(tokens, text, context, OPAQUE_CONTEXT)
-                if wanted is None:
+                if wanted is UNPROVEN:
+                    self.assertEqual((result.edits, result.refused, result.unverified),
+                                     ([], [], 1))
+                elif wanted is None:
                     self.assertEqual((result.edits, result.refused), ([], [token]))
                 else:
                     self.assertEqual(apply_edits(text, result.edits), f'x = {wanted}')

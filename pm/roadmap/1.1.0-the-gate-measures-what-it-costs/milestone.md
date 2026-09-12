@@ -40,8 +40,9 @@ already has, or consumers just leave it off — which is what Trail did with `de
 A consumer can ask this kit what ANY tier costs and get a number — boots for the scenario tier, a
 ledger row for every other — rather than lines;
 `test-shape`'s own `--help` says it is a readability gate and names the one that governs cost;
-each of the eight gates can be turned on frozen at a consumer's current findings and ratcheted
-down; and every documented config key has one example of its own shape.
+each gate with per-file debt can be turned on frozen at a consumer's current findings and
+ratcheted down — six through a `baseline`, `test-shape` through its `ledger`, and `uid` and
+`canonical` through the fixer that clears them (`check uid --fix`, `scene canonicalize`); and every documented config key has one example of its own shape.
 
 ## Risks
 

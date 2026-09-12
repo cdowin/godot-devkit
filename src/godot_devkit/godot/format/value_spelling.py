@@ -81,8 +81,12 @@ FLOAT_TYPE = 'float'
 
 # The plain positional range: inside it both the 32- and 64-bit writers print
 # digits and a point, outside it the saver's exponent spelling is not proven.
-POSITIONAL_MIN = 1e-4
-POSITIONAL_MAX = 1e6
+# One decade inside `%g`'s own [1e-4, 1e6) at each end: a shortest-form writer
+# may already spell 1e-04 or 1e+05 in exponent form, so the edge decades are
+# unprovable, and an exponent-spelled token is never ours to respell.
+POSITIONAL_MIN = 1e-3
+POSITIONAL_MAX = 1e5
+EXPONENT_MARKS = ('e', 'E')
 FLOAT32_MAX_DIGITS = 9           # every float32 round-trips in 9 significant digits
 FLOAT32 = struct.Struct('<f')
 INTEGRAL_SUFFIX = '.0'
@@ -261,11 +265,15 @@ def looks_noncanonical(text: str) -> bool:
     What turns a position the tool cannot prove into a NAMED refusal instead
     of silence: `0.30` is wrong whatever its type, `0.123456789` may be right.
     """
+    if any(mark in text for mark in EXPONENT_MARKS):
+        return False
     value = float(text)
     if not math.isfinite(value):
         return False
     if value == 0.0:
         return text not in (ZERO_COMPONENT, ZERO_VARIANT)
+    if not POSITIONAL_MIN <= abs(value) < POSITIONAL_MAX:
+        return False
     double = repr(value)
     component = double[:-len(INTEGRAL_SUFFIX)] if double.endswith(INTEGRAL_SUFFIX) else double
     return text not in (double, component)
@@ -385,6 +393,8 @@ def _wanted(text: str, context: object) -> str | None:
         return (canonical_float(float(whole), VARIANT_CONTEXT)
                 if abs(whole) < EXACT_INT_LIMIT else None)
     if context not in (FLOAT_CONTEXT, VARIANT_CONTEXT, COMPONENT_CONTEXT):
+        return None
+    if any(mark in text for mark in EXPONENT_MARKS):
         return None
     style = COMPONENT_CONTEXT if context == COMPONENT_CONTEXT else VARIANT_CONTEXT
     return canonical_float(float(text), style)

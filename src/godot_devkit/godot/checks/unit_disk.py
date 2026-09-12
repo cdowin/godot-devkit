@@ -33,6 +33,7 @@ devkit.toml:
 
     [unit_disk]
     roots = ["tests/unit"]
+    forbidden_literals = { "a real save path" = ["user://saves/", "user://settings\\\\.json"] }
     forbidden_calls = { "the live settings autoload" = [
         "SettingsManager\\\\.(save_settings|load_settings|reset_to_defaults)\\\\(" ] }
     min_args = { "SaveService.save" = 2, "SaveSlotIndex.scan" = 1 }

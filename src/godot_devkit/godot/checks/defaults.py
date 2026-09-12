@@ -16,8 +16,9 @@ declaration order, respells typed arrays (`[a, b]` -> `Array[Resource]([a, b])`)
 and floats (`0.30` -> `0.3`), mints `ext_resource` entries for typed-array
 element types, and drops every `;` comment in the file. A PASS here means "no
 redundant defaults", NOT "the editor would leave this file alone". Saying more
-than that would be the false-PASS sin; the other dimensions are not decidable by
-parse, because reproducing them means reimplementing `ResourceFormatSaverText`.
+than that would be the false-PASS sin. Float spelling, typed-array wrapping and
+scripted property order are `check canonical`'s, where a parse can prove them;
+the rest would mean reimplementing `ResourceFormatSaverText`.
 
 Precision is the design constraint, exactly as in `check props`. Both sides of
 every comparison must normalise into one small closed value language, or the
