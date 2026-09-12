@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.0 — 2026-09-12
+
 - README's `devkit.toml` block now shows every key the kit reads with an example of its own shape
   — `[unit_disk] forbidden_literals` (a reason-to-patterns TABLE, not a list) and `[test_shape]
   unit_root`, `infra`, `header_ledger` were missing — and a census test derives the key set from

@@ -33,3 +33,9 @@
 {"ts":"2026-09-12T15:08:20Z","kind":"disposition","grain":"ft-tres-canonical-respell-and-order","state":"done","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T15:08:20Z","kind":"status","grain":"bg-uid-guard-triggers-on-staging","from":"fixed","to":"closed","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T15:08:20Z","kind":"disposition","grain":"bg-uid-guard-triggers-on-staging","state":"closed","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:28:55Z","kind":"status","grain":"1.1.0","from":"building","to":"reviewing","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:28:55Z","kind":"disposition","grain":"1.1.0","state":"reviewing","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:28:55Z","kind":"status","grain":"1.1.0","from":"reviewing","to":"accepted","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:28:55Z","kind":"disposition","grain":"1.1.0","state":"accepted","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:28:56Z","kind":"status","grain":"1.1.0","from":"accepted","to":"packaging","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T15:28:56Z","kind":"disposition","grain":"1.1.0","state":"packaging","answer":"none","branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
