@@ -20,8 +20,10 @@ trap 'exit 0' ERR
 # --- project config (yours to edit after install — the file is your repo's) --
 # git subcommands allowed with ANY arguments, space-separated. One named here
 # skips every judgement below, the named blocks included: widening the list is
-# this line, edited in a commit, never a workaround for one call.
-ALLOW_SUBCOMMANDS="add status diff log show rev-parse rev-list merge-base ls-files ls-tree ls-remote cat-file grep blame describe shortlog show-ref for-each-ref name-rev range-diff fetch mv rm help version"
+# this line, edited in a commit, never a workaround for one call. `switch` is
+# here because lanes work in their own worktrees: the root checkout is the
+# orchestrator's alone (operator-approved 2026-09-12).
+ALLOW_SUBCOMMANDS="add status diff log show switch rev-parse rev-list merge-base ls-files ls-tree ls-remote cat-file grep blame describe shortlog show-ref for-each-ref name-rev range-diff fetch mv rm help version"
 # Branches (exact, space-separated) no `git push` may name as its destination.
 # Keep in step with pre-push's PROTECTED_BRANCHES, which backstops the rest.
 PROTECTED_BRANCHES="main"
