@@ -2,8 +2,8 @@
 id: 1.1.0/every-config-key-shows-its-shape
 milestone: "1.1.0"
 name: Every config key shows its own shape in the README
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-12-1.1.0-every-config-key-shows-its-shape.md
 phase:
 depends_on: []
 consumed_by: []

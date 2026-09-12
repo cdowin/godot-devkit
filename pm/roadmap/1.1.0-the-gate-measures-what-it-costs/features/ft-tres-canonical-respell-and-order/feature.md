@@ -3,8 +3,8 @@ id: ft-tres-canonical-respell-and-order
 kind: feature
 milestone: "1.1.0"
 name: .tres value spelling and property order are canonicalized and gated
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-12-1.1.0-ft-tres-canonical-respell-and-order.md
 depends_on: []
 consumed_by: []
 changelog:

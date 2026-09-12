@@ -3,7 +3,7 @@ id: bg-uid-guard-triggers-on-staging
 kind: bug
 milestone: "1.1.0"
 name: uid-guard.yml triggers on staging, a flow agentic-sdlc does not have
-status: fixed
+status: closed
 caused_by:
 changelog:
 ---

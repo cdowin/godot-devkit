@@ -2,8 +2,8 @@
 id: 1.1.0/a-new-gate-arrives-with-a-baseline
 milestone: "1.1.0"
 name: A new gate can be adopted frozen, then shrunk
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-12-1.1.0-a-new-gate-arrives-with-a-baseline.md
 phase:
 depends_on: []
 consumed_by: []

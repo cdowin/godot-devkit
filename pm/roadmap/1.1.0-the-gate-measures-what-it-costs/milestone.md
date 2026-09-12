@@ -4,6 +4,7 @@ name: the gate measures what it costs
 status: building
 depends_on: []
 branch: milestone/1.1.0-the-gate-measures-what-it-costs
+reviewed: docs/reviews/2026-09-12-1.1.0-milestone.md
 ---
 
 # 1.1.0 — the gate measures what it costs

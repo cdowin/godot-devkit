@@ -2,8 +2,8 @@
 id: 1.1.0/the-two-pin-instruction-is-complete
 milestone: "1.1.0"
 name: The two-pin install produces a working consumer, not a green one
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-12-1.1.0-the-two-pin-instruction-is-complete.md
 phase:
 depends_on: []
 consumed_by: []

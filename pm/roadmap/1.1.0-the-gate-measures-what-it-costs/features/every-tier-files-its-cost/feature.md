@@ -2,8 +2,8 @@
 id: 1.1.0/every-tier-files-its-cost
 milestone: "1.1.0"
 name: Every tier files a cost row, including the cheap ones
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-12-1.1.0-every-tier-files-its-cost.md
 phase:
 depends_on: []
 consumed_by: []

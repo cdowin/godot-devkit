@@ -2,8 +2,8 @@
 id: 1.1.0/the-tiers-cost-is-boots
 milestone: "1.1.0"
 name: The scenario tier is graded on boots, which is what it costs
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-12-1.1.0-the-tiers-cost-is-boots.md
 phase:
 depends_on: []
 consumed_by: []
