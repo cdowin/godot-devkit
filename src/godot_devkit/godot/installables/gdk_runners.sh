@@ -408,10 +408,18 @@ _gdk_cost_row() {
 		return 0
 	fi
 	# The library must define the call itself: with this file's own wrapper
-	# still in scope, a library that lacks it would re-enter here forever.
+	# still in scope, a library that lacks it would re-enter here forever. Its
+	# double-source guard is cleared too, or a wrapper that sourced it first
+	# would get an early return and no row.
 	# shellcheck source=/dev/null
-	( unset -f gdk_gate_log gdk_gate_verdict
-	  . "$GDK_GATE_LIB" && declare -F "$1" >/dev/null && "$@" ) >/dev/null || true
+	( unset -f gdk_gate_log gdk_gate_verdict; unset _GDK_GATE_SOURCED
+	  . "$GDK_GATE_LIB" || exit 0
+	  if declare -F "$1" >/dev/null; then
+		"$@"
+	  elif [ "$1" = gdk_gate_verdict ]; then
+		printf '%s: %s defines no %s — no cost row for this gate\n' \
+			"$GDK_LIB_TAG" "$GDK_GATE_LIB" "$1" >&2
+	  fi ) >/dev/null || true
 	return 0
 }
 

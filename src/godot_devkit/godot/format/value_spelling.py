@@ -273,7 +273,10 @@ def looks_noncanonical(text: str) -> bool:
     if value == 0.0:
         return text not in (ZERO_COMPONENT, ZERO_VARIANT)
     if not POSITIONAL_MIN <= abs(value) < POSITIONAL_MAX:
-        return False
+        # Unprovable spelling, but a trailing zero after the point (`0.00050`)
+        # is one no writer emits in any notation: still named.
+        fraction = text.partition('.')[2]
+        return len(fraction) > 1 and fraction.endswith('0')
     double = repr(value)
     component = double[:-len(INTEGRAL_SUFFIX)] if double.endswith(INTEGRAL_SUFFIX) else double
     return text not in (double, component)

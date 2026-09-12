@@ -97,6 +97,8 @@ class FloatSpelling(unittest.TestCase):
             ('0.00001', VARIANT_CONTEXT): UNPROVEN, ('1e-04', VARIANT_CONTEXT): UNPROVEN,
             ('0.0001', VARIANT_CONTEXT): UNPROVEN, ('100000.0', VARIANT_CONTEXT): UNPROVEN,
             ('1e+05', VARIANT_CONTEXT): UNPROVEN,
+            # ...unless no notation writes it: a trailing zero after the point.
+            ('0.00050', VARIANT_CONTEXT): None, ('200000.50', FLOAT_CONTEXT): None,
         }
         for (token, context), wanted in cases.items():
             with self.subTest(token=token, context=context):

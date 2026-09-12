@@ -280,6 +280,17 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     assert 'tests/unit/typo' in done.stdout, done.stdout
     assert [row[1] for row in _rows(ledger)] == ['PASS', 'FAIL', 'FAIL'], _rows(ledger)
 
+    # A gate library that defines neither call (empty, renamed upstream) once
+    # sent the cost row back into the runner's own wrapper until fork failed,
+    # while the run still printed PASS. Now: the verdict stands, no row, one note.
+    (root / 'tools' / 'dev' / 'gdk_gate.sh').write_text('', encoding='utf-8')
+    (stub / 'godot').write_text(GUT_TRANSCRIPT.format(scripts=3), encoding='utf-8')
+    done = subprocess.run(['bash', 'tools/dev/runners/unit.sh'], cwd=root, text=True,
+                          capture_output=True, env=env, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert 'defines no gdk_gate_verdict' in done.stderr, done.stderr
+    assert len(_rows(ledger)) == 3, _rows(ledger)
+
 
 # --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
 # 0.24.0/bugs/import-cache-rebuild-does-not-repair-a-stale-uid-index. In a
