@@ -1,11 +1,21 @@
-"""test_shape.py — check test-shape: the expensive test tier stays the SMALL one.
+"""test_shape.py — check test-shape: a READABILITY gate for the scenario tier.
 
 A two-tier suite says unit is the bulk and integration is the few. Nothing
 holds it there: measured on one consumer, integration had grown to 60% of the
 suite with six scenarios over 800 lines each — the rule was written, agreed,
-and simply not binding. A big scenario is expensive in a way a big unit file is
-not, because it boots a process: a 1000-line scenario is a unit suite wearing a
-scenario's clothes, paying full boot cost to assert what needs no boot.
+and simply not binding. A 1000-line scenario is a grab-bag: a unit suite
+wearing a scenario's clothes, asserting through a boot what needs none, and
+nobody can review it. The cap stops a scenario becoming one.
+
+WHAT THIS DOES NOT GOVERN: COST. A scenario's cost is its BOOT — one cold
+engine per file, whatever its length: measured on one consumer, scenarios of
+114, 358 and 325 lines each cost ~3.3s standalone. Lines do not move that
+number, and splitting a file to get under the cap ADDS a boot. What governs the
+tier's cost is the number of scenario FILES booted — the BOOTS census
+integration.sh prints, which `make integration`/`integration-all`/
+`integration-diff` file on the gate's ledger row — and the ceiling on it is
+agentic-sdlc's `[tests] cases` for those tiers, graded by `check budget`.
+Merging two scenarios saves a boot; trimming lines saves nothing.
 
 A RATCHET, not a big bang. Failing every over-cap file the day the gate lands
 just means the gate gets switched off. Every file already over the cap is
