@@ -125,12 +125,12 @@ unless the whole picture resolved — anything unresolvable is censused `UNVERIF
 | gate | scans | fails on | config |
 |---|---|---|---|
 | `uid` | tracked `.tscn`/`.tres` Script refs against `.gd.uid` sidecars; new `.gd` (untracked or staged); tracked sidecars | a stale ref uid, a script with no sidecar, an orphan sidecar, a non-canonical uid spelling — `--fix` repairs what has a should-be value | `[uid] exclude_prefixes` |
-| `tres` | tracked `.tscn`/`.tres` `ext_resource` lines | a path-only ref (no `uid=`), which Godot 4.4+ rewrites silently on the next editor pass | `[tres] exclude_prefixes` |
-| `props` | every property assignment in tracked scenes, against the script's `@export`s and Godot's ClassDB | an assignment to a property that does not exist (a renamed export, a mistyped built-in) | `[props] exclude_prefixes`, `extra_properties` |
-| `defaults` | tracked `.tres` assignments against the script's declared `@export` defaults | an assignment equal to its default — the churn Godot's writer omits and a hand-authored file spells out | `[defaults] exclude_prefixes` |
-| `rng` | `.gd` under the configured roots | a bare `randi()`/`randf()`/`randi_range()`/`randf_range()` or any `randomize()` — a draw a seeded run does not own | `[rng] roots`, `allowlist` |
-| `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes` |
-| `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args` |
+| `tres` | tracked `.tscn`/`.tres` `ext_resource` lines | a path-only ref (no `uid=`), which Godot 4.4+ rewrites silently on the next editor pass | `[tres] exclude_prefixes`, `baseline` |
+| `props` | every property assignment in tracked scenes, against the script's `@export`s and Godot's ClassDB | an assignment to a property that does not exist (a renamed export, a mistyped built-in) | `[props] exclude_prefixes`, `extra_properties`, `baseline` |
+| `defaults` | tracked `.tres` assignments against the script's declared `@export` defaults | an assignment equal to its default — the churn Godot's writer omits and a hand-authored file spells out | `[defaults] exclude_prefixes`, `baseline` |
+| `rng` | `.gd` under the configured roots | a bare `randi()`/`randf()`/`randi_range()`/`randf_range()` or any `randomize()` — a draw a seeded run does not own | `[rng] roots`, `allowlist`, `baseline` |
+| `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes`, `baseline` |
+| `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args`, `baseline` |
 | `test-shape` | the integration tier | a new scenario over the line cap, a ledgered one that grew, and — with `header = true` — a scenario with no `## covers:`/`## Boots because:` header, asked of the roster `make integration-list` boots | `[test_shape] scenario_root`, `cap`, `infra`, `ledger`, `header`, `header_ledger`, `runner` |
 
 **Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `devkit.toml`
@@ -142,6 +142,15 @@ is named at exit 2, never ignored.
 migrate to uid-in-refs, then `check tres` → `check props` (findings are real renamed-export bugs) →
 `scene canonicalize --elide-defaults`, then `check defaults` → wire `check all`. Steps two and four
 are also the cure for `.tscn`/`.tres` churn — files you did not edit turning up in every commit.
+
+**Adopting a gate frozen.** Six gates — `tres`, `props`, `defaults`, `rng`, `tres-comment`,
+`unit-disk` — take a `baseline` in their own section: one entry per file, at the number of findings
+it carries today. Those findings are held, and every run prints `  BASELINED  N finding(s) in M
+file(s) frozen by [<section>] baseline` so the debt stays visible. A file whose findings grow past
+its entry fails with every one of them listed; a file that now carries fewer fails until its entry
+is lowered (`SHRUNK`) or dropped (`STALE`) — the baseline only shrinks. It is per file on purpose:
+a single total would let a fix in one file pay for new drift in another. `test-shape` has the same
+ratchet as its `ledger`, measured in lines.
 
 **Migrating to uid-in-refs:** for a target whose header has no uid at all, mint one with Godot's own
 `ResourceUID.create_id()` in a headless pass (never hand-author a uid string — an invalid uid
@@ -166,18 +175,24 @@ extra = ["godot-check"]            # joins `check all` to `make check`
 exclude_prefixes = ["addons/"]     # scopes every uid check
 [tres]
 exclude_prefixes = ["addons/"]
+baseline = { "scenes/legacy/hub.tscn" = 7 }   # existing debt, per file at its CURRENT finding
+                                   # count; held and counted every run, and only shrinks
 [props]
 exclude_prefixes = ["addons/"]
+baseline = { "scenes/legacy/hub.tscn" = 2 }
 extra_properties = { MyWidget = ["virtual_prop"] }   # a `_get_property_list` shape the scanner
                                    # cannot see; the key is the class_name (or an ancestor's) or
                                    # the engine type, and the carve-out applies only to it
 [defaults]
 exclude_prefixes = ["addons/"]
+baseline = { "data/enemies/grunt.tres" = 3 }
 [rng]
 roots = ["systems/run/"]           # stock ".": keep it NARROW — the roots that hold run-scoped randomness
 allowlist = { "systems/run/dice.gd:roll" = "a cosmetic jitter; the reason is required" }
+baseline = { "systems/run/loot_roll.gd" = 4 }
 [tres_comment]
 exclude_prefixes = ["addons/"]
+baseline = { "data/legacy/tuning.tres" = 12 }
 [unit_disk]
 roots = ["tests/unit"]
 forbidden_literals = { "a real save path" = ["user://saves/", "user://settings\\.json"] }
@@ -185,6 +200,7 @@ forbidden_literals = { "a real save path" = ["user://saves/", "user://settings\\
                                    # list; stock { "a real user:// path" = ["user://"] }
 forbidden_calls = { "the live settings autoload" = ["SettingsManager\\.(save|load)_settings\\("] }
 min_args = { "SaveService.save" = 2 }
+baseline = { "tests/unit/test_save_roundtrip.gd" = 3 }
 [test_shape]
 scenario_root = "tests/integration"
 unit_root = "tests/unit"           # the other side of the tier-balance line

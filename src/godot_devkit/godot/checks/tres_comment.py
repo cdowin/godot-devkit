@@ -23,9 +23,14 @@ devkit.toml:
 
     [tres_comment]
     exclude_prefixes = ["addons/", "tests/fixtures/"]
+    # Existing debt, per file at its CURRENT count of comment lines: held and
+    # counted on a BASELINED line; a file past its entry fails, and an entry
+    # above what is left fails until lowered — it only shrinks.
+    baseline = { "data/legacy/tuning.tres" = 12 }
 """
 from __future__ import annotations
 
+from godot_devkit.core.baseline import Baseline
 from godot_devkit.core.config import config_section, str_tuple
 from godot_devkit.core.project import git_lines, repo_root
 
@@ -47,6 +52,7 @@ def run() -> int:
     sect = config_section(SECTION)
     excluded = str_tuple(sect, SECTION, 'exclude_prefixes',
                          DEFAULT_EXCLUDE_PREFIXES)
+    baseline = Baseline.read(sect, SECTION)
     root = repo_root()
     tracked = [rel for rel in git_lines('ls-files')
                if rel.endswith(SUFFIXES)]
@@ -60,18 +66,21 @@ def run() -> int:
               f'{"/".join(SUFFIXES)}; check [{SECTION}] exclude_prefixes')
         return 1
 
-    findings: list[str] = []
+    found: list[tuple[str, str]] = []
     for rel in scanned:
         try:
             text = (root / rel).read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
-        findings.extend(f'  STRIPPED  {rel}:{n}:{line}'
-                        for n, line in comment_lines(text))
+        found.extend((rel, f'  STRIPPED  {rel}:{n}:{line}')
+                     for n, line in comment_lines(text))
+    judged = baseline.judge(found)
+    findings = judged.open
 
     if findings:
         for finding in findings:
             print(finding)
+        judged.report()
         print(f'\n{TAG} FAIL — {len(findings)} authored comment line(s) in '
               f'Godot-rewritten files, across {len(scanned)} scanned')
         print("  Godot's serializer drops these on the next editor save / "
@@ -82,6 +91,10 @@ def run() -> int:
               'spec; delete it if it only restates the field beside it.')
         return 1
 
+    judged.report()
+    if judged.failed:
+        print(judged.verdict(TAG, f'{len(scanned)} scanned'))
+        return 1
     print(f'{TAG} PASS — {len(scanned)} of {len(tracked)} tracked resource '
           f'file(s) carry no authored comments')
     return 0

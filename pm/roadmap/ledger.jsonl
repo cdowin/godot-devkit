@@ -11,3 +11,6 @@
 {"ts":"2026-09-12T14:12:41Z","kind":"gate","gate":"pyunit","verdict":"FAIL","duration_ms":1393,"census":44,"branch":"feat/1.1.0-install"}
 {"ts":"2026-09-12T14:14:22Z","kind":"gate","gate":"test","verdict":"FAIL","duration_ms":30936,"census":202,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
 {"ts":"2026-09-12T14:15:27Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30847,"census":202,"branch":"milestone/1.1.0-the-gate-measures-what-it-costs"}
+{"ts":"2026-09-12T14:15:19Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1304,"census":51,"branch":"feat/1.1.0-baseline"}
+{"ts":"2026-09-12T14:15:49Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":852,"census":51,"branch":"feat/1.1.0-baseline"}
+{"ts":"2026-09-12T14:16:18Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":933,"census":46,"branch":"feat/1.1.0-baseline"}

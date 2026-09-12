@@ -14,6 +14,15 @@
   branches agentic-sdlc's flow uses, instead of a `staging` branch it does not have, and says the
   list is yours to edit (#9). The file is yours once written: `install-runners --diff` shows the
   change, `--force` takes it.
+- **A gate can be adopted frozen, then paid down.** `tres`, `props`, `defaults`, `rng`,
+  `tres-comment` and `unit-disk` each accept a `baseline` in their own `devkit.toml` section —
+  `{ "path/rel.tres" = N }`, one entry per file at its current finding count, the shape
+  `[test_shape] ledger` already uses. Held findings are not printed; every run with a baseline
+  prints `  BASELINED  N finding(s) in M file(s) frozen by [<section>] baseline`. A file whose
+  findings grow past its entry fails with all of them listed (`  GREW  …`); an entry above what is
+  left fails until lowered (`  SHRUNK  …`) or dropped (`  STALE  …`) — the baseline only shrinks.
+  A malformed entry (not a table, a non-integer or `0`, an absolute, `res://` or `..` path) exits
+  2. No baseline declared: output is byte-identical to before.
 
 ## v1.0.0 — 2026-09-06
 
