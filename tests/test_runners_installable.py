@@ -709,6 +709,8 @@ DESTINATIONS = {
     'Makefile.tiers',
 }
 HOOK_ENTRY = '"command": "bash tools/hooks/cc-godot-sandbox.sh"'
+UID_GUARD = '.github/workflows/uid-guard.yml'
+UID_GUARD_PUSH = 'branches: ["milestone/**"]'
 # The nine Godot targets the story names, plus the one `[gates] extra` names.
 GODOT_TARGETS = ('parse', 'lint', 'warnings', 'unit', 'integration', 'scenario',
                  'capture', 'import-cache', 'hermetic-scan', 'godot-check')
@@ -764,6 +766,11 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
                 assert os.access(root / rel, os.X_OK), f'{rel} is not executable'
         for name, rel in install.PLAN:
             assert (root / rel).read_text(encoding='utf-8') == install.body_of(name)
+        # The uid guard fires on the flow agentic-sdlc runs — a push to a
+        # milestone branch — never on a `staging` it does not have (#9).
+        guard = (root / UID_GUARD).read_text(encoding='utf-8')
+        push = guard.split('\n  push:\n', 1)[1].split('\n  workflow_dispatch:', 1)[0]
+        assert UID_GUARD_PUSH in push and 'staging' not in guard, guard
         # The registration step, pasteable and LAST on stdout.
         assert HOOK_ENTRY in out, out
         assert out.rstrip().endswith('}'), out[-200:]

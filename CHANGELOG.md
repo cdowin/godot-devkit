@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- README's `devkit.toml` block now shows every key the kit reads with an example of its own shape
+  — `[unit_disk] forbidden_literals` (a reason-to-patterns TABLE, not a list) and `[test_shape]
+  unit_root`, `infra`, `header_ledger` were missing — and a census test derives the key set from
+  the config readers and fails on any key the block lacks or shows in a shape its reader refuses.
+- README § Install — two pins names the third step for a repo with a PM tree: `pm init`, then
+  `pm vocabulary` to read the flow back, because the flow has no default and a repo that skips it
+  has working gates and a `pm` that refuses every work-moving verb; the fresh-repo and
+  bumping-consumer paths are written out separately.
+- `uid-guard.yml` (written by `install-runners`) now triggers on a push to `milestone/**`, the
+  branches agentic-sdlc's flow uses, instead of a `staging` branch it does not have, and says the
+  list is yours to edit (#9). The file is yours once written: `install-runners --diff` shows the
+  change, `--force` takes it.
+
 ## v1.0.0 — 2026-09-06
 
 First release of godot-devkit as a standalone Godot kit, and the first with a public history of

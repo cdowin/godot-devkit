@@ -45,9 +45,24 @@ extra = ["godot-check"]     # `godot-devkit check all`, the target install-runne
 ```
 
 `make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make precommit` and
-`make milestone` run the Godot tiers `Makefile.tiers` declares. Adopting a bump is a read of the
-CHANGELOG and `install-runners --diff`, which prints what a re-install would change and writes
-nothing. Every machine and CI runs the same gate code because the pin is a tag.
+`make milestone` run the Godot tiers `Makefile.tiers` declares. Every machine and CI runs the same
+gate code because the pin is a tag.
+
+**A repo with a PM tree has a third step.** agentic-sdlc's flow — the states `pm` moves work
+through, `[pm.states.*]` in `devkit.toml` — has no default, so a repo that skips this step has a
+working gate set and a `pm` that refuses every verb that moves work:
+
+```sh
+make pm ARGS='init'         # writes the flow; a fresh repo can run `agentic-sdlc init` instead,
+                            # which is this plus install-gates, devkit.toml and the rest
+make pm ARGS='vocabulary'   # reads back the states it wrote, by category
+```
+
+- **A fresh repo:** the two pins, `install-gates` (or `agentic-sdlc init`) and `install-runners`,
+  `[gates] extra`, then `pm init` and `pm vocabulary`.
+- **A consumer bumping a pin:** read both CHANGELOGs; re-run `pm init` once, then `pm vocabulary`;
+  `install-runners --diff` prints what a re-install would change and writes nothing;
+  `agentic-sdlc adopt <version>` proves the bump.
 
 ## Quickstart
 
@@ -165,13 +180,19 @@ allowlist = { "systems/run/dice.gd:roll" = "a cosmetic jitter; the reason is req
 exclude_prefixes = ["addons/"]
 [unit_disk]
 roots = ["tests/unit"]
+forbidden_literals = { "a real save path" = ["user://saves/", "user://settings\\.json"] }
+                                   # a TABLE, reason = [regexes], like forbidden_calls — not a
+                                   # list; stock { "a real user:// path" = ["user://"] }
 forbidden_calls = { "the live settings autoload" = ["SettingsManager\\.(save|load)_settings\\("] }
 min_args = { "SaveService.save" = 2 }
 [test_shape]
 scenario_root = "tests/integration"
+unit_root = "tests/unit"           # the other side of the tier-balance line
 cap = 300                          # lines; a NEW scenario over it fails
+infra = ["scenario_base.gd"]       # basenames of the tier's shared harness, not priced as scenarios
 ledger = { "tests/integration/big_flow.gd" = 812 }   # existing debt at its CURRENT size; only shrinks
 header = true                      # every booted scenario declares `## covers:` and `## Boots because:`
+header_ledger = ["tests/integration/big_flow.gd"]    # scenarios exempt until touched; only shrinks
 runner = "tools/dev/runners/integration.sh"
 
 [autoloads]
