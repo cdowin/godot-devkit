@@ -420,8 +420,14 @@ def test_a_parse_error_fails_fast_and_names_itself_instead_of_waiting_for_the_bo
     then outlives the bound; the watch must stop it within seconds — the run
     returning at all proves the engine holding the pipe is gone."""
     parse = ('echo \'SCRIPT ERROR: Parse Error: Identifier "nope" not declared'
-             ' in the current scope.\'; exec sleep 30')
+             ' in the current scope.\'; sleep 30')   # not exec'd: a wrapper's child
     root, env, _ = _scenario_fixture(tmp_path, parse)
+    # The REAL timeout, not the exec stub: the stop is a signal to the bound,
+    # which forwards it to the engine's whole process group.
+    real = shutil.which('timeout') or shutil.which('gtimeout')
+    assert real, 'GNU coreutils timeout is required for this case'
+    (tmp_path / 'bin' / 'timeout').unlink()
+    (tmp_path / 'bin' / 'timeout').symlink_to(real)
     started = time.monotonic()
     done = _run_scenario(root, dict(env, GDK_SCENARIO_HARD_TIMEOUT='20'))
     elapsed = time.monotonic() - started

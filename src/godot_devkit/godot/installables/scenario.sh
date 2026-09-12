@@ -69,7 +69,8 @@ FAILED_ASSERTION_PATTERN='\[fail\]'
 # Godot's GDScript parse-error signature. A runner whose load() came back null
 # over a broken script does not quit, so without a watch on the live stream the
 # only exit is the hard timeout — and a verdict that says "hang".
-PARSE_ERROR_PATTERN='SCRIPT ERROR: Parse Error|Parse Error:'
+# Anchored at the line's start, so a scenario's own log text quoting it is not one.
+PARSE_ERROR_PATTERN='^[[:space:]]*(SCRIPT ERROR: Parse Error|ERROR: .* - Parse Error:)'
 # The engine's import cache, which the recovery below may REMOVE. A literal,
 # never a configurable: it is the argument to an `rm -rf` inside a directory
 # holding somebody's project, and a name that can be set from outside is a name
@@ -499,7 +500,10 @@ watch_for_parse_error() {
 		if line="$(parse_error_line "$hits")"; then
 			printf '%s\n' "$line" > "$marker"
 			pid="$(cat "$pidfile" 2>/dev/null)"
-			[ -z "$pid" ] || gdk_stop_bounded "$pid"
+			# The bound's own process: `timeout` forwards the TERM to the
+			# engine's whole group and escalates to KILL after its grace, so an
+			# engine a wrapper script started (not exec'd) is stopped too.
+			[ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null
 			return 0
 		fi
 		sleep 0.2
@@ -508,8 +512,8 @@ watch_for_parse_error() {
 
 # Boot the scenario once, capturing the transcript. A function so the
 # cold-cache recovery below can re-run it without duplicating the plumbing.
-# The engine is exec'd through a shim that records its pid, which is what the
-# parse-error watch stops.
+# The engine is exec'd through a shim that records its PARENT's pid — the
+# `timeout` bounding it — which is what the parse-error watch signals.
 run_scenario() {
 	local pidfile hits marker watch_pid
 	pidfile="$(gdk_sandbox_tmpfile engine-pid.XXXXXX)" || exit 2
@@ -520,14 +524,14 @@ run_scenario() {
 	# shellcheck disable=SC2016  # $$ and $0 are the shim's own, not ours
 	if [ "$VERBOSE_STREAM" -eq 1 ]; then
 		gdk_run_bounded "$HARD_TIMEOUT_SECONDS" -- \
-			sh -c 'echo "$$" > "$0"; exec "$@"' "$pidfile" \
+			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
 			"$GDK_GODOT" --path . --headless -- \
 			"$GDK_SCENARIO_USER_ARG" "$SCENARIO_NAME" 2>&1 \
 			| tap_parse_errors "$hits" \
 			| head -c "$GDK_LOG_CAP_BYTES" | tee "$RUN_REPORT"
 	else
 		gdk_run_bounded "$HARD_TIMEOUT_SECONDS" -- \
-			sh -c 'echo "$$" > "$0"; exec "$@"' "$pidfile" \
+			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
 			"$GDK_GODOT" --path . --headless -- \
 			"$GDK_SCENARIO_USER_ARG" "$SCENARIO_NAME" 2>&1 \
 			| tap_parse_errors "$hits" \
