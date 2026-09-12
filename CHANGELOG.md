@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `[test_shape] header_ledger` holds a ledgered scenario until it carries BOTH `## Boots because:`
+  and `## covers:`; only then is it `HEADED` (drop the entry). A scenario with `covers:` alone —
+  what the runner's `--diff` slices by — can now be ledgered instead of failing either way.
+
 ## v1.1.0 — 2026-09-12
 
 - README's `devkit.toml` block now shows every key the kit reads with an example of its own shape
