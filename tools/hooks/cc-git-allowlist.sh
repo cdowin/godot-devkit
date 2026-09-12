@@ -26,8 +26,9 @@ ALLOW_SUBCOMMANDS="add status diff log show rev-parse rev-list merge-base ls-fil
 # Keep in step with pre-push's PROTECTED_BRANCHES, which backstops the rest.
 PROTECTED_BRANCHES="main"
 # Branch globs (space-separated) a `git merge` may name: the milestone branch,
-# and the agent branches tools/dev/agent-worktree.sh cuts (its BRANCH_PREFIX).
-MERGE_BRANCHES="milestone/* feat/*"
+# the agent branches tools/dev/agent-worktree.sh cuts (its BRANCH_PREFIX), and
+# the mainline, which the release skill merges INTO the milestone branch.
+MERGE_BRANCHES="milestone/* feat/* main origin/main"
 # -----------------------------------------------------------------------------
 
 # A header carried from an older install may lack a key: it runs at its stock value.
