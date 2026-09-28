@@ -183,9 +183,11 @@ NEXT_STEP = (
     '`.sh` here is written EXECUTABLE, so a target may call it either way — '
     'the stock recipes say `bash tools/dev/runners/<x>.sh`, which also works '
     'on a checkout that lost the mode bits. Then edit each file\'s `project '
-    'config` header: the files are yours now. Then paste the settings block '
-    'below into .claude/settings.json — installing a Claude Code hook is not '
-    'registering it, and an unregistered hook is a file nothing ever runs.')
+    'config` header: the files are yours now. Then paste the two blocks '
+    'below: first the toolchain step into .github/workflows/verify.yml, then '
+    'the settings block, last, into .claude/settings.json — installing a '
+    'Claude Code hook is not registering it, and an unregistered hook is a '
+    'file nothing ever runs.')
 
 # The step that calls the toolchain action, for the toolchain slot of the
 # consumer's `.github/workflows/verify.yml`. PRINTED, not written: that
