@@ -688,7 +688,9 @@ FIXTURE_EOF
 	# The same cases when grep -q exits before the producer finishes: a stub
 	# sweep that prints the gate FIRST, then more lines than a pipe buffer
 	# holds. Piped, the producer takes SIGPIPE and the gate reads as missing.
-	# The subshell prints its failure count; a stubbed case that missed moves it.
+	# The subshell prints its failure and case counts: a stubbed case that
+	# missed moves the first, and a keep-list that named no gate leaves the
+	# second where it was — a row that checked nothing.
 	cases=$((cases + 1))
 	out="$(
 		discover_all() {
@@ -698,10 +700,12 @@ FIXTURE_EOF
 		}
 		GDK_CAPTURE_GATE_RE='^(thing_capture)$' GDK_SCENARIO_SOURCE_DIR="$scratch" \
 			keep_list_cases 2>/dev/null
-		echo "$failures"
+		echo "$failures $cases"
 	)"
-	[ "$out" = "$failures" ] \
+	[ "${out% *}" = "$failures" ] \
 		|| miss "a keep-listed gate printed first in a sweep longer than a pipe buffer read as missing"
+	[ "${out#* }" -gt "$cases" ] 2>/dev/null \
+		|| miss "the stubbed keep-list named no gate, so the pipe-buffer row checked nothing"
 
 	cases=$((cases + 1))
 	[ "$(detect_jobs)" -ge 1 ] \
