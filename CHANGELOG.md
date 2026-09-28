@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the
+  engine, gdlint and shellcheck at pinned versions and imports the project; `uid-guard.yml` is no
+  longer installed, because `uid-scan` rides the milestone gate (#26).
+
 ## v1.2.0 — 2026-09-12
 
 - `[test_shape] header_ledger` holds a ledgered scenario until it carries BOTH `## Boots because:`

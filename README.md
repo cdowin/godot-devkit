@@ -253,8 +253,24 @@ tools/dev/runners/capture.sh            a headed visual capture to PNG (local, n
 tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed
 tools/dev/runners/hermetic_run_scan.sh  a headless run's sandbox HOME self-destructs
 tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw engine boot
-.github/workflows/uid-guard.yml         the uid-drift workflow
+.github/actions/godot-toolchain/action.yml
+                                        the CI toolchain: engine, gdlint, shellcheck, import
 ```
+
+**CI.** The workflow is agentic-sdlc's `install-ci`; its toolchain slot is empty. Fill it with one
+step, after `setup-uv` (the run prints it as a `next:` line):
+
+```yaml
+      - uses: ./.github/actions/godot-toolchain
+        with: { godot-patch: "<n>" }
+```
+
+The action reads the engine's MAJOR.MINOR from `project.godot` `config/features` and adds
+`godot-patch`; it installs gdlint (`gdtoolkit-version`, default `4.5.0`) and shellcheck
+(`shellcheck-version`, default `0.11.0`, from the release tarball), then imports the project and
+fails when `.godot/global_script_class_cache.cfg` is absent. `install-runners` no longer writes
+`.github/workflows/uid-guard.yml`: `uid-scan` is a tier of `make milestone`. An existing copy stays,
+and the run names it as retired and safe to delete.
 
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
