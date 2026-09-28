@@ -117,3 +117,8 @@
 {"ts":"2026-09-12T17:00:39Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":239,"branch":"milestone/1.1.1-the-runner-fails-fast"}
 {"ts":"2026-09-28T16:46:17Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":6568,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
 {"ts":"2026-09-28T16:46:19Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":408,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:18:16Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1566,"census":51,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
+{"ts":"2026-09-28T20:18:40Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":781,"census":5,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
+{"ts":"2026-09-28T20:18:49Z","kind":"gate","gate":"test","verdict":"FAIL","duration_ms":479,"census":2,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
+{"ts":"2026-09-28T20:19:10Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":10937,"census":29,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
+{"ts":"2026-09-28T20:20:52Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":8865,"census":9,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
