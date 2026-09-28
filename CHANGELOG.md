@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.3.0 — 2026-09-28
+
 - `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the
   engine, gdlint and shellcheck at pinned versions and imports the project; `uid-guard.yml` is no
   longer installed. An existing copy is named as retired: safe to delete when `[gates] extra` names
