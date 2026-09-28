@@ -117,3 +117,5 @@
 {"ts":"2026-09-12T17:00:39Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":239,"branch":"milestone/1.1.1-the-runner-fails-fast"}
 {"ts":"2026-09-28T16:46:17Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":6568,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
 {"ts":"2026-09-28T16:46:19Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":408,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:38Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":11829,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:41Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":538,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
