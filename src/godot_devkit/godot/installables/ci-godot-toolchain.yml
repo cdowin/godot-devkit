@@ -83,7 +83,10 @@ runs:
       shell: bash
       env:
         GDTOOLKIT_VERSION: ${{ inputs.gdtoolkit-version }}
-      run: uv tool install "gdtoolkit==$GDTOOLKIT_VERSION"
+      run: |
+        set -eu
+        uv tool install "gdtoolkit==$GDTOOLKIT_VERSION"
+        gdlint --version
     - name: shellcheck ${{ inputs.shellcheck-version }}, from the release tarball
       shell: bash
       env:

@@ -861,6 +861,7 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         action = (root / TOOLCHAIN).read_text(encoding='utf-8')
         for needle in ('using: composite', '  godot-patch:\n',
                        'default: "4.5.0"', 'default: "0.11.0"',
+                       'gdlint --version',
                        'test -f .godot/global_script_class_cache.cfg'):
             assert needle in action, needle
         godot_patch = action.split('  godot-patch:\n', 1)[1].split('\n  gdtoolkit', 1)[0]
