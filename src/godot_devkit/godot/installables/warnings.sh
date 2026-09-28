@@ -160,8 +160,11 @@ self_test() {
 	[ "$out" = "$(printf '%s' "$GDK_WARNING_CATEGORIES" | wc -w | tr -d ' ')" ] \
 		|| { echo "  MISS — the promotion block covers $out of the configured categories" >&2; failures=$((failures + 1)); }
 
+	# Captured once and matched with no pipe: under pipefail an early grep
+	# exit is SIGPIPE to the producer, and the case fails on a match.
 	cases=$((cases + 1))
-	promotion_block | grep -qxF "$PROMOTION_SECTION" \
+	out="$(promotion_block)"
+	grep -qxF -- "$PROMOTION_SECTION" <<<"$out" \
 		|| { echo "  MISS — the promotion block opens no $PROMOTION_SECTION section" >&2; failures=$((failures + 1)); }
 
 	# Level 2 is the whole mechanism: at level 1 the analyzer warns and the
