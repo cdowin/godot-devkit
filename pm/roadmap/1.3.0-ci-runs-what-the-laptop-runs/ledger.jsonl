@@ -14,3 +14,5 @@
 {"ts":"2026-09-28T20:38:52Z","kind":"disposition","grain":"1.3.0","state":"accepted","answer":"none","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
 {"ts":"2026-09-28T20:39:48Z","kind":"status","grain":"1.3.0","from":"accepted","to":"packaging","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
 {"ts":"2026-09-28T20:39:48Z","kind":"disposition","grain":"1.3.0","state":"packaging","answer":"none","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:40:35Z","kind":"status","grain":"1.3.0","from":"packaging","to":"done","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:40:35Z","kind":"disposition","grain":"1.3.0","state":"done","answer":"none","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
