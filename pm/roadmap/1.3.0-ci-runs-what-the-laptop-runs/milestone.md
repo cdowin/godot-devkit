@@ -8,6 +8,7 @@ branch: milestone/1.3.0-ci-runs-what-the-laptop-runs
 mode: parallel
 version: 1.3.0
 changelog: A consumer's CI installs the Godot toolchain the local gate runs, pinned, and imports the project before the gate; the integration self-test no longer fails on Linux when grep exits early.
+reviewed: docs/reviews/2026-09-28-1.3.0-milestone.md
 ---
 
 # 1.3.0 — ci runs what the laptop runs
