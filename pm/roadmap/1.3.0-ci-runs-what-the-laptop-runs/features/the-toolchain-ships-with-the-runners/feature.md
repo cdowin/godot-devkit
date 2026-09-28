@@ -2,7 +2,7 @@
 id: 1.3.0/the-toolchain-ships-with-the-runners
 milestone: "1.3.0"
 name: the toolchain ships with the runners
-status: building
+status: done
 reviewed: docs/reviews/2026-09-28-1.3.0-the-toolchain-ships-with-the-runners.md
 phase:
 depends_on: []

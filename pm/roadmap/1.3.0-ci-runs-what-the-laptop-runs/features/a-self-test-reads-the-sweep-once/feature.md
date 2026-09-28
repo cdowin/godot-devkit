@@ -2,7 +2,7 @@
 id: 1.3.0/a-self-test-reads-the-sweep-once
 milestone: "1.3.0"
 name: a self-test reads the sweep once
-status: building
+status: done
 reviewed: docs/reviews/2026-09-28-1.3.0-a-self-test-reads-the-sweep-once.md
 phase:
 depends_on: []

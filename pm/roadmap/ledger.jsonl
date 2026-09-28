@@ -137,3 +137,7 @@
 {"ts":"2026-09-28T20:32:37Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":870,"census":51,"branch":"feat/1.3.0-review-fixes"}
 {"ts":"2026-09-28T20:32:48Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":10640,"census":28,"branch":"feat/1.3.0-review-fixes"}
 {"ts":"2026-09-28T20:34:01Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30418,"census":214,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:34:39Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30899,"census":214,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:34:40Z","kind":"verify","rung":"feature","gate":"test","verdict":"PASS","exit_code":0,"duration_ms":31593,"state":"27e3d8972f14afedfc40169ba86614b2c96e2d2406a9074ac3744598986a40ef","graded":"506db71953e5d42a0f4cc3bd4bbec97e358a61f9e1a299eb8b82432e52aa9a71","census":214,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:35:12Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30850,"census":214,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T20:35:12Z","kind":"verify","rung":"feature","gate":"test","verdict":"PASS","exit_code":0,"duration_ms":31551,"state":"92c9e866cdcf4f3bf71f1b59294f472de4716d8bf919b48f1c5e10fed20b14d9","graded":"ac9216bfdf8e76d586322d12f51779ed3087e6c3c871e2ea4f51742e0bb9c10c","census":214,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
