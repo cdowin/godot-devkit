@@ -124,3 +124,14 @@
 {"ts":"2026-09-28T20:18:49Z","kind":"gate","gate":"test","verdict":"FAIL","duration_ms":479,"census":2,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
 {"ts":"2026-09-28T20:19:10Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":10937,"census":29,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
 {"ts":"2026-09-28T20:20:52Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":8865,"census":9,"branch":"feat/1.3.0-the-toolchain-ships-with-the-runners"}
+{"ts":"2026-09-28T20:30:14Z","kind":"gate","gate":"test","verdict":"FAIL","duration_ms":1146,"census":3,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:30:16Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":547,"census":6,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:30:35Z","kind":"gate","gate":"pyunit","verdict":"FAIL","duration_ms":1089,"census":51,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:30:50Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":1046,"census":51,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:30:51Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":535,"census":6,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:31:19Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":608,"census":6,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:31:26Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":373,"census":1,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:31:39Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":353,"census":1,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:32:30Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":3948,"census":2,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:32:37Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":870,"census":51,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:32:48Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":10640,"census":28,"branch":"feat/1.3.0-review-fixes"}
