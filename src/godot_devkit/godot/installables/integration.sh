@@ -419,10 +419,6 @@ boots_line() {
 	printf '[%s] BOOTS: %s scenario(s) booted, %s\n' "$GATE_TAG" "$n" "$cost"
 }
 
-# --- --self-test -------------------------------------------------------------
-# Boots nothing: discovery, the header reader and the slicing are pure
-# filesystem and text, which is exactly why they are written as functions over
-# a directory and a list.
 # keep_list_cases — self_test's keep-list cases, one per keep-listed name:
 # the gate has a file, and it survives the filter into the sweep. Uses
 # self_test's `cases` and `miss`.
@@ -444,6 +440,10 @@ keep_list_cases() {
 	done < <(capture_gate_names)
 }
 
+# --- --self-test -------------------------------------------------------------
+# Boots nothing: discovery, the header reader and the slicing are pure
+# filesystem and text, which is exactly why they are written as functions over
+# a directory and a list.
 self_test() {
 	local scratch rc out failures=0 cases=0 name bad
 
