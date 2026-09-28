@@ -270,7 +270,7 @@ The action reads the engine's MAJOR.MINOR from `project.godot` `config/features`
 (`shellcheck-version`, default `0.11.0`, from the release tarball), then imports the project and
 fails when `.godot/global_script_class_cache.cfg` is absent. `install-runners` no longer writes
 `.github/workflows/uid-guard.yml`. An existing copy stays, and the run names it as retired. It is
-safe to delete only when `[gates] extra` names `godot-check`: then `check uid` runs in `make check`,
+safe to delete only when `[gates] extra` names `godot-check` and `[checks] godot` keeps `uid`: then `check uid` runs in `make check`,
 and so in `make milestone`. `uid-scan` is not a milestone tier, so without `godot-check` the run
 says `check uid` is not in the repo's gate and tells you to keep the file.
 

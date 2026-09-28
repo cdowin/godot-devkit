@@ -145,8 +145,8 @@ from project.godot, the patch from its `godot-patch` input), gdlint and
 shellcheck at pinned versions, and an import pass (the run prints the step to
 paste). .github/workflows/uid-guard.yml is no longer written. An existing
 copy is left in place and named as retired: safe to delete when `[gates]
-extra` names `godot-check` (then `check uid` runs in `make check`), and to
-keep otherwise.
+extra` names `godot-check` and `[checks] godot` keeps `uid` (then `check uid`
+runs in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint warnings unit integration scenario capture import-cache
 hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the

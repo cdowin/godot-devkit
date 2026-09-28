@@ -7,7 +7,7 @@ reviewed: docs/reviews/2026-09-28-1.3.0-the-toolchain-ships-with-the-runners.md
 phase:
 depends_on: []
 consumed_by: []
-changelog: `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the engine, gdlint and shellcheck at pinned versions and imports the project; `uid-guard.yml` is no longer installed, and an existing copy is named as retired: safe to delete when `[gates] extra` names `godot-check` (then `check uid` runs in `make check`), and to keep otherwise (#26).
+changelog: `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the engine, gdlint and shellcheck at pinned versions and imports the project; `uid-guard.yml` is no longer installed, and an existing copy is named as retired: safe to delete when `[gates] extra` names `godot-check` and `[checks] godot` keeps `uid` (then `check uid` runs in `make check`), and to keep otherwise (#26).
 ---
 
 # the toolchain ships with the runners
