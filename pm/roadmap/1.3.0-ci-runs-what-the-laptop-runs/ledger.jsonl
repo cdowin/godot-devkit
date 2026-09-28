@@ -1,0 +1,6 @@
+{"ts":"2026-09-28T16:46:08Z","kind":"status","grain":"1.3.0","from":"planning","to":"building","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:08Z","kind":"disposition","grain":"1.3.0","state":"building","answer":"none","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:09Z","kind":"status","grain":"1.3.0/the-toolchain-ships-with-the-runners","from":"planning","to":"building","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:09Z","kind":"disposition","grain":"1.3.0/the-toolchain-ships-with-the-runners","state":"building","answer":"none","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:10Z","kind":"status","grain":"1.3.0/a-self-test-reads-the-sweep-once","from":"planning","to":"building","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:10Z","kind":"disposition","grain":"1.3.0/a-self-test-reads-the-sweep-once","state":"building","answer":"none","branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}

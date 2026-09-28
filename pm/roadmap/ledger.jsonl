@@ -113,3 +113,7 @@
 {"ts":"2026-09-12T17:00:17Z","kind":"status","grain":"1.2.0","from":"packaging","to":"done","branch":"milestone/1.1.1-the-runner-fails-fast"}
 {"ts":"2026-09-12T17:00:17Z","kind":"disposition","grain":"1.2.0","state":"done","answer":"none","branch":"milestone/1.1.1-the-runner-fails-fast"}
 {"ts":"2026-09-12T17:00:17Z","kind":"deviation","grain":"1.2.0","operation":"release","step":"features-done","outcome":"forced","reason":"features-done: BLOCKED 1.2.0 has no features — an empty feature set does not satisfy this belt; a mis-typed id looks exactly like this [pm] NOT READY — milestone 1.2.0: 1 blocker(s) named above, across 0 feature(s)","branch":"milestone/1.1.1-the-runner-fails-fast"}
+{"ts":"2026-09-12T17:00:38Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":5443,"branch":"milestone/1.1.1-the-runner-fails-fast"}
+{"ts":"2026-09-12T17:00:39Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":239,"branch":"milestone/1.1.1-the-runner-fails-fast"}
+{"ts":"2026-09-28T16:46:17Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":6568,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-28T16:46:19Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":408,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
