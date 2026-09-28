@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.3.0 — 2026-09-28
+
+- `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the
+  engine, gdlint and shellcheck at pinned versions and imports the project; `uid-guard.yml` is no
+  longer installed. An existing copy is named as retired: safe to delete when `[gates] extra` names
+  `godot-check` and `[checks] godot` keeps `uid` (then `check uid` runs in `make check`), and to keep
+  otherwise (#26).
+- `integration.sh --self-test` reads the sweep once and matches it with no pipe, so a keep-listed
+  gate is no longer reported missing on Linux; `warnings.sh` gets the same fix (#27).
+
 ## v1.2.0 — 2026-09-12
 
 - `[test_shape] header_ledger` holds a ledgered scenario until it carries BOTH `## Boots because:`

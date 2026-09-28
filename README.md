@@ -26,7 +26,7 @@ kit is the Godot tiers and gates.
 
 ```make
 DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.2.0     # this kit — the Godot tiers and the eight gates
+GODOT_DEVKIT_VERSION := v1.3.0     # this kit — the Godot tiers and the eight gates
 include Makefile.devkit
 ```
 
@@ -35,7 +35,7 @@ the gates to `make check`:
 
 ```sh
 uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.11.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.2.0" godot-devkit install-runners  # Makefile.tiers + runners
+uvx --from "git+https://github.com/cdowin/godot-devkit@v1.3.0" godot-devkit install-runners  # Makefile.tiers + runners
 ```
 
 ```toml
@@ -253,8 +253,26 @@ tools/dev/runners/capture.sh            a headed visual capture to PNG (local, n
 tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed
 tools/dev/runners/hermetic_run_scan.sh  a headless run's sandbox HOME self-destructs
 tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw engine boot
-.github/workflows/uid-guard.yml         the uid-drift workflow
+.github/actions/godot-toolchain/action.yml
+                                        the CI toolchain: engine, gdlint, shellcheck, import
 ```
+
+**CI.** The workflow is agentic-sdlc's `install-ci`; its toolchain slot is empty. Fill it with one
+step, after `setup-uv` (the run prints it as a `next:` line):
+
+```yaml
+      - uses: ./.github/actions/godot-toolchain
+        with: { godot-patch: "<n>" }
+```
+
+The action reads the engine's MAJOR.MINOR from `project.godot` `config/features` and adds
+`godot-patch`; it installs gdlint (`gdtoolkit-version`, default `4.5.0`) and shellcheck
+(`shellcheck-version`, default `0.11.0`, from the release tarball), then imports the project and
+fails when `.godot/global_script_class_cache.cfg` is absent. `install-runners` no longer writes
+`.github/workflows/uid-guard.yml`. An existing copy stays, and the run names it as retired. It is
+safe to delete only when `[gates] extra` names `godot-check` and `[checks] godot` keeps `uid`: then `check uid` runs in `make check`,
+and so in `make milestone`. `uid-scan` is not a milestone tier, so without `godot-check` the run
+says `check uid` is not in the repo's gate and tells you to keep the file.
 
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full

@@ -3,8 +3,8 @@
     install-runners  the sandboxed headless-run shell library, the runners
                      that source it, the compile sweep they boot (with the
                      `.uid` sidecar the engine would otherwise mint), the
-                     engine-boot guard for Claude Code, and the uid-drift
-                     workflow. Every function is `gdk_*` — the per-project
+                     engine-boot guard for Claude Code, and the CI
+                     toolchain action. Every function is `gdk_*` — the per-project
                      `<project>_*` forks this replaces are what drifted, so a
                      consumer keeping its own prefix is a second name for the
                      same fact and is not supported.
@@ -54,6 +54,7 @@ from importlib import resources
 from pathlib import Path
 
 from godot_devkit.core import apply
+from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.project import repo_root
 
 PACKAGE = 'godot_devkit.godot.installables'
@@ -104,10 +105,15 @@ PLAN: tuple[tuple[str, str], ...] = (
     # runners because its STOCK roster is the library's own boot function:
     # the guard and the door it points at are one install.
     ('cc-godot-sandbox.sh', 'tools/hooks/cc-godot-sandbox.sh'),
-    # `check uid` on a PR into main and a push to it — the one workflow that is
-    # Godot's. The rest of CI (the full gate, the semver gate, the tag) is the
-    # agentic kit's `install-ci`.
-    ('ci-uid-guard.yml', '.github/workflows/uid-guard.yml'),
+    # The Godot TOOLCHAIN for CI: a composite action the consumer's verify.yml
+    # (agentic-sdlc's `install-ci`, which leaves its toolchain slot empty)
+    # calls in one step — the engine line from project.godot, gdlint and
+    # shellcheck at pinned versions, and an import pass. The workflow itself
+    # stays the agentic kit's; this is only what fills the slot. The old
+    # uid-guard.yml is NOT here: `check uid` reaches `make check` (and so
+    # `make milestone`) through `godot-check`, when `[gates] extra` names it
+    # (see RETIRED).
+    ('ci-godot-toolchain.yml', '.github/actions/godot-toolchain/action.yml'),
     # The CALLERS, at the repo root: the Godot target roster, on the seam
     # agentic-sdlc's Makefile.devkit `-include`s, declaring which tiers
     # `precommit` and `milestone` run. It ships with the runners rather than
@@ -133,7 +139,14 @@ run's HOME self-destructs. Every one carries --help and --self-test. Plus
 tools/hooks/cc-godot-sandbox.sh — the Claude Code guard against a raw engine
 boot, whose stock roster is the library's own boot function (the run prints
 the .claude/settings.json entry that fires it) — and
-.github/workflows/uid-guard.yml (`check uid` on a PR into main and a push to it).
+.github/actions/godot-toolchain/action.yml, the composite action that fills
+the toolchain slot of your .github/workflows/verify.yml: the engine (MAJOR.MINOR
+from project.godot, the patch from its `godot-patch` input), gdlint and
+shellcheck at pinned versions, and an import pass (the run prints the step to
+paste). .github/workflows/uid-guard.yml is no longer written. An existing
+copy is left in place and named as retired: safe to delete when `[gates]
+extra` names `godot-check` and `[checks] godot` keeps `uid` (then `check uid`
+runs in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint warnings unit integration scenario capture import-cache
 hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
@@ -170,9 +183,54 @@ NEXT_STEP = (
     '`.sh` here is written EXECUTABLE, so a target may call it either way — '
     'the stock recipes say `bash tools/dev/runners/<x>.sh`, which also works '
     'on a checkout that lost the mode bits. Then edit each file\'s `project '
-    'config` header: the files are yours now. Then paste the settings block '
-    'below into .claude/settings.json — installing a Claude Code hook is not '
-    'registering it, and an unregistered hook is a file nothing ever runs.')
+    'config` header: the files are yours now. Then paste the two blocks '
+    'below: first the toolchain step into .github/workflows/verify.yml, then '
+    'the settings block, last, into .claude/settings.json — installing a '
+    'Claude Code hook is not registering it, and an unregistered hook is a '
+    'file nothing ever runs.')
+
+# The step that calls the toolchain action, for the toolchain slot of the
+# consumer's `.github/workflows/verify.yml`. PRINTED, not written: that
+# workflow is agentic-sdlc's `install-ci` output and the consumer's after the
+# write, so this verb does not edit it. The patch is a placeholder because it
+# is the one thing project.godot does not carry.
+TOOLCHAIN_STEP = ('      - uses: ./.github/actions/godot-toolchain\n'
+                  '        with: { godot-patch: "<n>" }')
+
+# Destinations an earlier release WROTE and this one does not. Never deleted:
+# after the write the file is the consumer's, and a verb that writes a whole
+# file or refuses does not remove one. Each is NAMED on every run that finds
+# it, so the retirement is not silence (a file that looks installed and that
+# nothing maintains any more).
+UID_GUARD = '.github/workflows/uid-guard.yml'
+RETIRED: tuple[str, ...] = (UID_GUARD,)
+
+
+def retired_line(rel: str) -> str:
+    """The `[install] retired:` line for one retired destination.
+
+    CONDITIONAL on the consumer's devkit.toml. `uid-scan` is NOT a tier of
+    `make milestone` (GDK_MILESTONE_TIERS); `check uid` reaches `make check`,
+    and so `make milestone`, only through `godot-check` — and only when
+    `[gates] extra` names it and `[checks] godot` keeps `uid`. "Safe to
+    delete" said to any other repo removes its only CI uid gate, and nothing
+    would say so. Raises ConfigError on a malformed value (exit 2).
+    """
+    head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
+    extra = str_tuple(config_section('gates'), 'gates', 'extra', ())
+    roster = str_tuple(config_section('checks'), 'checks', 'godot', ('uid',))
+    if 'godot-check' not in extra:
+        return (head + '`check uid` is NOT in this repo\'s gate: `[gates] '
+                'extra` does not name `godot-check`; it was left in place — '
+                'keep it, or add "godot-check" to `[gates] extra` in '
+                'devkit.toml')
+    if 'uid' not in roster:
+        return (head + '`check uid` is NOT in this repo\'s gate: `[checks] '
+                'godot` leaves `uid` out; it was left in place — keep it, or '
+                'add "uid" to `[checks] godot` in devkit.toml')
+    return (head + '`check uid` runs in `make check` through `godot-check`, '
+            'which `[gates] extra` names; it was left in place and is safe '
+            'to delete')
 
 # The `.claude/settings.json` entry that FIRES the engine-boot guard. PRINTED,
 # not written: `.claude/settings.json` is a hand-maintained file with
@@ -430,6 +488,17 @@ def main(argv: list[str]) -> int:
             print_diff(rel, target, body)
         return 0
 
+    # The retired lines read devkit.toml, so they are decided BEFORE any
+    # write: a malformed value is exit 2 with nothing written, never a crash
+    # after the files landed.
+    try:
+        retired = [retired_line(rel) for rel in RETIRED
+                   if (root / rel).exists()]
+    except ConfigError as err:
+        print(f'godot-devkit {COMMAND}: {err} — nothing was written',
+              file=sys.stderr)
+        return 2
+
     # Decide the WHOLE plan first — resolve every destination, collect every
     # collision — and touch nothing until it holds.
     plan: list[tuple[str, Path, str, str]] = []   # (kind, target, rel, body)
@@ -512,8 +581,13 @@ def main(argv: list[str]) -> int:
                                        header_only=header_only)
         print(f'godot-devkit {COMMAND}: {head}\n'
               f'godot-devkit {COMMAND}: {tail}', file=sys.stderr)
+    for line in retired:
+        print(line)
     if written:
         print(f'[install] {NEXT_STEP}')
+        print(f'[install] next: paste this step into the toolchain slot of '
+              f'.github/workflows/verify.yml, after setup-uv, with your '
+              f'engine patch number:\n\n{TOOLCHAIN_STEP}\n')
         # Raw, unprefixed, so the block can be selected and pasted whole: a
         # JSON file is the one place a stray `[install] ` is not cosmetic.
         print(f'\n.claude/settings.json — the entry that FIRES the engine-boot '
