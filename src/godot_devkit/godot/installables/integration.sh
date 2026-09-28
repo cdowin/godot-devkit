@@ -423,6 +423,27 @@ boots_line() {
 # Boots nothing: discovery, the header reader and the slicing are pure
 # filesystem and text, which is exactly why they are written as functions over
 # a directory and a list.
+# keep_list_cases — self_test's keep-list cases, one per keep-listed name:
+# the gate has a file, and it survives the filter into the sweep. Uses
+# self_test's `cases` and `miss`.
+keep_list_cases() {
+	local swept name
+	# The sweep is read ONCE and matched with no pipe: under pipefail,
+	# `discover_all | grep -q` exits on the match, the producer takes SIGPIPE
+	# (Linux, a sweep longer than the pipe buffer) and the pipeline fails.
+	swept="$(discover_all)"
+	while IFS= read -r name; do
+		[ -n "$name" ] || continue
+		cases=$((cases + 1))
+		if [ -z "$(find "$GDK_SCENARIO_SOURCE_DIR" -type f -name "$name.gd" 2>/dev/null)" ]; then
+			miss "GDK_CAPTURE_GATE_RE names '$name', which has no file"
+			continue
+		fi
+		grep -qxF -- "$name" <<<"$swept" \
+			|| miss "keep-listed gate '$name' is missing from the sweep"
+	done < <(capture_gate_names)
+}
+
 self_test() {
 	local scratch rc out failures=0 cases=0 name bad
 
@@ -662,16 +683,25 @@ FIXTURE_EOF
 	# --- every keep-listed gate must EXIST and survive the filter ------------
 	# A renamed or deleted keep-listed capture must fail loudly here, never
 	# drop silently out of --all.
-	while IFS= read -r name; do
-		[ -n "$name" ] || continue
-		cases=$((cases + 1))
-		if [ -z "$(find "$GDK_SCENARIO_SOURCE_DIR" -type f -name "$name.gd" 2>/dev/null)" ]; then
-			miss "GDK_CAPTURE_GATE_RE names '$name', which has no file"
-			continue
-		fi
-		discover_all | grep -qx "$name" \
-			|| miss "keep-listed gate '$name' is missing from the sweep"
-	done < <(capture_gate_names)
+	keep_list_cases
+
+	# The same cases when grep -q exits before the producer finishes: a stub
+	# sweep that prints the gate FIRST, then more lines than a pipe buffer
+	# holds. Piped, the producer takes SIGPIPE and the gate reads as missing.
+	# The subshell prints its failure count; a stubbed case that missed moves it.
+	cases=$((cases + 1))
+	out="$(
+		discover_all() {
+			local i
+			echo thing_capture
+			for ((i = 0; i < 20000; i++)); do echo "filler_gate_$i"; done
+		}
+		GDK_CAPTURE_GATE_RE='^(thing_capture)$' GDK_SCENARIO_SOURCE_DIR="$scratch" \
+			keep_list_cases 2>/dev/null
+		echo "$failures"
+	)"
+	[ "$out" = "$failures" ] \
+		|| miss "a keep-listed gate printed first in a sweep longer than a pipe buffer read as missing"
 
 	cases=$((cases + 1))
 	[ "$(detect_jobs)" -ge 1 ] \
