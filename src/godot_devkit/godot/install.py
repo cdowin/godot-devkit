@@ -54,6 +54,7 @@ from importlib import resources
 from pathlib import Path
 
 from godot_devkit.core import apply
+from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.project import repo_root
 
 PACKAGE = 'godot_devkit.godot.installables'
@@ -109,8 +110,9 @@ PLAN: tuple[tuple[str, str], ...] = (
     # calls in one step — the engine line from project.godot, gdlint and
     # shellcheck at pinned versions, and an import pass. The workflow itself
     # stays the agentic kit's; this is only what fills the slot. The old
-    # uid-guard.yml is NOT here: `uid-scan` is a tier of `make milestone`,
-    # which that workflow already runs (see RETIRED).
+    # uid-guard.yml is NOT here: `check uid` reaches `make check` (and so
+    # `make milestone`) through `godot-check`, when `[gates] extra` names it
+    # (see RETIRED).
     ('ci-godot-toolchain.yml', '.github/actions/godot-toolchain/action.yml'),
     # The CALLERS, at the repo root: the Godot target roster, on the seam
     # agentic-sdlc's Makefile.devkit `-include`s, declaring which tiers
@@ -141,9 +143,10 @@ the .claude/settings.json entry that fires it) — and
 the toolchain slot of your .github/workflows/verify.yml: the engine (MAJOR.MINOR
 from project.godot, the patch from its `godot-patch` input), gdlint and
 shellcheck at pinned versions, and an import pass (the run prints the step to
-paste). .github/workflows/uid-guard.yml is no longer written — `uid-scan` runs
-in `make milestone` — and an existing copy is left in place and named as
-retired.
+paste). .github/workflows/uid-guard.yml is no longer written. An existing
+copy is left in place and named as retired: safe to delete when `[gates]
+extra` names `godot-check` (then `check uid` runs in `make check`), and to
+keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint warnings unit integration scenario capture import-cache
 hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
@@ -197,11 +200,35 @@ TOOLCHAIN_STEP = ('      - uses: ./.github/actions/godot-toolchain\n'
 # file or refuses does not remove one. Each is NAMED on every run that finds
 # it, so the retirement is not silence (a file that looks installed and that
 # nothing maintains any more).
-RETIRED: tuple[tuple[str, str], ...] = (
-    ('.github/workflows/uid-guard.yml',
-     '`uid-scan` is a tier of `make milestone`, which verify.yml already '
-     'runs, so this workflow is a second run of the same check'),
-)
+UID_GUARD = '.github/workflows/uid-guard.yml'
+RETIRED: tuple[str, ...] = (UID_GUARD,)
+
+
+def retired_line(rel: str) -> str:
+    """The `[install] retired:` line for one retired destination.
+
+    CONDITIONAL on the consumer's devkit.toml. `uid-scan` is NOT a tier of
+    `make milestone` (GDK_MILESTONE_TIERS); `check uid` reaches `make check`,
+    and so `make milestone`, only through `godot-check` — and only when
+    `[gates] extra` names it and `[checks] godot` keeps `uid`. "Safe to
+    delete" said to any other repo removes its only CI uid gate, and nothing
+    would say so. Raises ConfigError on a malformed value (exit 2).
+    """
+    head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
+    extra = str_tuple(config_section('gates'), 'gates', 'extra', ())
+    roster = str_tuple(config_section('checks'), 'checks', 'godot', ('uid',))
+    if 'godot-check' not in extra:
+        return (head + '`check uid` is NOT in this repo\'s gate: `[gates] '
+                'extra` does not name `godot-check`; it was left in place — '
+                'keep it, or add "godot-check" to `[gates] extra` in '
+                'devkit.toml')
+    if 'uid' not in roster:
+        return (head + '`check uid` is NOT in this repo\'s gate: `[checks] '
+                'godot` leaves `uid` out; it was left in place — keep it, or '
+                'add "uid" to `[checks] godot` in devkit.toml')
+    return (head + '`check uid` runs in `make check` through `godot-check`, '
+            'which `[gates] extra` names; it was left in place and is safe '
+            'to delete')
 
 # The `.claude/settings.json` entry that FIRES the engine-boot guard. PRINTED,
 # not written: `.claude/settings.json` is a hand-maintained file with
@@ -459,6 +486,17 @@ def main(argv: list[str]) -> int:
             print_diff(rel, target, body)
         return 0
 
+    # The retired lines read devkit.toml, so they are decided BEFORE any
+    # write: a malformed value is exit 2 with nothing written, never a crash
+    # after the files landed.
+    try:
+        retired = [retired_line(rel) for rel in RETIRED
+                   if (root / rel).exists()]
+    except ConfigError as err:
+        print(f'godot-devkit {COMMAND}: {err} — nothing was written',
+              file=sys.stderr)
+        return 2
+
     # Decide the WHOLE plan first — resolve every destination, collect every
     # collision — and touch nothing until it holds.
     plan: list[tuple[str, Path, str, str]] = []   # (kind, target, rel, body)
@@ -541,11 +579,8 @@ def main(argv: list[str]) -> int:
                                        header_only=header_only)
         print(f'godot-devkit {COMMAND}: {head}\n'
               f'godot-devkit {COMMAND}: {tail}', file=sys.stderr)
-    for rel, why in RETIRED:
-        if (root / rel).exists():
-            print(f'[install] retired: {rel} is no longer written by '
-                  f'{COMMAND} — {why}; it was left in place and is safe to '
-                  f'delete')
+    for line in retired:
+        print(line)
     if written:
         print(f'[install] {NEXT_STEP}')
         print(f'[install] next: paste this step into the toolchain slot of '
