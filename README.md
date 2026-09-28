@@ -269,8 +269,10 @@ The action reads the engine's MAJOR.MINOR from `project.godot` `config/features`
 `godot-patch`; it installs gdlint (`gdtoolkit-version`, default `4.5.0`) and shellcheck
 (`shellcheck-version`, default `0.11.0`, from the release tarball), then imports the project and
 fails when `.godot/global_script_class_cache.cfg` is absent. `install-runners` no longer writes
-`.github/workflows/uid-guard.yml`: `uid-scan` is a tier of `make milestone`. An existing copy stays,
-and the run names it as retired and safe to delete.
+`.github/workflows/uid-guard.yml`. An existing copy stays, and the run names it as retired. It is
+safe to delete only when `[gates] extra` names `godot-check`: then `check uid` runs in `make check`,
+and so in `make milestone`. `uid-scan` is not a milestone tier, so without `godot-check` the run
+says `check uid` is not in the repo's gate and tells you to keep the file.
 
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full

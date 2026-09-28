@@ -4,7 +4,8 @@
 
 - `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the
   engine, gdlint and shellcheck at pinned versions and imports the project; `uid-guard.yml` is no
-  longer installed, because `uid-scan` rides the milestone gate (#26).
+  longer installed. An existing copy is named as retired: safe to delete when `[gates] extra` names
+  `godot-check` (then `check uid` runs in `make check`), and to keep otherwise (#26).
 - `integration.sh --self-test` reads the sweep once and matches it with no pipe, so a keep-listed
   gate is no longer reported missing on Linux; `warnings.sh` gets the same fix (#27).
 

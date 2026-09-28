@@ -861,6 +861,7 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         action = (root / TOOLCHAIN).read_text(encoding='utf-8')
         for needle in ('using: composite', '  godot-patch:\n',
                        'default: "4.5.0"', 'default: "0.11.0"',
+                       'gdlint --version',
                        'test -f .godot/global_script_class_cache.cfg'):
             assert needle in action, needle
         godot_patch = action.split('  godot-patch:\n', 1)[1].split('\n  gdtoolkit', 1)[0]
@@ -881,17 +882,34 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         assert _snapshot(root) == before
 
 
-def test_a_retired_destination_is_kept_and_named(tmp_path):
+@pytest.mark.parametrize('toml, says', [
+    # `godot-check` joined: `check uid` runs in `make check`, so the file is
+    # a second run of the same check.
+    ('[gates]\nextra = ["godot-check"]\n', 'is safe to delete'),
+    # Not joined: `uid-scan` is no milestone tier, so this file is the only
+    # CI uid gate, and "safe to delete" would be the lie.
+    ('', 'is NOT in this repo\'s gate: `[gates] extra` does not name'),
+    # Joined, but the roster drops `uid`: `godot-check` runs, `check uid` not.
+    ('[gates]\nextra = ["godot-check"]\n[checks]\ngodot = ["tres"]\n',
+     '`[checks] godot` leaves `uid` out'),
+])
+def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
     """uid-guard.yml is the consumer's file after the write: a run leaves it
-    byte-for-byte and names it retired, every run, written or not."""
+    byte-for-byte and names it retired, every run, written or not — and says
+    it is safe to delete ONLY when `check uid` is in the repo's gate."""
     with consumer_repo(tmp_path) as root:
+        if toml:
+            (root / 'devkit.toml').write_text(toml, encoding='utf-8')
         guard = root / UID_GUARD
         guard.parent.mkdir(parents=True)
         guard.write_text('name: UID Guard\n', encoding='utf-8')
         for _ in range(2):
             code, out, err = run_install()
             assert code == 0, out + err
-            assert f'[install] retired: {UID_GUARD}' in out, out
+            line = next(l for l in out.splitlines()
+                        if l.startswith(f'[install] retired: {UID_GUARD}'))
+            assert says in line, line
+            assert ('safe to delete' in line) == ('safe' in says), line
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
 
 
