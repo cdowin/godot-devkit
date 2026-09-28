@@ -2,7 +2,7 @@
 id: "1.3.0"
 kind: milestone
 name: ci runs what the laptop runs
-status: building
+status: accepted
 depends_on: []
 branch: milestone/1.3.0-ci-runs-what-the-laptop-runs
 mode: parallel
