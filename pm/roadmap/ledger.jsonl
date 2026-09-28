@@ -136,3 +136,4 @@
 {"ts":"2026-09-28T20:32:30Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":3948,"census":2,"branch":"feat/1.3.0-review-fixes"}
 {"ts":"2026-09-28T20:32:37Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":870,"census":51,"branch":"feat/1.3.0-review-fixes"}
 {"ts":"2026-09-28T20:32:48Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":10640,"census":28,"branch":"feat/1.3.0-review-fixes"}
+{"ts":"2026-09-28T20:34:01Z","kind":"gate","gate":"test","verdict":"PASS","duration_ms":30418,"census":214,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
