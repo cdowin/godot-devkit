@@ -33,6 +33,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from support import REPO_ROOT  # noqa: E402
 
+from godot_devkit import __version__  # noqa: E402
 from godot_devkit.core.project import load_config, repo_root  # noqa: E402
 from godot_devkit.godot import install  # noqa: E402
 
@@ -882,6 +883,13 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         assert 'required: true' in godot_patch and 'default' not in godot_patch
         assert not (root / UID_GUARD).exists()
         assert TOOLCHAIN_STEP in out and 'retired' not in out, out
+        # The locked shape (#38), pasteable whole: the running version, from
+        # this kit's index ONLY.
+        assert f'\n{install.PYPROJECT_BLOCK}\n' in out, out
+        for needle in (f'dev = ["godot-devkit=={__version__}"]', 'explicit = true',
+                       'url = "https://cdowin.github.io/godot-devkit/simple/"',
+                       'godot-devkit = { index = "cdowin" }'):
+            assert needle in install.PYPROJECT_BLOCK, needle
         # The registration step, pasteable and LAST on stdout.
         assert HOOK_ENTRY in out, out
         assert out.rstrip().endswith('}'), out[-200:]
@@ -1050,10 +1058,44 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
         for target in sorted(declared | set(GODOT_TARGETS)):
             done = _make_n(root, target)
             assert done.returncode == 0, f'{target}: {done.stdout}{done.stderr}'
-        # `godot-check` is the pinned kit's `check all`, through the tag the
-        # consumer's Makefile pins.
-        done = _make_n(root, 'godot-check')
-        assert 'godot-devkit@v0.25.0' in done.stdout and 'check all' in done.stdout, done.stdout
+
+
+LOCKED_BIN = '.venv/bin/godot-devkit'
+
+
+@pytest.mark.skipif(shutil.which('make') is None, reason='needs make')
+@pytest.mark.parametrize('pin, venv, caller, runs, refuses', [
+    # 1. The caller's GODOT_DEVKIT wins over everything, both pins included.
+    (True, True, True, 'my-devkit check all', None),
+    # 2. The locked shape: uv sync's binary, no Makefile pin.
+    (False, True, False, f'{LOCKED_BIN} check all', None),
+    # 3. The legacy pin, unchanged.
+    (True, False, False,
+     'uvx --from "git+https://github.com/cdowin/godot-devkit@v0.25.0" godot-devkit check all', None),
+    # 4. Both pins: two products, refused at parse time.
+    (True, True, False, None, 'Delete the GODOT_DEVKIT_VERSION line'),
+    # 5. Neither: refused, the locked shape named first.
+    (False, False, False, None, 'not pinned — lock it'),
+], ids=['caller', 'locked', 'legacy-pin', 'both', 'neither'])
+def test_the_tiers_resolve_godot_devkit_in_one_order(tmp_path, pin, venv, caller, runs, refuses):
+    """#38: which godot-devkit `godot-check` runs, decided by the written
+    Makefile.tiers at parse time — `make -n`, so nothing runs."""
+    with consumer_repo(tmp_path, makefile=True) as root:
+        assert run_install()[0] == 0
+        if not pin:
+            (root / 'Makefile').write_text(
+                CONSUMER_MAKEFILE.replace('GODOT_DEVKIT_VERSION := v0.25.0\n', ''),
+                encoding='utf-8')
+        if venv:
+            (root / LOCKED_BIN).parent.mkdir(parents=True)
+            (root / LOCKED_BIN).write_text('#!/bin/sh\n', encoding='utf-8')
+        done = _make_n(root, 'godot-check', *(['GODOT_DEVKIT=my-devkit'] if caller else []))
+        if refuses:
+            assert done.returncode != 0 and refuses in done.stderr, done.stderr
+            assert done.stdout == '', done.stdout
+        else:
+            assert done.returncode == 0, done.stderr
+            assert f' {runs};' in done.stdout or f' {runs}\n' in done.stdout, done.stdout
 
 
 def test_this_repos_tier_file_starts_with_the_installable():
