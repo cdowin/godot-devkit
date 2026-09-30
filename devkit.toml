@@ -150,3 +150,9 @@ contracts = ["CLAUDE.md", ".claude/rules/pm-execution.md"]
 # the floor, which `matrix` refuses. Named on every adopt, never graded.
 [adopt]
 ours = [".github/workflows/verify.yml"]
+
+# The shellcheck `check shell` and the runner shellcheck test may run, installed
+# by verify.yml, so a local pass is a CI pass: CI's apt shellcheck named a
+# finding SC2317 that 0.11.0 names SC2329 (1.4.0's release PR).
+[shell]
+shellcheck_version = "0.11.0"
