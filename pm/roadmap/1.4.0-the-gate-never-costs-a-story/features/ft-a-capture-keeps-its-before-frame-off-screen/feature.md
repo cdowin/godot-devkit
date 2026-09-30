@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-a-capture-keeps-its-before-frame-off-screen.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: capture.sh keeps the previous PNG under previous/, places its window off screen unless CAPTURE_VISIBLE=1, and warns on a capture loop (#17 #37).
 ---
 
 # a capture keeps its before frame off screen

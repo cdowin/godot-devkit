@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-diff-slice-boots-what-changed.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: integration --diff boots only the scenarios that reach a touched fixture, reruns a failure alone once (FLAKE), and repairs a stale import cache once before the sweep (#16 #33 #34).
 ---
 
 # the diff slice boots what changed

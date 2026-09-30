@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-read-verbs-stop-lying-by-omission.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: refs reports untyped signal hits in a dynamic bucket instead of zero, check rng ignores draw-named declarations, and install-runners shares check all's roster (#19 #28 #30 #35).
 ---
 
 # the read verbs stop lying by omission

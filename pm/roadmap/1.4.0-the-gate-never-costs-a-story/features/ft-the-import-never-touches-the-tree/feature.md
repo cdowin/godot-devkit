@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-import-never-touches-the-tree.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: make import-cache runs the editor pass in a scratch copy and never writes the tree's files; .godot comes back by rename (#20 #23).
 ---
 
 # the import never touches the tree

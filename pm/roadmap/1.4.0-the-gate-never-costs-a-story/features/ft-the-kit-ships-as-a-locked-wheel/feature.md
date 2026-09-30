@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-kit-ships-as-a-locked-wheel.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: The kit ships as a hash-locked wheel on a GitHub Pages index; Makefile.tiers runs uv run --frozen godot-devkit when uv.lock names it (#38).
 ---
 
 # the kit ships as a locked wheel

@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-integration-tier-boots-once.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: GDK_INTEGRATION_WARM=1 boots Godot once per worker and runs a slice of scenarios against a documented contract, handing crashes back to the cold path (#36).
 ---
 
 # the integration tier boots once

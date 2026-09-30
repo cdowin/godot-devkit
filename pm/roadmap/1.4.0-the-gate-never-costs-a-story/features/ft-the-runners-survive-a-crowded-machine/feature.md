@@ -7,7 +7,7 @@ status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-runners-survive-a-crowded-machine.md
 depends_on: []
 consumed_by: []
-changelog:
+changelog: The runner self-tests no longer write into the host repo under a git hook, a pid is dead only on ESRCH, the unit bound scales with load and names GDK_UNIT_TIMEOUT, and runners read git without the index lock (#24 #31 #32 #35).
 ---
 
 # the runners survive a crowded machine

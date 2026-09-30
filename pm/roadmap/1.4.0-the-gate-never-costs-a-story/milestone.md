@@ -7,7 +7,7 @@ depends_on: []
 branch: milestone/1.4.0-the-gate-never-costs-a-story
 mode: parallel
 version: 1.4.0
-changelog:
+changelog: Gates survive parallel agent lanes: isolated self-test git, ESRCH-only liveness, a load-scaled unit bound, a fixture-sliced --diff with rerun-alone, an import pass in a scratch copy, an opt-in warm integration tier, off-screen captures, and the kit shipped as a hash-locked wheel.
 reviewed: docs/reviews/2026-09-29-1.4.0-milestone.md
 ---
 
