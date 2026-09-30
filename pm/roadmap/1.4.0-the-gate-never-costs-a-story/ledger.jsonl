@@ -45,3 +45,5 @@
 {"ts":"2026-09-30T10:44:58Z","kind":"disposition","grain":"1.4.0","state":"accepted","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
 {"ts":"2026-09-30T10:47:57Z","kind":"status","grain":"1.4.0","from":"accepted","to":"packaging","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
 {"ts":"2026-09-30T10:47:57Z","kind":"disposition","grain":"1.4.0","state":"packaging","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T10:51:13Z","kind":"status","grain":"1.4.0","from":"packaging","to":"done","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T10:51:13Z","kind":"disposition","grain":"1.4.0","state":"done","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
