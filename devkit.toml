@@ -144,3 +144,9 @@ done        = ["closed"]
 [dispatch]
 project = "godot-devkit — scene tooling and the eight Godot gates for Godot 4.x, a pinned-tag stdlib-only Python package. Pure parse, never boots Godot; the CLI is a published API. Public repo, MIT."
 contracts = ["CLAUDE.md", ".claude/rules/pm-execution.md"]
+
+# This repo's verify.yml is one job (its `matrix` tier runs every interpreter),
+# not the stock three: the stock per-interpreter legs pass a PY_MATRIX without
+# the floor, which `matrix` refuses. Named on every adopt, never graded.
+[adopt]
+ours = [".github/workflows/verify.yml"]

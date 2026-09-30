@@ -71,7 +71,7 @@ its commands.
 
 | # | check | runs | what must be true |
 |---|---|---|---|
-| 1 | `pin-bumped` | — *(reads the tree)* | the `DEVKIT_VERSION` line in this repo's own makefile names the version of the package that is running. |
+| 1 | `pin-bumped` | — *(reads the tree)* | this repo's `uv.lock` pins the version of the package that is running, and no retired `DEVKIT_VERSION` line is left; a tree still on that git pin is told the move off it. |
 | 2 | `installables-current` | — *(reads the tree)* | every installed file the project has not claimed in `[<op>] ours` is byte-current with what this version ships, or differs only in its project-config header; each that differs is named with the `install-* --diff` that shows it, and what was claimed is counted and named beside it, on every run. |
 | 3 | `config-updated` | — *(reads the tree)* | every devkit.toml section this version reads accepts what this repo declares. |
 | 4 | `hooks-self-test` | `make sdlc ARGS='check hooks'` *(shipped)* | `check hooks` exits 0 — the installed guards still return the verdicts their own corpus asserts. |
@@ -84,7 +84,7 @@ its commands.
 
 **Yours, after the write** (printed as `next:` lines):
 
-- commit the pin bump and every installable you took or hand-applied
+- commit the pin bump (`pyproject.toml` and `uv.lock`) and every installable you took or hand-applied
 
 ## `story` — the checks
 

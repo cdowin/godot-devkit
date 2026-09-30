@@ -1,9 +1,10 @@
 # Makefile.devkit — the gate framework: `check`, the tier seam, `precommit` and
 # `milestone`. `agentic-sdlc install-gates` writes it; edit the source, not this.
 #
-# Your Makefile is two lines plus your own targets:
-#     DEVKIT_VERSION := vX.Y.Z
+# Your Makefile is one line plus your own targets:
 #     include Makefile.devkit
+# The kit is the version your uv.lock pins — `uv add --dev agentic-sdlc==X.Y.Z`,
+# or a dependency bot's PR — run from the project environment, never uvx.
 # Your gates join `check` via `[gates] extra` in devkit.toml. A language kit's
 # tier file (GDK_TIERS_MK, default Makefile.tiers) defines its targets and their
 # `.PHONY`, and sets GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS. make 3.81 is the floor.
@@ -13,13 +14,26 @@ MAKEFLAGS += --warn-undefined-variables --no-print-directory
 .DELETE_ON_ERROR:
 .DEFAULT_GOAL := help
 
-# DEVKIT_VERSION is the per-project pin, set above the include; or set DEVKIT
-# to the command itself and there is nothing to resolve.
+# DEVKIT is the kit uv.lock pins, installed in the project environment, where
+# `uv sync` puts it when it is missing or older than the lock. A lock that does
+# not name the kit stops every target BY NAME, with the command that fixes it.
+# Or set DEVKIT to the command itself and there is nothing to resolve.
+UV            ?= uv
+GDK_VENV      ?= .venv
+GDK_KIT_INDEX := https://cdowin.github.io/agentic-sdlc/simple/
 ifeq ($(origin DEVKIT),undefined)
-ifndef DEVKIT_VERSION
-$(error DEVKIT_VERSION is not set — put `DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit` (or set DEVKIT to the command that runs the package))
+ifneq ($(shell grep -qsx 'name = "agentic-sdlc"' uv.lock && echo locked),locked)
+$(error uv.lock does not name agentic-sdlc, and the lock is the only way this kit is installed. Run `uv add --dev agentic-sdlc==<X.Y.Z> --index agentic-sdlc=$(GDK_KIT_INDEX)` and add `explicit = true` to the [[tool.uv.index]] table it writes (no pyproject.toml? `uv init --bare` first; one that already declares the kit needs only `uv lock`). Or set DEVKIT to the command that runs the package)
 endif
-DEVKIT := uvx --from "git+https://github.com/cdowin/agentic-sdlc@$(DEVKIT_VERSION)" agentic-sdlc
+DEVKIT := $(GDK_VENV)/bin/agentic-sdlc
+GDK_KIT_FRESH = $(shell test -x $(DEVKIT) && test ! uv.lock -nt $(DEVKIT) && echo fresh)
+ifneq ($(GDK_KIT_FRESH),fresh)
+GDK_KIT_SYNC := $(shell echo 'Makefile.devkit: $(UV) sync --frozen, for the kit uv.lock pins' >&2; \
+                  $(UV) sync --frozen >&2 && touch $(DEVKIT))
+ifneq ($(GDK_KIT_FRESH),fresh)
+$(error `$(UV) sync --frozen` did not install $(DEVKIT) — read what uv printed above)
+endif
+endif
 endif
 
 # Where `install-gates` put the shell library; moving it means setting this.
@@ -92,7 +106,7 @@ endef
 
 # Only what this file defines; the tier file declares its own.
 .PHONY: help pm sdlc check precommit milestone \
-        gdk-tiers-none-precommit gdk-tiers-none-milestone
+        gdk-tiers-none-precommit gdk-tiers-none-milestone gdk-tiers-skipped-milestone
 
 help: ## Show this help (authoritative target list)
 	@echo "make <target> — the gate framework from Makefile.devkit, plus this project's tiers and its own"
@@ -122,21 +136,46 @@ sdlc: ## Every verb, at the pin:  make sdlc ARGS='close story <id>'. make exits 
 # roster's own verdict is the last line. Re-entry is refused through
 # GDK_IN_CHECK. The sub-make is `$${MAKE:-make}`, not `$(MAKE)`, so
 # `make -n check` runs nothing.
-check: ## Static gate: the devkit checks + this project's own ([gates] extra)
+#
+# A gate whose inputs are byte-identical to a recorded PASS is reused (#98):
+# `check all` keys each devkit gate on what it reads, and a `[gates] extra`
+# target with `[gates.inputs]` declared runs through `gates-extra --run`, keyed
+# the same way. A `check all` that reused anything and passed creates the
+# file GDK_GATE_UNMEASURED names, and its slot files no cost row.
+#
+# `check pm`'s verdict ends `; <n> close(s) ready to run — <command>` when a
+# close whose checks that need no run pass stands open; GDK_SUM_CLOSES lifts
+# that clause out of the transcript at `$$log`, with a reuse clause after it
+# dropped, and the `[CHECK]` verdict ends with it — a count, never the exit
+# code.
+GDK_SUM_CLOSES = sed -nE '/^\[check:pm\] (PASS|FAIL) /{s/; reused — .*$$//; s/^.*(; [0-9]+ close\(s\) ready to run — .*)$$/\1/p;}' "$$log" | tail -1
+GDK_SUM_CHECK_ALL = printf '%s check(s) PASS%s%s' "$$(grep -acE '^\[check:[a-z-]+\] PASS' "$$log")" \
+                    "$$(grep -acE '^\[check:[a-z-]+\] PASS.*; reused — ' "$$log" | sed -E 's/^0$$//; s/^[0-9]+$$/, & reused/')" \
+                    "$$($(GDK_SUM_CLOSES))"
+
+check: ## Static gate: the devkit checks + this project's own ([gates] extra); an unchanged gate is reused
 	@test -z "$(GDK_IN_CHECK)" || { echo "make check: re-entered through [gates] extra in devkit.toml — a gate target that runs \`make check\` recurses forever; drop it from that list" >&2; exit 2; }
-	@( $(call gdk_gate_sh,check,CHECK,$(GDK_SUM_CHECKS),$(DEVKIT) check all) ); \
-	worst=$$?; failed=; n=0; m=1; \
+	@unmeasured="$${GDK_GATE_REPORT_DIR:-.gate-reports}/.check.unmeasured.$$$$"; rm -f -- "$$unmeasured"; \
+	( export GDK_GATE_UNMEASURED="$$unmeasured"; \
+	  $(call gdk_gate_sh,check,CHECK,$(GDK_SUM_CHECK_ALL),$(DEVKIT) check all) ); \
+	worst=$$?; rm -f -- "$$unmeasured"; failed=; n=0; m=1; \
 	[ "$$worst" -eq 0 ] || { failed="check all"; n=1; }; \
 	extra="$$($(DEVKIT) gates-extra)" || exit $$?; \
 	[ -n "$$extra" ] || exit "$$worst"; \
+	log="$${GDK_GATE_REPORT_DIR:-.gate-reports}/check.log"; closes="$$($(GDK_SUM_CLOSES))"; \
+	reuse="$$($(DEVKIT) gates-extra --inputs)" || exit $$?; \
+	reuse=" $$(echo $$reuse) "; \
 	for target in $$extra; do \
 		m=$$((m + 1)); \
-		$${MAKE:-make} GDK_IN_CHECK=1 "$$target" && continue; \
+		case "$$reuse" in \
+		*" $$target "*) $(DEVKIT) gates-extra --run "$$target" && continue ;; \
+		*) $${MAKE:-make} GDK_IN_CHECK=1 "$$target" && continue ;; \
+		esac; \
 		rc=$$?; n=$$((n + 1)); failed="$${failed:+$$failed, }$$target"; \
 		[ "$$rc" -le "$$worst" ] || worst=$$rc; \
 	done; \
-	if [ "$$n" -eq 0 ]; then echo "[CHECK] PASS — $$m gate(s)"; \
-	else echo "[CHECK] FAIL — $$n of $$m gate(s) failed: $$failed"; fi; \
+	if [ "$$n" -eq 0 ]; then echo "[CHECK] PASS — $$m gate(s)$$closes"; \
+	else echo "[CHECK] FAIL — $$n of $$m gate(s) failed: $$failed$$closes"; fi; \
 	exit "$$worst"
 
 # --- The tier seam ------------------------------------------------------------
@@ -181,6 +220,17 @@ gdk-tiers-none-precommit:
 gdk-tiers-none-milestone:
 	$(call gdk_tiers_none,GDK_MILESTONE_TIERS)
 
+# CI can run a milestone tier as a job of its own: the stock verify.yml runs
+# the interpreter matrix concurrently and sets GDK_MILESTONE_SKIP=matrix. A tier
+# named here leaves `milestone` and the gate SAYS so; a name no milestone tier
+# carries leaves nothing, so the stock workflow is safe on a tree with no matrix.
+GDK_MILESTONE_SKIP    ?=
+GDK_MILESTONE_SKIPPED := $(filter $(GDK_MILESTONE_SKIP),$(GDK_MILESTONE_TIERS))
+GDK_MILESTONE_RUN     := $(filter-out $(GDK_MILESTONE_SKIP),$(GDK_MILESTONE_TIERS))
+
+gdk-tiers-skipped-milestone:
+	@echo "[TIERS] milestone skips [$(strip $(GDK_MILESTONE_SKIPPED))] — GDK_MILESTONE_SKIP names them, so another job runs them or nothing does"
+
 # --- The compositions ---------------------------------------------------------
 # `precommit` and `milestone` run `check` plus the declared tiers as the goals
 # of one sub-make inside a slot of their own name, so the ledger gets a row
@@ -204,5 +254,5 @@ endef
 precommit: $(if $(GDK_PRECOMMIT_TIERS),,gdk-tiers-none-precommit) ## Per-change gate: check + GDK_PRECOMMIT_TIERS
 	$(call gdk_composition,precommit,PRECOMMIT,check $(GDK_PRECOMMIT_TIERS))
 
-milestone: $(if $(GDK_MILESTONE_TIERS),,gdk-tiers-none-milestone) ## Full gate: check + GDK_MILESTONE_TIERS
-	$(call gdk_composition,milestone,MILESTONE,check $(GDK_MILESTONE_TIERS))
+milestone: $(if $(GDK_MILESTONE_TIERS),,gdk-tiers-none-milestone) $(if $(GDK_MILESTONE_SKIPPED),gdk-tiers-skipped-milestone) ## Full gate: check + GDK_MILESTONE_TIERS, less GDK_MILESTONE_SKIP
+	$(call gdk_composition,milestone,MILESTONE,check $(GDK_MILESTONE_RUN))

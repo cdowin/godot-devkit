@@ -26,6 +26,16 @@ Repository = "https://github.com/cdowin/godot-devkit"
 [project.scripts]
 godot-devkit = "godot_devkit.cli:main"
 
+[[tool.uv.index]]
+name = "agentic-sdlc"
+url = "https://cdowin.github.io/agentic-sdlc/simple/"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "agentic-sdlc==1.0.0",
+]
+
 # A repo with no pytest config is a repo where every agent invents its own
 # incantation. `pytest` from the root now means exactly one thing.
 [tool.pytest.ini_options]
@@ -40,3 +50,6 @@ packages = ["src/godot_devkit"]
 # The installables are read at runtime via importlib.resources — they must be
 # in the wheel, not just the sdist.
 artifacts = ["src/godot_devkit/godot/installables/*"]
+
+[tool.uv.sources]
+agentic-sdlc = { index = "agentic-sdlc" }
