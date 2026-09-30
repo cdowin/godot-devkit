@@ -4,7 +4,7 @@ kind: feature
 milestone: "1.4.0"
 name: the runners survive a crowded machine
 status: building
-reviewed:
+reviewed: docs/reviews/2026-09-29-1.4.0-the-runners-survive-a-crowded-machine.md
 depends_on: []
 consumed_by: []
 changelog:

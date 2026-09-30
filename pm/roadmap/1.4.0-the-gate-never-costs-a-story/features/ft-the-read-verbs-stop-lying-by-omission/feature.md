@@ -4,7 +4,7 @@ kind: feature
 milestone: "1.4.0"
 name: the read verbs stop lying by omission
 status: building
-reviewed:
+reviewed: docs/reviews/2026-09-29-1.4.0-the-read-verbs-stop-lying-by-omission.md
 depends_on: []
 consumed_by: []
 changelog:

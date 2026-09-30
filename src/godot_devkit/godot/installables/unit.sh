@@ -155,7 +155,7 @@ disk_test_scripts() {
 # unit_timeout_factor <load_1min> <ncpu> — ceil(load / ncpu) clamped to 1..3 on
 # stdout; non-zero with nothing printed when either reading is not a number.
 unit_timeout_factor() {
-	awk -v l="${1-}" -v n="${2-}" 'BEGIN {
+	LC_ALL=C awk -v l="${1-}" -v n="${2-}" 'BEGIN {
 		if (l !~ /^[0-9]+([.][0-9]+)?$/ || n !~ /^[0-9]+$/ || n + 0 == 0) exit 1
 		f = l / n; c = int(f); if (c < f) c++
 		if (c < 1) c = 1; if (c > 3) c = 3
@@ -171,7 +171,7 @@ unit_timeout() {
 		printf '%s GDK_UNIT_TIMEOUT\n' "$1"
 	elif factor="$(unit_timeout_factor "${2-}" "${3-}")"; then
 		printf '%s load %sx\n' "$((UNIT_TIMEOUT_BASE * factor))" \
-			"$(awk -v l="$2" -v n="$3" 'BEGIN { printf "%.1f", l / n }')"
+			"$(LC_ALL=C awk -v l="$2" -v n="$3" 'BEGIN { printf "%.1f", l / n }')"
 	else
 		printf '%s load unreadable\n' "$UNIT_TIMEOUT_BASE"
 	fi
@@ -182,7 +182,7 @@ unit_timeout() {
 # which a trimmed PATH leaves out.
 machine_load() {
 	local out
-	if out="$(sysctl -n vm.loadavg 2>/dev/null || /usr/sbin/sysctl -n vm.loadavg 2>/dev/null)"; then
+	if out="$(LC_ALL=C sysctl -n vm.loadavg 2>/dev/null || LC_ALL=C /usr/sbin/sysctl -n vm.loadavg 2>/dev/null)"; then
 		printf '%s\n' "$out" | tr -d '{}' | awk '{ print $1 }'
 	elif [ -r /proc/loadavg ]; then
 		awk '{ print $1 }' /proc/loadavg
