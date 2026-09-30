@@ -166,6 +166,7 @@ class RefsScope(unittest.TestCase):
         '\t# lonesome()\n'
         '\tshard_taken.emit(1)\n'
         '\tself.shard_taken.emit(2)\n'
+        '\tshard_taken.connect(on_gear_changed)\n'
         '\t_on_hurt()\n'
         '\trehurt()\n'
         '\n'
@@ -183,7 +184,7 @@ class RefsScope(unittest.TestCase):
     EXPECTED = (
         ('resync_active_variant', ('## definitions (1)', '## call / emit sites (2)'), ()),
         ('lonesome', ('## definitions (1)',), ('## call / emit sites',)),
-        ('shard_taken', ('## definitions (1)', '## call / emit sites (2)'),
+        ('shard_taken', ('## definitions (1)', '## call / emit sites (3)'),
          ('## dynamic',)),
         ('spawn_handler_changed',
          ('## dynamic (untyped receiver) (2)',

@@ -110,6 +110,7 @@ def _call_emit_pattern(symbol: str) -> re.Pattern:
     alternatives = [
         rf'\.{word}\(',              # .name(   — method call
         rf'\b{word}\.emit\(',        # name.emit(
+        rf'(?<![\w.]){word}\.(?:connect|disconnect)\(',  # name.connect( — receiverless (self); a dotted receiver is the dynamic bucket's
         rf'\.connect\(\s*{word}\b',  # .connect(name
     ]
     return re.compile('|'.join(alternatives))
