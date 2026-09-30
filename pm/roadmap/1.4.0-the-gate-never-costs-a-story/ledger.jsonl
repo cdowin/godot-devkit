@@ -39,3 +39,5 @@
 {"ts":"2026-09-30T02:23:59Z","kind":"disposition","grain":"ft-the-integration-tier-boots-once","state":"done","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
 {"ts":"2026-09-30T02:25:44Z","kind":"status","grain":"ft-the-kit-ships-as-a-locked-wheel","from":"building","to":"done","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
 {"ts":"2026-09-30T02:25:44Z","kind":"disposition","grain":"ft-the-kit-ships-as-a-locked-wheel","state":"done","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T02:50:38Z","kind":"status","grain":"1.4.0","from":"building","to":"reviewing","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T02:50:38Z","kind":"disposition","grain":"1.4.0","state":"reviewing","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}

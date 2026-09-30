@@ -2,12 +2,13 @@
 id: "1.4.0"
 kind: milestone
 name: the gate never costs a story
-status: building
+status: reviewing
 depends_on: []
 branch: milestone/1.4.0-the-gate-never-costs-a-story
 mode: parallel
 version: 1.4.0
 changelog:
+reviewed: docs/reviews/2026-09-29-1.4.0-milestone.md
 ---
 
 
