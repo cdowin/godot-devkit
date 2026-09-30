@@ -43,13 +43,16 @@ GDK_UNIT_TEST_GLOB="${GDK_UNIT_TEST_GLOB:-test_*.gd}"
 # `_for_scenario\(|\.start_game\(` is the shape that replaced it). Empty means
 # no guard, and the verdict line says so rather than implying one ran.
 GDK_UNIT_BOOT_MARKERS="${GDK_UNIT_BOOT_MARKERS:-}"
-# Env: GDK_UNIT_TIMEOUT  seconds bounding the run (default 180)
+# Env: GDK_UNIT_TIMEOUT  seconds bounding the run (default: 180, scaled by load)
 #      GDK_GODOT         the engine binary (default `godot`)
 # -----------------------------------------------------------------------------
 
 GATE_TAG="UNIT"
 GATE_SLOT="unit"
-TIMEOUT_SECONDS="${GDK_UNIT_TIMEOUT:-180}"
+# The unscaled bound. With GDK_UNIT_TIMEOUT unset the run gets this times
+# ceil(1-minute load / cpus), clamped to 1..3 — three agent lanes booting Godot
+# at once on one machine tripped a flat 180 s on a tier that takes 85 s alone.
+UNIT_TIMEOUT_BASE=180
 
 # The console summary. GUT's totals block is the counts line; every failing /
 # risky / refused-to-load line is surfaced verbatim, because those are the two
@@ -84,7 +87,8 @@ Env: GDK_UNIT_TEST_ROOT      the tier root (default tests/unit)
      GDK_UNIT_TEST_GLOB      the test-script glob the coverage gate counts
      GDK_UNIT_BOOT_MARKERS   ERE naming your boot entry points (no-boot guard)
      GDK_GUT_CMDLN           res:// path to gut_cmdln.gd
-     GDK_UNIT_TIMEOUT        seconds bounding the run (default 180)
+     GDK_UNIT_TIMEOUT        seconds bounding the run, never scaled (default
+                             180 x ceil(load/cpus), clamped to 1..3)
      GDK_RUNNERS_LIB         path to gdk_runners.sh, relative to this file
      GDK_GODOT               the engine binary (default `godot`)
      VERBOSE=1               stream the transcript to the console too
@@ -145,6 +149,48 @@ disk_test_scripts() {
 		total=$((total + found))
 	done
 	printf '%s\n' "$total"
+}
+
+# --- the timeout: explicit, or scaled by the machine's load ------------------
+# unit_timeout_factor <load_1min> <ncpu> — ceil(load / ncpu) clamped to 1..3 on
+# stdout; non-zero with nothing printed when either reading is not a number.
+unit_timeout_factor() {
+	awk -v l="${1-}" -v n="${2-}" 'BEGIN {
+		if (l !~ /^[0-9]+([.][0-9]+)?$/ || n !~ /^[0-9]+$/ || n + 0 == 0) exit 1
+		f = l / n; c = int(f); if (c < f) c++
+		if (c < 1) c = 1; if (c > 3) c = 3
+		print c }'
+}
+
+# unit_timeout <explicit> <load_1min> <ncpu> — "<seconds> <why>" on stdout. An
+# explicit value is the caller's decision and is never scaled; an unreadable
+# load falls back to the base.
+unit_timeout() {
+	local factor
+	if [ -n "${1-}" ]; then
+		printf '%s GDK_UNIT_TIMEOUT\n' "$1"
+	elif factor="$(unit_timeout_factor "${2-}" "${3-}")"; then
+		printf '%s load %sx\n' "$((UNIT_TIMEOUT_BASE * factor))" \
+			"$(awk -v l="$2" -v n="$3" 'BEGIN { printf "%.1f", l / n }')"
+	else
+		printf '%s load unreadable\n' "$UNIT_TIMEOUT_BASE"
+	fi
+}
+
+# The 1-minute load average and the cpu count — macOS sysctl, then Linux
+# /proc and nproc. Empty when unreadable. sysctl lives in /usr/sbin on macOS,
+# which a trimmed PATH leaves out.
+machine_load() {
+	local out
+	if out="$(sysctl -n vm.loadavg 2>/dev/null || /usr/sbin/sysctl -n vm.loadavg 2>/dev/null)"; then
+		printf '%s\n' "$out" | tr -d '{}' | awk '{ print $1 }'
+	elif [ -r /proc/loadavg ]; then
+		awk '{ print $1 }' /proc/loadavg
+	fi
+}
+machine_cpus() {
+	sysctl -n hw.ncpu 2>/dev/null || /usr/sbin/sysctl -n hw.ncpu 2>/dev/null \
+		|| nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null
 }
 
 # --- --self-test -------------------------------------------------------------
@@ -273,6 +319,22 @@ self_test() {
 
 	rm -rf "$scratch"
 
+	# --- the timeout: the scaling arithmetic, and what is never scaled -------
+	local row expect got
+	for row in '0.80 8|180 load 0.1x' '4.00 4|180 load 1.0x' '5.00 4|360 load 1.2x' \
+		'2.10 1|540 load 2.1x' '40.00 4|540 load 10.0x' ' 8|180 load unreadable' \
+		'2.1 0|180 load unreadable' 'n/a 8|180 load unreadable'; do
+		expect="${row#*|}"; row="${row%%|*}"
+		cases=$((cases + 1))
+		got="$(unit_timeout '' "${row% *}" "${row#* }")"
+		[ "$got" = "$expect" ] \
+			|| { echo "  MISS — load '$row' should give '$expect', got '$got'" >&2; failures=$((failures + 1)); }
+	done
+	cases=$((cases + 1))
+	got="$(unit_timeout 77 40.00 4)"
+	[ "$got" = "77 GDK_UNIT_TIMEOUT" ] \
+		|| { echo "  MISS — an explicit GDK_UNIT_TIMEOUT must never be scaled, got '$got'" >&2; failures=$((failures + 1)); }
+
 	if [ "$failures" -eq 0 ]; then
 		echo "[$GATE_TAG] SELF-TEST OK — $cases case(s)"
 		return 0
@@ -335,6 +397,12 @@ fi
 # user:// sandbox — GUT boots the engine, and the engine writes to user://.
 gdk_sandbox_home
 
+# The bound, and why it is that — printed first, so a HARD_TIMEOUT below reads
+# against a number the run already said out loud.
+read -r TIMEOUT_SECONDS TIMEOUT_WHY \
+	<<< "$(unit_timeout "${GDK_UNIT_TIMEOUT:-}" "$(machine_load)" "$(machine_cpus)")"
+echo "[$GATE_TAG] timeout ${TIMEOUT_SECONDS}s (${TIMEOUT_WHY})"
+
 LOG="$(gdk_gate_log "$GATE_SLOT")"
 # The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
 # one PASS below says otherwise, so a verdict path that forgets to set it files
@@ -373,7 +441,7 @@ printf '%s\n' "$PLAIN" | grep -E "$SUMMARY_PATTERN" | sed 's/^/  /' || true
 if gdk_timeout_is_hang "$GODOT_EXIT"; then
 	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
-		"HARD_TIMEOUT — exceeded ${TIMEOUT_SECONDS}s, killed" "$LOG"
+		"HARD_TIMEOUT — exceeded ${TIMEOUT_SECONDS}s, killed — rerun with GDK_UNIT_TIMEOUT=$((TIMEOUT_SECONDS * 2)) if the machine is loaded" "$LOG"
 	exit 2
 fi
 

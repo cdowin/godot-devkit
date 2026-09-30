@@ -278,6 +278,15 @@ Every runner carries `--help` and a `--self-test` corpus; `make runners-self-tes
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
 
+**Several lanes on one machine.** `unit.sh` bounds its run at 180 s times `ceil(1-minute load /
+cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (load
+1.4x)`); an explicit `GDK_UNIT_TIMEOUT` is used as given, and a `HARD_TIMEOUT` names the value to
+rerun with. Sourcing `gdk_runners.sh` exports `GIT_OPTIONAL_LOCKS=0`, so a gate killed mid-`git
+status` leaves no `.git/index.lock`. A pid counts as dead only on positive evidence (`kill -0`
+says `No such process`, or a visible process table lacks it), so the HOME reaper never deletes a
+peer's live run. Where a sandbox hides pid 1 from `ps`, the library's self-test prints `SKIP — …`
+for its two foreign-pid cases instead of failing them.
+
 **What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `check budget` can
 put a ceiling on each: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
 (`unit` with its GUT test count as the census), and the scenario tiers carry a census of **boots**.
