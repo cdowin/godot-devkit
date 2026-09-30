@@ -9,13 +9,20 @@
 #
 #   release  check out the tag; refuse unless the tag, pyproject.toml's
 #            `version` and `__version__` agree; `uv build`; attach the wheel
-#            and sdist to the GitHub Release. A release that already carries a
-#            wheel is REFUSED by name, never overwritten: a published wheel is
-#            immutable, and uv.lock hashes it.
+#            and sdist to the GitHub Release. A wheel the LIVE index already
+#            lists, or a release that already carries one, is REFUSED by name,
+#            never overwritten: a published wheel is immutable, and uv.lock
+#            hashes it — even after its Release is deleted and the tag moved.
 #   index    regenerate the WHOLE index from every release's assets, each
 #            downloaded and hashed (tools/release/build_index.py), so a lost
 #            run is repaired by the next one.
 #   deploy   publish it to Pages: https://cdowin.github.io/godot-devkit/simple/
+#
+# Concurrency is two groups, so no tag's run is ever dropped: `release` is
+# per TAG (a second run of one tag waits, then is refused), and `index` +
+# `deploy` share `pages`, never cancelled in progress — a pending index or
+# deploy a newer one replaces is superseded by it, since every index is
+# rebuilt from ALL releases.
 #
 # Pages must be enabled with source "GitHub Actions", and the github-pages
 # environment must allow deployments from `v*` tags — both run refs here are
@@ -37,21 +44,21 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 defaults:
   run:
     shell: bash
 
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
+  INDEX_URL: https://cdowin.github.io/godot-devkit/simple/godot-devkit/
 
 jobs:
   release:
     name: Build and attach the wheel
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ inputs.tag || github.ref_name }}
+      cancel-in-progress: false
     outputs:
       wheel: ${{ steps.build.outputs.wheel }}
       wheel_sha256: ${{ steps.build.outputs.wheel_sha256 }}
@@ -94,6 +101,26 @@ jobs:
           echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
           echo "wheel_sha256=$(sha256sum "dist/$wheel" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+      - name: The live index does not list this wheel yet
+        env:
+          WHEEL: ${{ steps.build.outputs.wheel }}
+        run: |
+          set -euo pipefail
+          # A 404 is an index not published yet; any other failure to read it
+          # fails the run — an unread index is not an absent wheel.
+          code=$(curl -sS --retry 3 -o live-index.html -w '%{http_code}' "$INDEX_URL")
+          case "$code" in
+            404) echo "no live index at $INDEX_URL yet — nothing to collide with." ;;
+            200)
+              if grep -qF ">$WHEEL</a>" live-index.html; then
+                echo "::error::$INDEX_URL already lists $WHEEL — a published wheel is never replaced (every consumer's uv.lock hashes it), even after its Release is deleted or its tag moved. Cut a new version instead."
+                exit 1
+              fi
+              echo "$INDEX_URL does not list $WHEEL." ;;
+            *) echo "::error::reading $INDEX_URL returned HTTP $code — cannot prove $WHEEL is unpublished; nothing was attached."
+               exit 1 ;;
+          esac
+
       - name: Attach to the GitHub Release (a re-tag is refused)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -115,6 +142,9 @@ jobs:
     name: Regenerate the index from every release
     needs: release
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -159,6 +189,9 @@ jobs:
     name: Publish to GitHub Pages
     needs: index
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}simple/
