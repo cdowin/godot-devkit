@@ -3,7 +3,7 @@ id: ft-the-diff-slice-boots-what-changed
 kind: feature
 milestone: "1.4.0"
 name: the diff slice boots what changed
-status: building
+status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-diff-slice-boots-what-changed.md
 depends_on: []
 consumed_by: []

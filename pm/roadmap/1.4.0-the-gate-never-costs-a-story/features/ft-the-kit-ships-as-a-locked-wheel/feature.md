@@ -3,7 +3,7 @@ id: ft-the-kit-ships-as-a-locked-wheel
 kind: feature
 milestone: "1.4.0"
 name: the kit ships as a locked wheel
-status: building
+status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-the-kit-ships-as-a-locked-wheel.md
 depends_on: []
 consumed_by: []
