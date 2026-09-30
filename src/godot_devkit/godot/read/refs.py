@@ -4,7 +4,13 @@
 grep can't tell a type-ref from a string/comment match. This finds every
 REAL usage of a `class_name`, method, signal, or a `.gd`/`.tscn`/`.tres`
 path/uid, grouped by kind: definitions, typed refs, call/emit sites,
-preload/load, scene resource refs. Comment-stripped (the capability-scan
+preload/load, scene resource refs — and, in a bucket of its own, the TEXTUAL
+signal hits the typed index cannot resolve (`entity.died.connect(` on an
+untyped `entity`, `emit_signal(&"died")`, `connect("died", …)`). Those are
+not proven references, and they are not nothing either: a zero verdict prints
+only when BOTH buckets are empty, because zero is the answer that gets a
+signal deleted (#19). `refs --retarget` never acts on a dynamic hit.
+Comment-stripped (the capability-scan
 doctrine: everything after the first `#` on a line is dropped before
 matching — pragmatic, not string-literal-aware). Pure parse — never writes,
 never boots Godot.
@@ -136,6 +142,20 @@ def _definition_pattern(symbol: str) -> re.Pattern:
     return re.compile('|'.join(alternatives))
 
 
+def _dynamic_pattern(symbol: str) -> re.Pattern:
+    """A signal reached through a receiver the index cannot type — the
+    textual spellings, owned by no typed arm. `<expr>.name.connect(` is the
+    live-subscriber shape on an untyped parameter; the string forms name the
+    signal as data."""
+    word = re.escape(symbol)
+    alternatives = [
+        rf'\.{word}\.(?:connect|disconnect|emit)\(',       # expr.name.connect(
+        rf'\bemit_signal\(\s*&?["\']{word}["\']',          # emit_signal(&"name"
+        rf'\bconnect\(\s*&?["\']{word}["\']',              # connect("name"
+    ]
+    return re.compile('|'.join(alternatives))
+
+
 PRELOAD_LOAD = re.compile(r'(?:preload|load)\(\s*"([^"]+)"\s*\)')
 
 
@@ -149,9 +169,11 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
     typed_ref_pattern = _typed_ref_pattern(symbol)
     call_emit_pattern = _call_emit_pattern(symbol)
     bare_call_pattern = _bare_call_pattern(symbol)
+    dynamic_pattern = _dynamic_pattern(symbol)
     needle = symbol.lower()
 
-    hits: dict[str, list[Hit]] = {'definition': [], 'typed_ref': [], 'call_emit': [], 'preload_load': []}
+    hits: dict[str, list[Hit]] = {'definition': [], 'typed_ref': [], 'call_emit': [],
+                                  'preload_load': [], 'dynamic': []}
     for path in files:
         rel = _relpath(root, path)
         for lineno, raw in enumerate(path.read_text(encoding='utf-8', errors='replace').split('\n'), 1):
@@ -160,9 +182,11 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
                 continue
             text = stripped.strip()
             defines = definition_pattern.search(stripped) is not None
+            typed = defines
             if defines:
                 hits['definition'].append(Hit('definition', rel, lineno, text))
             if typed_ref_pattern.search(stripped):
+                typed = True
                 hits['typed_ref'].append(Hit('typed_ref', rel, lineno, text))
             # A receiverless `name(` is a call unless this line is where the
             # name is DECLARED — `func name(` and `signal name(` are the
@@ -172,11 +196,18 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
             # arm defers.
             if call_emit_pattern.search(stripped) or (
                     not defines and bare_call_pattern.search(stripped)):
+                typed = True
                 hits['call_emit'].append(Hit('call_emit', rel, lineno, text))
             for match in PRELOAD_LOAD.finditer(stripped):
                 target = match.group(1)
                 if needle in basename(target).lower() or symbol == target:
+                    typed = True
                     hits['preload_load'].append(Hit('preload_load', rel, lineno, text))
+            # A line a typed bucket already counts is not counted again here:
+            # one line is one reference, and the dynamic count must not
+            # inflate a total a reader weighs a delete against.
+            if not typed and dynamic_pattern.search(stripped):
+                hits['dynamic'].append(Hit('dynamic', rel, lineno, text))
     return hits
 
 
@@ -208,7 +239,9 @@ SECTION_TITLES = (
     ('call / emit sites', 'call_emit'),
     ('preload / load', 'preload_load'),
     ('scene resource refs (.tscn/.tres)', 'scene_ref'),
+    ('dynamic (untyped receiver)', 'dynamic'),
 )
+DYNAMIC_KIND = 'dynamic'
 
 
 def run(symbol: str, include_tests: bool) -> int:
@@ -232,7 +265,7 @@ def run(symbol: str, include_tests: bool) -> int:
     hits_by_kind = scan_gd_files(root, symbol, gd_files)
     hits_by_kind['scene_ref'] = scan_scene_refs(root, symbol, scene_files)
 
-    total = 0
+    typed_total = 0
     print(f'# refs: {symbol}')
     # The census, before the hits: a scan narrowed to nothing must not read as
     # a symbol with no references. `census()` is the only way to get the number,
@@ -240,16 +273,24 @@ def run(symbol: str, include_tests: bool) -> int:
     print(f'# {gd_walk.merge(scene_walk).census("file(s) searched")}')
     for title, kind in SECTION_TITLES:
         hits = hits_by_kind[kind]
-        total += len(hits)
+        if kind != DYNAMIC_KIND:
+            typed_total += len(hits)
         if not hits:
             continue
         print(f'\n## {title} ({len(hits)})')
+        if kind == DYNAMIC_KIND:
+            print('# textual hits on a receiver the index cannot type — not '
+                  'proven references; `refs --retarget` does not act on these')
         for hit in hits:
             location = f'{hit.path}:{hit.line}' if hit.line else hit.path
             print(f'  {location}  {hit.text}')
 
-    if total == 0:
+    dynamic_total = len(hits_by_kind[DYNAMIC_KIND])
+    if typed_total == 0 and dynamic_total == 0:
         print('\n(no references found)')
+    elif typed_total == 0:
+        print(f'\n(0 typed references; {dynamic_total} dynamic hit(s) above — '
+              f'read each before calling the symbol unused)')
     return 0
 
 

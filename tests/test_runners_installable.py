@@ -913,6 +913,26 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
 
 
+@pytest.mark.parametrize('toml', [
+    # MN4: a malformed value — a bare string is refused, never iterated.
+    '[checks]\ngodot = "uid"\n',
+    # #28: an unknown gate. The retired line had its own fallback and said
+    # "safe to delete" over a value `check all` refuses at exit 2.
+    '[gates]\nextra = ["godot-check"]\n[checks]\ngodot = ["uid", "tress"]\n',
+])
+def test_a_roster_check_all_refuses_is_exit_2_before_any_write(tmp_path, toml):
+    with consumer_repo(tmp_path) as root:
+        (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+        (root / UID_GUARD).parent.mkdir(parents=True)
+        (root / UID_GUARD).write_text('name: UID Guard\n', encoding='utf-8')
+        with pytest.raises(install.ConfigError) as refused:
+            install.all_roster()
+        code, out, err = run_install()
+        assert code == 2, out + err
+        assert str(refused.value) in err and 'nothing was written' in err, err
+        assert _snapshot(root) == {}, 'a config refusal wrote'
+
+
 def test_diff_prints_and_writes_nothing(tmp_path):
     with consumer_repo(tmp_path) as root:
         code, out, err = run_install('--diff')

@@ -56,6 +56,23 @@ class Spares(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn('[check:rng] PASS — 1 script(s)', out)
 
+    def test_a_draw_api_declared_under_the_engines_names_is_not_a_draw(self) -> None:
+        # #30: the seeded-stream owner exposes `func randf()` & co. The
+        # declaration line is no call, and a bare `randf()` in the script that
+        # declares it is its OWN method; the same bare call in a script that
+        # declares nothing is still the global generator.
+        owner = ('var _rng := RandomNumberGenerator.new()\n'
+                 'func randf() -> float:\n'
+                 '\treturn _rng.randf()\n'
+                 'static func randi_range(lo: int, hi: int) -> int:\n'
+                 '\treturn _rng.randi_range(lo, hi)\n'
+                 'func coin() -> bool:\n'
+                 '\treturn randf() < 0.5\n')
+        self.assertEqual([str(h) for h in rng.scan_text(owner, 'owner.gd')], [])
+        caller = 'func coin() -> bool:\n\treturn randf() < 0.5\n'
+        self.assertEqual([str(h) for h in rng.scan_text(caller, 'caller.gd')],
+                         ['caller.gd:2:coin:return randf() < 0.5'])
+
 
 class TheAllowlist(unittest.TestCase):
     def test_an_entry_silences_only_its_func_and_a_full_list_counts_the_carve_outs(self) -> None:

@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from godot_devkit.godot.format.tscn import parse, parse_text, basename
-from godot_devkit.core.project import repo_root
+from godot_devkit.core.project import repo_root, run_git
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.godot import VENDORED_DEFAULT
 
@@ -97,9 +97,8 @@ def tracked_files(root: Path) -> list[str]:
     free either way (.godot/, headless sandbox dirs, __pycache__, … are
     all gitignored)."""
     try:
-        result = subprocess.run(
-            ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
-            cwd=root, capture_output=True, text=True, check=True)
+        result = run_git(['ls-files', '--cached', '--others', '--exclude-standard'],
+                         cwd=root)
     except (subprocess.CalledProcessError, FileNotFoundError) as err:
         # An empty census here would read as "no orphans" — the reverse of
         # the truth. Refuse rather than lie.

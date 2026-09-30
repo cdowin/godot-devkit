@@ -16,10 +16,10 @@ writes, never boots Godot.
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from dataclasses import dataclass
 
+from godot_devkit.core.project import run_git
 from godot_devkit.godot.format.tscn import (
     REF_ARROW,
     Section,
@@ -173,8 +173,7 @@ def print_diff(old_sections: list[Section], new_sections: list[Section],
 
 
 def read_at_git_ref(path: str, ref: str) -> str:
-    result = subprocess.run(
-        ['git', 'show', f'{ref}:{path}'], capture_output=True, text=True, check=False)
+    result = run_git(['show', f'{ref}:{path}'], check=False)
     if result.returncode != 0:
         # Exit-code contract: a bad ref / not-a-repo is an ENVIRONMENT error
         # (2), never 1 — 1 means "the diff found something".

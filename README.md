@@ -88,7 +88,7 @@ same command twice is a no-op the second time.
 |---|---|
 | `scene <file> [--props] [--paths]` | a `.tscn`/`.tres`'s node tree and resources; `--props` every `[resource]`/`[sub_resource]` property value, packed data elided, each id verbatim — the address the write verbs take |
 | `scene-diff <file> [--git <ref>]` · `scene-diff <old> <new>` | a structural diff — nodes, properties, resources, reparents — keyed the way the write verbs address them |
-| `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind |
+| `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind; signal hits on a receiver the index cannot type (`x.sig.connect(`, `emit_signal(&"sig"`, `connect("sig"`) print under `dynamic (untyped receiver)`, and `(no references found)` prints only when that bucket is empty too |
 | `orphans [--tests]` | tracked files nothing references |
 | `autoloads` | the `project.godot` autoload census, grouped by suffix, layout flagged |
 | `tiles <file> [--layer NAME] [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]` | a `TileMapLayer`'s grid: cell count, bounds, tile-kind histogram, per-column/row counts |
