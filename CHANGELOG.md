@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Runners survive several agent lanes on one machine. The `gdk_runners.sh` self-test no longer
+  re-initialises the host repo under a git hook (#24). `gdk_pid_is_live` counts a pid as dead only
+  on positive evidence (ESRCH), and the self-test prints `SKIP — …` where a sandbox hides pid 1
+  (#31). `unit.sh` scales its 180 s bound with load (up to 3x), prints `[UNIT] timeout Ns (…)`
+  first, and names `GDK_UNIT_TIMEOUT` on a HARD_TIMEOUT (#32). Sourcing the library exports
+  `GIT_OPTIONAL_LOCKS=0` (#35).
+- `refs` prints signal hits on an untyped receiver under a new `dynamic (untyped receiver)` heading,
+  and prints `(no references found)` only when that bucket is empty too (#19). `check rng` no longer
+  flags a `func randf()` declaration, or a script's unqualified call to its own draw-named method
+  (#30). `install-runners` reads `[checks] godot` through the same roster as `check all`, so an
+  unknown or malformed value exits 2 there too (#28). Every git read the package makes runs with
+  `GIT_OPTIONAL_LOCKS=0` (#35).
+- `capture.sh` no longer clears its report dir. Before each run it moves the last `<name>.png` to
+  `previous/<name>.png`. The window opens off screen (`--position`, `GDK_CAPTURE_POSITION`, default
+  `100000,100000`) unless `CAPTURE_VISIBLE=1`. A capture run more than 5 times in 10 minutes prints
+  one `WARN` (#17, #37).
+
 ## v1.3.0 — 2026-09-28
 
 - `install-runners` writes a composite action, `.github/actions/godot-toolchain`, that installs the
