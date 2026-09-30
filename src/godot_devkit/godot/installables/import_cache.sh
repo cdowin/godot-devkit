@@ -33,10 +33,11 @@
 # `rm -rf .godot` rebuild pulled imported textures out from under a game being
 # played from that checkout. So the pass runs in a scratch copy of the project
 # (an APFS/reflink clone where the filesystem has one) under the sandbox runs
-# dir. The copy is the WHOLE project directory but `.git/` and the sandbox dir
-# — gitignored inputs included (an addon a plugin manager installed, generated
-# scripts, override.cfg): a copy that lacks one builds a `.godot/` for a
-# different project, and the swap would install it. Only two things come back:
+# dir. The copy includes Git-ignored runtime inputs (an addon a plugin manager
+# installed, generated scripts, override.cfg), omits `.git` metadata, prunes
+# registered nested worktrees and `.gdignore` trees, and carries `.godot/`
+# separately. A copy that lacks a runtime input builds a cache for a different
+# project, and the swap would install it. Only two things come back:
 #   1. `.godot/` as a whole, swapped in by RENAME — a running game keeps the
 #      old inodes it has open, and no reader ever sees a half-written cache.
 #      The old cache is renamed INTO the scratch copy and dies with it;
@@ -213,16 +214,68 @@ pick_clone_flag() {
 }
 
 # project_file_list — every file under the project root, NUL-separated and
-# relative to it, but `.git/`, `.godot/` (carried separately) and the sandbox
-# dir. NOT git's tracked + untracked-not-ignored set: Godot reads ignored files
-# too (a plugin manager's addons, generated scripts, override.cfg), and a pass
-# that cannot see them writes a class registry missing their class_names — a
-# cache for a different project, which the swap would then install. A clone
-# makes the ignored bulk cheap. copy_listed drops .godot/ and the sandbox dir
+# relative to it, but `.git/`, `.godot/` (carried separately), the sandbox dir,
+# registered nested Git worktrees and directories marked `.gdignore`. NOT
+# git's tracked + untracked-not-ignored set: Godot reads ignored files too (a
+# plugin manager's addons, generated scripts, override.cfg), and a pass that
+# cannot see them writes a class registry for a different project. Ordinary
+# nested clones and submodules can contain real addons, so preserve their files
+# while omitting only `.git` metadata. Traverse sorted paths in Bash so these
+# boundaries are checked before descending, without spawning a per-directory
+# process over a large tree. copy_listed drops `.godot/` and the sandbox dir
 # again whatever the list says.
 project_file_list() {
-	find . \( -path ./.git -o -path "./$IMPORT_DIR" -o -path "./$GDK_SANDBOX_DIRNAME" \) -prune \
-		-o \( -type f -o -type l \) -print0
+	(
+		shopt -s dotglob nullglob
+		LC_ALL=C
+		export LC_ALL
+		local sandbox="${GDK_SANDBOX_DIRNAME:-.headless-userdata}"
+		local root worktree record current entry name candidate registered
+		local -a dirs=(.) entries=() worktrees=()
+		local next=0
+		root="$(pwd -P)" || return 1
+		if command -v git >/dev/null 2>&1 && git -C "$root" rev-parse --git-common-dir >/dev/null 2>&1; then
+			while IFS= read -r -d '' record; do
+				case "$record" in
+					'worktree '*)
+						worktree="${record#worktree }"
+						[ "$worktree" = "$root" ] && continue
+						case "$worktree/" in
+							"$root/"*) worktrees+=("$worktree") ;;
+						esac
+						;;
+				esac
+			done < <(git -C "$root" worktree list --porcelain -z 2>/dev/null)
+		fi
+		while [ "$next" -lt "${#dirs[@]}" ]; do
+			current="${dirs[$next]}"
+			next=$((next + 1))
+			entries=("$current"/*)
+			for entry in ${entries[@]+"${entries[@]}"}; do
+				name="${entry##*/}"
+				[ "$name" = .git ] && continue
+				if [ -d "$entry" ] && [ ! -L "$entry" ]; then
+					case "$entry" in
+						./.git|"./$IMPORT_DIR"|"./$sandbox") continue ;;
+					esac
+					if [ -e "$entry/.gdignore" ] || [ -L "$entry/.gdignore" ]; then
+						continue
+					fi
+					if [ -f "$entry/.git" ] || [ -L "$entry/.git" ]; then
+						candidate="$(cd "$entry" 2>/dev/null && pwd -P)" || candidate=''
+						for registered in ${worktrees[@]+"${worktrees[@]}"}; do
+							if [ "$candidate" = "$registered" ]; then
+								continue 2
+							fi
+						done
+					fi
+					dirs+=("$entry")
+				elif [ -f "$entry" ] || [ -L "$entry" ]; then
+					printf '%s\0' "$entry"
+				fi
+			done
+		done
+	)
 }
 
 # _copy_batch <dest> <dir> <path...> — one cp for paths that share a dir.
@@ -240,6 +293,27 @@ _copy_batch() {
 copy_listed() {
 	local dest="${1:?usage: copy_listed <dest>}" path dir cur='' count=0 rc=0
 	local -a batch=()
+	if command -v rsync >/dev/null 2>&1; then
+		local manifest
+		manifest="$(mktemp "$dest/.gdk-import-cache-files.XXXXXX")" || return 1
+		while IFS= read -r -d '' path; do
+			path="${path#./}"
+			path="${path%/}"
+			case "$path" in
+				''|"$IMPORT_DIR"|"$IMPORT_DIR"/*|"$GDK_SANDBOX_DIRNAME"|"$GDK_SANDBOX_DIRNAME"/*) continue ;;
+			esac
+			# A file deleted between listing and staging has nothing to copy.
+			[ -e "$path" ] || [ -L "$path" ] || continue
+			printf '%s\0' "$path" >> "$manifest" || rc=1
+			count=$((count + 1))
+		done
+		if [ "$rc" -eq 0 ]; then
+			rsync -rltp --from0 --files-from="$manifest" "$PWD/" "$dest/" || rc=1
+		fi
+		rm -f "$manifest" || rc=1
+		printf '%s\n' "$count"
+		return "$rc"
+	fi
 	while IFS= read -r -d '' path; do
 		path="${path#./}"
 		path="${path%/}"
@@ -364,7 +438,7 @@ _st_run() {
 
 self_test() {
 	local scratch stamp out rc failures=0 cases=0
-	local proj script stub before after i stub_pid
+	local proj script stub before after i stub_pid census_before census_after fallback_dest
 
 	# argument handling: --help is 0, an unknown argument is a usage error (2).
 	cases=$((cases + 1))
@@ -492,6 +566,10 @@ printf 'stub-uid-cache\n' > .godot/uid_cache.bin
 printf 'stub-classes\n' > .godot/global_script_class_cache.cfg
 # An engine registers every class_name it can SEE — a gitignored addon too.
 [ ! -f addons/vendored/thing.gd ] || printf 'VendoredThing\n' >> .godot/global_script_class_cache.cfg
+[ -L data/thing-link.tres ] || printf 'MissingSymlink\n' >> .godot/global_script_class_cache.cfg
+[ ! -f addons/vendored/.git/config ] || printf 'VendoredGitMetadata\n' >> .godot/global_script_class_cache.cfg
+[ ! -f vendor/nested-checkout/src/one.gd ] || printf 'NestedAddonSource\n' >> .godot/global_script_class_cache.cfg
+[ ! -f vendor/nested-checkout/.git/config ] || printf 'NestedGitMetadata\n' >> .godot/global_script_class_cache.cfg
 if [ -n "${STUB_MARKER:-}" ]; then
 	printf '%s\n' "$$" > "$STUB_MARKER.tmp" && mv "$STUB_MARKER.tmp" "$STUB_MARKER"
 	exec sleep 30
@@ -518,23 +596,56 @@ SHIM_EOF
 	chmod +x "$scratch/shim/rm"
 
 	proj="$scratch/proj"
-	mkdir -p "$proj/data" "$proj/scripts" "$proj/.godot/imported" "$proj/addons/vendored"
+	mkdir -p "$proj/data" "$proj/scripts" "$proj/.godot/imported" "$proj/addons/vendored" \
+		"$proj/addons/vendored/.git" "$proj/vendor/nested-checkout/.git" \
+		"$proj/vendor/nested-checkout/src" "$proj/vendor/engine-ignored"
 	printf 'config_version=5\n' > "$proj/project.godot"
 	printf '[gd_resource type="Resource"]\nvalue = 1.0\n' > "$proj/data/thing.tres"
+	ln -s thing.tres "$proj/data/thing-link.tres"
 	printf 'extends Node\nclass_name New\n' > "$proj/scripts/new.gd"
 	printf 'extends Node\nclass_name VendoredThing\n' > "$proj/addons/vendored/thing.gd"
-	printf '.godot/\n.headless-userdata/\naddons/vendored/\n' > "$proj/.gitignore"
+	printf '.godot/\n.headless-userdata/\naddons/vendored/\nvendor/nested-checkout/\nvendor/worktree/\nvendor/engine-ignored/\n' > "$proj/.gitignore"
+	: > "$proj/vendor/engine-ignored/.gdignore"
+	printf 'ignored checkout file\n' > "$proj/vendor/nested-checkout/.git/config"
+	printf 'vendored Git metadata\n' > "$proj/addons/vendored/.git/config"
+	printf 'class_name NestedAddon\n' > "$proj/vendor/nested-checkout/src/one.gd"
+	printf 'ignored Godot directory file\n' > "$proj/vendor/engine-ignored/one.gd"
+	for i in {1..300}; do printf 'class_name IgnoredEngine%s\n' "$i" > "$proj/vendor/engine-ignored/source-$i.gd"; done
 	printf 'old-uid-cache\n' > "$proj/.godot/uid_cache.bin"
 	printf 'texture\n' > "$proj/.godot/imported/a.ctex"
 	script="$(_st_install "$proj")"
 	if [ -z "$script" ] \
 		|| ! _st_git -C "$proj" init -q \
-		|| ! _st_git -C "$proj" add project.godot data/thing.tres .gitignore; then
+		|| ! _st_git -C "$proj" add project.godot data/thing.tres .gitignore \
+		|| ! _st_git -C "$proj" -c user.name=GDK -c user.email=gdk@example.invalid commit -qm selftest \
+		|| ! _st_git -C "$proj" worktree add --detach -q "$proj/vendor/worktree" HEAD; then
 		echo "  MISS — could not build the end-to-end project (git, or no gdk_runners.sh beside this file)" >&2
 		rm -rf "$scratch"
 		echo "$TAG SELF-TEST FAIL — the end-to-end cases could not run" >&2
 		return 1
 	fi
+	census_before="$(cd "$proj" && project_file_list | tr -cd '\000' | wc -c | tr -d '[:space:]')"
+	for i in {1..300}; do
+		printf 'class_name NestedWorktree%s\n' "$i" > "$proj/vendor/worktree/extra-$i.gd"
+		printf 'class_name IgnoredEngine%s\n' "$i" > "$proj/vendor/engine-ignored/extra-$i.gd"
+	done
+	census_after="$(cd "$proj" && project_file_list | tr -cd '\000' | wc -c | tr -d '[:space:]')"
+	cases=$((cases + 1))
+	[ "$census_before" = "$census_after" ] \
+		|| { echo "  MISS — registered worktree/.gdignore growth changed the copy census ($census_before → $census_after)" >&2; failures=$((failures + 1)); }
+	census_after="$(cd "$proj" && project_file_list | tr -cd '\000' | wc -c | tr -d '[:space:]')"
+	# Without rsync, the original batched cp fallback still preserves a listed
+	# symlink as a link and reports the same one-path census.
+	cases=$((cases + 1))
+	fallback_dest="$scratch/fallback-copy"
+	mkdir -p "$scratch/no-rsync" "$fallback_dest"
+	ln -s "$(command -v cp)" "$scratch/no-rsync/cp"
+	ln -s "$(command -v mkdir)" "$scratch/no-rsync/mkdir"
+	rc=0
+	out="$(cd "$proj" && GDK_SANDBOX_DIRNAME=.headless-userdata PATH="$scratch/no-rsync" CP_CLONE='' copy_listed "$fallback_dest" \
+		< <(printf 'data/thing-link.tres\0'))" || rc=$?
+	[ "$rc" -eq 0 ] && [ "$out" = 1 ] && [ -L "$fallback_dest/data/thing-link.tres" ] \
+		|| { echo "  MISS — no-rsync fallback did not copy one symlink path (rc=$rc, census='$out')" >&2; failures=$((failures + 1)); }
 	cp "$proj/data/thing.tres" "$scratch/thing.tres.orig"
 
 	# killed mid-pass (#20): SIGTERM while the engine hangs leaves the tree
@@ -569,6 +680,10 @@ SHIM_EOF
 	[ "$(cat "$proj/scripts/new.gd.uid" 2>/dev/null)" = 'uid://stubnew' ] || i="$i the new sidecar did not come back;"
 	[ "$(cat "$proj/.godot/uid_cache.bin" 2>/dev/null)" = 'stub-uid-cache' ] || i="$i .godot/ is not the pass's;"
 	[ -f "$proj/.godot/imported/a.ctex" ] || i="$i the existing cache was not carried into the copy;"
+	printf '%s\n' "$out" | grep -qF "$TAG scratch copy: $census_after paths" \
+		|| i="$i the copy census did not match the pruned traversal ($census_after);"
+	printf '%s\n' "$out" | grep -q 'MissingSymlink' \
+		&& i="$i rsync followed or lost a listed symlink;"
 	printf '%s\n' "$out" | grep -qF "$TAG dropped 1 re-serialised files (import churn): data/thing.tres" \
 		|| i="$i no dropped line naming data/thing.tres;"
 	[ -z "$(ls -A "$proj/.headless-userdata/runs" 2>/dev/null)" ] || i="$i a scratch copy was left behind;"
@@ -576,12 +691,16 @@ SHIM_EOF
 	[ -z "$i" ] \
 		|| { echo "  MISS — a full run:$i output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
 
-	# a GITIGNORED input (an addon a plugin manager installed) is in the copy:
-	# the pass registers its class_name, so the cache swapped into the tree
-	# describes the tree's project, not a smaller one.
+	# GITIGNORED runtime inputs survive: an addon with its own .git metadata
+	# remains importable, and ordinary nested checkout source remains present,
+	# while those nested `.git` metadata files are omitted from the copy.
 	cases=$((cases + 1))
-	grep -qx 'VendoredThing' "$proj/.godot/global_script_class_cache.cfg" 2>/dev/null \
-		|| { echo "  MISS — a gitignored addon was not in the copy: its class_name is missing from the swapped cache" >&2; failures=$((failures + 1)); }
+	if ! grep -qx 'VendoredThing' "$proj/.godot/global_script_class_cache.cfg" 2>/dev/null \
+		|| ! grep -qx 'NestedAddonSource' "$proj/.godot/global_script_class_cache.cfg" 2>/dev/null \
+		|| grep -q 'GitMetadata' "$proj/.godot/global_script_class_cache.cfg" 2>/dev/null; then
+		echo "  MISS — ignored addon/checkout source was lost or nested Git metadata was copied" >&2
+		failures=$((failures + 1))
+	fi
 
 	# interrupted while the OLD cache is deleted (a group SIGINT — a Ctrl-C —
 	# landing on the runner and the rm alike): no `.godot.old*` is left in the
@@ -726,6 +845,7 @@ echo "$TAG project: $REPO_ROOT"
 echo "$TAG sandbox HOME: $HOME"
 
 CP_CLONE="$(pick_clone_flag "$GDK_PROJECT_FILE" "$COPY")"
+if command -v rsync >/dev/null 2>&1; then COPY_METHOD=rsync; else COPY_METHOD="${CP_CLONE:-plain copy}"; fi
 copied="$(project_file_list | copy_listed "$COPY")" || {
 	echo "${C_BAD}$TAG could not build the scratch copy at $COPY${C_OFF}" >&2
 	exit 2
@@ -739,7 +859,7 @@ if [ ! -f "$COPY/$GDK_PROJECT_FILE" ]; then
 	echo "${C_BAD}$TAG the scratch copy holds no $GDK_PROJECT_FILE ($copied paths copied)${C_OFF}" >&2
 	exit 2
 fi
-echo "$TAG scratch copy: $copied paths (${CP_CLONE:-plain copy}) + ${IMPORT_DIR}/ at $COPY"
+echo "$TAG scratch copy: $copied paths ($COPY_METHOD) + ${IMPORT_DIR}/ at $COPY"
 echo "$TAG regenerating $IMPORT_DIR/ (uid map + class_name registry), up to ${TIMEOUT_SECONDS}s…"
 
 # mtime reference for the outcome check AND for what the pass wrote, taken

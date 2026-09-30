@@ -7,7 +7,9 @@ what is on disk — a tracked-but-locally-deleted file used to crash the walk
 """
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from support import temp_repo
 
@@ -18,6 +20,21 @@ DRIFTED = ['project.godot', 'systems/rule.gd', 'systems/rule.gd.uid',
 
 
 class CrossReference(unittest.TestCase):
+    def test_existing_resource_uid_comes_only_from_its_header(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for suffix, header in (('.tres', 'gd_resource'), ('.tscn', 'gd_scene')):
+                path = root / ('target' + suffix)
+                for own_uid in (None, 'uid://dtarget'):
+                    identity = f' uid="{own_uid}"' if own_uid else ''
+                    path.write_text(
+                        f'[{header} format=3{identity}]\n\n'
+                        '[ext_resource type="Script" uid="uid://dscript" '
+                        'path="res://script.gd" id="1"]\n', encoding='utf-8')
+                    index = UidIndex(root)
+                    index._cross_reference = {'res://' + path.name: 'uid://dscript'}
+                    self.assertEqual(index.of('res://' + path.name), own_uid)
+
     def test_skips_a_tracked_but_locally_deleted_file(self) -> None:
         from godot_devkit.core.project import load_config, repo_root
         with temp_repo('uid_repo', only=DRIFTED) as root:

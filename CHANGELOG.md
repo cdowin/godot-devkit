@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Import scratch copies prune explicit Godot-ignored directories and registered nested worktrees before descent. Ignored runtime addons remain inputs.
+- Resource UID lookup reads the target header only. A headerless resource no longer acquires its inner script UID.
+
 ## v1.4.0 — 2026-09-30
 
 **Upgrading.** No Makefile or hook edit is required. The README's install section now shows both
