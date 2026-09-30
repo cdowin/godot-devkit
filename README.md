@@ -250,7 +250,7 @@ tools/dev/runners/unit.sh               the GUT tier, no boot; a census that mus
 tools/dev/runners/integration.sh        the scenario fan-out: --all, --diff <ref>, --system <dir>, --list
 tools/dev/runners/scenario.sh           one scenario, cold, with the cache-recovery ladder
 tools/dev/runners/capture.sh            a headed visual capture to PNG (local, needs a display); the window
-                                        opens off screen unless CAPTURE_VISIBLE=1, and the last PNG of a
+                                        is placed off screen unless CAPTURE_VISIBLE=1 (a desktop may clamp it to the edge), and the last PNG of a
                                         name moves to previous/ for a before/after
 tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed, in a scratch copy:
                                         .godot/ comes back by rename, new .uid/.import sidecars

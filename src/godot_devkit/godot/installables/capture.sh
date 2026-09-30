@@ -175,7 +175,7 @@ loop_warning() {
 	local count
 	count="$(recent_runs "$@")"
 	[ "$count" -gt "$LOOP_WARN_OVER" ] || return 0
-	echo "[$GATE_TAG] $2 WARN — $count runs in the last $((LOOP_WINDOW_SECONDS / 60)) minutes; each headed run opens a window (off screen unless CAPTURE_VISIBLE=1)"
+	echo "[$GATE_TAG] $2 WARN — $count runs in the last $((LOOP_WINDOW_SECONDS / 60)) minutes; each headed run opens a window (placed off screen unless CAPTURE_VISIBLE=1)"
 }
 
 # --- --self-test -------------------------------------------------------------

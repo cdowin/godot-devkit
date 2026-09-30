@@ -15,8 +15,9 @@
   unknown or malformed value exits 2 there too (#28). Every git read the package makes runs with
   `GIT_OPTIONAL_LOCKS=0` (#35).
 - `capture.sh` no longer clears its report dir. Before each run it moves the last `<name>.png` to
-  `previous/<name>.png`. The window opens off screen (`--position`, `GDK_CAPTURE_POSITION`, default
-  `100000,100000`) unless `CAPTURE_VISIBLE=1`. A capture run more than 5 times in 10 minutes prints
+  `previous/<name>.png`. The window is asked to open off screen (`--position`, `GDK_CAPTURE_POSITION`,
+  default `100000,100000`) unless `CAPTURE_VISIBLE=1`; macOS and Windows may clamp part of it back on
+  screen, and it can still take focus. A capture run more than 5 times in 10 minutes prints
   one `WARN` (#17, #37).
 - `make import-cache` runs the editor import pass in a scratch copy of the project (an APFS/reflink
   clone) and never writes the tree's files. `.godot/` comes back by rename. Only new `.uid`/`.import`
