@@ -19,8 +19,9 @@
   default `100000,100000`) unless `CAPTURE_VISIBLE=1`; macOS and Windows may clamp part of it back on
   screen, and it can still take focus. A capture run more than 5 times in 10 minutes prints
   one `WARN` (#17, #37).
-- `make import-cache` runs the editor import pass in a scratch copy of the project (an APFS/reflink
-  clone) and never writes the tree's files. `.godot/` comes back by rename. Only new `.uid`/`.import`
+- `make import-cache` runs the editor import pass in a scratch copy of the whole project (an
+  APFS/reflink clone, gitignored inputs included; only `.git/` stays out) and never writes the tree's
+  files. `.godot/` comes back by rename. Only new `.uid`/`.import`
   sidecars are copied back; other rewrites are dropped and printed as `dropped N re-serialised files
   (import churn): …`. A killed run leaves the tree byte-identical, and a Godot process holding the
   project gets a `WARN` before the swap (#20, #23).

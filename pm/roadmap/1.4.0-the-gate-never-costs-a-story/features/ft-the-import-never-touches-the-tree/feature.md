@@ -3,8 +3,8 @@ id: ft-the-import-never-touches-the-tree
 kind: feature
 milestone: "1.4.0"
 name: the import never touches the tree
-status: building
-reviewed:
+status: done
+reviewed: docs/reviews/2026-09-29-1.4.0-the-import-never-touches-the-tree.md
 depends_on: []
 consumed_by: []
 changelog:
