@@ -26,13 +26,14 @@
 # stale PNG to pass for a fresh one.
 #
 # OFF SCREEN BY DEFAULT. The boot passes `--position <x>,<y>`
-# (GDK_CAPTURE_POSITION, default -10000,-10000), so the window exists and
+# (GDK_CAPTURE_POSITION, default 100000,100000), so the window exists and
 # rasterizes out of view instead of landing on the developer's screen and
 # taking focus; CAPTURE_VISIBLE=1 omits the flag, to watch. CAVEAT, from
 # reading Godot 4's source rather than a display: the desktop display servers
 # (macOS and Windows at least) CLAMP a new window's position into the screen's
 # usable rect, so there an off-screen position may land at the screen's edge
-# instead. Godot 4 has no command-line flag that stops the window taking focus
+# instead. The default is bottom-RIGHT for that reason: a clamp there leaves
+# most of the window past the edge, where a top-left clamp would show it all. Godot 4 has no command-line flag that stops the window taking focus
 # — the documented mechanism is the project setting
 # display/window/size/no_focus, which lives in project.godot (or an
 # override.cfg), and this wrapper does not write the consumer's project files.
@@ -58,7 +59,7 @@ REPO_ROOT_FROM_HERE="../../.."
 GDK_SCENARIO_SOURCE_DIR="${GDK_SCENARIO_SOURCE_DIR:-tests/integration}"
 GDK_CAPTURE_REPORT_DIR="${GDK_CAPTURE_REPORT_DIR:-.capture-reports}"
 GDK_SCENARIO_USER_ARG="${GDK_SCENARIO_USER_ARG:---scenario}"
-GDK_CAPTURE_POSITION="${GDK_CAPTURE_POSITION:--10000,-10000}"
+GDK_CAPTURE_POSITION="${GDK_CAPTURE_POSITION:-100000,100000}"
 # Env: GDK_CAPTURE_TIMEOUT  seconds bounding the headed boot (default 120)
 #      GDK_GODOT            the engine binary (default `godot`)
 #      CAPTURE_VISIBLE=1    boot the window on screen (omit --position)
@@ -95,7 +96,7 @@ CAPTURE_VISIBLE=1. A name run more than 5 times in 10 minutes prints one WARN.
 
 Env: GDK_CAPTURE_REPORT_DIR   where the PNGs land (gitignore it)
      GDK_CAPTURE_TIMEOUT      seconds bounding the boot (default 120)
-     GDK_CAPTURE_POSITION     where the window opens (default -10000,-10000)
+     GDK_CAPTURE_POSITION     where the window opens (default 100000,100000)
      CAPTURE_VISIBLE          1 = open the window on screen (no --position)
      GDK_SCENARIO_SOURCE_DIR  where capture scenarios live
      GDK_SCENARIO_USER_ARG    the user arg carrying the scenario name
@@ -297,8 +298,8 @@ self_test() {
 	rc=0; (cd "$repo" && env -u CAPTURE_VISIBLE -u GDK_CAPTURE_POSITION -u GDK_RUNNERS_LIB \
 		PATH="$stub:$PATH" GDK_GODOT=godot bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
 	out="$(tr '\n' ' ' < "$scratch/argv" 2>/dev/null)"
-	[ "$rc" -eq 0 ] && [ "${out#*--position -10000,-10000 --}" != "$out" ] \
-		|| { echo "  MISS — the default boot should carry --position -10000,-10000 (rc $rc, argv: $out)" >&2; failures=$((failures + 1)); }
+	[ "$rc" -eq 0 ] && [ "${out#*--position 100000,100000 --}" != "$out" ] \
+		|| { echo "  MISS — the default boot should carry --position 100000,100000 (rc $rc, argv: $out)" >&2; failures=$((failures + 1)); }
 
 	cases=$((cases + 1))
 	rm -f "$scratch/argv"
