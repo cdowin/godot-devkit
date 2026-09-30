@@ -35,16 +35,16 @@ both, the legacy pin runs, as it did before the lock existed, and `make` warns y
 time. `GODOT_DEVKIT` set to a command overrides both.
 
 ```make
-DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.3.0     # this kit, the legacy pin — omit it when uv.lock pins the kit
+DEVKIT_VERSION       := v0.17.0      # agentic-sdlc — the framework and the SDLC
+GODOT_DEVKIT_VERSION := v1.4.0     # this kit, the legacy pin — omit it when uv.lock pins the kit
 include Makefile.devkit
 ```
 
 Then write the two files the include reads, and join the gates to `make check`:
 
 ```sh
-uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.11.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.3.0" godot-devkit install-runners  # Makefile.tiers + runners
+uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.17.0" agentic-sdlc install-gates    # Makefile.devkit
+uvx --from "git+https://github.com/cdowin/godot-devkit@v1.4.0" godot-devkit install-runners  # Makefile.tiers + runners
 ```
 
 ```toml
