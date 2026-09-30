@@ -3,7 +3,7 @@ id: ft-a-capture-keeps-its-before-frame-off-screen
 kind: feature
 milestone: "1.4.0"
 name: a capture keeps its before frame off screen
-status: building
+status: done
 reviewed: docs/reviews/2026-09-29-1.4.0-a-capture-keeps-its-before-frame-off-screen.md
 depends_on: []
 consumed_by: []
