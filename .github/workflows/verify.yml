@@ -6,20 +6,31 @@
 # tracked file that only exists where it is wanted, the way the arming step
 # is. After this file is written it is YOURS: edit it here; re-installing
 # needs --force, and `--diff` shows what a re-install would change.
+#
+# CI is the one confirmation at merge: the hooks and belts already run the
+# gates on every commit, so this runs once per pull request into main, not
+# again on the push that merges it. There is no `paths-ignore`, because a
+# REQUIRED check that is skipped blocks the merge. By design, nothing
+# re-verifies the merge commit: the check ran on the pull request's tree, and
+# the ruleset's `strict` is false, so main may move after that run.
 name: verify
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
 
+# A new push to the same pull request cancels the run it makes stale.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The PM and doc gates read worktrees, branches and tracked files.
           fetch-depth: 0
@@ -27,7 +38,20 @@ jobs:
         # `core.hooksPath` is repo-local config a fresh checkout never has.
         if: hashFiles('tools/setup-hooks.sh') != ''
         run: bash tools/setup-hooks.sh
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Install the pinned shellcheck
+        # `[shell] shellcheck_version` pins the shellcheck `check shell` may
+        # run; this installs that release, so a local pass is a CI pass. The
+        # pin is read through the tool (`check shell --pin`); unset, it prints
+        # an empty line and this step installs nothing.
+        if: hashFiles('devkit.toml') != ''
+        run: |
+          pin="$(make -s sdlc ARGS='check shell --pin')"
+          if [ -n "$pin" ]; then
+            curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${pin}/shellcheck-v${pin}.linux.x86_64.tar.gz" \
+              | tar -xz -C "$RUNNER_TEMP"
+            echo "$RUNNER_TEMP/shellcheck-v${pin}" >> "$GITHUB_PATH"
+          fi
       # --- your toolchain goes here -----------------------------------------
       #   - name: Install the linters this project's gate shells out to
       #     if: hashFiles('<a file only this kind of project has>') != ''
@@ -42,8 +66,9 @@ jobs:
         run: make milestone
       - name: keep the gate transcripts of a red run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gate-reports
           path: .gate-reports/
           if-no-files-found: ignore
+          retention-days: 3

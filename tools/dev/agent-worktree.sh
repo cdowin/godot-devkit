@@ -5,8 +5,11 @@
 #   new [--no-warm] <slug> [base]  branch <BRANCH_PREFIX><slug> + worktree at
 #                                  <WORKTREE_PARENT>/<slug>, caches pre-warmed,
 #                                  scope marker written; prints the absolute path
-#   done <slug>                    refuse on uncommitted work, keep an unmerged
-#                                  branch, then remove worktree and branch
+#   done <slug>                    carry appended CARRY_ROWS rows to the main
+#                                  checkout, refuse on any other uncommitted
+#                                  work, keep a branch merged into neither its
+#                                  base nor the mainline, then remove worktree
+#                                  and branch
 #   list                           active worktrees, cross-checked with git
 # Run from anywhere in the repo. `set -uo pipefail`, no -e: exit codes are read.
 set -uo pipefail
@@ -25,6 +28,10 @@ WARM_SIDECAR_GLOB=""
 FALLBACK_BASE=""
 # The PM CLI as `make pm`; a project calling the CLI directly replaces the array.
 PM_CMD=(make -s pm)
+# Append-only row files (a glob; `*` spans directories) whose uncommitted rows
+# `done` appends to the same path in the main checkout rather than refusing on.
+# Keep in step with `[pm] roadmap_dir`.
+CARRY_ROWS="pm/roadmap/*.jsonl"
 # -----------------------------------------------------------------------------
 
 # A header carried from an older install may lack a key: it runs at its stock value.
@@ -35,6 +42,7 @@ declare -p WARM_DIRS >/dev/null 2>&1 || WARM_DIRS=()
 declare -p WARM_SIDECAR_GLOB >/dev/null 2>&1 || WARM_SIDECAR_GLOB=""
 declare -p FALLBACK_BASE >/dev/null 2>&1 || FALLBACK_BASE=""
 declare -p PM_CMD >/dev/null 2>&1 || PM_CMD=(make -s pm)
+declare -p CARRY_ROWS >/dev/null 2>&1 || CARRY_ROWS="pm/roadmap/*.jsonl"
 
 # An empty FALLBACK_BASE is READ from the remote's HEAD, never guessed. A remote
 # with no HEAD (a `git remote add`, not a clone) leaves the name `origin/HEAD`,
@@ -198,6 +206,21 @@ cmd_new() {
 	echo "$abs_path"
 }
 
+# rows_past_head <tree> <rel> <out> — the bytes <tree>/<rel> holds past HEAD's
+# copy (all of them where HEAD has none), into <out>. Returns 1 when HEAD's copy
+# is not a prefix of the file: a row was changed or dropped, not appended.
+rows_past_head() {
+	local tree="$1" rel="$2" out="$3" size
+	[ -f "${tree}/${rel}" ] || return 1
+	git -C "$tree" cat-file blob "HEAD:${rel}" >"${out}.head" 2>/dev/null || : >"${out}.head"
+	size="$(wc -c <"${out}.head" | tr -d ' ')"
+	[ "$(wc -c <"${tree}/${rel}" | tr -d ' ')" -ge "$size" ] || return 1
+	# `head -c` then a whole-file `cmp`: BSD `cmp -n` reports EOF inside its
+	# limit, and BSD `head -c 0` is an error.
+	[ "$size" -eq 0 ] || head -c "$size" "${tree}/${rel}" | cmp -s - "${out}.head" || return 1
+	tail -c "+$((size + 1))" "${tree}/${rel}" >"$out"
+}
+
 cmd_done() {
 	local slug="${1:-}"
 	validate_slug "$slug"
@@ -222,22 +245,96 @@ cmd_done() {
 	planted_dirs="${planted_dirs%|}"
 	planted_roots="$(printf '%s|' ${WARM_DIRS[@]+"${WARM_DIRS[@]}"})"
 	planted_roots="${planted_roots%|}"
-	local dirty
-	dirty="$(git -C "$abs_path" status --porcelain --untracked-files=all 2>/dev/null \
+	local status ignored=""
+	status="$(git -C "$abs_path" status --porcelain --untracked-files=all 2>/dev/null \
 		| grep -vE "^.. (${SCOPE_MARKER}|${planted_dirs})\$" \
 		| grep -vE "^.. (${planted_roots})\$" || true)"
+	# A gitignored row file is never in `status`, and `worktree remove --force`
+	# would delete it with its rows: it is listed, as `!!`, to be carried.
+	if [ -n "$CARRY_ROWS" ]; then
+		local within="${CARRY_ROWS%%\**}"
+		ignored="$(git -C "$abs_path" ls-files --others --ignored --exclude-standard \
+			-- "${within:-.}" 2>/dev/null | sed 's/^/!! /')"
+	fi
+
+	# Rows APPENDED to a CARRY_ROWS file are the lane's telemetry, not its work:
+	# they go to the main checkout. A row changed or dropped is work, and refuses.
+	CARRY_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-worktree.XXXXXX")" \
+		|| die "cannot make a scratch directory to carry rows through"
+	trap 'rm -rf "$CARRY_TMP"' EXIT
+	local line rel dirty="" carried=()
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		rel="${line:3}"
+		case "${line:0:2}" in
+			" M" | "M " | "MM" | "A " | "AM" | "??" | "!!")
+				# shellcheck disable=SC2254  # CARRY_ROWS is a glob, matched as one
+				case "$rel" in
+					$CARRY_ROWS)
+						if rows_past_head "$abs_path" "$rel" "${CARRY_TMP}/${#carried[@]}"; then
+							carried+=("$rel")
+						else
+							# Never silently removed with the tree, gitignored or not.
+							dirty="${dirty}${line}"$'\n'
+						fi
+						continue
+						;;
+				esac
+				;;
+		esac
+		[ "${line:0:2}" = "!!" ] || dirty="${dirty}${line}"$'\n'
+	done <<< "${status}
+${ignored}"
 	if [ -n "$dirty" ]; then
 		echo "agent-worktree: REFUSING to remove ${slug} — uncommitted work in the worktree:" >&2
-		printf '%s\n' "$dirty" | sed 's/^/    /' >&2
+		printf '%s' "$dirty" | sed 's/^/    /' >&2
 		die "commit or discard it in ${abs_path}, then re-run 'done ${slug}'"
 	fi
 
-	# An unmerged branch is kept, loudly; committed work is never dropped.
-	local unmerged=0
+	# Appended to the same path in the main checkout, then the lane's copy is
+	# reset from HEAD — so a re-run after any later refusal carries nothing twice.
+	local i=0 dest suffix rows
+	while [ "$i" -lt "${#carried[@]}" ]; do
+		rel="${carried[$i]}"
+		dest="${MAIN_ROOT}/${rel}"
+		suffix="${CARRY_TMP}/${i}"
+		rows="$(wc -l <"$suffix" | tr -d ' ')"
+		if [ -s "$suffix" ]; then
+			mkdir -p "$(dirname "$dest")" \
+				|| die "cannot create $(dirname "$dest") to carry ${rel} — nothing removed"
+			if [ -s "$dest" ] && [ -n "$(tail -c1 "$dest")" ] && [ -n "$(head -c1 "$suffix")" ]; then
+				printf '\n' >>"$dest"
+			fi
+			cat "$suffix" >>"$dest" \
+				|| die "cannot append ${rel} to the main checkout — nothing removed"
+		fi
+		if git -C "$abs_path" cat-file -e "HEAD:${rel}" 2>/dev/null; then
+			git -C "$abs_path" checkout -q HEAD -- "$rel" \
+				|| die "cannot reset ${rel} in ${abs_path} from HEAD — its rows are already in the main checkout"
+		else
+			git -C "$abs_path" rm -q --cached --ignore-unmatch -- "$rel" >/dev/null 2>&1
+			rm -f "${abs_path}/${rel}"
+		fi
+		echo "agent-worktree: carried ${rows} row(s) of ${rel} into the main checkout" >&2
+		i=$((i + 1))
+	done
+
+	# Merged into the base it was cut from, or into the mainline: after a release
+	# no milestone is in progress, and a lane that landed through main is merged.
+	# One merged into neither is kept, loudly; committed work is never dropped.
+	local unmerged=0 ref into=""
 	if git show-ref --verify --quiet "refs/heads/${branch}"; then
-		if ! git merge-base --is-ancestor "$branch" "$base" 2>/dev/null; then
+		for ref in "$base" "$FALLBACK_BASE"; do
+			if git merge-base --is-ancestor "$branch" "$ref" 2>/dev/null; then
+				into="$ref"
+				break
+			fi
+		done
+		if [ -z "$into" ]; then
 			unmerged=1
-			echo "agent-worktree: WARNING — ${branch} is NOT merged into ${base}." >&2
+			local named="$base"
+			[ "$FALLBACK_BASE" = "$base" ] || named="${base} or ${FALLBACK_BASE}"
+			echo "agent-worktree: WARNING — ${branch} is NOT merged into ${named}." >&2
 			echo "  Removing the worktree but KEEPING the branch so committed work is not lost." >&2
 			echo "  Re-run 'done ${slug}' after merging, or delete the branch by hand if abandoning." >&2
 		fi
@@ -248,8 +345,10 @@ cmd_done() {
 		|| die "git worktree remove failed for ${abs_path}"
 
 	if [ "$unmerged" -eq 0 ] && git show-ref --verify --quiet "refs/heads/${branch}"; then
-		git branch -d "$branch" >/dev/null \
-			|| echo "agent-worktree: note — branch ${branch} not deleted (git branch -d declined)" >&2
+		# `-D` on a merge PROVEN above against a named ref: `-d` asks HEAD, and the
+		# main checkout's HEAD may sit behind the mainline the lane landed in.
+		git branch -D "$branch" >/dev/null \
+			|| echo "agent-worktree: note — branch ${branch} not deleted (git branch -D declined)" >&2
 		echo "agent-worktree: removed worktree + deleted merged branch ${branch}" >&2
 	else
 		echo "agent-worktree: removed worktree for ${slug} (branch ${branch} retained)" >&2

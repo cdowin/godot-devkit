@@ -119,7 +119,7 @@ cd "$REPO_ROOT"
 # No Makefile, no gate: fail open.
 [ -f Makefile ] || exit 0
 
-# Scope the unit tier to the changed-system slices; no mapping means the whole tier.
+# Scope the unit tier to the changed-system slices; no mapping means no unit tier.
 UNIT_SLICES=""
 base_branch="$DEFAULT_BASE"
 if [ -f "${REPO_ROOT}/${SCOPE_MARKER}" ]; then
@@ -133,15 +133,25 @@ if [ -z "$base_branch" ]; then
 	[ -n "$base_branch" ] || base_branch="origin/HEAD"
 fi
 if ! git rev-parse --verify --quiet "$base_branch" >/dev/null 2>&1; then
-	echo "cc-stop-gate: base '${base_branch}' does not resolve — running the WHOLE unit tier (set DEFAULT_BASE in tools/hooks/cc-stop-gate.sh, or the marker's base=)" >&2
+	echo "cc-stop-gate: base '${base_branch}' does not resolve — no unit slice can be named, so only the static gate runs (set DEFAULT_BASE in tools/hooks/cc-stop-gate.sh, or the marker's base=)" >&2
+	GATE_UNIT=(true)
 else
+	# Every path COMPONENT of a changed file is a candidate slice: src/billing/x.py
+	# names `billing`, lib/core/parser/y.py names `parser`. Only a component
+	# that is a ${UNIT_SLICE_ROOT}/<slice> directory counts.
 	changed_dirs="$(git diff --name-only "$base_branch"...HEAD 2>/dev/null \
-		| awk -F/ 'NF>1 {print $1}' | sort -u)"
+		| tr '/' '\n' | sort -u)"
 	for d in $changed_dirs; do
-		if [ -d "${UNIT_SLICE_ROOT}/$d" ]; then
+		if [ -n "$d" ] && [ -d "${UNIT_SLICE_ROOT}/$d" ]; then
 			UNIT_SLICES="${UNIT_SLICES:+$UNIT_SLICES }$d"
 		fi
 	done
+	# No slice maps to the change: run NO unit tier. The merge's own rung is the
+	# proof; a whole tier on every agent stop was measured at 113 runs in 8 hours,
+	# all green, on one consumer.
+	if [ -z "$UNIT_SLICES" ]; then
+		GATE_UNIT=(true)
+	fi
 fi
 
 # Captured so the agent gets the failure text; mktemp without -t, which BSD treats as a prefix.

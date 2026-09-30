@@ -36,8 +36,10 @@ export GDK_LEDGER_CMD ?= $(DEVKIT)
 
 # Arguments, overridden on the command line:
 #   ARGS — passthrough              make sdlc ARGS='dispatch --grain <id>'
-# Read with $(value ARGS), so a `$` in free text is never make's to expand; the
-# recipe's shell parses it once more, so quote free text in single quotes.
+# Read with $(value ARGS), so a `$` in free text is never make's to expand, and
+# handed to the verb through the ENVIRONMENT (AGENTIC_SDLC_ARGS), never spliced
+# into the recipe's shell text: the CLI splits it with shell-style quoting, so
+# `(`, `,` and `$` pass as typed. Write an apostrophe in a name as \'.
 # The verb runs with ARGS unset and MAKEFLAGS emptied: a sub-make a belt spawns
 # never sees your ARGS, through the environment or through MAKEFLAGS. Only the
 # `pm` and `sdlc` recipes drop it; your own targets still see `$ARGS`.
@@ -64,8 +66,14 @@ GDK_SUM_TAIL   := { grep -aE '^\[[A-Za-z][A-Za-z:_-]*\] ' "$$log" || tail -1 "$$
 # `$$log` in the summary, census and failure excerpt is THIS run's transcript,
 # never a slot a concurrent run of the same gate is appending to, and the slot
 # holds the last whole run to finish. Watch a run in flight at `<slot>.*`.
+# `gdk_gate_sh` is the same text with no `@`, for a recipe that runs it inside
+# a larger shell line (`check`); it reads the positionals of the call around it.
 define gdk_gate
-@set -o pipefail; . $(GDK_GATE_LIB); \
+@$(gdk_gate_sh)
+endef
+
+define gdk_gate_sh
+set -o pipefail; . $(GDK_GATE_LIB); \
 slot="$$(gdk_gate_log $(1))"; log="$$slot.$$$$"; : > "$$log"; \
 gdk_on_exit 'rm -f -- "$$log"'; \
 gdk_gate_capture "$$log" -- $(4); \
@@ -96,22 +104,40 @@ help: ## Show this help (authoritative target list)
 	@echo 'Args: ARGS="…"  VERBOSE=1     Tiers: $(GDK_TIERS_MK) -> precommit=[$(strip $(GDK_PRECOMMIT_TIERS))] milestone=[$(strip $(GDK_MILESTONE_TIERS))]'
 	@echo 'Gates print ONE verdict line naming .gate-reports/<gate>.log; VERBOSE=1 streams it.'
 
+pm sdlc: export AGENTIC_SDLC_ARGS = $(value ARGS)
+
 pm: ## PM-tree CLI (the ONLY sanctioned status transition):  make pm ARGS='story building <id>'
-	@unset ARGS; MAKEFLAGS= $(DEVKIT) pm $(if $(value ARGS),$(value ARGS),--help)
+	@unset ARGS; MAKEFLAGS= $(DEVKIT) pm $(if $(value ARGS),,--help)
 
 sdlc: ## Every verb, at the pin:  make sdlc ARGS='close story <id>'. make exits 2 on any failure; the verb's own exit code is the N in make's "Error N"
-	@unset ARGS; MAKEFLAGS= $(DEVKIT) $(if $(value ARGS),$(value ARGS),--help)
+	@unset ARGS; MAKEFLAGS= $(DEVKIT) $(if $(value ARGS),,--help)
 
 # --- Aggregate gates ----------------------------------------------------------
 # `check` is the devkit roster then this project's `[gates] extra`, read once
-# by the CLI (a bad value exits 2 rather than narrowing the gate). Re-entry is
-# refused through GDK_IN_CHECK. The sub-make is `$${MAKE:-make}`, not
-# `$(MAKE)`, so `make -n check` runs nothing.
+# by the CLI (a bad value exits 2 rather than narrowing the gate). Every gate
+# runs; a red one does not stop the next. With extras declared, the LAST line
+# is the verdict over all of them, and the exit is the worst exit any gate
+# gave: `[CHECK] PASS — <m> gate(s)` or `[CHECK] FAIL — <n> of <m> gate(s)
+# failed: <name>, …`, where `check all` counts as one gate. With none, the
+# roster's own verdict is the last line. Re-entry is refused through
+# GDK_IN_CHECK. The sub-make is `$${MAKE:-make}`, not `$(MAKE)`, so
+# `make -n check` runs nothing.
 check: ## Static gate: the devkit checks + this project's own ([gates] extra)
 	@test -z "$(GDK_IN_CHECK)" || { echo "make check: re-entered through [gates] extra in devkit.toml — a gate target that runs \`make check\` recurses forever; drop it from that list" >&2; exit 2; }
-	$(call gdk_gate,check,CHECK,$(GDK_SUM_CHECKS),$(DEVKIT) check all)
-	@extra="$$($(DEVKIT) gates-extra)" || exit $$?; \
-	[ -z "$$extra" ] || $${MAKE:-make} GDK_IN_CHECK=1 $$extra
+	@( $(call gdk_gate_sh,check,CHECK,$(GDK_SUM_CHECKS),$(DEVKIT) check all) ); \
+	worst=$$?; failed=; n=0; m=1; \
+	[ "$$worst" -eq 0 ] || { failed="check all"; n=1; }; \
+	extra="$$($(DEVKIT) gates-extra)" || exit $$?; \
+	[ -n "$$extra" ] || exit "$$worst"; \
+	for target in $$extra; do \
+		m=$$((m + 1)); \
+		$${MAKE:-make} GDK_IN_CHECK=1 "$$target" && continue; \
+		rc=$$?; n=$$((n + 1)); failed="$${failed:+$$failed, }$$target"; \
+		[ "$$rc" -le "$$worst" ] || worst=$$rc; \
+	done; \
+	if [ "$$n" -eq 0 ]; then echo "[CHECK] PASS — $$m gate(s)"; \
+	else echo "[CHECK] FAIL — $$n of $$m gate(s) failed: $$failed"; fi; \
+	exit "$$worst"
 
 # --- The tier seam ------------------------------------------------------------
 # The kit's tier lists, read and guarded at parse time.
