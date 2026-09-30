@@ -250,7 +250,9 @@ tools/dev/runners/unit.sh               the GUT tier, no boot; a census that mus
 tools/dev/runners/integration.sh        the scenario fan-out: --all, --diff <ref>, --system <dir>, --list
 tools/dev/runners/scenario.sh           one scenario, cold, with the cache-recovery ladder
 tools/dev/runners/capture.sh            a headed visual capture to PNG (local, needs a display)
-tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed
+tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed, in a scratch copy:
+                                        .godot/ comes back by rename, new .uid/.import sidecars
+                                        are copied back, other rewrites are dropped and counted
 tools/dev/runners/hermetic_run_scan.sh  a headless run's sandbox HOME self-destructs
 tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw engine boot
 .github/actions/godot-toolchain/action.yml

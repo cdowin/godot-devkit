@@ -7,8 +7,8 @@
 # autoload stack against whatever `user://` resolves to, so it must never run
 # without the HOME sandbox. The rebuild itself is `gdk_rebuild_import_cache`
 # (gdk_runners.sh); this file is the sanctioned ENTRY POINT that owns
-# everything around it — the sandbox home, the bound, the outcome check, and
-# the tree-churn report. Without it the only spelling is a hand-typed
+# everything around it — the sandbox home, the scratch copy, the bound, the
+# outcome check, and the report. Without it the only spelling is a hand-typed
 # `source gdk_runners.sh && gdk_rebuild_import_cache`, whose sandbox depends on
 # the typist ALSO remembering `gdk_sandbox_home` first — and a developer duly
 # ran the unsandboxed half against live player data. The engine-boot guard
@@ -26,18 +26,28 @@
 #   - after editing a `.png`/`.tres` asset, before a screenshot capture —
 #     otherwise the capture renders the OLD art.
 #
-# THE PASS WRITES INTO THE TREE, in two very different ways, so the run ends by
-# listing them apart:
-#   - `.uid` sidecars for new scripts — the point of the exercise. Commit them.
-#   - re-serialized `.tres`/`.tscn` with no semantic change — churn. Diff it,
-#     then revert it; never commit it. (`project.godot` is the exception: the
-#     run restores that one itself when the only change is re-serialization —
-#     see gdk_restore_project_file.)
+# THE PASS RUNS IN A COPY, NEVER IN THE TREE. An editor pass re-serialises
+# authored `.tres`/`.tscn` (values normalised, `ext_resource` reordered,
+# sub-resources extracted to new files). Run in the working tree, a KILLED pass
+# left 100+ tracked files rewritten with nothing to undo them, and an
+# `rm -rf .godot` rebuild pulled imported textures out from under a game being
+# played from that checkout. So the pass runs in a scratch copy of the project
+# (an APFS/reflink clone where the filesystem has one) under the sandbox runs
+# dir, and only two things come back:
+#   1. `.godot/` as a whole, swapped in by RENAME — a running game keeps the
+#      old inodes it has open, and no reader ever sees a half-written cache;
+#   2. `.uid` / `.import` sidecars the pass created that the tree does NOT
+#      have — the point of the exercise. Commit them.
+# Everything else the pass rewrote is DROPPED with the copy and reported as a
+# count; the tree's own files are never written. (That is also why this file
+# no longer restores project.godot: the tree's copy is never touched. The
+# library's gdk_sandbox_home still arms its restore; here it is a no-op.)
 #
 # Usage: tools/dev/runners/import_cache.sh   (via `make import-cache`)
 #        tools/dev/runners/import_cache.sh --help | --self-test
 # Exit:  0 = cache refreshed | 1 = it was not (import failed or hit the bound)
-#        2 = harness error (unusable repo, or a usage mistake)
+#        2 = harness error (unusable repo, the copy failed, or a usage mistake)
+#        A run killed by INT/TERM exits 130/143 and leaves the tree as it was.
 set -uo pipefail
 
 # --- project config (yours to edit after install — the file is your repo's) --
@@ -61,25 +71,31 @@ CACHE_ARTIFACTS=("$IMPORT_DIR/uid_cache.bin" "$IMPORT_DIR/global_script_class_ca
 # A cold, full import of a real project runs well past the 60s the library
 # default assumes.
 TIMEOUT_SECONDS="${GDK_IMPORT_CACHE_TIMEOUT:-300}"
-# Churn lists are a pointer, not a report — past this many paths, print a count.
+# Sidecar lists are a pointer, not a report — past this many paths, print a count.
 CHURN_LIST_MAX=20
+# The dropped-churn line names this many paths, then counts the rest.
+DROPPED_LIST_MAX=5
+# cp arguments per call when building the copy — far under any ARG_MAX.
+COPY_BATCH_MAX=500
 # ANCHORED: a bare `.uid` substring also matches `a.uid.tres` and `x.uidmap`,
-# which are re-serialization churn to revert, not sidecars to commit — the two
-# halves of the report say opposite things about what to do with a path.
-UID_SIDECAR_RE='\.uid$'
+# which are re-serialization churn, not sidecars — and the two halves of the
+# report do opposite things with a path (bring back vs drop).
+SIDECAR_RE='\.(uid|import)$'
 
-if [ -t 1 ]; then C_BAD=$'\033[31m'; C_OK=$'\033[32m'; C_OFF=$'\033[0m'; else C_BAD=''; C_OK=''; C_OFF=''; fi
+if [ -t 1 ]; then C_BAD=$'\033[31m'; C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_OFF=$'\033[0m'; else C_BAD=''; C_OK=''; C_WARN=''; C_OFF=''; fi
 
 usage() {
 	cat <<'USAGE_EOF'
 usage: import_cache.sh [--help] [--self-test]
 
 Regenerates Godot's .godot import cache through a headless editor pass, inside
-the gdk_runners.sh HOME sandbox, bounded and outcome-checked.
+the gdk_runners.sh HOME sandbox, bounded and outcome-checked. The pass runs in
+a scratch copy of the project; .godot/ is swapped back in by rename and only
+NEW .uid/.import sidecars are copied back. The tree's files are never written.
 
   (no argument)  do the rebuild
-  --self-test    prove the argument handling and the outcome check without
-                 booting anything
+  --self-test    prove the argument handling, the outcome check and the copy
+                 (a stub engine, a temp project) without booting anything
   --help         this message
 
 Env: GDK_IMPORT_CACHE_TIMEOUT  seconds to bound the editor pass (default 300)
@@ -146,13 +162,6 @@ stale_cache_artifacts() {
 	done
 }
 
-# git_dirty_paths — the worktree's changed paths, one per line (empty when git
-# is unavailable, so a non-git checkout degrades to "no churn report" rather
-# than to a failure).
-git_dirty_paths() {
-	git status --porcelain 2>/dev/null | sed 's/^...//' || true
-}
-
 # print_churn <heading> <newline-separated paths>
 print_churn() {
 	local heading="$1" paths="$2" count
@@ -164,14 +173,186 @@ print_churn() {
 	return 0
 }
 
+# dropped_line <newline-separated paths> — the one line naming the churn the
+# copy absorbed: a count, then the first few paths. Silent on empty input.
+dropped_line() {
+	local paths="$1" count first
+	[ -n "$paths" ] || return 0
+	count="$(printf '%s\n' "$paths" | grep -c . || true)"
+	first="$(printf '%s\n' "$paths" | head -n "$DROPPED_LIST_MAX" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+	[ "$count" -gt "$DROPPED_LIST_MAX" ] && first="$first, … (+$((count - DROPPED_LIST_MAX)) more)"
+	echo "$TAG dropped $count re-serialised files (import churn): $first"
+}
+
+# is_sidecar <path> — a `.uid`/`.import` sidecar, anchored (see SIDECAR_RE).
+is_sidecar() {
+	[[ "$1" =~ $SIDECAR_RE ]]
+}
+
+# --- the scratch copy --------------------------------------------------------
+# pick_clone_flag <file> <dir> — the cp flag that CLONES rather than copies on
+# this filesystem, proven on a real file: `--reflink=auto` (GNU, btrfs/xfs),
+# `-c` (macOS, APFS clonefile). Empty means a plain copy. GNU is probed first
+# because a GNU cp may read `-c` as something else.
+pick_clone_flag() {
+	local flag probe="$2/.gdk-clone-probe"
+	for flag in --reflink=auto -c; do
+		if cp "$flag" -p "$1" "$probe" 2>/dev/null; then
+			rm -f "$probe"
+			printf '%s\n' "$flag"
+			return 0
+		fi
+		rm -f "$probe"
+	done
+	return 0
+}
+
+# project_file_list — what the import needs to resolve, NUL-separated and
+# relative to the project root: git's tracked files plus untracked-not-ignored
+# ones (assets, addons, project.godot, .uid sidecars). Outside a git checkout
+# (a tarball), every file. `.godot/` is carried separately and the sandbox dir
+# never — copy_listed drops both whatever the list says.
+project_file_list() {
+	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		git ls-files -z --cached --others --exclude-standard
+		return
+	fi
+	find . \( -path ./.git -o -path "./$IMPORT_DIR" -o -path "./$GDK_SANDBOX_DIRNAME" \) -prune \
+		-o \( -type f -o -type l \) -print0
+}
+
+# _copy_batch <dest> <dir> <path...> — one cp for paths that share a dir.
+_copy_batch() {
+	local dest="$1" dir="$2"; shift 2
+	[ "$#" -gt 0 ] || return 0
+	mkdir -p "$dest/$dir" && cp -R -p ${CP_CLONE:+"$CP_CLONE"} "$@" "$dest/$dir/"
+}
+
+# copy_listed <dest> — copy the NUL-separated paths on stdin into <dest>,
+# keeping mtimes (-p: the importer compares them, and a copy with fresh mtimes
+# would reimport everything). Batched per directory so a clone costs one cp
+# per directory, not one per file. Prints the census; non-zero when any cp
+# failed.
+copy_listed() {
+	local dest="${1:?usage: copy_listed <dest>}" path dir cur='' count=0 rc=0
+	local -a batch=()
+	while IFS= read -r -d '' path; do
+		path="${path#./}"
+		path="${path%/}"
+		case "$path" in
+			''|"$IMPORT_DIR"|"$IMPORT_DIR"/*|"$GDK_SANDBOX_DIRNAME"|"$GDK_SANDBOX_DIRNAME"/*) continue ;;
+		esac
+		# --cached lists a tracked file deleted in the worktree; it has
+		# nothing to copy.
+		[ -e "$path" ] || [ -L "$path" ] || continue
+		case "$path" in */*) dir="${path%/*}" ;; *) dir=. ;; esac
+		if [ "${#batch[@]}" -gt 0 ] && { [ "$dir" != "$cur" ] || [ "${#batch[@]}" -ge "$COPY_BATCH_MAX" ]; }; then
+			_copy_batch "$dest" "$cur" "${batch[@]}" || rc=1
+			batch=()
+		fi
+		cur="$dir"
+		batch+=("$path")
+		count=$((count + 1))
+	done
+	if [ "${#batch[@]}" -gt 0 ]; then
+		_copy_batch "$dest" "$cur" "${batch[@]}" || rc=1
+	fi
+	printf '%s\n' "$count"
+	return "$rc"
+}
+
+# kill_tree <pid> — TERM <pid> and every descendant, children first, found by
+# ppid (`ps -A -o pid= -o ppid=`, POSIX). The pass is a subshell → timeout →
+# engine chain; signalling the subshell alone would orphan the engine, still
+# writing into a copy that is being removed.
+# shellcheck disable=SC2329  # invoked from the exit hook and the signal trap
+kill_tree() {
+	local pid="$1" child
+	for child in $(ps -A -o pid= -o ppid= 2>/dev/null | awk -v p="$pid" '$2 == p { print $1 }'); do
+		kill_tree "$child"
+	done
+	kill -TERM "$pid" 2>/dev/null || true
+}
+
+# live_project_processes <engine> <root> [<root>] — read `pid args` lines on
+# stdin and print the ones that are a Godot process holding THIS project: the
+# command's basename is the engine's (or starts with `godot`, which is what an
+# editor-launched game runs as whatever GDK_GODOT says), and one argument IS
+# the root (or its project.godot). A path merely UNDER the root — this run's
+# own scratch copy — does not count. Pure, so the self-test feeds it text.
+live_project_processes() {
+	local engine="${1:?usage: live_project_processes <engine> <root> [<root>]}"
+	engine="$(basename "$engine" | tr '[:upper:]' '[:lower:]')"
+	awk -v engine="$engine" -v r1="${2:?}" -v r2="${3:-$2}" '
+		function base(p) { sub(/.*\//, "", p); return tolower(p) }
+		function isroot(t) {
+			sub(/\/+$/, "", t)
+			return t == r1 || t == r2 || t == r1 "/project.godot" || t == r2 "/project.godot"
+		}
+		NF >= 2 {
+			b = base($2)
+			if (b != engine && index(b, "godot") != 1) next
+			for (i = 3; i <= NF; i++) if (isroot($i)) { sub(/^[ \t]+/, ""); print; next }
+		}
+	'
+}
+
 # --- --self-test -------------------------------------------------------------
-# This runner cannot be exercised end to end anywhere Godot is not installed —
-# and it must never boot one in CI. So the corpus covers the two things that
-# are the runner's OWN logic rather than the engine's: how it reads its
-# arguments, and whether the outcome check tells a refreshed cache from a stale
-# one. Both run against fake files in a scratch dir it removes.
+# This runner cannot be exercised against a real engine anywhere Godot is not
+# installed — and it must never boot one in CI. So the corpus covers what is
+# the runner's OWN logic rather than the engine's: its arguments, the outcome
+# check, the report helpers, the live-process match, and the copy itself —
+# the whole runner driven end to end against a STUB engine that does what an
+# editor pass does to a tree (rewrites a tracked .tres, writes a new sidecar
+# and the cache), in a temp project it removes.
+
+# _st_install <proj> — lay this runner and its library out in <proj> at the
+# depth REPO_ROOT_FROM_HERE says, and print the runner's path. Non-zero when
+# the library cannot be found beside this file.
+_st_install() {
+	local proj="$1" here lib rest seg rel=''
+	here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	if [ -f "$here/$GDK_RUNNERS_LIB" ]; then lib="$here/$GDK_RUNNERS_LIB"
+	elif [ -f "$here/gdk_runners.sh" ]; then lib="$here/gdk_runners.sh"
+	else return 1
+	fi
+	rest="$REPO_ROOT_FROM_HERE/"
+	while [ -n "$rest" ]; do
+		seg="${rest%%/*}"; rest="${rest#*/}"
+		[ "$seg" = .. ] && rel="${rel}d/"
+	done
+	mkdir -p "$proj/$rel" "$(dirname "$proj/$rel$GDK_RUNNERS_LIB")" || return 1
+	cp "${BASH_SOURCE[0]}" "$proj/${rel}import_cache.sh" || return 1
+	cp "$lib" "$proj/$rel$GDK_RUNNERS_LIB" || return 1
+	printf '%s\n' "$proj/${rel}import_cache.sh"
+}
+
+# _st_git <args...> — git on the temp project only: a caller's GIT_DIR (a
+# commit hook sets one) would otherwise aim `add` at the real repo's index.
+_st_git() {
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git "$@"
+}
+
+# _st_digest <proj> — every file but the sandbox dir and .git, checksummed.
+_st_digest() {
+	(cd "$1" && find . \( -path ./.headless-userdata -o -path ./.git \) -prune -o -type f -exec cksum {} + \
+		| LC_ALL=C sort)
+}
+
+# _st_run <script> <stub> [VAR=value...] — the runner, as a consumer runs it.
+# `exec`, so a caller that backgrounds this holds the RUNNER's pid — a TERM
+# sent to a wrapping subshell would never reach the runner at all.
+_st_run() {
+	local script="$1" stub="$2"; shift 2
+	exec env -u GDK_HEADLESS_HOME -u GDK_SANDBOX_DIRNAME -u GDK_PROJECT_FILE \
+		-u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u STUB_MARKER \
+		GDK_RUNNERS_LIB="$GDK_RUNNERS_LIB" GDK_GODOT="$stub" GDK_IMPORT_CACHE_TIMEOUT=60 \
+		"$@" bash "$script"
+}
+
 self_test() {
 	local scratch stamp out rc failures=0 cases=0
+	local proj script stub before after i stub_pid
 
 	# argument handling: --help is 0, an unknown argument is a usage error (2).
 	cases=$((cases + 1))
@@ -244,12 +425,11 @@ self_test() {
 	[ "$out" = "$scratch/old.bin" ] \
 		|| { echo "  MISS — a partial refresh must name the stale artifact, got '$out'" >&2; failures=$((failures + 1)); }
 
-	# the churn report splits sidecars from re-serialized files, and says
-	# nothing at all when there is no churn.
+	# the report helpers say nothing at all when there is nothing to say.
 	cases=$((cases + 1))
-	out="$(print_churn 'heading' '')"
+	out="$(print_churn 'heading' ''; dropped_line '')"
 	[ -z "$out" ] \
-		|| { echo "  MISS — print_churn must be silent on empty input, got '$out'" >&2; failures=$((failures + 1)); }
+		|| { echo "  MISS — print_churn/dropped_line must be silent on empty input, got '$out'" >&2; failures=$((failures + 1)); }
 
 	cases=$((cases + 1))
 	out="$(print_churn 'sidecars' 'a.gd.uid
@@ -258,12 +438,110 @@ b.gd.uid' | head -1)"
 		|| { echo "  MISS — print_churn heading/count, got '$out'" >&2; failures=$((failures + 1)); }
 
 	# the sidecar split is ANCHORED: a path that merely CONTAINS '.uid' is
-	# re-serialization churn to revert, and the report tells you the opposite
-	# about a sidecar. An unanchored match put it under the wrong heading.
+	# churn to drop, and bringing it back would write a re-serialised file
+	# into the tree. An unanchored match put it under the wrong heading.
 	cases=$((cases + 1))
-	out="$(printf '%s\n' 'a.gd.uid' 'scenes/a.uid.tres' | grep -E -- "$UID_SIDECAR_RE")"
-	[ "$out" = "a.gd.uid" ] \
-		|| { echo "  MISS — the sidecar split matched a non-sidecar path, got '$out'" >&2; failures=$((failures + 1)); }
+	out=''
+	for i in a.gd.uid scenes/a.uid.tres icon.png.import x.uidmap; do
+		is_sidecar "$i" && out="$out $i"
+	done
+	[ "$out" = " a.gd.uid icon.png.import" ] \
+		|| { echo "  MISS — the sidecar split matched the wrong paths, got '$out'" >&2; failures=$((failures + 1)); }
+
+	# live-process warning (#23): a Godot holding the project root is named —
+	# the editor-launched game whose binary is `Godot`, and an editor opened
+	# on project.godot — while this run's own scratch copy (a path UNDER the
+	# root), another project, and a non-engine process naming the root are not.
+	cases=$((cases + 1))
+	out="$(live_project_processes godot /r/proj /private/r/proj <<'PS_EOF' | awk '{ print $1 }' | tr '\n' ' '
+  101 /Applications/Godot.app/Contents/MacOS/Godot --path /r/proj --remote-debug tcp://127.0.0.1:6007
+  102 godot --path /r/proj/.headless-userdata/runs/run-1-import-x --headless --editor --quit
+  103 vim /r/proj
+  104 /usr/bin/godot --path /r/other
+  105 godot4 -e /private/r/proj/project.godot
+  106 /usr/bin/godot --path /r/proj/
+PS_EOF
+)"
+	[ "$out" = "101 105 106 " ] \
+		|| { echo "  MISS — live_project_processes named the wrong pids, got '$out'" >&2; failures=$((failures + 1)); }
+
+	# --- end to end, against a stub engine -------------------------------
+	# The stub does to the copy what an editor pass does to a tree: rewrites
+	# a tracked .tres, writes a new script sidecar, writes the cache. With
+	# STUB_MARKER set it then records its pid and hangs, to be killed.
+	stub="$scratch/bin/godot"
+	mkdir -p "$scratch/bin"
+	cat > "$stub" <<'STUB_EOF'
+#!/bin/sh
+printf 'normalised = true\n' >> data/thing.tres
+printf 'uid://stubnew\n' > scripts/new.gd.uid
+mkdir -p .godot
+printf 'stub-uid-cache\n' > .godot/uid_cache.bin
+printf 'stub-classes\n' > .godot/global_script_class_cache.cfg
+if [ -n "${STUB_MARKER:-}" ]; then
+	printf '%s\n' "$$" > "$STUB_MARKER.tmp" && mv "$STUB_MARKER.tmp" "$STUB_MARKER"
+	exec sleep 30
+fi
+STUB_EOF
+	chmod +x "$stub"
+
+	proj="$scratch/proj"
+	mkdir -p "$proj/data" "$proj/scripts" "$proj/.godot/imported"
+	printf 'config_version=5\n' > "$proj/project.godot"
+	printf '[gd_resource type="Resource"]\nvalue = 1.0\n' > "$proj/data/thing.tres"
+	printf 'extends Node\nclass_name New\n' > "$proj/scripts/new.gd"
+	printf '.godot/\n.headless-userdata/\n' > "$proj/.gitignore"
+	printf 'old-uid-cache\n' > "$proj/.godot/uid_cache.bin"
+	printf 'texture\n' > "$proj/.godot/imported/a.ctex"
+	script="$(_st_install "$proj")"
+	if [ -z "$script" ] \
+		|| ! _st_git -C "$proj" init -q \
+		|| ! _st_git -C "$proj" add project.godot data/thing.tres .gitignore; then
+		echo "  MISS — could not build the end-to-end project (git, or no gdk_runners.sh beside this file)" >&2
+		rm -rf "$scratch"
+		echo "$TAG SELF-TEST FAIL — the end-to-end cases could not run" >&2
+		return 1
+	fi
+	cp "$proj/data/thing.tres" "$scratch/thing.tres.orig"
+
+	# killed mid-pass (#20): SIGTERM while the engine hangs leaves the tree
+	# byte-identical — .godot/ included, nothing was swapped — no scratch
+	# copy or run home behind, and no engine still running.
+	cases=$((cases + 1))
+	before="$(_st_digest "$proj")"
+	_st_run "$script" "$stub" STUB_MARKER="$scratch/marker" >"$scratch/killed.out" 2>&1 &
+	rc=$!
+	for i in $(seq 1 100); do [ -f "$scratch/marker" ] && break; sleep 0.1; done
+	kill -TERM "$rc" 2>/dev/null
+	wait "$rc" 2>/dev/null
+	stub_pid="$(cat "$scratch/marker" 2>/dev/null)"
+	for i in $(seq 1 30); do { [ -n "$stub_pid" ] && kill -0 "$stub_pid" 2>/dev/null; } || break; sleep 0.1; done
+	after="$(_st_digest "$proj")"
+	out=''
+	[ -n "$stub_pid" ] || out="$out the stub never started;"
+	[ "$before" = "$after" ] || out="$out the tree changed;"
+	[ -z "$(ls -A "$proj/.headless-userdata/runs" 2>/dev/null)" ] || out="$out a scratch copy or run home was left behind;"
+	[ -n "$stub_pid" ] && kill -0 "$stub_pid" 2>/dev/null && { out="$out the engine outlived the run;"; kill "$stub_pid" 2>/dev/null; }
+	[ -z "$out" ] \
+		|| { echo "  MISS — a killed run:$out see $scratch/killed.out" >&2; cat "$scratch/killed.out" >&2; failures=$((failures + 1)); }
+
+	# a full run: the tracked .tres is byte-identical and the dropped line
+	# names it, the new sidecar came back, .godot/ is the pass's (and kept
+	# what it held before — the pass is incremental), and nothing is left.
+	cases=$((cases + 1))
+	rc=0; out="$(_st_run "$script" "$stub" 2>&1)" || rc=$?
+	i=''
+	[ "$rc" -eq 0 ] || i="$i exit $rc;"
+	cmp -s "$scratch/thing.tres.orig" "$proj/data/thing.tres" || i="$i the tracked .tres was written;"
+	[ "$(cat "$proj/scripts/new.gd.uid" 2>/dev/null)" = 'uid://stubnew' ] || i="$i the new sidecar did not come back;"
+	[ "$(cat "$proj/.godot/uid_cache.bin" 2>/dev/null)" = 'stub-uid-cache' ] || i="$i .godot/ is not the pass's;"
+	[ -f "$proj/.godot/imported/a.ctex" ] || i="$i the existing cache was not carried into the copy;"
+	printf '%s\n' "$out" | grep -qF "$TAG dropped 1 re-serialised files (import churn): data/thing.tres" \
+		|| i="$i no dropped line naming data/thing.tres;"
+	[ -z "$(ls -A "$proj/.headless-userdata/runs" 2>/dev/null)" ] || i="$i a scratch copy was left behind;"
+	[ -z "$(cd "$proj" && ls -d "$IMPORT_DIR".old.* 2>/dev/null)" ] || i="$i the old .godot/ was left behind;"
+	[ -z "$i" ] \
+		|| { echo "  MISS — a full run:$i output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
 
 	rm -rf "$scratch"
 
@@ -322,55 +600,159 @@ fi
 # before any godot invocation.
 gdk_sandbox_home
 
-before_dirty="$(git_dirty_paths)"
+# The scratch copy lives under the sandbox runs dir with the run-<pid>- prefix,
+# so a SIGKILLed run's copy is reaped by the next run like any abandoned home.
+# The EXIT hook and the INT/TERM traps remove it on every other way out; there
+# is nothing in the tree to revert, which is the point.
+RUNS_DIR="$PWD/$GDK_SANDBOX_DIRNAME/$GDK_SANDBOX_RUNS_SUBDIR"
+mkdir -p "$RUNS_DIR" || exit 2
+COPY="$(mktemp -d "$RUNS_DIR/${GDK_SANDBOX_RUN_PREFIX}$$-import-XXXXXX")" || exit 2
+PASS_PID=''
 
-# mtime reference for the outcome check, inside the run home so it dies with it.
-STAMP="$(gdk_sandbox_tmpfile import-cache-stamp.XXXXXX)"
+# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+remove_copy() {
+	[ -z "$PASS_PID" ] || kill_tree "$PASS_PID"
+	PASS_PID=''
+	case "$COPY" in
+		*"/$GDK_SANDBOX_DIRNAME/$GDK_SANDBOX_RUNS_SUBDIR/$GDK_SANDBOX_RUN_PREFIX"*) rm -rf "$COPY" ;;
+	esac
+	COPY=''
+}
 
-echo "${C_OK}== import-cache rebuild — headless editor pass, sandboxed ==${C_OFF}"
+# The engine is stopped HERE, before exit, because the EXIT hooks remove the
+# run home and the copy — which a still-running pass would keep writing into.
+# shellcheck disable=SC2329  # invoked indirectly via trap
+on_signal() {
+	trap '' INT TERM
+	[ -z "$PASS_PID" ] || kill_tree "$PASS_PID"
+	PASS_PID=''
+	echo "$TAG interrupted — the tree is as it was; the scratch copy is removed." >&2
+	exit "$1"
+}
+arm_signal_traps() {
+	trap 'on_signal 130' INT
+	trap 'on_signal 143' TERM
+}
+gdk_on_exit remove_copy
+arm_signal_traps
+
+echo "${C_OK}== import-cache rebuild — headless editor pass, sandboxed, in a copy ==${C_OFF}"
 echo "$TAG project: $REPO_ROOT"
 echo "$TAG sandbox HOME: $HOME"
+
+CP_CLONE="$(pick_clone_flag "$GDK_PROJECT_FILE" "$COPY")"
+copied="$(project_file_list | copy_listed "$COPY")" || {
+	echo "${C_BAD}$TAG could not build the scratch copy at $COPY${C_OFF}" >&2
+	exit 2
+}
+if [ -d "$IMPORT_DIR" ] && ! cp -R -p ${CP_CLONE:+"$CP_CLONE"} "$IMPORT_DIR" "$COPY/"; then
+	echo "${C_BAD}$TAG could not copy $IMPORT_DIR/ into the scratch copy${C_OFF}" >&2
+	exit 2
+fi
+# The census: a copy without the project file is a pass over nothing.
+if [ ! -f "$COPY/$GDK_PROJECT_FILE" ]; then
+	echo "${C_BAD}$TAG the scratch copy holds no $GDK_PROJECT_FILE ($copied paths copied)${C_OFF}" >&2
+	exit 2
+fi
+echo "$TAG scratch copy: $copied paths (${CP_CLONE:-plain copy}) + ${IMPORT_DIR}/ at $COPY"
 echo "$TAG regenerating $IMPORT_DIR/ (uid map + class_name registry), up to ${TIMEOUT_SECONDS}s…"
 
+# mtime reference for the outcome check AND for what the pass wrote, taken
+# after the copy (whose mtimes -p kept), inside the run home so it dies with it.
+STAMP="$(gdk_sandbox_tmpfile import-cache-stamp.XXXXXX)"
+
+# gdk_rebuild_import_cache boots `--path .`, so it runs in the copy's working
+# directory. In the background and `wait`ed on, so an INT/TERM reaches
+# on_signal NOW rather than after the engine exits on its own.
+# A RELATIVE engine path (./bin/godot) is the tree's, and would not resolve
+# from inside the copy.
+case "$GDK_GODOT" in /*|'') ;; */*) GDK_GODOT="$REPO_ROOT/$GDK_GODOT" ;; esac
 started_at="$(date +%s)"
-gdk_rebuild_import_cache "$TIMEOUT_SECONDS"
+( cd "$COPY" && gdk_rebuild_import_cache "$TIMEOUT_SECONDS" ) &
+PASS_PID=$!
+wait "$PASS_PID"
+PASS_PID=''
 elapsed=$(( $(date +%s) - started_at ))
 
-stale="$(stale_cache_artifacts "$STAMP" "${CACHE_ARTIFACTS[@]}")"
+stale="$(cd "$COPY" && stale_cache_artifacts "$STAMP" "${CACHE_ARTIFACTS[@]}")"
 
 if [ -n "$stale" ]; then
 	echo "${C_BAD}$TAG FAIL — the import pass did not refresh the cache (${elapsed}s):${C_OFF}"
 	printf '%s\n' "$stale" | sed 's/^/      /'
-	echo "  The pass either failed or hit the ${TIMEOUT_SECONDS}s bound."
+	echo "  The pass either failed or hit the ${TIMEOUT_SECONDS}s bound; the tree's $IMPORT_DIR/ is untouched."
 	echo "  Raise it with GDK_IMPORT_CACHE_TIMEOUT=<seconds> make import-cache,"
 	echo "  or run your parse gate — its boot prints the underlying error."
 	exit 1
 fi
 
+# --- what the pass wrote, sorted into brought-back and dropped ---------------
+# Every file in the copy the pass wrote after the stamp: a NEW sidecar comes
+# back; anything else that differs from the tree (a rewrite, or a new file
+# such as an extracted sub-resource) is churn, dropped with the copy.
+sidecars=''
+dropped=''
+while IFS= read -r rel; do
+	[ -n "$rel" ] || continue
+	if [ -e "$rel" ] || [ -L "$rel" ]; then
+		cmp -s "$COPY/$rel" "$rel" && continue
+		dropped="$dropped$rel"$'\n'
+	elif is_sidecar "$rel"; then
+		sidecars="$sidecars$rel"$'\n'
+	else
+		dropped="$dropped$rel"$'\n'
+	fi
+done <<WRITTEN_EOF
+$(cd "$COPY" && find . -path "./$IMPORT_DIR" -prune -o -type f -newer "$STAMP" -print | sed 's|^\./||' | LC_ALL=C sort)
+WRITTEN_EOF
+sidecars="${sidecars%$'\n'}"
+dropped="${dropped%$'\n'}"
+
+# #23: a game or editor on this project keeps running across the swap — its
+# open files are the old inodes — but it will not see the new imports.
+live="$(ps -A -o pid= -o args= 2>/dev/null | live_project_processes "$GDK_GODOT" "$REPO_ROOT" "$(pwd -P)")"
+if [ -n "$live" ]; then
+	echo "${C_WARN}$TAG WARN — a Godot process has this project open:${C_OFF}"
+	printf '%s\n' "$live" | sed 's/^/      pid /'
+	echo "  Swapping $IMPORT_DIR/ in anyway: it is a rename, so what that process has open stays valid."
+	echo "  A running game may need a restart to see the new imports."
+fi
+
+# The swap: two renames on one filesystem, signals held off between them so no
+# INT/TERM can leave the tree with no $IMPORT_DIR/ at all.
+old="$IMPORT_DIR.old.$$"
+rm -rf "$old"
+trap '' INT TERM
+swap_rc=0
+if [ -e "$IMPORT_DIR" ] && ! mv "$IMPORT_DIR" "$old"; then
+	swap_rc=1
+elif ! mv "$COPY/$IMPORT_DIR" "$IMPORT_DIR"; then
+	swap_rc=1
+	[ ! -e "$old" ] || mv "$old" "$IMPORT_DIR"
+fi
+arm_signal_traps
+if [ "$swap_rc" -ne 0 ]; then
+	echo "${C_BAD}$TAG could not swap the new $IMPORT_DIR/ into $REPO_ROOT — the old one is in place${C_OFF}" >&2
+	exit 2
+fi
+rm -rf "$old"
+
+while IFS= read -r rel; do
+	[ -n "$rel" ] || continue
+	if ! { mkdir -p "$(dirname "$rel")" && cp -p "$COPY/$rel" "$rel"; }; then
+		echo "${C_BAD}$TAG could not bring back $rel${C_OFF}" >&2
+		exit 2
+	fi
+done <<SIDECARS_EOF
+$sidecars
+SIDECARS_EOF
+
 echo "${C_OK}$TAG PASS — $IMPORT_DIR/ refreshed in ${elapsed}s${C_OFF}"
 
-# project.godot is the one churn path that undoes itself. Called HERE rather
-# than left to the exit hook so the report below is already accurate — it would
-# otherwise tell you to revert a file that is about to be reverted for you.
-gdk_restore_project_file
-
-# --- what the pass wrote into the TREE ---------------------------------------
-# Only paths this run made dirty: a tree that was already dirty is the caller's
-# business, and reporting it as churn would send them to revert their own work.
-after_dirty="$(git_dirty_paths)"
-new_dirty="$(comm -13 \
-	<(printf '%s\n' "$before_dirty" | sort -u) \
-	<(printf '%s\n' "$after_dirty" | sort -u) | grep . || true)"
-
-if [ -z "$new_dirty" ]; then
+if [ -z "$sidecars" ] && [ -z "$dropped" ]; then
 	echo "$TAG the tree is unchanged — nothing to commit, nothing to revert."
 	exit 0
 fi
-
-sidecars="$(printf '%s\n' "$new_dirty" | grep -E -- "$UID_SIDECAR_RE" || true)"
-churn="$(printf '%s\n' "$new_dirty" | grep -vE -- "$UID_SIDECAR_RE" || true)"
-
-echo "$TAG the pass wrote into the tree:"
-print_churn "uid sidecars — COMMIT these (they are why you ran this)" "$sidecars"
-print_churn "re-serialized by the importer — DIFF, then 'git checkout --' them" "$churn"
+print_churn "new sidecars brought back into the tree — COMMIT these (they are why you ran this)" "$sidecars"
+dropped_line "$dropped"
+[ -z "$dropped" ] || echo "  (left in the scratch copy and removed with it — the tree's files were never written)"
 exit 0
