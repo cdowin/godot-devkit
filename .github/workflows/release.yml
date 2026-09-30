@@ -1,0 +1,167 @@
+# release.yml — build the kit ONCE per tag and publish it to this repo's
+# PEP 503 index on GitHub Pages (#38). This repo's own file, not an
+# installable.
+#
+# Two triggers, one build. A tag pushed by a person triggers `push: tags`; a
+# tag auto-tag.yml pushes with GITHUB_TOKEN triggers nothing, so auto-tag
+# DISPATCHES this file by name (`gh workflow run release.yml --ref <tag>
+# -f tag=<tag>`) — hence the `tag` input.
+#
+#   release  check out the tag; refuse unless the tag, pyproject.toml's
+#            `version` and `__version__` agree; `uv build`; attach the wheel
+#            and sdist to the GitHub Release. A release that already carries a
+#            wheel is REFUSED by name, never overwritten: a published wheel is
+#            immutable, and uv.lock hashes it.
+#   index    regenerate the WHOLE index from every release's assets, each
+#            downloaded and hashed (tools/release/build_index.py), so a lost
+#            run is repaired by the next one.
+#   deploy   publish it to Pages: https://cdowin.github.io/godot-devkit/simple/
+#
+# Pages must be enabled with source "GitHub Actions", and the github-pages
+# environment must allow deployments from `v*` tags — both run refs here are
+# the tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to build and publish (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: Build and attach the wheel
+    runs-on: ubuntu-latest
+    outputs:
+      wheel: ${{ steps.build.outputs.wheel }}
+      wheel_sha256: ${{ steps.build.outputs.wheel_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: The tag, pyproject.toml and __version__ agree
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::'$TAG' is not a vX.Y.Z tag."; exit 1 ;;
+          esac
+          want="${TAG#v}"
+          project=$(sed -n -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' pyproject.toml | head -1)
+          package=$(sed -n -E "s/^__version__[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*$/\1/p" src/godot_devkit/__init__.py | head -1)
+          echo "tag $TAG, pyproject.toml ${project:-<none>}, __version__ ${package:-<none>}"
+          if [ "$project" != "$want" ] || [ "$package" != "$want" ]; then
+            echo "::error::$TAG does not match pyproject.toml version '${project}' and __version__ '${package}' — two version sites that disagree ship two products; nothing was built."
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: uv build
+        id: build
+        run: |
+          set -euo pipefail
+          uv build --out-dir dist
+          ( cd dist && sha256sum -- * | tee SHA256SUMS )
+          wheels=$(find dist -maxdepth 1 -name '*.whl' | wc -l)
+          sdists=$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)
+          if [ "$wheels" -ne 1 ] || [ "$sdists" -ne 1 ]; then
+            echo "::error::uv build produced $wheels wheel(s) and $sdists sdist(s); expected one of each."
+            exit 1
+          fi
+          wheel=$(basename dist/*.whl)
+          echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
+          echo "wheel_sha256=$(sha256sum "dist/$wheel" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to the GitHub Release (a re-tag is refused)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            existing=$(gh release view "$TAG" --json assets --jq '.assets[].name | select(endswith(".whl"))')
+            if [ -n "$existing" ]; then
+              echo "::error::release $TAG already carries $existing — a published wheel is never overwritten (uv.lock hashes it). Cut a new version instead."
+              exit 1
+            fi
+            gh release upload "$TAG" dist/*.whl dist/*.tar.gz
+          else
+            gh release create "$TAG" dist/*.whl dist/*.tar.gz --verify-tag \
+              --title "$TAG" --notes "godot-devkit $TAG. Install it locked: see the README's \"Consume it locked\"."
+          fi
+
+  index:
+    name: Regenerate the index from every release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Download and hash every release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_WHEEL: ${{ needs.release.outputs.wheel }}
+          NEW_WHEEL_SHA256: ${{ needs.release.outputs.wheel_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.draft | not) | .assets[]
+                  | select(.name | endswith(".whl") or endswith(".tar.gz"))
+                  | [.name, .browser_download_url] | @tsv' > assets.tsv
+          while IFS=$'\t' read -r name url; do
+            curl -fsSL --retry 3 -o "assets/$name" "$url"
+            sha=$(sha256sum "assets/$name" | cut -d' ' -f1)
+            if [ "$name" = "$NEW_WHEEL" ] && [ "$sha" != "$NEW_WHEEL_SHA256" ]; then
+              echo "::error::$name downloads as $sha but was built as $NEW_WHEEL_SHA256 — refusing to index it."
+              exit 1
+            fi
+            jq -n --arg name "$name" --arg url "$url" --arg sha256 "$sha" \
+              '{name: $name, url: $url, sha256: $sha256}'
+          done < assets.tsv | jq -s . > assets.json
+          jq -r '.[] | "\(.sha256)  \(.name)"' assets.json
+          if ! jq -e --arg w "$NEW_WHEEL" 'any(.[]; .name == $w)' assets.json >/dev/null; then
+            echo "::error::the index would not list $NEW_WHEEL, the wheel this run attached."
+            exit 1
+          fi
+
+      - name: Build the static index
+        run: python3 tools/release/build_index.py assets.json _site
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: index
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}simple/
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

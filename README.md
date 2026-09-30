@@ -20,18 +20,25 @@ without re-reading the file.
 
 ## Install — two pins
 
-A consumer sets two pins in its Makefile and includes one file. `agentic-sdlc` is the gate framework
-and the SDLC (`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this
-kit is the Godot tiers and gates.
+A consumer pins two kits and includes one file. `agentic-sdlc` is the gate framework and the SDLC
+(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this kit is the
+Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes, never both:
+
+| shape | the pin | what `make` runs |
+|---|---|---|
+| **locked** (recommended) | `godot-devkit==X.Y.Z` in `pyproject.toml`, hash-pinned in `uv.lock` — [below](#consume-it-locked) | `.venv/bin/godot-devkit`, installed once by `uv sync` |
+| legacy | `GODOT_DEVKIT_VERSION := vX.Y.Z` in the Makefile, ABOVE the include | `uvx --from git+…@vX.Y.Z godot-devkit`, built from the tag |
+
+Both at once is refused at parse time (two pins of one tool ship two products), and so is neither.
+`GODOT_DEVKIT` set to a command overrides both.
 
 ```make
 DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.3.0     # this kit — the Godot tiers and the eight gates
+GODOT_DEVKIT_VERSION := v1.3.0     # this kit, the legacy pin — omit it when uv.lock pins the kit
 include Makefile.devkit
 ```
 
-`GODOT_DEVKIT_VERSION` goes ABOVE the include. Then write the two files the include reads, and join
-the gates to `make check`:
+Then write the two files the include reads, and join the gates to `make check`:
 
 ```sh
 uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.11.0" agentic-sdlc install-gates    # Makefile.devkit
@@ -63,6 +70,38 @@ make pm ARGS='vocabulary'   # reads back the states it wrote, by category
 - **A consumer bumping a pin:** read both CHANGELOGs; re-run `pm init` once, then `pm vocabulary`;
   `install-runners --diff` prints what a re-install would change and writes nothing;
   `agentic-sdlc adopt <version>` proves the bump.
+
+### Consume it locked
+
+Every `v*` tag is built once into a wheel and an sdist, attached to its GitHub Release (a re-tag is
+refused), and listed on a static PEP 503 index on this repo's GitHub Pages,
+`https://cdowin.github.io/godot-devkit/simple/` — public, no token. The PyPI name is someone
+else's, so the index is declared `explicit` and the kit never resolves from PyPI. `install-runners`
+prints this block at the version that ran it:
+
+```toml
+# pyproject.toml
+[dependency-groups]
+dev = ["godot-devkit==X.Y.Z"]
+
+[[tool.uv.index]]
+name = "cdowin"
+url = "https://cdowin.github.io/godot-devkit/simple/"
+explicit = true
+
+[tool.uv.sources]
+godot-devkit = { index = "cdowin" }
+```
+
+`uv sync` installs it once into `.venv`, and `uv.lock` records the version and the wheel's hash, so
+every machine and CI run gets the same bits and a moved tag cannot change them. Delete the
+`GODOT_DEVKIT_VERSION` line: `Makefile.tiers` runs `.venv/bin/godot-devkit`. In CI the installed
+`godot-toolchain` action runs `uv sync --frozen --only-group dev` whenever `uv.lock` names the kit.
+
+- **Upgrade:** `uv add --dev godot-devkit==X.Y.Z`, then agentic-sdlc's adopt belt
+  (`agentic-sdlc adopt <version>`).
+- **Bots:** the pin lives in `pyproject.toml` and `uv.lock`, where Renovate and Dependabot can see it
+  and open the bump PR themselves.
 
 ## Quickstart
 
@@ -231,8 +270,9 @@ convention_files = ["default_bus_layout.tres"]
 
 Each file once; after that it is the repo's. A differing destination is refused by name (`--force`
 overwrites it), `--diff` prints what would change and writes nothing, and the run ends by printing
-the `.claude/settings.json` entry that fires the engine-boot guard. It reads `GODOT_DEVKIT_VERSION`
-from the Makefile above the include.
+the `.claude/settings.json` entry that fires the engine-boot guard, after the `pyproject.toml` block
+that locks the kit. It runs `.venv/bin/godot-devkit` when `uv.lock` pins the kit, or the legacy
+`GODOT_DEVKIT_VERSION` from the Makefile above the include — never both.
 
 ```
 Makefile.tiers                          the Godot tier roster on the seam Makefile.devkit -includes:
