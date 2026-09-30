@@ -322,11 +322,13 @@ says `check uid` is not in the repo's gate and tells you to keep the file.
 
 **The diff slice.** `integration.sh --diff <ref>` (`make integration-diff`) boots the scenarios
 whose `## covers:` header names a touched path, plus smoke. A touched file under
-`GDK_SCENARIO_FIXTURE_DIR` (default `tests/support/`) selects every scenario that loads it,
-followed through other fixtures by a text scan of `preload`/`load`/`extends "res://…"` and
-`[ext_resource path=…]`, and each fixture prints how many scenarios it selected. A touched fixture
-that no scenario loads boots the whole tier with the line `fixture <path> is referenced by no
-scenario — booting the tier`. Only the runners and the scenario base/runner scripts are the tier's
+`GDK_SCENARIO_FIXTURE_DIR` (default `tests/support/`) selects every scenario whose text names it,
+followed through other fixtures. A fixture is named by its `res://` path in any quote or none, by
+its own `uid://`, or by a `class_name` it declares, so no call form can drop a scenario out of the
+slice. Each fixture prints how many scenarios it selected. A touched fixture that no scenario names
+boots the whole tier with the line `fixture <path> is referenced by no scenario — booting the
+tier`. A fixture root that is not a directory under the repo exits 2. With the root set elsewhere,
+a touch under `tests/support/` (1.3.0's ground) still boots the tier. Only the runners and the scenario base/runner scripts are the tier's
 ground (`GDK_SCENARIO_SUBSTRATE_RE`; a value you set is kept). After the sweep, `--diff` reruns each
 failed scenario once, alone. One that passes alone counts green and prints `  FLAKE  <name> —
 failed in the sweep, passed alone`, and the summary reads `N passed (K flaky)`. `--no-rerun` or
