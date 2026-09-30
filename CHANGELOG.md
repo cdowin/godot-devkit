@@ -40,6 +40,11 @@
   passes cold prints `WARM-ONLY` and counts green. `WARM-ABORT` names a crashed worker, a `WALL:`
   line splits warm from cold time, and `SUMMARY` carries the warm/cold/handed-back census. Unset,
   nothing changes.
+- The kit ships as a hash-locked wheel from `https://cdowin.github.io/godot-devkit/simple/`, built
+  once per tag by `release.yml`. Add the `pyproject.toml` block that `install-runners` prints
+  (a dev dependency plus an `explicit = true` index) and run `uv sync`, and `Makefile.tiers` runs
+  `.venv/bin/godot-devkit`. The `GODOT_DEVKIT_VERSION` pin still works, but setting both is refused.
+  The CI toolchain action runs `uv sync --frozen` when the caller's `uv.lock` names the kit (#38).
 
 ## v1.3.0 — 2026-09-28
 

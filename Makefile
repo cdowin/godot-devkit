@@ -38,8 +38,8 @@ PYTEST_Q  ?= -q
 # src/ with the stdlib. (The test targets above DO use uv, for pytest.)
 #
 # GODOT_DEVKIT is what Makefile.tiers' `godot-check` and `uid-scan` run (a
-# consumer resolves it from GODOT_DEVKIT_VERSION; this tree sets it ahead of
-# the include, so the tier file resolves nothing). It is the package from
+# consumer resolves it from its locked .venv, or the legacy GODOT_DEVKIT_VERSION
+# pin; this tree sets it ahead of the include, so the tier file resolves nothing). It is the package from
 # src/ INSIDE a scratch copy of the committed clean Godot project — this tree
 # is not a Godot project, and the self-hosting proof is the eight gates over
 # something committed here, not a 0-file census over the repo itself.
