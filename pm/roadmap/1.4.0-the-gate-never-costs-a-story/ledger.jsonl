@@ -1,0 +1,12 @@
+{"ts":"2026-09-30T01:27:54Z","kind":"status","grain":"ft-the-runners-survive-a-crowded-machine","from":"planning","to":"building","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:54Z","kind":"disposition","grain":"ft-the-runners-survive-a-crowded-machine","state":"building","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:55Z","kind":"status","grain":"ft-the-diff-slice-boots-what-changed","from":"planning","to":"building","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:55Z","kind":"disposition","grain":"ft-the-diff-slice-boots-what-changed","state":"building","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:55Z","kind":"status","grain":"ft-the-import-never-touches-the-tree","from":"planning","to":"building","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:55Z","kind":"disposition","grain":"ft-the-import-never-touches-the-tree","state":"building","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:57Z","kind":"status","grain":"ft-a-capture-keeps-its-before-frame-off-screen","from":"planning","to":"building","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:57Z","kind":"disposition","grain":"ft-a-capture-keeps-its-before-frame-off-screen","state":"building","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:58Z","kind":"status","grain":"ft-the-read-verbs-stop-lying-by-omission","from":"planning","to":"building","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:58Z","kind":"disposition","grain":"ft-the-read-verbs-stop-lying-by-omission","state":"building","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:28:09Z","kind":"status","grain":"1.4.0","from":"planning","to":"building","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:28:09Z","kind":"disposition","grain":"1.4.0","state":"building","answer":"none","branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
