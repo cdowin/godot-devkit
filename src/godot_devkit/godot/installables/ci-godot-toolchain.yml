@@ -21,9 +21,10 @@
 # with no import pass does not resolve `class_name` globals or imported assets.
 #
 # godot-devkit itself, when your uv.lock names it (the locked shape, #38): the
-# first step runs `uv sync --frozen --only-group dev`, so the Makefile finds
-# .venv/bin/godot-devkit at exactly the locked version and hash. The index is
-# public: no token. A repo on the legacy GODOT_DEVKIT_VERSION pin skips it.
+# first step runs `uv run --frozen godot-devkit --version` — the command
+# Makefile.tiers runs — so .venv is synced to the lock, at exactly the locked
+# version and hash, before any gate, and a kit that does not start fails here.
+# The index is public: no token. A lock that does not name the kit skips it.
 #
 # After this file is written it is YOURS. Edit it here; re-installing needs
 # --force, and `--diff` shows what a re-install would change.
@@ -47,14 +48,13 @@ runs:
   using: composite
   steps:
     - name: godot-devkit, from uv.lock
-      # Only when the lock names it; a `uv sync` in a repo that never locked
-      # the kit would install a dev group this step has no business with.
+      # Only when the lock names it; a sync in a repo that never locked the
+      # kit would install an environment this step has no business with.
       shell: bash
       run: |
         set -eu
         if [ -f uv.lock ] && grep -qx 'name = "godot-devkit"' uv.lock; then
-          uv sync --frozen --only-group dev
-          .venv/bin/godot-devkit --version
+          uv run --frozen godot-devkit --version
         else
           echo "uv.lock does not name godot-devkit — nothing to sync (the legacy GODOT_DEVKIT_VERSION pin resolves through uvx)."
         fi

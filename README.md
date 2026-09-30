@@ -22,15 +22,17 @@ without re-reading the file.
 
 A consumer pins two kits and includes one file. `agentic-sdlc` is the gate framework and the SDLC
 (`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this kit is the
-Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes, never both:
+Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
 
 | shape | the pin | what `make` runs |
 |---|---|---|
-| **locked** (recommended) | `godot-devkit==X.Y.Z` in `pyproject.toml`, hash-pinned in `uv.lock` — [below](#consume-it-locked) | `.venv/bin/godot-devkit`, installed once by `uv sync` |
+| **locked** (recommended) | `godot-devkit==X.Y.Z` in `pyproject.toml`, hash-pinned in `uv.lock` — [below](#consume-it-locked) | `uv run --frozen godot-devkit` — uv syncs `.venv` to the lock first |
 | legacy | `GODOT_DEVKIT_VERSION := vX.Y.Z` in the Makefile, ABOVE the include | `uvx --from git+…@vX.Y.Z godot-devkit`, built from the tag |
 
-Both at once is refused at parse time (two pins of one tool ship two products), and so is neither.
-`GODOT_DEVKIT` set to a command overrides both.
+"Locked" means `uv.lock` names `godot-devkit`; what `.venv` happens to hold decides nothing. With
+both, the legacy pin runs, as it did before the lock existed, and `make` warns you to delete the
+`GODOT_DEVKIT_VERSION` line (two pins of one tool ship two products). Neither is refused at parse
+time. `GODOT_DEVKIT` set to a command overrides both.
 
 ```make
 DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
@@ -93,10 +95,12 @@ explicit = true
 godot-devkit = { index = "cdowin" }
 ```
 
-`uv sync` installs it once into `.venv`, and `uv.lock` records the version and the wheel's hash, so
-every machine and CI run gets the same bits and a moved tag cannot change them. Delete the
-`GODOT_DEVKIT_VERSION` line: `Makefile.tiers` runs `.venv/bin/godot-devkit`. In CI the installed
-`godot-toolchain` action runs `uv sync --frozen --only-group dev` whenever `uv.lock` names the kit.
+`uv sync` writes `uv.lock`, which records the version and the wheel's hash, so every machine and CI
+run gets the same bits and a moved tag cannot change them. Delete the `GODOT_DEVKIT_VERSION` line:
+once `uv.lock` names the kit, `Makefile.tiers` runs `uv run --frozen godot-devkit`, which syncs
+`.venv` to the lock before it runs, so a lock bump you pull takes effect on the next `make` with no
+`uv sync` to forget, and never rewrites the lock. In CI the installed `godot-toolchain` action runs
+the same command, `--version`, whenever `uv.lock` names the kit.
 
 - **Upgrade:** `uv add --dev godot-devkit==X.Y.Z`, then agentic-sdlc's adopt belt
   (`agentic-sdlc adopt <version>`).
@@ -271,8 +275,9 @@ convention_files = ["default_bus_layout.tres"]
 Each file once; after that it is the repo's. A differing destination is refused by name (`--force`
 overwrites it), `--diff` prints what would change and writes nothing, and the run ends by printing
 the `.claude/settings.json` entry that fires the engine-boot guard, after the `pyproject.toml` block
-that locks the kit. It runs `.venv/bin/godot-devkit` when `uv.lock` pins the kit, or the legacy
-`GODOT_DEVKIT_VERSION` from the Makefile above the include — never both.
+that locks the kit. It runs `uv run --frozen godot-devkit` when `uv.lock` names the kit, or the
+legacy `GODOT_DEVKIT_VERSION` from the Makefile above the include, which wins with a warning when
+both are present.
 
 ```
 Makefile.tiers                          the Godot tier roster on the seam Makefile.devkit -includes:
