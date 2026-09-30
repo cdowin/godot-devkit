@@ -2,17 +2,28 @@
 
 ## Unreleased
 
+**Upgrading.** No Makefile or hook edit is required. One `devkit.toml` edit may be: `[rng]`
+allowlist or baseline entries that covered `func randf()`-style declarations (the #30 false
+positive) are now reported `STALE`/`SHRUNK` and fail `check rng` until you delete them. Consumers
+that grep runner output should note the changed shapes: `SUMMARY: N passed (K flaky[, W
+warm-only]), …` (a regex expecting `passed,` right after the number breaks on a flaky run), the new
+`FLAKE`, `WARM-ONLY`, `WARM-ABORT` and fixture-selection lines from `integration.sh`, `[UNIT]
+timeout Ns (…)` as the unit tier's first line, and the `import_cache.sh` banner and
+`dropped N re-serialised files` line (the `the pass wrote into the tree:` line is gone).
+
 - Runners survive several agent lanes on one machine. The `gdk_runners.sh` self-test no longer
   re-initialises the host repo under a git hook (#24). `gdk_pid_is_live` counts a pid as dead only
-  on positive evidence (ESRCH), and the self-test prints `SKIP — …` where a sandbox hides pid 1
-  (#31). `unit.sh` scales its 180 s bound with load (up to 3x), prints `[UNIT] timeout Ns (…)`
-  first, and names `GDK_UNIT_TIMEOUT` on a HARD_TIMEOUT (#32). Sourcing the library exports
+  on positive evidence (ESRCH), so a sandbox or a hidden process table can no longer make a live
+  peer's HOME look reapable (#31). `unit.sh` scales its 180 s bound with load (up to 3x), prints `[UNIT] timeout Ns (…)`
+  first, and names `GDK_UNIT_TIMEOUT` on a HARD_TIMEOUT; a `GDK_UNIT_TIMEOUT` that is not a whole
+  number of seconds exits 2 (#32). Sourcing the library exports
   `GIT_OPTIONAL_LOCKS=0` (#35).
 - `refs` prints signal hits on an untyped receiver under a new `dynamic (untyped receiver)` heading,
   and prints `(no references found)` only when that bucket is empty too (#19). `check rng` no longer
   flags a `func randf()` declaration, or a script's unqualified call to its own draw-named method
-  (#30). `install-runners` reads `[checks] godot` through the same roster as `check all`, so an
-  unknown or malformed value exits 2 there too (#28). Every git read the package makes runs with
+  (#30). `install-runners` reads `[checks] godot` through the same roster as `check all`, so where it
+  reads the key (a retired `uid-guard.yml` is present) an unknown or malformed value exits 2 there
+  too (#28). Every git read the package makes runs with
   `GIT_OPTIONAL_LOCKS=0` (#35).
 - `capture.sh` no longer clears its report dir. Before each run it moves the last `<name>.png` to
   `previous/<name>.png`. The window is asked to open off screen (`--position`, `GDK_CAPTURE_POSITION`,
@@ -28,8 +39,9 @@
 - `integration.sh --diff` boots only the scenarios that load a touched `tests/support/` fixture,
   following references through other fixtures (`GDK_SCENARIO_FIXTURE_DIR`, validated: a missing or
   absolute root exits 2). A reference is the fixture's `res://` path in any form, its basename after
-  a `/` or a quote, its `uid://`, or a `class_name` it declares. A fixture no scenario names boots
-  the whole tier and says so (#33). It reruns each failed scenario once, alone: one that
+  a `/` or a quote, its `uid://`, or a `class_name` it declares, searched across the fixture root
+  and the whole scenario dir (so a scenario base that loads a fixture counts). A fixture no scenario
+  names boots the whole tier and says so (#33). It reruns each failed scenario once, alone: one that
   passes alone prints `  FLAKE  <name> — failed in the sweep, passed alone` and counts green as
   `N passed (K flaky)`. Past max(3, 10% of the slice) failures nothing reruns, and a line says so.
   `--no-rerun` or `GDK_INTEGRATION_RERUN=0` turns this off (#34). Before a
@@ -42,12 +54,12 @@
   The contract requires the runner to exit 0 and to finish each scenario's teardown before its
   verdict line. A crash, a non-zero exit, or an engine error outside a scenario hands the whole
   slice back to the cold path (exit 4, `WARM-ABORT`), as does a stalled scenario. A scenario that fails warm and
-  passes cold prints `WARM-ONLY` and counts green. `WARM-ABORT` names a crashed worker, a `WALL:`
+  passes cold prints `WARM-ONLY` and counts green (with `--diff`, where the rerun runs). `WARM-ABORT` names a crashed worker, a `WALL:`
   line splits warm from cold time, and `SUMMARY` carries the warm/cold/handed-back census. Unset,
   nothing changes.
 - The kit ships as a hash-locked wheel from `https://cdowin.github.io/godot-devkit/simple/`, built
   once per tag by `release.yml`. Add the `pyproject.toml` block that `install-runners` prints
-  (a dev dependency plus an `explicit = true` index) and run `uv lock`. When `uv.lock` names
+  (a dev dependency plus an `explicit = true` index) and run `uv sync`. When `uv.lock` names
   `godot-devkit`, `Makefile.tiers` runs `uv run --frozen godot-devkit`, so a pulled lock bump takes
   effect without a manual sync. The `GODOT_DEVKIT_VERSION` pin still works exactly as before. With
   both present the pin runs and make warns once. The CI toolchain action runs the same

@@ -571,8 +571,11 @@ fixture_slice() {
 	if [ ! -s "$touched" ]; then rm -f "$touched" "$gates" "$files"; return 0; fi
 	discover_gate_files "$sdir" > "$gates"
 	# BSD find prints `dir//x` for a trailing slash, hence the strip above.
-	find "$fdir" -type f \( -name '*.gd' -o -name '*.tscn' -o -name '*.tres' \) 2>/dev/null \
-		| LC_ALL=C sort > "$files"
+	# What may reference a fixture: the fixture root AND everything under the
+	# scenario dir — a scenario_base, a runner or a scenario-local support
+	# script that loads a fixture on a scenario's behalf is a path to it.
+	find "$fdir" "$sdir" -type f \( -name '*.gd' -o -name '*.tscn' -o -name '*.tres' \) 2>/dev/null \
+		| LC_ALL=C sort -u > "$files"
 	awk "$FIXTURE_SLICE_AWK" "$touched" "$gates" "$files" | LC_ALL=C sort -u
 	rm -f "$touched" "$gates" "$files"
 }
@@ -636,12 +639,21 @@ import_cache_stale() {
 # under them re-initialises the HOST repo rather than the scratch one. Every git
 # call the self-test makes on a fixture goes through one of these.
 unset_git_env() {
-	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR \
-		GIT_ALTERNATE_OBJECT_DIRECTORIES
+	# Repeated until gone: each `unset` pops one scope, and a prefix
+	# assignment over an exported variable is two.
+	local v
+	for v in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR \
+		GIT_ALTERNATE_OBJECT_DIRECTORIES; do
+		while [ -n "${!v+x}" ]; do unset "$v"; done
+	done
 }
 # scratch_git <dir> <git args…>
+# `env -u`, not `unset`: under a caller's prefix assignment (`GIT_DIR=x f`)
+# bash's `unset` pops only that temporary binding, and a hook's exported
+# GIT_DIR underneath comes back — the host repo gets the commit.
 scratch_git() {
-	( unset_git_env; git -C "$@" )
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
+		-u GIT_COMMON_DIR -u GIT_ALTERNATE_OBJECT_DIRECTORIES git -C "$@"
 }
 
 # detect_jobs — cores minus two, floor one. Two are left for the shell, the
@@ -1275,6 +1287,10 @@ FIXTURE_EOF
 	printf '%s\n' 'extends Node' 'var x := SharedThing.new()' > "$fx/tests/integration/cls.gd"
 	printf '%s\n' "extends 'res://tests/support/shared.gd'" > "$fx/tests/integration/ext.gd"
 	printf '%s\n' 'extends Node' 'const R = preload("../support/shared.gd")' > "$fx/tests/integration/rel.gd"
+	# Reached through a scenario base that lives in the scenario dir (C2).
+	printf '%s\n' 'extends Node' > "$fx/tests/support/via.gd"
+	printf '%s\n' 'extends Node' 'const V = preload("res://tests/support/via.gd")' > "$fx/tests/integration/scenario_base.gd"
+	printf '%s\n' 'extends "res://tests/integration/scenario_base.gd"' > "$fx/tests/integration/beta.gd"
 	printf '%s\n' 'extends Node' 'var y := SharedThingy.new()' 'const V = preload("uid://cshared12")' > "$fx/tests/integration/decoy.gd"
 	printf '%s\n' 'extends Node' 'const L = preload("uid://clevel9")' > "$fx/tests/integration/lvl.gd"
 	out="$(cd "$fx" && printf '%s\n' tests/support/shared.gd | fixture_slice | tr '\t\n' ': ')"
@@ -1288,6 +1304,12 @@ FIXTURE_EOF
 	cases=$((cases + 1))
 	case "$out" in
 		*:decoy\ *) miss "a longer class_name or uid is not the fixture's (whole words only) — got '$out'" ;;
+	esac
+	cases=$((cases + 1))
+	out="$(cd "$fx" && printf '%s\n' tests/support/via.gd | fixture_slice | tr '\t\n' ': ')"
+	case "$out" in
+		*"FIXTURE:tests/support/via.gd:beta "*) ;;
+		*) miss "a fixture a scenario reaches through a scenario base in the scenario dir selects it — got '$out'" ;;
 	esac
 	cases=$((cases + 1))
 	out="$(cd "$fx" && printf '%s\n' tests/support/level.tscn | fixture_slice | tr '\t\n' ': ')"
@@ -1324,8 +1346,10 @@ FIXTURE_EOF
 		&& scratch_git "$host" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m host; } >/dev/null 2>&1 \
 		|| miss "the host git fixture could not be built"
 	host_before="$(scratch_git "$host" rev-parse HEAD 2>&1) $(cksum < "$host/.git/config")"
-	GIT_DIR="$host/.git" GIT_WORK_TREE="$host" GIT_INDEX_FILE="$host/.git/index" \
-		mono_fixture "$mono" || miss "the git fixture could not be built"
+	# Exported in a subshell, as a hook exports it — a prefix assignment is a
+	# different scope, and it hid this runner's own escape (C1, 1.4.0 checkup).
+	( export GIT_DIR="$host/.git" GIT_WORK_TREE="$host" GIT_INDEX_FILE="$host/.git/index"
+	  mono_fixture "$mono" ) || miss "the git fixture could not be built"
 	cases=$((cases + 1))
 	host_after="$(scratch_git "$host" rev-parse HEAD 2>&1) $(cksum < "$host/.git/config")"
 	[ "$host_after" = "$host_before" ] && [ -z "$(scratch_git "$host" config --get core.quotePath)" ] \
