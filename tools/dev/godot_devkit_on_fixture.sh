@@ -32,5 +32,5 @@ git -C "$scratch" -c user.name=godot-devkit -c user.email=godot-devkit@fixture.i
 
 cd "$scratch"
 status=0
-env PYTHONPATH="$here/src" python3 -m godot_devkit.cli "$@" || status=$?
+env PYTHONPATH="$here/src" uv run --project "$here" --frozen python -m godot_devkit.cli "$@" || status=$?
 exit "$status"

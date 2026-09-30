@@ -44,14 +44,14 @@ include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
 
 ```sh
 uv add --dev agentic-sdlc==1.0.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
-uv add --dev godot-devkit==1.4.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+uv add --dev godot-devkit==1.5.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
 # then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
 uv run agentic-sdlc install-gates     # Makefile.devkit
 uv run godot-devkit install-runners   # Makefile.tiers + runners
 ```
 
-The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v1.4.0` above the include and
-`uvx --from "git+https://github.com/cdowin/godot-devkit@v1.4.0" godot-devkit install-runners`.
+The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v1.5.0` above the include and
+`uvx --from "git+https://github.com/cdowin/godot-devkit@v1.5.0" godot-devkit install-runners`.
 Then join the gates to `make check`:
 
 ```toml
@@ -276,6 +276,18 @@ entry_point_prefixes = ["tools/"]
 auto_discovered_prefixes = ["tests/", "data/"]
 convention_files = ["default_bus_layout.tres"]
 ```
+
+## Parallel engine work
+
+The runners share an OS-owned, nonblocking admission lease under the account home.
+Integration owns it across cache repair and worker fanout. Standalone engine boots also require admission.
+A competing gate exits promptly with its owner's PID and check. Read-only verbs remain available.
+The lock remains held while any admitted descendant runs, including after a parent dies.
+`GDK_ENGINE_GATE_HOME` explicitly selects an isolated admission domain for stub test fixtures.
+Production callers must share one domain across checkouts.
+
+Import copying prunes registered nested worktrees and explicit Godot-ignored directories before descent.
+It preserves runtime addons, ordinary Git-cloned addons, and the exact manifest through rsync or the clone-aware fallback.
 
 ## What `install-runners` writes
 

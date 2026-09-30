@@ -1497,7 +1497,8 @@ ORIGINAL_ARGS=("$@")
 held_rc=0; gdk_engine_gate_held || held_rc=$?
 if [ "$held_rc" -eq 2 ]; then exit 2; fi
 if [ "$held_rc" -eq 1 ]; then
-	gdk_engine_gate_run "$GATE_TAG" -- bash "$SCRIPT_DIR/$(basename "$0")" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+	GDK_INTEGRATION_RERUN="$RERUN" GDK_INTEGRATION_WARM="$WARM" \
+		gdk_engine_gate_run "$GATE_TAG" -- bash "$SCRIPT_DIR/$(basename "$0")" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
 	exit $?
 fi
 

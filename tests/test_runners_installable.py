@@ -62,6 +62,14 @@ GIT = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign
 TIMEOUT_STUB = '#!/usr/bin/env bash\nshift 2\nexec "$@"\n'
 
 
+@pytest.fixture(autouse=True)
+def isolated_engine_admission(tmp_path, monkeypatch):
+    """Stub runners share a host within one case, never another case's host."""
+    home = str(tmp_path / 'engine-admission-home')
+    monkeypatch.setenv('GDK_ENGINE_GATE_HOME', home)
+    monkeypatch.setitem(FANOUT_ENV, 'GDK_ENGINE_GATE_HOME', home)
+
+
 def run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
     # The installed CI exports VERBOSE=1 for the whole `make milestone` step,
     # and the quiet-by-default cases are asked of the DEFAULT — VERBOSE unset.
@@ -595,13 +603,16 @@ def test_a_failing_scenario_with_no_summary_line_still_gets_a_diagnosis(tmp_path
     FAILURE_SUMMARY_RE, so the FAILURES block printed the scenario name and
     then nothing at all. A transcript the summary patterns cannot read is the
     case a reader needs the MOST."""
-    runner = _fanout_fixture(tmp_path, 'echo "some engine noise nothing matches"\nexit 1\n')
-    done = subprocess.run(['bash', str(runner), 'alpha'], cwd=tmp_path,
-                          text=True, capture_output=True, env=FANOUT_ENV)
+    runner = _fanout_fixture(tmp_path, 'echo boot >> "$PWD/boots.txt"\n'
+                                      'echo "some engine noise nothing matches"\nexit 1\n')
+    done = subprocess.run(['bash', str(runner), 'alpha', '--no-rerun', '--cold'], cwd=tmp_path,
+                          text=True, capture_output=True,
+                          env=dict(FANOUT_ENV, GDK_INTEGRATION_WARM='1'))
     assert done.returncode == 1, done.stdout + done.stderr
     assert '--- alpha ---' in done.stdout, done.stdout
     assert 'some engine noise nothing matches' in done.stdout, (
         'the FAILURES block named the scenario and said nothing about it')
+    assert (tmp_path / 'boots.txt').read_text() == 'boot\n', done.stdout
 
 
 @pytest.mark.skipif(shutil.which('shellcheck') is None, reason='needs shellcheck')

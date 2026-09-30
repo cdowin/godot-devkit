@@ -1,7 +1,7 @@
 ---
 id: ft-a-capture-never-takes-focus
 kind: feature
-milestone: "1.5.0"
+milestone: ms-future-godot-tooling
 name: a capture never takes focus
 status: planning
 reviewed:

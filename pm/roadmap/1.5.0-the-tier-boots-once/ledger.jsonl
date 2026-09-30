@@ -1,0 +1,14 @@
+{"ts":"2026-09-30T22:01:43Z","kind":"status","grain":"1.5.0","from":"planning","to":"building","branch":"codex/fast-import-copy"}
+{"ts":"2026-09-30T22:01:43Z","kind":"disposition","grain":"1.5.0","state":"building","answer":"none","branch":"codex/fast-import-copy"}
+{"ts":"2026-09-30T22:01:43Z","kind":"status","grain":"ft-bounded-parallel-engine-work","from":"planning","to":"building","branch":"codex/fast-import-copy"}
+{"ts":"2026-09-30T22:01:43Z","kind":"disposition","grain":"ft-bounded-parallel-engine-work","state":"building","answer":"none","branch":"codex/fast-import-copy"}
+{"ts":"2026-09-30T22:40:44Z","kind":"status","grain":"ft-bounded-parallel-engine-work","from":"building","to":"reviewing","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"ft-bounded-parallel-engine-work","state":"reviewing","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"status","grain":"ft-bounded-parallel-engine-work","from":"reviewing","to":"done","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"ft-bounded-parallel-engine-work","state":"done","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"status","grain":"1.5.0","from":"building","to":"reviewing","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"1.5.0","state":"reviewing","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"status","grain":"1.5.0","from":"reviewing","to":"accepted","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"1.5.0","state":"accepted","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"status","grain":"1.5.0","from":"accepted","to":"packaging","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"1.5.0","state":"packaging","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}

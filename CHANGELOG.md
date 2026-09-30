@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Engine runners share a nonblocking per-user OS lease. Integration holds it across fanout; standalone engine boots refuse competing work with owner context. Read-only verbs remain available.
+## v1.5.0 — 2026-09-30
+
+- Engine runners share a nonblocking per-user OS lease. Integration holds it across fanout; standalone engine boots refuse competing work with owner context. Read-only verbs remain available. `GDK_ENGINE_GATE_HOME` explicitly selects an isolated admission domain for test fixtures; production defaults to the account home.
 
 - Import scratch copies prune explicit Godot-ignored directories and registered nested worktrees before descent. Ignored runtime addons remain inputs.
 - Resource UID lookup reads the target header only. A headerless resource no longer acquires its inner script UID.

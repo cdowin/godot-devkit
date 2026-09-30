@@ -89,6 +89,8 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 exclude_prefixes = ["addons/", "tests/fixtures/"]
 
 [pm]
+version_file = "pyproject.toml"
+version_pattern = '^version = "(.*)"$'
 # Everything opt-in except D8. The rules this package ships OFF by default are
 # off because a consumer's legacy tree would go red on upgrade day — this tree
 # has no legacy, so it takes all of them and stays inside them from entry one.
@@ -156,3 +158,10 @@ ours = [".github/workflows/verify.yml"]
 # finding SC2317 that 0.11.0 names SC2329 (1.4.0's release PR).
 [shell]
 shellcheck_version = "0.11.0"
+
+[release.version_files]
+"pyproject.toml" = '^version = "(.*)"$'
+"src/godot_devkit/__init__.py" = "^__version__ = '(.*)'$"
+
+[release.commands]
+prove-artifact = "uvx --no-cache --index https://cdowin.github.io/godot-devkit/simple/ godot-devkit@{version} --version"

@@ -66,7 +66,7 @@ if [ -n "${GDK_ENGINE_GATE_FD:-}" ] && [ -n "${GDK_ENGINE_GATE_OWNER_PID:-}" ] \
 	&& [ -n "${GDK_ENGINE_GATE_HOME:-}" ]; then
 	_GDK_ENGINE_GATE_HOME="$GDK_ENGINE_GATE_HOME"
 else
-	_GDK_ENGINE_GATE_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')"
+	_GDK_ENGINE_GATE_HOME="${GDK_ENGINE_GATE_HOME:-$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')}"
 fi
 
 GDK_GATE_REPORT_DIR="${GDK_GATE_REPORT_DIR:-.gate-reports}"
@@ -363,6 +363,7 @@ def inherited(path):
 def run(path, fd, check, command):
     env = os.environ.copy()
     env[FD_KEY] = str(fd)
+    env["GDK_ENGINE_GATE_HOME"] = os.path.dirname(os.path.dirname(os.path.dirname(path)))
     env[OWNER_KEY] = str(os.getpid()) if env.get(OWNER_KEY) is None else env[OWNER_KEY]
     try:
         child = subprocess.Popen(command, env=env, pass_fds=(fd,))
@@ -1194,9 +1195,14 @@ usage: source gdk_runners.sh            the normal use — a shell library
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
+gdk_engine_gate_run, gdk_engine_gate_held,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.
+
+Engine admission defaults to the account home across checkouts.
+GDK_ENGINE_GATE_HOME explicitly selects an isolated domain for test fixtures.
+Production callers must share one domain. Competing engine work exits 75.
 USAGE_EOF
 }
 
