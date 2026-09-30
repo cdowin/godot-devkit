@@ -394,6 +394,16 @@ elif [ -d "$GDK_UNIT_TEST_ROOT" ]; then
 	fi
 fi
 
+# A bound the arithmetic below cannot read would turn a real hang into some
+# other verdict, so a malformed one is a usage error, said up front.
+if [ -n "${GDK_UNIT_TIMEOUT:-}" ]; then
+	case "$GDK_UNIT_TIMEOUT" in
+		*[!0-9]* | 0*)
+			echo "[$GATE_TAG] GDK_UNIT_TIMEOUT must be a whole number of seconds, got '$GDK_UNIT_TIMEOUT'" >&2
+			exit 2 ;;
+	esac
+fi
+
 # user:// sandbox — GUT boots the engine, and the engine writes to user://.
 gdk_sandbox_home
 

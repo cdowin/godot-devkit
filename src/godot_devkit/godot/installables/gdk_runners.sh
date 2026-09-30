@@ -147,21 +147,18 @@ _gdk_destroy_run_home() {
 #
 # A pid is dead only on POSITIVE evidence that it is gone, because the two
 # mistakes do not cost the same: a reaper that keeps a dead HOME costs disk,
-# and one that deletes a live HOME costs a peer's data. So:
-#   * `kill -0` succeeds                    -> live
-#   * `kill -0` says "No such process"      -> dead (ESRCH is the evidence)
-#   * `kill -0` fails any other way         -> ask `ps -p`. EPERM is the other
-#     user's process (a reaper once `rm -rf`d a live peer's HOME that way); a
-#     sandbox denial (the macOS seatbelt) is this shell being refused.
-#   * `ps` cannot see even this shell       -> live. The process table is
-#     hidden, so `ps -p` failing says nothing about the pid.
-# The error text is read under LC_ALL=C: strerror is localised.
+# and one that deletes a live HOME costs a peer's data. The kernel answers
+# `kill -0` with ESRCH only for a pid it did not find; EPERM (another user's
+# process) and a sandbox denial (the macOS seatbelt) both mean it FOUND one.
+# So `kill -0` succeeding or failing any way but "No such process" is live.
+# No `ps` fallback: `ps` can be blind to a pid that exists (a sandbox, Linux
+# /proc hidepid=2), and a blind `ps` read as "gone" is how a reaper deletes a
+# live HOME. The error text is read under LC_ALL=C: strerror is localised.
 gdk_pid_is_live() {
 	local pid="${1:?usage: gdk_pid_is_live <pid>}" err
 	err="$(export LC_ALL=C; kill -0 "$pid" 2>&1)" && return 0
 	case "$err" in *'No such process'*) return 1 ;; esac
-	ps -p "$$" >/dev/null 2>&1 || return 0
-	ps -p "$pid" >/dev/null 2>&1
+	return 0
 }
 
 # _gdk_reap_stale_run_homes <runs_dir> — the forget-proof backstop. A SIGKILLed
@@ -748,36 +745,29 @@ second line' "$(cat "$log")"
 	_gdk_st_true 'reap leaves a directory carrying no pid alone' "$status"
 
 	# pid 1 is alive and belongs to root: `kill -0` on it returns EPERM for an
-	# ordinary user, which a liveness probe must not read as death. Same shape
-	# as a peer's run home in a checkout two accounts share. A sandbox that
-	# hides pid 1 from `ps` (the macOS seatbelt an agent CLI runs under) makes
-	# these two cases unprovable rather than false, so they SAY so — a case
-	# that passes or fails on what the environment hides is neither.
-	if ps -p 1 >/dev/null 2>&1; then
-		status=0; gdk_pid_is_live 1 || status=1
-		_gdk_st_true 'a live pid this user cannot signal is still live' "$status"
-		mkdir -p "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign"
-		_gdk_reap_stale_run_homes "$runs"
-		status=0; [ -d "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign" ] || status=1
-		_gdk_st_true 'reap never touches a live home owned by another user' "$status"
-	else
-		echo "  SKIP — the two foreign-pid cases: \`ps -p 1\` cannot see pid 1, so this shell runs in a process sandbox (the macOS seatbelt, as an agent CLI's workspace-write mode) that hides the process table"
-	fi
+	# ordinary user, and under a process sandbox a denial — neither of which a
+	# liveness probe may read as death. Same shape as a peer's run home in a
+	# checkout two accounts share.
+	status=0; gdk_pid_is_live 1 || status=1
+	_gdk_st_true 'a live pid this user cannot signal is still live' "$status"
+	mkdir -p "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign"
+	_gdk_reap_stale_run_homes "$runs"
+	status=0; [ -d "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign" ] || status=1
+	_gdk_st_true 'reap never touches a live home owned by another user' "$status"
 
 	# The same decision with the environment taken out of it: `kill` and `ps`
-	# stubbed, so each answer is proven on every machine, sandboxed or not.
-	# EPERM, or a denial worded any other way, is NOT evidence of death; with
-	# `ps` blind to the table too, the only safe answer is live.
+	# stubbed, so each answer is proven on every machine. Only ESRCH is death;
+	# a `ps` that cannot see the pid (a sandbox, /proc hidepid=2) is not asked.
 	# shellcheck disable=SC2317,SC2329  # the stubs are called by gdk_pid_is_live
 	( kill() { echo "bash: kill: ($2) - Operation not permitted" >&2; return 1; }
 	  ps() { return 1; }
 	  gdk_pid_is_live 42 )
-	_gdk_st_true 'a pid kill -0 refuses (EPERM) and ps cannot see is live' "$?"
+	_gdk_st_true 'a pid kill -0 refuses (EPERM) is live even when ps cannot see it' "$?"
 	# shellcheck disable=SC2317,SC2329
 	( kill() { echo "bash: kill: ($2) - Sandbox: kill denied" >&2; return 1; }
 	  ps() { [ "$2" != 42 ]; }
-	  gdk_pid_is_live 42 && exit 1; exit 0 )
-	_gdk_st_true 'a denial ps can check is settled by ps (gone from a visible table)' "$?"
+	  gdk_pid_is_live 42 )
+	_gdk_st_true 'a sandbox denial is live even when ps shows this shell and not the pid' "$?"
 	# shellcheck disable=SC2317,SC2329
 	( kill() { echo "bash: kill: ($2) - No such process" >&2; return 1; }
 	  ps() { return 0; }
