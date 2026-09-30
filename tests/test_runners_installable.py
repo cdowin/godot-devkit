@@ -21,6 +21,7 @@ import contextlib
 import io
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -460,10 +461,96 @@ def _fanout_fixture(tmp_path: Path, stub_body: str, mode: int = 0o755) -> Path:
     (tmp_path / '.godot').mkdir()
     (tmp_path / '.godot' / 'uid_cache.bin').write_bytes(b'')
     shutil.copy2(INTEGRATION, runners / 'integration.sh')
+    shutil.copy2(LIBRARY, runners.parent / 'gdk_runners.sh')
     stub = runners / 'stub_scenario.sh'
     stub.write_text('#!/usr/bin/env bash\n' + stub_body, encoding='utf-8')
     stub.chmod(mode)
     return runners / 'integration.sh'
+
+
+def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_sandbox(tmp_path):
+    """The lock is host-scoped and descriptor-backed: a second gate fails
+    immediately with owner context, while sourced descendants still validate
+    the captured host path after HOME has become a per-run sandbox."""
+    home = tmp_path / 'host-home'
+    lib = LIBRARY
+    owner = subprocess.Popen(
+        ['bash', '-c', 'source "$1"; gdk_engine_gate_run integration -- bash -c '
+         '"source \\\"$1\\\"; HOME=/tmp/sandbox; '
+         'gdk_engine_gate_held || exit 41; echo ready; sleep 20"', '_', str(lib)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        env=dict(os.environ, HOME=str(home)))
+    try:
+        assert owner.stdout is not None
+        assert owner.stdout.readline().strip() == 'ready'
+        competing = subprocess.run(
+            ['bash', '-c', 'source "$1"; gdk_engine_gate_run parse -- true', '_', str(lib)],
+            text=True, capture_output=True, env=dict(os.environ, HOME=str(home)))
+        assert competing.returncode == 75, competing.stdout + competing.stderr
+        assert 'engine gate busy' in competing.stderr, competing.stderr
+        assert 'integration' in competing.stderr, competing.stderr
+    finally:
+        os.killpg(owner.pid, signal.SIGTERM)
+        owner.wait(timeout=5)
+    released = subprocess.run(
+        ['bash', '-c', 'source "$1"; gdk_engine_gate_run after-crash -- true', '_', str(lib)],
+        text=True, capture_output=True, env=dict(os.environ, HOME=str(home)))
+    assert released.returncode == 0, released.stdout + released.stderr
+
+
+def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp_path):
+    """Scenario's env-prefixed engine command is serialized; a forged or
+    stale inherited descriptor refuses cache rebuild before invoking Godot."""
+    home = tmp_path / 'lease-home'
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    godot = bin_dir / 'godot'
+    godot.write_text('#!/bin/sh\necho boot >> "$GDK_BOOT_LOG"\nsleep 5\n', encoding='utf-8')
+    godot.chmod(0o755)
+    timeout = bin_dir / 'timeout'
+    timeout.write_text(TIMEOUT_STUB, encoding='utf-8')
+    timeout.chmod(0o755)
+    ready = tmp_path / 'ready'
+    owner = subprocess.Popen(
+        ['bash', '-c', 'source "$1"; GDK_TIMEOUT="$2"; GDK_GODOT="$3"; export GDK_TIMEOUT GDK_GODOT; '
+         'gdk_run_bounded 20 -- env GDK_GODOT="$GDK_GODOT" "$GDK_GODOT"; echo "$?" > "$4"',
+         '_', str(LIBRARY), str(timeout), str(godot), str(ready)],
+        cwd=tmp_path, env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+    try:
+        deadline = time.monotonic() + 5
+        while not (tmp_path / 'boots').exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        competing = subprocess.run(
+            ['bash', '-c', 'source "$1"; GDK_TIMEOUT="$2"; GDK_GODOT="$3"; export GDK_TIMEOUT GDK_GODOT; '
+             'gdk_run_bounded 20 -- env GDK_GODOT="$GDK_GODOT" "$GDK_GODOT"',
+             '_', str(LIBRARY), str(timeout), str(godot)], cwd=tmp_path,
+            text=True, capture_output=True,
+            env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+        assert competing.returncode == 75, competing.stdout + competing.stderr
+        assert 'engine gate busy' in competing.stderr, competing.stderr
+    finally:
+        os.killpg(owner.pid, signal.SIGTERM) if owner.poll() is None else None
+        owner.wait(timeout=5)
+    marker = tmp_path / 'marker'
+    refused = subprocess.run(
+        ['bash', '-c', 'source "$1"; GDK_TIMEOUT="$2"; GDK_GODOT="$3"; '
+         'GDK_ENGINE_GATE_FD=999999 GDK_ENGINE_GATE_OWNER_PID=1 gdk_rebuild_import_cache 2; '
+         'echo "$?" > "$4"', '_', str(LIBRARY), str(timeout), str(godot), str(marker)],
+        cwd=tmp_path, text=True, capture_output=True,
+        env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+    assert 'invalid inherited engine lease' in refused.stderr, refused.stderr
+    assert marker.read_text(encoding='utf-8').strip() == '2'
+
+
+def test_integration_read_only_verbs_do_not_consult_engine_lease(tmp_path):
+    runner = _fanout_fixture(tmp_path, 'exit 0\n')
+    poisoned = dict(FANOUT_ENV, HOME=str(tmp_path / 'home'),
+                    GDK_ENGINE_GATE_FD='999999', GDK_ENGINE_GATE_OWNER_PID='1')
+    for verb in ('--help', '--list', '--self-test'):
+        done = subprocess.run(['bash', str(runner), verb], cwd=tmp_path,
+                              text=True, capture_output=True, env=poisoned)
+        assert done.returncode in (0, 1), f'{verb}: {done.stdout}{done.stderr}'
+        assert 'engine gate' not in done.stderr.lower(), done.stderr
 
 
 def test_the_fan_out_runs_a_runner_with_no_exec_bit_and_tells_every_job_it_has_peers(tmp_path):

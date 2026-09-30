@@ -99,6 +99,7 @@ GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN:-1}"
 # contract in scenario.sh's header. 0 (the default) is the cold path; --cold
 # forces it for one run.
 GDK_INTEGRATION_WARM="${GDK_INTEGRATION_WARM:-0}"
+GDK_RUNNERS_LIB="${GDK_RUNNERS_LIB:-$(dirname "${BASH_SOURCE[0]}")/../gdk_runners.sh}"
 # Env: GDK_JOBS  parallelism (default: cores - 2, floor 1)
 # -----------------------------------------------------------------------------
 
@@ -1485,6 +1486,19 @@ if [ "${1:-}" = "--list" ]; then
 	fi
 	printf '%s\n' "$roster"
 	exit 0
+fi
+
+# Read-only exits above never take the lease. One owner covers repair and the
+# full fan-out; child workers validate and inherit its descriptor.
+ORIGINAL_ARGS=("$@")
+[ -f "$GDK_RUNNERS_LIB" ] || { echo "[$GATE_TAG] engine-gate library not found: $GDK_RUNNERS_LIB" >&2; exit 2; }
+# shellcheck source=/dev/null
+. "$GDK_RUNNERS_LIB"
+held_rc=0; gdk_engine_gate_held || held_rc=$?
+if [ "$held_rc" -eq 2 ]; then exit 2; fi
+if [ "$held_rc" -eq 1 ]; then
+	gdk_engine_gate_run "$GATE_TAG" -- bash "$SCRIPT_DIR/$(basename "$0")" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+	exit $?
 fi
 
 SCENARIO_SH="$SCRIPT_DIR/$GDK_SCENARIO_RUNNER"
