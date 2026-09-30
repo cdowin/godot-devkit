@@ -2,7 +2,7 @@
 id: "1.4.0"
 kind: milestone
 name: the gate never costs a story
-status: reviewing
+status: accepted
 depends_on: []
 branch: milestone/1.4.0-the-gate-never-costs-a-story
 mode: parallel
