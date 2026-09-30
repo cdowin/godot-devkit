@@ -1060,42 +1060,55 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
             assert done.returncode == 0, f'{target}: {done.stdout}{done.stderr}'
 
 
-LOCKED_BIN = '.venv/bin/godot-devkit'
+LEGACY_RUN = 'uvx --from "git+https://github.com/cdowin/godot-devkit@v0.25.0" godot-devkit check all'
+# A uv.lock whose packages are (some of) these; the kit's entry is what makes
+# the tree locked.
+OTHER_PACKAGE = '[[package]]\nname = "gdtoolkit"\nversion = "4.3.0"\n'
+KIT_PACKAGE = ('[[package]]\nname = "godot-devkit"\nversion = "1.4.0"\n'
+               'source = { registry = "https://cdowin.github.io/godot-devkit/simple/" }\n')
 
 
 @pytest.mark.skipif(shutil.which('make') is None, reason='needs make')
-@pytest.mark.parametrize('pin, venv, caller, runs, refuses', [
+@pytest.mark.parametrize('pin, lock, caller, runs, says', [
     # 1. The caller's GODOT_DEVKIT wins over everything, both pins included.
     (True, True, True, 'my-devkit check all', None),
-    # 2. The locked shape: uv sync's binary, no Makefile pin.
-    (False, True, False, f'{LOCKED_BIN} check all', None),
-    # 3. The legacy pin, unchanged.
-    (True, False, False,
-     'uvx --from "git+https://github.com/cdowin/godot-devkit@v0.25.0" godot-devkit check all', None),
-    # 4. Both pins: two products, refused at parse time.
-    (True, True, False, None, 'Delete the GODOT_DEVKIT_VERSION line'),
-    # 5. Neither: refused, the locked shape named first.
+    # 2. The locked shape: uv.lock names the kit, no Makefile pin.
+    (False, True, False, 'uv run --frozen godot-devkit check all', None),
+    # 3. The legacy pin, as in 1.3.0 — a lock that names other packages and a
+    #    venv holding the kit change nothing and warn nothing.
+    (True, False, False, LEGACY_RUN, None),
+    # 4. Both pins: the legacy pin still runs (a minor forces no edit), warned.
+    (True, True, False, LEGACY_RUN, 'Delete the GODOT_DEVKIT_VERSION line'),
+    # 5. Neither: refused, the locked shape named first — a .venv binary with
+    #    no lock naming the kit is not a pin.
     (False, False, False, None, 'not pinned — lock it'),
 ], ids=['caller', 'locked', 'legacy-pin', 'both', 'neither'])
-def test_the_tiers_resolve_godot_devkit_in_one_order(tmp_path, pin, venv, caller, runs, refuses):
+def test_the_tiers_resolve_godot_devkit_in_one_order(tmp_path, pin, lock, caller, runs, says):
     """#38: which godot-devkit `godot-check` runs, decided by the written
-    Makefile.tiers at parse time — `make -n`, so nothing runs."""
+    Makefile.tiers at parse time — `make -n`, so nothing runs. Every case
+    carries a stale .venv/bin/godot-devkit: the LOCK decides, never the venv."""
     with consumer_repo(tmp_path, makefile=True) as root:
         assert run_install()[0] == 0
         if not pin:
             (root / 'Makefile').write_text(
                 CONSUMER_MAKEFILE.replace('GODOT_DEVKIT_VERSION := v0.25.0\n', ''),
                 encoding='utf-8')
-        if venv:
-            (root / LOCKED_BIN).parent.mkdir(parents=True)
-            (root / LOCKED_BIN).write_text('#!/bin/sh\n', encoding='utf-8')
+        (root / 'uv.lock').write_text(
+            'version = 1\n\n' + OTHER_PACKAGE + ('\n' + KIT_PACKAGE if lock else ''),
+            encoding='utf-8')
+        (root / '.venv' / 'bin').mkdir(parents=True)
+        (root / '.venv' / 'bin' / 'godot-devkit').write_text('#!/bin/sh\n', encoding='utf-8')
         done = _make_n(root, 'godot-check', *(['GODOT_DEVKIT=my-devkit'] if caller else []))
-        if refuses:
-            assert done.returncode != 0 and refuses in done.stderr, done.stderr
+        if runs is None:
+            assert done.returncode != 0 and says in done.stderr, done.stderr
             assert done.stdout == '', done.stdout
+            return
+        assert done.returncode == 0, done.stderr
+        assert f' {runs};' in done.stdout or f' {runs}\n' in done.stdout, done.stdout
+        if says:
+            assert done.stderr.count(says) == 1, done.stderr
         else:
-            assert done.returncode == 0, done.stderr
-            assert f' {runs};' in done.stdout or f' {runs}\n' in done.stdout, done.stdout
+            assert 'pinned twice' not in done.stderr, done.stderr
 
 
 def test_this_repos_tier_file_starts_with_the_installable():

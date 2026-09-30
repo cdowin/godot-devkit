@@ -153,9 +153,10 @@ Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint warnings unit integration scenario capture import-cache
 hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
 GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS lists the include's compositions
-run. It runs .venv/bin/godot-devkit, the version uv.lock pins (the run
-prints the pyproject.toml block that locks it), or — the legacy pin — the
-tag GODOT_DEVKIT_VERSION names in your Makefile; never both.
+run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
+(the run prints the pyproject.toml block that locks it), or — the legacy
+pin, which wins with a warning when both are present — the tag
+GODOT_DEVKIT_VERSION names in your Makefile. Keep one.
 
 The gate framework (`check`, `precommit`, `milestone`, Makefile.devkit) is
 agentic-sdlc's: pin that package and run its `install-gates`; its include
@@ -179,9 +180,10 @@ EXECUTABLE_SUFFIX = '.sh'
 
 NEXT_STEP = (
     'lock godot-devkit with uv — paste the pyproject.toml block below and run '
-    '`uv sync`, which installs .venv/bin/godot-devkit, the binary '
-    'Makefile.tiers runs (the legacy pin, `GODOT_DEVKIT_VERSION := <tag>` in '
-    'your Makefile above `include Makefile.devkit`, still works; never both) '
+    '`uv sync`, which writes the uv.lock Makefile.tiers reads: once it names '
+    'the kit, make runs `uv run --frozen godot-devkit` (the legacy pin, '
+    '`GODOT_DEVKIT_VERSION := <tag>` in your Makefile above `include '
+    'Makefile.devkit`, still works and wins with a warning; keep one) '
     '— then `include Makefile.devkit` (agentic-sdlc\'s `install-gates`; it '
     '`-include`s Makefile.tiers, where the Godot targets live) and join the '
     'Godot checks to `make check` with `[gates] extra = ["godot-check"]` in '
@@ -199,7 +201,8 @@ NEXT_STEP = (
 # The consumer's pyproject.toml block that LOCKS this kit (#38): a dev
 # dependency at the version that ran this verb, resolved ONLY from this kit's
 # index (`explicit = true` — the PyPI name is someone else's), hash-pinned in
-# uv.lock by `uv sync`. PRINTED, not written: pyproject.toml is the consumer's.
+# uv.lock by `uv sync`, run by Makefile.tiers as `uv run --frozen`. PRINTED,
+# not written: pyproject.toml is the consumer's.
 INDEX_URL = 'https://cdowin.github.io/godot-devkit/simple/'
 PYPROJECT_BLOCK = f'''[dependency-groups]
 dev = ["godot-devkit=={__version__}"]
