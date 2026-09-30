@@ -34,18 +34,25 @@ both, the legacy pin runs, as it did before the lock existed, and `make` warns y
 `GODOT_DEVKIT_VERSION` line (two pins of one tool ship two products). Neither is refused at parse
 time. `GODOT_DEVKIT` set to a command overrides both.
 
-```make
-DEVKIT_VERSION       := v0.17.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.4.0     # this kit, the legacy pin — omit it when uv.lock pins the kit
-include Makefile.devkit
-```
+Both kits lock the same way: a dev dependency from each kit's own index, hash-pinned in `uv.lock`.
+agentic-sdlc runs only from the lock since its 1.0.0 (no `DEVKIT_VERSION` line), so the Makefile
+is the include plus your own targets:
 
-Then write the two files the include reads, and join the gates to `make check`:
+```make
+include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
+```
 
 ```sh
-uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.17.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.4.0" godot-devkit install-runners  # Makefile.tiers + runners
+uv add --dev agentic-sdlc==1.0.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
+uv add --dev godot-devkit==1.4.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+# then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
+uv run agentic-sdlc install-gates     # Makefile.devkit
+uv run godot-devkit install-runners   # Makefile.tiers + runners
 ```
+
+The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v1.4.0` above the include and
+`uvx --from "git+https://github.com/cdowin/godot-devkit@v1.4.0" godot-devkit install-runners`.
+Then join the gates to `make check`:
 
 ```toml
 # devkit.toml
@@ -55,7 +62,7 @@ extra = ["godot-check"]     # `godot-devkit check all`, the target install-runne
 
 `make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make precommit` and
 `make milestone` run the Godot tiers `Makefile.tiers` declares. Every machine and CI runs the same
-gate code because the pin is a tag.
+gate code because `uv.lock` pins the bits.
 
 **A repo with a PM tree has a third step.** agentic-sdlc's flow — the states `pm` moves work
 through, `[pm.states.*]` in `devkit.toml` — has no default, so a repo that skips this step has a

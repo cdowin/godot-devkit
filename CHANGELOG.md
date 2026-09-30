@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-**Upgrading.** No Makefile or hook edit is required. One `devkit.toml` edit may be: `[rng]`
+**Upgrading.** No Makefile or hook edit is required. The README's install section now shows both
+kits locked in `uv.lock` (agentic-sdlc 1.0.0 runs only from the lock). One `devkit.toml` edit may be: `[rng]`
 allowlist or baseline entries that covered `func randf()`-style declarations (the #30 false
 positive) are now reported `STALE`/`SHRUNK` and fail `check rng` until you delete them. Consumers
 that grep runner output should note the changed shapes: `SUMMARY: N passed (K flaky[, W
