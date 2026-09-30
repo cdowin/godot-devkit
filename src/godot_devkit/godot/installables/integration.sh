@@ -456,6 +456,7 @@ slice_for_touched() {
 # A file REFERENCES a fixture when its text holds any of the fixture's names:
 #   - its res:// path, as a substring — any quote, none, a const, a threaded
 #     load, an ext_resource, a string property;
+#   - its basename after a `/` or a quote — a relative path ("../support/x.gd");
 #   - its own uid://, read from its .uid or .import sidecar, or from the
 #     [gd_scene|gd_resource … uid="…"] header of a .tscn/.tres — a whole token;
 #   - a class_name it declares — a whole word.
@@ -497,9 +498,15 @@ FIXTURE_SLICE_AWK='
 		return u != "" ? u : first_uid(slurp(f ".import"))
 	}
 	# names_of — fills need[1..n] / whole[1..n] with the names f goes by.
-	function names_of(f,   n, u, t, k, lines, m, i) {
+	function names_of(f,   n, u, t, k, lines, m, i, b) {
 		n = 0
 		need[++n] = "res://" f; whole[n] = 0
+		# A relative path ("../support/x.gd") ends in the basename after a
+		# slash or a quote; another file of the same basename over-selects.
+		b = f; sub(/.*\//, "", b)
+		need[++n] = "/" b; whole[n] = 0
+		need[++n] = "\"" b; whole[n] = 0
+		need[++n] = "\047" b; whole[n] = 0
 		u = uid_of(f)
 		if (u != "") { need[++n] = u; whole[n] = 1 }
 		if (f ~ /\.gd$/) {
@@ -782,7 +789,7 @@ echo "$name ${GDK_SCENARIO_IN_SWEEP:-unset}" >> "$state/env"
 n=$(( $(cat "$state/$name.n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$state/$name.n"
 case "$name" in
 	flaky) [ "$n" -ge 2 ] || { echo "[SCENARIO] $name FAIL — load flake"; exit 1; } ;;
-	red) echo "[SCENARIO] $name FAIL — real"; exit 1 ;;
+	red*) echo "[SCENARIO] $name FAIL — real"; exit 1 ;;
 esac
 echo "[SCENARIO] $name PASS"
 STUB_EOF
@@ -851,6 +858,15 @@ STUB_EOF
 	cases=$((cases + 1))
 	out="$(GDK_INTEGRATION_RERUN=maybe sweep --diff HEAD)"; rc=$?
 	[ "$rc" -eq 2 ] || miss "a GDK_INTEGRATION_RERUN that is not 0 or 1 is a config error (exit 2), got $rc"
+	# Past the cap (max of 3 and 10% of the slice) nothing reruns: the answer
+	# is already red, and serial cold boots would only make it slower.
+	for n in red2 red3 red4; do echo 'extends Node' > "$proj/tests/integration/$n.gd"; done
+	cases=$((cases + 1))
+	out="$(sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 1 ] && grep -qF 'over the rerun cap of 3' <<<"$out" \
+		&& [ "$(cat "$state/flaky.n")" = 1 ] && ! grep -qF 'FLAKE' <<<"$out" \
+		|| miss "past the rerun cap nothing reruns and the failures stay red (rc $rc): $out"
+	rm -f "$proj/tests/integration/red2.gd" "$proj/tests/integration/red3.gd" "$proj/tests/integration/red4.gd"
 
 	# A touched fixture no scenario references boots the tier and says why —
 	# and the env spelling of --no-rerun holds on the way.
@@ -1258,10 +1274,11 @@ FIXTURE_EOF
 	printf '%s\n' 'extends Node' 'const U = preload("uid://cshared1")' > "$fx/tests/integration/uid.gd"
 	printf '%s\n' 'extends Node' 'var x := SharedThing.new()' > "$fx/tests/integration/cls.gd"
 	printf '%s\n' "extends 'res://tests/support/shared.gd'" > "$fx/tests/integration/ext.gd"
+	printf '%s\n' 'extends Node' 'const R = preload("../support/shared.gd")' > "$fx/tests/integration/rel.gd"
 	printf '%s\n' 'extends Node' 'var y := SharedThingy.new()' 'const V = preload("uid://cshared12")' > "$fx/tests/integration/decoy.gd"
 	printf '%s\n' 'extends Node' 'const L = preload("uid://clevel9")' > "$fx/tests/integration/lvl.gd"
 	out="$(cd "$fx" && printf '%s\n' tests/support/shared.gd | fixture_slice | tr '\t\n' ': ')"
-	for name in 'sq:single quotes' 'cst:a const path' 'uid:its uid://' 'cls:its class_name' "ext:extends '…'"; do
+	for name in 'sq:single quotes' 'cst:a const path' 'uid:its uid://' 'cls:its class_name' "ext:extends '…'" 'rel:a relative path'; do
 		cases=$((cases + 1))
 		case "$out" in
 			*"FIXTURE:tests/support/shared.gd:${name%%:*} "*) ;;
@@ -1728,6 +1745,13 @@ BOOTS=$((PASS + FAIL))
 # perform it. Still red alone is red, exactly as before. The FLAKE line is the
 # record; nothing is filed.
 FLAKY=0; WARM_ONLY=0
+# A rerun is for the few a loaded machine reddens. Past a cap the answer is
+# already red, and 166 serial cold boots would only make it slower.
+RERUN_CAP=$(( ${#NAMES[@]} / 10 )); [ "$RERUN_CAP" -ge 3 ] || RERUN_CAP=3
+if [ "$RERUN" -eq 1 ] && [ "${#FAILED_NAMES[@]}" -gt "$RERUN_CAP" ]; then
+	echo "[$GATE_TAG] ${#FAILED_NAMES[@]} scenario(s) failed, over the rerun cap of $RERUN_CAP (max of 3 and 10% of ${#NAMES[@]}) — not rerunning; they are red"
+	RERUN=0
+fi
 if [ "$RERUN" -eq 1 ] && [ "${#FAILED_NAMES[@]}" -gt 0 ]; then
 	echo "[$GATE_TAG] rerunning ${#FAILED_NAMES[@]} failed scenario(s) alone, once each"
 	STILL_RED=()
