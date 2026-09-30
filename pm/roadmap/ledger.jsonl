@@ -165,3 +165,5 @@
 {"ts":"2026-09-30T01:33:55Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":10672,"census":51,"branch":"feat/ft-the-read-verbs-stop-lying-by-omission"}
 {"ts":"2026-09-30T01:34:01Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":10871,"census":51,"branch":"feat/ft-the-runners-survive-a-crowded-machine"}
 {"ts":"2026-09-30T01:34:49Z","kind":"gate","gate":"runners-self-test","verdict":"PASS","duration_ms":20722,"branch":"feat/ft-the-runners-survive-a-crowded-machine"}
+{"ts":"2026-09-30T01:39:00Z","kind":"gate","gate":"runners-self-test","verdict":"PASS","duration_ms":29273,"branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:37:24Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":10607,"census":51,"branch":"feat/ft-the-import-never-touches-the-tree"}
