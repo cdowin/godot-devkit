@@ -454,6 +454,10 @@ def _fanout_fixture(tmp_path: Path, stub_body: str, mode: int = 0o755) -> Path:
     runners = tmp_path / 'tools' / 'dev' / 'runners'
     runners.mkdir(parents=True)
     (tmp_path / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    # A current import cache, written after project.godot: a --diff/--all
+    # sweep repairs a stale one first, and no import_cache.sh stands here.
+    (tmp_path / '.godot').mkdir()
+    (tmp_path / '.godot' / 'uid_cache.bin').write_bytes(b'')
     shutil.copy2(INTEGRATION, runners / 'integration.sh')
     stub = runners / 'stub_scenario.sh'
     stub.write_text('#!/usr/bin/env bash\n' + stub_body, encoding='utf-8')
@@ -681,13 +685,23 @@ def test_diff_slices_a_clean_tree_to_smoke_and_a_change_by_every_touched_path(tm
 
 
 def test_a_touched_piece_of_the_tiers_ground_selects_every_scenario(tmp_path):
+    """The scenario base is ground: every scenario boots on it. A fixture
+    under tests/support/ is not (#33) — but one NO scenario loads boots the
+    tier too, and says so, rather than selecting nothing (rule 4)."""
     runner = _slice_fixture(tmp_path)
-    _touch(tmp_path / 'tests' / 'support' / 'fixture.gd')
+    _touch(tmp_path / 'tests' / 'integration' / 'scenario_base.gd')
     done = _slice(runner, '--diff', 'HEAD')
     assert done.returncode == 0, done.stdout + done.stderr
     assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
     assert "the tier's own ground" in done.stdout, done.stdout
     assert 'eyes_capture' not in done.stdout, 'a capture TOOL boots in the whole-tier slice'
+    subprocess.run([*GIT, 'commit', '-q', '-am', 'base'], cwd=tmp_path, check=True)
+    _touch(tmp_path / 'tests' / 'support' / 'fixture.gd')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
+    assert ('[INTEGRATION] fixture tests/support/fixture.gd is referenced by no scenario'
+            ' — booting the tier') in done.stdout, done.stdout
 
 
 def test_a_hostile_or_doubled_slash_covers_entry_selects_nothing_and_reads_as_undeclared(tmp_path):
