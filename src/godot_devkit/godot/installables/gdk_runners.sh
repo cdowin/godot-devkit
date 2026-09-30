@@ -67,6 +67,14 @@ GDK_GODOT="${GDK_GODOT:-godot}"
 GDK_GATE_LIB="${GDK_GATE_LIB:-$(dirname "${BASH_SOURCE[0]}")/gdk_gate.sh}"
 GDK_LEDGER_CMD="${GDK_LEDGER_CMD:-}"
 
+# THE INDEX LOCK. A read-only `git status` / `git diff` still refreshes the
+# index when it can, and takes .git/index.lock to do it; a gate killed
+# mid-refresh (a timeout, a Ctrl-C, a peer lane's reaper) leaves the lock
+# behind, and every later git write in that checkout fails until a human
+# deletes it. Exported at source time so every runner that sources this library
+# — and every git it spawns — reads without taking the optional lock.
+export GIT_OPTIONAL_LOCKS=0
+
 # The tag every line this library prints on its OWN behalf carries, so a
 # consumer can tell the library's voice from its gate's.
 GDK_LIB_TAG="gdk-runners"
@@ -84,7 +92,7 @@ GDK_LIB_TAG="gdk-runners"
 # exit status.
 _GDK_EXIT_HOOKS=()
 
-# shellcheck disable=SC2329  # invoked indirectly via `trap … EXIT`
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via `trap … EXIT`
 _gdk_run_exit_hooks() {
 	local status=$?
 	local hook
@@ -121,7 +129,7 @@ GDK_SANDBOX_RUN_PREFIX="run-"
 # _gdk_destroy_run_home — remove THIS run's HOME. Guarded: it will only ever
 # delete a path that looks like one we minted, so a mis-set variable can never
 # point `rm -rf` at the real ~/Library/Application Support.
-# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via gdk_on_exit
 _gdk_destroy_run_home() {
 	local home="${_GDK_RUN_HOME:-}"
 	[ -n "$home" ] || return 0
@@ -135,14 +143,22 @@ _gdk_destroy_run_home() {
 }
 
 # gdk_pid_is_live <pid> — true while that process exists, INCLUDING when it
-# belongs to another user. `kill -0` is permission-gated: on a pid this user
-# does not own it fails with EPERM, which reads as "dead" and is how a reaper
-# came to `rm -rf` a live peer's HOME in a checkout shared by two accounts.
-# `ps -p` answers existence without needing signal permission; the `kill -0`
-# fast path stays because it is a syscall rather than a fork.
+# belongs to another user, and INCLUDING when this shell cannot tell.
+#
+# A pid is dead only on POSITIVE evidence that it is gone, because the two
+# mistakes do not cost the same: a reaper that keeps a dead HOME costs disk,
+# and one that deletes a live HOME costs a peer's data. The kernel answers
+# `kill -0` with ESRCH only for a pid it did not find; EPERM (another user's
+# process) and a sandbox denial (the macOS seatbelt) both mean it FOUND one.
+# So `kill -0` succeeding or failing any way but "No such process" is live.
+# No `ps` fallback: `ps` can be blind to a pid that exists (a sandbox, Linux
+# /proc hidepid=2), and a blind `ps` read as "gone" is how a reaper deletes a
+# live HOME. The error text is read under LC_ALL=C: strerror is localised.
 gdk_pid_is_live() {
-	kill -0 "${1:?usage: gdk_pid_is_live <pid>}" 2>/dev/null && return 0
-	ps -p "$1" >/dev/null 2>&1
+	local pid="${1:?usage: gdk_pid_is_live <pid>}" err
+	err="$(export LC_ALL=C; kill -0 "$pid" 2>&1)" && return 0
+	case "$err" in *'No such process'*) return 1 ;; esac
+	return 0
 }
 
 # _gdk_reap_stale_run_homes <runs_dir> — the forget-proof backstop. A SIGKILLed
@@ -289,7 +305,7 @@ _gdk_normalize_project_file() {
 
 # gdk_restore_project_file — idempotent; silent when the run left the file
 # alone (the overwhelmingly common case), one line otherwise.
-# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via gdk_on_exit
 gdk_restore_project_file() {
 	local snapshot="${_GDK_PROJECT_SNAPSHOT:-}"
 	[ -n "$snapshot" ] || return 0
@@ -570,6 +586,31 @@ _gdk_st_true() {
 	fi
 }
 
+# _gdk_st_git_env_clear — drop every variable that points git at a repository
+# other than the one `-C` names. Under a git hook GIT_DIR / GIT_INDEX_FILE are
+# exported, and a scratch fixture's bare `git init .` then re-initialised the
+# HOST repo instead (#24). Call it in a subshell: `env -u` is not on every
+# platform, and the caller's own git must keep its environment.
+_gdk_st_git_env_clear() {
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+		GIT_COMMON_DIR GIT_ALTERNATE_OBJECT_DIRECTORIES
+}
+
+# _gdk_st_tracked_dir_case <dir> — the report-dir guard against a scratch git
+# repo built at <dir>: 0 when a tracked directory is refused and an ordinary
+# report dir admitted. No git on PATH skips the clause (0).
+_gdk_st_tracked_dir_case() (
+	_gdk_st_git_env_clear
+	cd "$1" || exit 1
+	git -C "$1" init -q >/dev/null 2>&1 || exit 0
+	mkdir -p tracked
+	: > tracked/keep.txt
+	git -C "$1" add tracked/keep.txt >/dev/null 2>&1 || exit 0
+	gdk_report_dir_defect tracked >/dev/null && exit 1
+	gdk_report_dir_defect .scenario-reports >/dev/null || exit 1
+	exit 0
+)
+
 _gdk_self_test() {
 	local scratch verdict log body status hung runs dead live lib
 	# Resolved BEFORE the cd below: the sub-shell cases re-source the library
@@ -704,14 +745,34 @@ second line' "$(cat "$log")"
 	_gdk_st_true 'reap leaves a directory carrying no pid alone' "$status"
 
 	# pid 1 is alive and belongs to root: `kill -0` on it returns EPERM for an
-	# ordinary user, which a liveness probe must not read as death. Same shape
-	# as a peer's run home in a checkout two accounts share.
+	# ordinary user, and under a process sandbox a denial — neither of which a
+	# liveness probe may read as death. Same shape as a peer's run home in a
+	# checkout two accounts share.
 	status=0; gdk_pid_is_live 1 || status=1
 	_gdk_st_true 'a live pid this user cannot signal is still live' "$status"
 	mkdir -p "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign"
 	_gdk_reap_stale_run_homes "$runs"
 	status=0; [ -d "$runs/${GDK_SANDBOX_RUN_PREFIX}1-foreign" ] || status=1
 	_gdk_st_true 'reap never touches a live home owned by another user' "$status"
+
+	# The same decision with the environment taken out of it: `kill` and `ps`
+	# stubbed, so each answer is proven on every machine. Only ESRCH is death;
+	# a `ps` that cannot see the pid (a sandbox, /proc hidepid=2) is not asked.
+	# shellcheck disable=SC2317,SC2329  # the stubs are called by gdk_pid_is_live
+	( kill() { echo "bash: kill: ($2) - Operation not permitted" >&2; return 1; }
+	  ps() { return 1; }
+	  gdk_pid_is_live 42 )
+	_gdk_st_true 'a pid kill -0 refuses (EPERM) is live even when ps cannot see it' "$?"
+	# shellcheck disable=SC2317,SC2329
+	( kill() { echo "bash: kill: ($2) - Sandbox: kill denied" >&2; return 1; }
+	  ps() { [ "$2" != 42 ]; }
+	  gdk_pid_is_live 42 )
+	_gdk_st_true 'a sandbox denial is live even when ps shows this shell and not the pid' "$?"
+	# shellcheck disable=SC2317,SC2329
+	( kill() { echo "bash: kill: ($2) - No such process" >&2; return 1; }
+	  ps() { return 0; }
+	  gdk_pid_is_live 42 && exit 1; exit 0 )
+	_gdk_st_true 'ESRCH from kill -0 is dead without asking ps' "$?"
 
 	# --- the rebuild says so when it cannot be bounded -----------------------
 	mkdir -p "$scratch/stub-bin"
@@ -857,15 +918,29 @@ second line' "$(cat "$log")"
 
 	# A directory the repo keeps TRACKED content in is the repo's, whatever
 	# the config says. `GDK_CAPTURE_REPORT_DIR=tests` emptied tests/.
-	( cd "$scratch" || exit 1
-	  git init -q . >/dev/null 2>&1 || exit 0    # no git: the clause is skipped
-	  mkdir -p tracked
-	  : > tracked/keep.txt
-	  git add tracked/keep.txt >/dev/null 2>&1 || exit 0
-	  gdk_report_dir_defect tracked >/dev/null && exit 1
-	  gdk_report_dir_defect .scenario-reports >/dev/null || exit 1
-	  exit 0 )
+	_gdk_st_tracked_dir_case "$scratch"
 	_gdk_st_true 'report_dir_defect refuses a directory git tracks files in' "$?"
+
+	# The same fixture run the way a git HOOK in a LINKED WORKTREE runs it:
+	# GIT_DIR and GIT_INDEX_FILE exported at that worktree's git dir. The
+	# fixture used to re-initialise that repository and write `core.bare =
+	# true` into the config every worktree shares (#24) — so the throwaway is
+	# a linked worktree too, the shape that flips it.
+	if command -v git >/dev/null 2>&1; then
+		mkdir -p "$scratch/hook-host" "$scratch/under-a-hook"
+		( _gdk_st_git_env_clear
+		  git -C "$scratch/hook-host" init -q \
+			&& git -C "$scratch/hook-host" -c user.name=t -c user.email=t@t \
+				-c commit.gpgsign=false commit -q --allow-empty -m host \
+			&& git -C "$scratch/hook-host" worktree add -q "$scratch/hook-wt" ) >/dev/null 2>&1
+		cp "$scratch/hook-host/.git/config" "$scratch/hook-host.config.before" 2>/dev/null
+		( export GIT_DIR="$scratch/hook-host/.git/worktrees/hook-wt"
+		  export GIT_INDEX_FILE="$GIT_DIR/index"
+		  _gdk_st_tracked_dir_case "$scratch/under-a-hook" )
+		status=$?
+		cmp -s "$scratch/hook-host.config.before" "$scratch/hook-host/.git/config" || status=1
+		_gdk_st_true 'a git fixture under a hook-exported GIT_DIR leaves that repo untouched' "$status"
+	fi
 
 	# --- the compile-sweep transcript readers --------------------------------
 	# A clean sweep buried in engine chatter; a failing one whose count and

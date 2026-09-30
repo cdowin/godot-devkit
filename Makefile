@@ -38,15 +38,15 @@ PYTEST_Q  ?= -q
 # src/ with the stdlib. (The test targets above DO use uv, for pytest.)
 #
 # GODOT_DEVKIT is what Makefile.tiers' `godot-check` and `uid-scan` run (a
-# consumer resolves it from GODOT_DEVKIT_VERSION; this tree sets it ahead of
-# the include, so the tier file resolves nothing). It is the package from
+# consumer resolves it from its uv.lock (`uv run --frozen`), or the legacy
+# GODOT_DEVKIT_VERSION pin; this tree sets it ahead of the include, so the tier file resolves nothing). It is the package from
 # src/ INSIDE a scratch copy of the committed clean Godot project — this tree
 # is not a Godot project, and the self-hosting proof is the eight gates over
 # something committed here, not a 0-file census over the repo itself.
 PY          ?= python3
 GODOT_DEVKIT ?= bash tools/dev/godot_devkit_on_fixture.sh
 
-# The pin, and the include that derives `DEVKIT` (the agentic-sdlc command)
-# from it. Bumping the tag is the whole adoption; `agentic-sdlc adopt` checks it.
-DEVKIT_VERSION := v0.11.0
+# agentic-sdlc is pinned in uv.lock (a dev dependency from its own index);
+# Makefile.devkit runs the locked kit. A bump is `uv add --dev
+# agentic-sdlc==X.Y.Z`, then `make sdlc ARGS='adopt X.Y.Z'`.
 include Makefile.devkit

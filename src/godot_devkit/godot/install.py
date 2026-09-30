@@ -53,9 +53,11 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+from godot_devkit import __version__
 from godot_devkit.core import apply
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.project import repo_root
+from godot_devkit.godot.checks.roster import all_roster
 
 PACKAGE = 'godot_devkit.godot.installables'
 COMMAND = 'install-runners'
@@ -151,7 +153,10 @@ Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint warnings unit integration scenario capture import-cache
 hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
 GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS lists the include's compositions
-run. It reads GODOT_DEVKIT_VERSION from your Makefile.
+run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
+(the run prints the pyproject.toml block that locks it), or — the legacy
+pin, which wins with a warning when both are present — the tag
+GODOT_DEVKIT_VERSION names in your Makefile. Keep one.
 
 The gate framework (`check`, `precommit`, `milestone`, Makefile.devkit) is
 agentic-sdlc's: pin that package and run its `install-gates`; its include
@@ -174,8 +179,12 @@ file, header included. --diff prints what would change and writes nothing."""
 EXECUTABLE_SUFFIX = '.sh'
 
 NEXT_STEP = (
-    'set `GODOT_DEVKIT_VERSION := <tag>` in your Makefile above `include '
-    'Makefile.devkit` (the include is agentic-sdlc\'s `install-gates`; it '
+    'lock godot-devkit with uv — paste the pyproject.toml block below and run '
+    '`uv sync`, which writes the uv.lock Makefile.tiers reads: once it names '
+    'the kit, make runs `uv run --frozen godot-devkit` (the legacy pin, '
+    '`GODOT_DEVKIT_VERSION := <tag>` in your Makefile above `include '
+    'Makefile.devkit`, still works and wins with a warning; keep one) '
+    '— then `include Makefile.devkit` (agentic-sdlc\'s `install-gates`; it '
     '`-include`s Makefile.tiers, where the Godot targets live) and join the '
     'Godot checks to `make check` with `[gates] extra = ["godot-check"]` in '
     'devkit.toml — never a fork of the include. Then gitignore .gate-reports/, '
@@ -188,6 +197,23 @@ NEXT_STEP = (
     'the settings block, last, into .claude/settings.json — installing a '
     'Claude Code hook is not registering it, and an unregistered hook is a '
     'file nothing ever runs.')
+
+# The consumer's pyproject.toml block that LOCKS this kit (#38): a dev
+# dependency at the version that ran this verb, resolved ONLY from this kit's
+# index (`explicit = true` — the PyPI name is someone else's), hash-pinned in
+# uv.lock by `uv sync`, run by Makefile.tiers as `uv run --frozen`. PRINTED,
+# not written: pyproject.toml is the consumer's.
+INDEX_URL = 'https://cdowin.github.io/godot-devkit/simple/'
+PYPROJECT_BLOCK = f'''[dependency-groups]
+dev = ["godot-devkit=={__version__}"]
+
+[[tool.uv.index]]
+name = "cdowin"
+url = "{INDEX_URL}"
+explicit = true
+
+[tool.uv.sources]
+godot-devkit = {{ index = "cdowin" }}'''
 
 # The step that calls the toolchain action, for the toolchain slot of the
 # consumer's `.github/workflows/verify.yml`. PRINTED, not written: that
@@ -214,11 +240,13 @@ def retired_line(rel: str) -> str:
     and so `make milestone`, only through `godot-check` — and only when
     `[gates] extra` names it and `[checks] godot` keeps `uid`. "Safe to
     delete" said to any other repo removes its only CI uid gate, and nothing
-    would say so. Raises ConfigError on a malformed value (exit 2).
+    would say so. The roster is `all_roster()`, the one `check all` reads: an
+    absent key is all eight, and a malformed value or an unknown gate raises
+    ConfigError (exit 2) here exactly as it does there (#28).
     """
     head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
     extra = str_tuple(config_section('gates'), 'gates', 'extra', ())
-    roster = str_tuple(config_section('checks'), 'checks', 'godot', ('uid',))
+    roster = all_roster()
     if 'godot-check' not in extra:
         return (head + '`check uid` is NOT in this repo\'s gate: `[gates] '
                 'extra` does not name `godot-check`; it was left in place — '
@@ -585,6 +613,9 @@ def main(argv: list[str]) -> int:
         print(line)
     if written:
         print(f'[install] {NEXT_STEP}')
+        # Raw, unprefixed, so it pastes whole into pyproject.toml.
+        print(f'\npyproject.toml — godot-devkit, locked (then `uv sync`; '
+              f'merge into yours):\n\n{PYPROJECT_BLOCK}\n')
         print(f'[install] next: paste this step into the toolchain slot of '
               f'.github/workflows/verify.yml, after setup-uv, with your '
               f'engine patch number:\n\n{TOOLCHAIN_STEP}\n')

@@ -3,9 +3,12 @@
 # the project's fast gate; on red, block the stop (exit 2) with the gate output
 # on stderr so the agent fixes before claiming done. Agent context only — the
 # scope marker or DEVKIT_AGENT_SCOPE; the orchestrator's trunk session is never
-# gated, because it stops constantly — it is only TOLD when `check pm` names a
-# ready close (its CLOSE lines), and CLOSE_READY decides whether that informs or
-# holds the stop once. Stdin: the Stop event JSON (cwd, stop_hook_active).
+# gated, because it stops constantly — but a close ready to run (the
+# `; N close(s) ready to run — <command>` clause on `check pm`'s verdict line:
+# the belt's checks that need no run pass, its rung will run) holds its stop
+# once under stock CLOSE_READY="block"; `check pm`'s other CLOSE lines, and
+# every one under "inform", are only named. Stdin: the Stop event JSON
+# (cwd, stop_hook_active).
 # Exit 0 = allow, exit 2 = block.
 set -eu
 
@@ -38,7 +41,7 @@ declare -p UNIT_SLICE_ROOT >/dev/null 2>&1 || UNIT_SLICE_ROOT="tests/unit"
 declare -p DEFAULT_BASE >/dev/null 2>&1 || DEFAULT_BASE=""
 declare -p SCOPE_MARKER >/dev/null 2>&1 || SCOPE_MARKER=".agent-scope"
 declare -p CLOSE_ASK >/dev/null 2>&1 || CLOSE_ASK=(make -s sdlc ARGS="check pm")
-declare -p CLOSE_READY >/dev/null 2>&1 || CLOSE_READY="inform"
+declare -p CLOSE_READY >/dev/null 2>&1 || CLOSE_READY="block"
 
 # Inline, not sourced: a library the repo may lack would fail the hook.
 is_agent_context() {
@@ -93,23 +96,36 @@ if ! is_agent_context "$REPO_ROOT"; then
 	if [ "${#CLOSE_ASK[@]}" -eq 0 ] || [ ! -f "${REPO_ROOT}/Makefile" ]; then
 		exit 0
 	fi
-	ready="$(cd "$REPO_ROOT" || exit 0
-		"${CLOSE_ASK[@]}" 2>/dev/null \
-			| grep -E '\(CLOSE\)[[:space:]]*$' \
-			| sed -E 's/^[[:space:]]*(WARN[[:space:]]+)?//')" || ready=''
-	[ -n "$ready" ] || exit 0
-	if [ "$CLOSE_READY" = "block" ]; then
+	said="$(cd "$REPO_ROOT" || exit 0
+		"${CLOSE_ASK[@]}" 2>/dev/null | cat)" || said=''
+	ready="$(printf '%s\n' "$said" \
+		| grep -E '\(CLOSE\)[[:space:]]*$' \
+		| sed -E 's/^[[:space:]]*(WARN[[:space:]]+)?//')" || ready=''
+	# `N close(s) ready to run — <command>`: the belt's checks that need no
+	# run pass, and its rung did not last FAIL; the rung runs at the close.
+	closes="$(printf '%s\n' "$said" \
+		| sed -nE '/^\[check:pm\] (PASS|FAIL) /{s/; reused — .*$//; s/^.*; ([0-9]+ close\(s\) ready to run — .*)$/\1/p;}' \
+		| tail -1)" || closes=''
+	case "$CLOSE_READY" in
+		inform | block) ;;
+		*)
+			echo "cc-stop-gate: CLOSE_READY='${CLOSE_READY}' is neither inform nor block — informing" >&2
+			CLOSE_READY="inform"
+			;;
+	esac
+	if [ "$CLOSE_READY" = "block" ] && [ -n "$closes" ]; then
 		{
-			echo "BLOCKED (Stop gate): a close is ready — run it, or say why it waits, then stop again:"
+			echo "BLOCKED (Stop gate): ${closes} — the belt's checks that need no run pass; its rung will run. Run it, or say why it waits, then stop again:"
 			printf '%s\n' "$ready" | sed 's/^/  /'
 		} >&2
 		exit 2
 	fi
-	[ "$CLOSE_READY" = "inform" ] \
-		|| echo "cc-stop-gate: CLOSE_READY='${CLOSE_READY}' is neither inform nor block — informing" >&2
-	message="$(printf '%s\n%s\n%s\n' 'Stop gate: a close is ready —' "$ready" \
-		'(CLOSE_READY="block" in tools/hooks/cc-stop-gate.sh holds the stop instead)' \
-		| json_escape)"
+	[ -n "$ready" ] || exit 0
+	message="$({
+		printf '%s\n%s\n' 'Stop gate: a close stands open —' "$ready"
+		[ "$CLOSE_READY" = "block" ] \
+			|| echo '(CLOSE_READY="block" in tools/hooks/cc-stop-gate.sh holds the stop instead)'
+	} | json_escape)"
 	printf '{"systemMessage": "%s"}\n' "$message"
 	exit 0
 fi
@@ -119,7 +135,7 @@ cd "$REPO_ROOT"
 # No Makefile, no gate: fail open.
 [ -f Makefile ] || exit 0
 
-# Scope the unit tier to the changed-system slices; no mapping means the whole tier.
+# Scope the unit tier to the changed-system slices; no mapping means no unit tier.
 UNIT_SLICES=""
 base_branch="$DEFAULT_BASE"
 if [ -f "${REPO_ROOT}/${SCOPE_MARKER}" ]; then
@@ -133,15 +149,25 @@ if [ -z "$base_branch" ]; then
 	[ -n "$base_branch" ] || base_branch="origin/HEAD"
 fi
 if ! git rev-parse --verify --quiet "$base_branch" >/dev/null 2>&1; then
-	echo "cc-stop-gate: base '${base_branch}' does not resolve — running the WHOLE unit tier (set DEFAULT_BASE in tools/hooks/cc-stop-gate.sh, or the marker's base=)" >&2
+	echo "cc-stop-gate: base '${base_branch}' does not resolve — no unit slice can be named, so only the static gate runs (set DEFAULT_BASE in tools/hooks/cc-stop-gate.sh, or the marker's base=)" >&2
+	GATE_UNIT=(true)
 else
+	# Every path COMPONENT of a changed file is a candidate slice: src/billing/x.py
+	# names `billing`, lib/core/parser/y.py names `parser`. Only a component
+	# that is a ${UNIT_SLICE_ROOT}/<slice> directory counts.
 	changed_dirs="$(git diff --name-only "$base_branch"...HEAD 2>/dev/null \
-		| awk -F/ 'NF>1 {print $1}' | sort -u)"
+		| tr '/' '\n' | sort -u)"
 	for d in $changed_dirs; do
-		if [ -d "${UNIT_SLICE_ROOT}/$d" ]; then
+		if [ -n "$d" ] && [ -d "${UNIT_SLICE_ROOT}/$d" ]; then
 			UNIT_SLICES="${UNIT_SLICES:+$UNIT_SLICES }$d"
 		fi
 	done
+	# No slice maps to the change: run NO unit tier. The merge's own rung is the
+	# proof; a whole tier on every agent stop was measured at 113 runs in 8 hours,
+	# all green, on one consumer.
+	if [ -z "$UNIT_SLICES" ]; then
+		GATE_UNIT=(true)
+	fi
 fi
 
 # Captured so the agent gets the failure text; mktemp without -t, which BSD treats as a prefix.

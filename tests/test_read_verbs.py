@@ -143,7 +143,10 @@ class RefsScope(unittest.TestCase):
     # answer that gets a method deleted); a commented-out call (does not); a
     # signal declaration with arguments (a definition, not a call); a longer
     # name ending in the symbol (another name); and the defining line itself
-    # (`func name(` IS `name(` — counted once, as a definition).
+    # (`func name(` IS `name(` — counted once, as a definition). And #19: a
+    # signal reached only through an untyped receiver or by string name
+    # (DYNAMIC, its own bucket — a zero verdict there got a live signal a
+    # delete finding), while a typed-bucket line is never counted twice.
     GRAMMAR = (
         'extends Node\n'
         '\n'
@@ -162,18 +165,32 @@ class RefsScope(unittest.TestCase):
         '\tresync_active_variant()\n'
         '\t# lonesome()\n'
         '\tshard_taken.emit(1)\n'
+        '\tself.shard_taken.emit(2)\n'
+        '\tshard_taken.connect(on_gear_changed)\n'
         '\t_on_hurt()\n'
         '\trehurt()\n'
         '\n'
         '\n'
         'func on_gear_changed() -> void:\n'
         '\tresync_active_variant()\n'
+        '\n'
+        '\n'
+        'func bind(entity) -> void:\n'
+        '\tentity.spawn_handler_changed.connect(on_gear_changed)\n'
+        '\tentity.emit_signal(&"spawn_handler_changed")\n'
+        '\t# entity.spawn_handler_changed.disconnect(on_gear_changed)\n'
+        '\tentity.disconnect("spawn_handler_changed", on_gear_changed)\n'
     )
     # (symbol, lines its report carries, lines it must not)
     EXPECTED = (
         ('resync_active_variant', ('## definitions (1)', '## call / emit sites (2)'), ()),
         ('lonesome', ('## definitions (1)',), ('## call / emit sites',)),
-        ('shard_taken', ('## definitions (1)', '## call / emit sites (1)'), ()),
+        ('shard_taken', ('## definitions (1)', '## call / emit sites (3)'),
+         ('## dynamic',)),
+        ('spawn_handler_changed',
+         ('## dynamic (untyped receiver) (3)',
+          '(0 typed references; 3 dynamic hit(s) above'),
+         ('(no references found)', '## call / emit sites')),
         ('hurt', (), ('grammar.gd',)),
     )
 

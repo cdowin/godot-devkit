@@ -33,6 +33,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from support import REPO_ROOT  # noqa: E402
 
+from godot_devkit import __version__  # noqa: E402
 from godot_devkit.core.project import load_config, repo_root  # noqa: E402
 from godot_devkit.godot import install  # noqa: E402
 
@@ -454,6 +455,10 @@ def _fanout_fixture(tmp_path: Path, stub_body: str, mode: int = 0o755) -> Path:
     runners = tmp_path / 'tools' / 'dev' / 'runners'
     runners.mkdir(parents=True)
     (tmp_path / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
+    # A current import cache, written after project.godot: a --diff/--all
+    # sweep repairs a stale one first, and no import_cache.sh stands here.
+    (tmp_path / '.godot').mkdir()
+    (tmp_path / '.godot' / 'uid_cache.bin').write_bytes(b'')
     shutil.copy2(INTEGRATION, runners / 'integration.sh')
     stub = runners / 'stub_scenario.sh'
     stub.write_text('#!/usr/bin/env bash\n' + stub_body, encoding='utf-8')
@@ -681,13 +686,23 @@ def test_diff_slices_a_clean_tree_to_smoke_and_a_change_by_every_touched_path(tm
 
 
 def test_a_touched_piece_of_the_tiers_ground_selects_every_scenario(tmp_path):
+    """The scenario base is ground: every scenario boots on it. A fixture
+    under tests/support/ is not (#33) — but one NO scenario loads boots the
+    tier too, and says so, rather than selecting nothing (rule 4)."""
     runner = _slice_fixture(tmp_path)
-    _touch(tmp_path / 'tests' / 'support' / 'fixture.gd')
+    _touch(tmp_path / 'tests' / 'integration' / 'scenario_base.gd')
     done = _slice(runner, '--diff', 'HEAD')
     assert done.returncode == 0, done.stdout + done.stderr
     assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
     assert "the tier's own ground" in done.stdout, done.stdout
     assert 'eyes_capture' not in done.stdout, 'a capture TOOL boots in the whole-tier slice'
+    subprocess.run([*GIT, 'commit', '-q', '-am', 'base'], cwd=tmp_path, check=True)
+    _touch(tmp_path / 'tests' / 'support' / 'fixture.gd')
+    done = _slice(runner, '--diff', 'HEAD')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
+    assert ('[INTEGRATION] fixture tests/support/fixture.gd is referenced by no scenario'
+            ' — booting the tier') in done.stdout, done.stdout
 
 
 def test_a_hostile_or_doubled_slash_covers_entry_selects_nothing_and_reads_as_undeclared(tmp_path):
@@ -868,6 +883,13 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         assert 'required: true' in godot_patch and 'default' not in godot_patch
         assert not (root / UID_GUARD).exists()
         assert TOOLCHAIN_STEP in out and 'retired' not in out, out
+        # The locked shape (#38), pasteable whole: the running version, from
+        # this kit's index ONLY.
+        assert f'\n{install.PYPROJECT_BLOCK}\n' in out, out
+        for needle in (f'dev = ["godot-devkit=={__version__}"]', 'explicit = true',
+                       'url = "https://cdowin.github.io/godot-devkit/simple/"',
+                       'godot-devkit = { index = "cdowin" }'):
+            assert needle in install.PYPROJECT_BLOCK, needle
         # The registration step, pasteable and LAST on stdout.
         assert HOOK_ENTRY in out, out
         assert out.rstrip().endswith('}'), out[-200:]
@@ -911,6 +933,26 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
             assert says in line, line
             assert ('safe to delete' in line) == ('safe' in says), line
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
+
+
+@pytest.mark.parametrize('toml', [
+    # MN4: a malformed value — a bare string is refused, never iterated.
+    '[checks]\ngodot = "uid"\n',
+    # #28: an unknown gate. The retired line had its own fallback and said
+    # "safe to delete" over a value `check all` refuses at exit 2.
+    '[gates]\nextra = ["godot-check"]\n[checks]\ngodot = ["uid", "tress"]\n',
+])
+def test_a_roster_check_all_refuses_is_exit_2_before_any_write(tmp_path, toml):
+    with consumer_repo(tmp_path) as root:
+        (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+        (root / UID_GUARD).parent.mkdir(parents=True)
+        (root / UID_GUARD).write_text('name: UID Guard\n', encoding='utf-8')
+        with pytest.raises(install.ConfigError) as refused:
+            install.all_roster()
+        code, out, err = run_install()
+        assert code == 2, out + err
+        assert str(refused.value) in err and 'nothing was written' in err, err
+        assert _snapshot(root) == {}, 'a config refusal wrote'
 
 
 def test_diff_prints_and_writes_nothing(tmp_path):
@@ -1016,10 +1058,57 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
         for target in sorted(declared | set(GODOT_TARGETS)):
             done = _make_n(root, target)
             assert done.returncode == 0, f'{target}: {done.stdout}{done.stderr}'
-        # `godot-check` is the pinned kit's `check all`, through the tag the
-        # consumer's Makefile pins.
-        done = _make_n(root, 'godot-check')
-        assert 'godot-devkit@v0.25.0' in done.stdout and 'check all' in done.stdout, done.stdout
+
+
+LEGACY_RUN = 'uvx --from "git+https://github.com/cdowin/godot-devkit@v0.25.0" godot-devkit check all'
+# A uv.lock whose packages are (some of) these; the kit's entry is what makes
+# the tree locked.
+OTHER_PACKAGE = '[[package]]\nname = "gdtoolkit"\nversion = "4.3.0"\n'
+KIT_PACKAGE = ('[[package]]\nname = "godot-devkit"\nversion = "1.4.0"\n'
+               'source = { registry = "https://cdowin.github.io/godot-devkit/simple/" }\n')
+
+
+@pytest.mark.skipif(shutil.which('make') is None, reason='needs make')
+@pytest.mark.parametrize('pin, lock, caller, runs, says', [
+    # 1. The caller's GODOT_DEVKIT wins over everything, both pins included.
+    (True, True, True, 'my-devkit check all', None),
+    # 2. The locked shape: uv.lock names the kit, no Makefile pin.
+    (False, True, False, 'uv run --frozen godot-devkit check all', None),
+    # 3. The legacy pin, as in 1.3.0 — a lock that names other packages and a
+    #    venv holding the kit change nothing and warn nothing.
+    (True, False, False, LEGACY_RUN, None),
+    # 4. Both pins: the legacy pin still runs (a minor forces no edit), warned.
+    (True, True, False, LEGACY_RUN, 'Delete the GODOT_DEVKIT_VERSION line'),
+    # 5. Neither: refused, the locked shape named first — a .venv binary with
+    #    no lock naming the kit is not a pin.
+    (False, False, False, None, 'not pinned — lock it'),
+], ids=['caller', 'locked', 'legacy-pin', 'both', 'neither'])
+def test_the_tiers_resolve_godot_devkit_in_one_order(tmp_path, pin, lock, caller, runs, says):
+    """#38: which godot-devkit `godot-check` runs, decided by the written
+    Makefile.tiers at parse time — `make -n`, so nothing runs. Every case
+    carries a stale .venv/bin/godot-devkit: the LOCK decides, never the venv."""
+    with consumer_repo(tmp_path, makefile=True) as root:
+        assert run_install()[0] == 0
+        if not pin:
+            (root / 'Makefile').write_text(
+                CONSUMER_MAKEFILE.replace('GODOT_DEVKIT_VERSION := v0.25.0\n', ''),
+                encoding='utf-8')
+        (root / 'uv.lock').write_text(
+            'version = 1\n\n' + OTHER_PACKAGE + ('\n' + KIT_PACKAGE if lock else ''),
+            encoding='utf-8')
+        (root / '.venv' / 'bin').mkdir(parents=True)
+        (root / '.venv' / 'bin' / 'godot-devkit').write_text('#!/bin/sh\n', encoding='utf-8')
+        done = _make_n(root, 'godot-check', *(['GODOT_DEVKIT=my-devkit'] if caller else []))
+        if runs is None:
+            assert done.returncode != 0 and says in done.stderr, done.stderr
+            assert done.stdout == '', done.stdout
+            return
+        assert done.returncode == 0, done.stderr
+        assert f' {runs};' in done.stdout or f' {runs}\n' in done.stdout, done.stdout
+        if says:
+            assert done.stderr.count(says) == 1, done.stderr
+        else:
+            assert 'pinned twice' not in done.stderr, done.stderr
 
 
 def test_this_repos_tier_file_starts_with_the_installable():

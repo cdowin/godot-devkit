@@ -34,9 +34,10 @@ One developer builds each feature, or each lane of features that share files, in
 context, in its own `agent-worktree.sh new <slug> <base>` worktree. Lanes on disjoint
 files run at once, and the orchestrator merges each branch into the milestone branch
 when its builder reports. The next milestone's branch is cut from the current tip, so
-it does not wait for this release. One reviewer covers each milestone and writes every
-feature record and the milestone record in one pass. The `run-the-sdlc` skill is this
-loop, with its commands.
+it does not wait for this release. A reviewer covers each lane as it merges and writes
+that feature's record; a lighter checkup writes the milestone record, and a narrow pass
+reviews the commits that landed findings. The `run-the-sdlc` skill is this loop, with
+its commands.
 
 ## `release` — the checks
 
@@ -45,10 +46,11 @@ loop, with its commands.
 | 1 | `tree-clean` | — *(reads the tree)* | `git status --porcelain` names no path outside the roadmap directory — the same reading `committed` makes on the story belt. What is modified INSIDE it is neither read nor counted, because the belt writes there by design: the status it lands, `gate`'s cost rows, every `[emit]` event. |
 | 2 | `on-milestone-branch` | — *(reads the tree)* | HEAD is the branch the milestone document stamps in `branch:` (D9). |
 | 3 | `changelog-unreleased-nonempty` | — *(reads the tree)* | the milestone itself, whatever its state, and every grain in it that is in the `done` category answer the `changelog:` field with a sentence or `none`. The milestone is graded before `release` writes its `done`, and the field is read on each grain — no file is. |
-| 4 | `features-done` | `make pm ARGS='ready-for milestone <id>'` *(shipped)* | `pm ready-for milestone <milestone>` exits 0 — every feature is in the `done` category and its `reviewed:` names a review record that is there and not empty, and every bug whose `milestone:` names the milestone is in the `done` category. |
+| 4 | `features-done` | `make pm ARGS='ready-for milestone <id>'` *(shipped)* | `pm ready-for milestone <milestone>` exits 0 — every feature is in the `done` category and its `reviewed:` names a review record that is there and not empty, and every bug whose `milestone:` names the milestone is in the `done` category. A milestone with no features passes only as a bug-only milestone: at least one bug bound to it, every one `done`. Under `reconcile: forward` it also names each gap `forward-reconciled` reads. |
 | 5 | `findings-resolved` | `make pm ARGS='ready-for tag <id>'` *(shipped)* | `pm ready-for tag <milestone>` exits 0 — no finding in any record the milestone's grains point at is `open`. |
 | 6 | `version-sync` | — *(reads the tree)* | every configured version site names the release version; read, never bumped. |
-| 7 | `gate` | `make milestone` | the configured gate command exits 0. |
+| 7 | `forward-reconciled` | — *(reads the tree)* | a milestone declaring `reconcile: forward` has its record beside it: a `## Contracts` row, or the line `none changed`; every id under `## Forward grains updated` resolves; and each forward milestone that owns one has a `decisions.md` heading naming this milestone. Read, never written; a milestone without the field passes as not declared. |
+| 8 | `gate` | `make milestone` | the configured gate command exits 0. |
 
 **Then, all true:** the milestone's status → the first state of `[pm.states.milestone] done` (`pm vocabulary` prints it), through `pm milestone <state> <id>`, which mints the ledger's `status` row. Any check false → `error:` lines, exit 1, no status written. `--force` writes anyway and the ledger's `deviation` row names the false checks.
 
@@ -63,12 +65,13 @@ loop, with its commands.
 - tag the merge commit and push the TAG ref only: `git tag v<version> && git push origin refs/tags/v<version>` — a published tag is never force-moved
 - prove the published artifact reports <version> from a cold cache — configure `[release.commands] prove-artifact` to name how
 - open the next milestone, so the next release's notes have somewhere to go from the first commit
+- sync the local mainline to the tagged merge: `git switch <mainline> && git pull --ff-only`
 
 ## `adopt` — the checks
 
 | # | check | runs | what must be true |
 |---|---|---|---|
-| 1 | `pin-bumped` | — *(reads the tree)* | the `DEVKIT_VERSION` line in this repo's own makefile names the version of the package that is running. |
+| 1 | `pin-bumped` | — *(reads the tree)* | this repo's `uv.lock` pins the version of the package that is running, and no retired `DEVKIT_VERSION` line is left; a tree still on that git pin is told the move off it. |
 | 2 | `installables-current` | — *(reads the tree)* | every installed file the project has not claimed in `[<op>] ours` is byte-current with what this version ships, or differs only in its project-config header; each that differs is named with the `install-* --diff` that shows it, and what was claimed is counted and named beside it, on every run. |
 | 3 | `config-updated` | — *(reads the tree)* | every devkit.toml section this version reads accepts what this repo declares. |
 | 4 | `hooks-self-test` | `make sdlc ARGS='check hooks'` *(shipped)* | `check hooks` exits 0 — the installed guards still return the verdicts their own corpus asserts. |
@@ -81,16 +84,17 @@ loop, with its commands.
 
 **Yours, after the write** (printed as `next:` lines):
 
-- commit the pin bump and every installable you took or hand-applied
+- commit the pin bump (`pyproject.toml` and `uv.lock`) and every installable you took or hand-applied
 
 ## `story` — the checks
 
 | # | check | runs | what must be true |
 |---|---|---|---|
 | 1 | `story-exists` | — *(reads the tree)* | the story id resolves to exactly one document. |
-| 2 | `story-verified` | `make sdlc ARGS='verify --story'` *(shipped)* | `verify --story` exits 0 — the make target `[verify] story` names, the way `feature-verified` runs its rung. |
-| 3 | `committed` | — *(reads the tree)* | nothing is uncommitted outside the roadmap directory; it names what is and never commits — the same reading `tree-clean` makes on `release`, so the two belts cannot disagree about one tree. |
-| 4 | `evidence-written` | — *(reads the tree)* | the story file carries `done: <hash(es)> — <what shipped>`; read, never written. |
+| 2 | `required-lines` | — *(reads the tree)* | every line `[pm.required.story] lines` declares is in the story and carries a value — present and non-empty, never read for a meaning; a tree that declares none passes and says so. |
+| 3 | `story-verified` | `make sdlc ARGS='verify --story'` *(shipped)* | `verify --story` exits 0 — the make target `[verify] story` names, the way `feature-verified` runs its rung. |
+| 4 | `committed` | — *(reads the tree)* | nothing is uncommitted outside the roadmap directory; it names what is and never commits — the same reading `tree-clean` makes on `release`, so the two belts cannot disagree about one tree. |
+| 5 | `evidence-written` | — *(reads the tree)* | the story file carries `done: <hash(es)> — <what shipped>`; read, never written. |
 
 **Then, all true:** the story's status → the first state of `[pm.states.story] done` (`pm vocabulary` prints it), through `pm story <state> <id>`, which mints the ledger's `status` row. Any check false → `error:` lines, exit 1, no status written. `--force` writes anyway and the ledger's `deviation` row names the false checks.
 

@@ -156,3 +156,15 @@
 {"ts":"2026-09-28T20:39:58Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":333,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
 {"ts":"2026-09-28T20:40:34Z","kind":"gate","gate":"matrix","verdict":"PASS","duration_ms":35517,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
 {"ts":"2026-09-28T20:40:35Z","kind":"gate","gate":"milestone","verdict":"PASS","duration_ms":45401,"branch":"milestone/1.3.0-ci-runs-what-the-laptop-runs"}
+{"ts":"2026-09-30T01:27:41Z","kind":"gate","gate":"check","verdict":"PASS","duration_ms":19773,"branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:27:43Z","kind":"gate","gate":"godot-check","verdict":"PASS","duration_ms":582,"branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:32:40Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":2063,"census":51,"branch":"feat/ft-a-capture-keeps-its-before-frame-off-screen"}
+{"ts":"2026-09-30T01:32:55Z","kind":"gate","gate":"pyunit","verdict":"FAIL","duration_ms":294,"census":0,"branch":"feat/ft-a-capture-keeps-its-before-frame-off-screen"}
+{"ts":"2026-09-30T01:32:56Z","kind":"gate","gate":"pyunit","verdict":"FAIL","duration_ms":298,"census":0,"branch":"feat/ft-a-capture-keeps-its-before-frame-off-screen"}
+{"ts":"2026-09-30T01:32:33Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":2042,"census":51,"branch":"feat/ft-the-read-verbs-stop-lying-by-omission"}
+{"ts":"2026-09-30T01:33:55Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":10672,"census":51,"branch":"feat/ft-the-read-verbs-stop-lying-by-omission"}
+{"ts":"2026-09-30T01:34:01Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":10871,"census":51,"branch":"feat/ft-the-runners-survive-a-crowded-machine"}
+{"ts":"2026-09-30T01:34:49Z","kind":"gate","gate":"runners-self-test","verdict":"PASS","duration_ms":20722,"branch":"feat/ft-the-runners-survive-a-crowded-machine"}
+{"ts":"2026-09-30T01:39:00Z","kind":"gate","gate":"runners-self-test","verdict":"PASS","duration_ms":29273,"branch":"milestone/1.4.0-the-gate-never-costs-a-story"}
+{"ts":"2026-09-30T01:37:24Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":10607,"census":51,"branch":"feat/ft-the-import-never-touches-the-tree"}
+{"ts":"2026-09-30T01:40:36Z","kind":"gate","gate":"pyunit","verdict":"PASS","duration_ms":9692,"census":51,"branch":"feat/ft-the-diff-slice-boots-what-changed"}

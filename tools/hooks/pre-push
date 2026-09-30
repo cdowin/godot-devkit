@@ -2,8 +2,9 @@
 # pre-push — tracked git hook (core.hooksPath=tools/hooks). Stage 1 blocks a
 # direct push to a protected branch, always. Stage 2 runs the project's static
 # gate before a trunk push lands; skipped for agent worktrees (their Stop hook
-# already gates) and for pushes carrying no code change (up-to-date, tag-only,
-# delete). Stdin: one `<local_ref> <local_sha> <remote_ref> <remote_sha>` per ref.
+# already gates) and for pushes carrying no commit the remote lacks (up-to-date,
+# tag-only, delete, a new branch or a fast-forward at an already-pushed commit).
+# Stdin: one `<local_ref> <local_sha> <remote_ref> <remote_sha>` per ref.
 set -eu
 
 # --- project config (yours to edit after install — the file is your repo's) --
@@ -30,6 +31,8 @@ is_agent_context() {
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 ZERO_SHA="0000000000000000000000000000000000000000"
+# git passes the remote's name (or its URL, when none) as $1.
+remote_name="${1:-}"
 
 # One pass: the protected-branch block, and whether any real branch commit goes out.
 has_real_push=0
@@ -45,10 +48,20 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
 			exit 1
 		fi
 	done
-	# A real push = a branch ref with a non-zero local sha (delete = zero sha).
+	# A real push = a branch ref carrying a commit the remote does not have
+	# (delete = zero sha). A new branch or a fast-forward to a commit the
+	# remote already has is not one. No remote name, or a rev-list that
+	# fails, counts as a real push: fail closed.
 	case "$remote_ref" in
 		refs/heads/*)
-			[ "$local_sha" != "$ZERO_SHA" ] && has_real_push=1
+			[ "$local_sha" = "$ZERO_SHA" ] && continue
+			if [ -n "$remote_name" ] &&
+				new_commit="$(git rev-list -n 1 "$local_sha" --not \
+					--remotes="$remote_name" </dev/null 2>/dev/null)"; then
+				[ -n "$new_commit" ] && has_real_push=1
+			else
+				has_real_push=1
+			fi
 			;;
 	esac
 done
@@ -64,8 +77,13 @@ fi
 # No Makefile, no gate: fail open; stage 1 already ran.
 [ -f "${REPO_ROOT}/Makefile" ] || exit 0
 
-# Run from the repo root so make/tools resolve.
+# Run from the repo root so make/tools resolve, with git's repository-local
+# env vars unset: an inherited GIT_DIR would send a self-test's `git init`
+# into this repository instead of its scratch directory.
 cd "$REPO_ROOT"
+for local_var in $(git rev-parse --local-env-vars 2>/dev/null || true); do
+	unset "$local_var"
+done
 if ! "${PUSH_GATE[@]}"; then
 	echo "" >&2
 	echo "BLOCKED (pre-push gate): ${PUSH_GATE[*]} failed — fix before pushing." >&2

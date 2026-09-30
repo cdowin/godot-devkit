@@ -6,6 +6,16 @@
 # — so no scenario can observe another's global state. That is the tier's whole
 # contract; the parallelism is what makes paying for it affordable.
 #
+# WARM MODE (#36, opt-in: GDK_INTEGRATION_WARM=1). A cold boot costs 13-15 s of
+# CPU before the first assertion, so warm mode splits the --all/--diff/--system
+# roster into GDK_JOBS slices, balanced by count, and runs each through ONE
+# `scenario.sh --suite` — one boot per worker, a fresh World per scenario,
+# under the contract scenario.sh's header states and YOUR runner implements.
+# A scenario whose header carries `## Isolated because: <reason>` never goes
+# warm; every scenario a worker hands back (a crash, a stall) runs cold after
+# it. With --diff, a warm failure is rerun COLD, alone: passing, it prints
+# WARM-ONLY and counts green. Unset, every path is the cold one, byte for byte.
+#
 # A SCENARIO DECLARES WHAT IT COVERS. Its header — the leading run of comment
 # lines — carries `## covers: <path>[, <path>…]`, repo-relative prefixes of the
 # code it exercises, and `--diff <ref>` maps a change to the slice that
@@ -27,8 +37,11 @@
 #   tools/dev/runners/integration.sh --smoke            # just the smoke scenario
 #   tools/dev/runners/integration.sh --system protocol  # the tests/integration/protocol/ directory
 #   tools/dev/runners/integration.sh --diff HEAD        # what the uncommitted change covers, + smoke
+#   tools/dev/runners/integration.sh --diff HEAD --no-rerun   # a sweep failure is red at once
 #   tools/dev/runners/integration.sh boot_a boot_b      # an explicit list
 #   GDK_JOBS=4 tools/dev/runners/integration.sh --all   # cap the parallelism
+#   GDK_INTEGRATION_WARM=1 tools/dev/runners/integration.sh --all   # one boot per worker
+#   GDK_INTEGRATION_WARM=1 tools/dev/runners/integration.sh --all --cold   # not this run
 #   tools/dev/runners/integration.sh --help | --self-test
 #
 # Exit: 0 = all passed | 1 = any failed, or a slice that selected nothing
@@ -62,12 +75,37 @@ GDK_CAPTURE_GATE_RE="${GDK_CAPTURE_GATE_RE:-}"
 # the shortest boot that proves the game comes up at all. Yours to name.
 GDK_SMOKE_SCENARIO="${GDK_SMOKE_SCENARIO:-smoke}"
 # The tier's own GROUND: paths whose change makes every scenario the honest
-# slice, because every scenario boots on them. An ERE over REPO-RELATIVE paths.
-# A basename matching GDK_INTEGRATION_INFRA_RE is ground too, without being
-# named twice.
-GDK_SCENARIO_SUBSTRATE_RE="${GDK_SCENARIO_SUBSTRATE_RE:-^tests/support/|^tools/dev/runners/|^tools/dev/gdk_runners\.sh$}"
+# slice, because every scenario boots on them — the runners, the library, and
+# the scenario base/runner scripts in the source dir. An ERE over REPO-RELATIVE
+# paths. A basename matching GDK_INTEGRATION_INFRA_RE is ground too, wherever
+# it lives. Shared FIXTURES are not ground: see GDK_SCENARIO_FIXTURE_DIR.
+# shellcheck disable=SC2016  # the `$` inside sed's bracket is a character to escape
+GDK_SCENARIO_SUBSTRATE_RE="${GDK_SCENARIO_SUBSTRATE_RE:-^tools/dev/runners/|^tools/dev/gdk_runners\.sh$|^$(printf '%s' "${GDK_SCENARIO_SOURCE_DIR%/}" | sed 's/[].[\*^$()+?{|]/\\&/g')/(scenario_base|scenario_runner)\.gd$}"
+# The fixture root: scenes, resources and helper scripts scenarios LOAD. A
+# touched file under it selects every scenario whose text names it — its
+# res:// path in any quote or none, its uid://, a class_name it declares —
+# followed transitively through the fixture root. A touched fixture NO
+# scenario names boots the whole tier and says so: a reference the scan cannot
+# see (a built path) must not become a silent zero. A root that is not a
+# directory under the repo is a config error (exit 2); a touch under
+# tests/support/ (1.3.0's ground) outside a root set elsewhere boots the tier.
+GDK_SCENARIO_FIXTURE_DIR="${GDK_SCENARIO_FIXTURE_DIR:-tests/support/}"
+# --diff reruns each FAILED scenario once, alone, after the sweep; one that
+# passes alone counts green and prints a FLAKE line. 0 turns it off (as does
+# --no-rerun). --all and named runs never rerun.
+GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN:-1}"
+# 1 runs --all/--diff/--system WARM: one scenario.sh --suite per job, each
+# booting once. Turn it on only once your scenario runner implements the
+# contract in scenario.sh's header. 0 (the default) is the cold path; --cold
+# forces it for one run.
+GDK_INTEGRATION_WARM="${GDK_INTEGRATION_WARM:-0}"
 # Env: GDK_JOBS  parallelism (default: cores - 2, floor 1)
 # -----------------------------------------------------------------------------
+
+# This runner only READS git; an optional lock taken by a status/diff here
+# must never collide with a hook or an agent writing the same repo. It sources
+# no library, so it says so itself.
+export GIT_OPTIONAL_LOCKS=0
 
 GATE_TAG="INTEGRATION"
 # What a failing scenario's transcript is grepped for, to say WHY in one line.
@@ -76,6 +114,8 @@ FAILURE_SUMMARY_LINES=3
 # The header line a scenario declares its coverage on. Matched at the start of
 # a `##` comment line inside the header block only.
 COVERS_KEY='covers:'
+# The header line that keeps a scenario out of warm mode, with its reason.
+ISOLATED_KEY='Isolated because:'
 # A `--system` argument is ONE directory name under the source dir — never a
 # path, never a pattern. Bounded so an over-long argument is refused, not
 # interpolated.
@@ -85,7 +125,7 @@ COVERS_ENTRY_MAX=200
 
 usage() {
 	cat <<'USAGE_EOF'
-usage: integration.sh --all | --smoke | --system <dir> | --diff <ref> | <name>...
+usage: integration.sh --all | --smoke | --system <dir> | --diff <ref> [--no-rerun] [--cold] | <name>...
        integration.sh --help | --self-test
 
 Runs integration scenarios, each in its own process, N in parallel. Each one
@@ -104,18 +144,40 @@ convention.
                    holds no gate is a FAIL, never a green run over nothing
   --diff <ref>     the scenarios whose `## covers:` header names a path the
                    working tree changed against <ref> (plus every touched
-                   scenario, plus GDK_SMOKE_SCENARIO). A change to the tier's
-                   own ground selects everything. Scenarios declaring nothing
-                   are reported; they ride only --all
+                   scenario, plus GDK_SMOKE_SCENARIO). A touched file under
+                   GDK_SCENARIO_FIXTURE_DIR selects every scenario whose text
+                   names it, transitively — its res:// path, its uid://, a
+                   class_name it declares; one NO scenario names boots the
+                   whole tier and says so. A change to the tier's own ground
+                   selects everything.
+                   Scenarios declaring nothing are reported; they ride only
+                   --all. Each scenario that FAILS in the sweep is rerun once,
+                   alone: passing alone, it counts green and prints
+                   `  FLAKE  <name> — failed in the sweep, passed alone`
+  --no-rerun       with --diff: report a sweep failure red at once
+  --cold           with GDK_INTEGRATION_WARM=1: run this one cold
   <name>...        an explicit list, discovery bypassed
   --self-test      prove the argument handling, the discovery filter, the
-                   header reader and the slicing against a fixture tree,
-                   booting nothing
+                   header reader, the slicing, the rerun and the cache
+                   precheck against fixture trees and stub runners, booting
+                   no engine
   --help           this message
 
 A scenario header (the leading comment block) declares, one `##` line each:
   ## Boots because: tests/unit/<path> cannot <what only a boot can assert>
   ## covers: systems/<x>, resources/<y>.gd     repo-relative path prefixes
+  ## Isolated because: <reason>                never run warm (the reason is
+                                               required: an empty one exits 2)
+
+Warm mode (GDK_INTEGRATION_WARM=1, --all/--diff/--system only): the roster is
+split into GDK_JOBS slices, each run by ONE `scenario.sh --suite` (one boot
+per worker); `## Isolated because:` scenarios and every scenario a worker
+hands back (`  WARM-ABORT  after <name> — N scenario(s) handed back`) run
+cold after. With --diff, a warm failure reruns cold, alone; passing, it prints
+`  WARM-ONLY  <name> — failed warm, passed cold: …` and counts green. The
+SUMMARY adds `(K flaky, W warm-only)` and `; warm A, cold B, handed back C`,
+which must sum to the roster or the run FAILS naming what is missing; a
+`[INTEGRATION] WALL:` line splits the wall clock between the two phases.
 
 Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_SCENARIO_RUNNER        scenario.sh, relative to this file
@@ -124,13 +186,24 @@ Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_CAPTURE_GATE_RE        captures that are gates after all
      GDK_SMOKE_SCENARIO         the scenario --smoke runs and every --diff carries
      GDK_SCENARIO_SUBSTRATE_RE  repo-relative paths that are the tier's ground
+     GDK_SCENARIO_FIXTURE_DIR   the fixture root --diff slices by reference
+                                (default tests/support/; one that is not a
+                                directory under the repo exits 2)
+     GDK_INTEGRATION_RERUN      0 turns off --diff's rerun-alone (default 1)
+     GDK_INTEGRATION_WARM       1 runs --all/--diff/--system warm (default 0)
      GDK_JOBS                   parallelism (default: cores - 2, floor 1)
-Sets: GDK_SCENARIO_IN_SWEEP=1 on every job — the runner's import-cache
-     recovery must not remove a .godot its peers are booting in.
+Sets: GDK_SCENARIO_IN_SWEEP=1 on every job, the rerun alone included — the
+     runner's import-cache recovery must not remove a .godot its peers, or a
+     playing session, are using. So before a --diff/--all sweep boots
+     anything, a stale cache (.godot/uid_cache.bin missing, or older than a
+     tracked *.uid, *.import or project.godot) is repaired ONCE by
+     import_cache.sh beside this file; if that fails, the sweep does not
+     start (exit 1).
 Cost: every scenario FILE is one cold engine boot, whatever its length, so a
      run ends with `[INTEGRATION] BOOTS: <n> scenario(s) booted, <cpu>` above
      its SUMMARY — the census Makefile.tiers files on the gate's cost row.
      Merging two scenarios saves a boot; trimming lines saves nothing.
+     Warm mode counts one boot per worker, however many scenarios it ran.
 Exit: 0 all passed | 1 any failed, or a slice selecting nothing | 2 usage/harness error
 USAGE_EOF
 }
@@ -262,6 +335,28 @@ scenario_covers() {
 	done
 }
 
+# scenario_isolation <file> — the reason the header gives on its first
+# `## Isolated because:` line, printed (EMPTY when the line gives none) and 0;
+# silent and 1 when the header declares no isolation. The header is the same
+# leading block scenario_covers reads.
+scenario_isolation() {
+	local found
+	found="$(awk -v key="$ISOLATED_KEY" '
+		/^[[:space:]]*$/ || /^#/ || /^extends[[:space:]]/ || /^class_name[[:space:]]/ || /^@/ {
+			if ($0 ~ ("^##[[:space:]]*" key)) {
+				sub("^##[[:space:]]*" key "[[:space:]]*", "")
+				sub(/[[:space:]]+$/, "")
+				print "D" $0
+				exit
+			}
+			next
+		}
+		{ exit }
+	' "$1")"
+	[ -n "$found" ] || return 1
+	printf '%s\n' "${found#D}"
+}
+
 # covers_table [dir] — one tab-separated line per declared entry:
 #   <name>\t<file>\t<entry>
 # and one line with an EMPTY entry for a scenario declaring nothing, so a single
@@ -357,6 +452,210 @@ slice_for_touched() {
 	rm -f "$touched"
 }
 
+# --- --diff: a touched FIXTURE selects the scenarios that load it -------------
+# A file REFERENCES a fixture when its text holds any of the fixture's names:
+#   - its res:// path, as a substring — any quote, none, a const, a threaded
+#     load, an ext_resource, a string property;
+#   - its basename after a `/` or a quote — a relative path ("../support/x.gd");
+#   - its own uid://, read from its .uid or .import sidecar, or from the
+#     [gd_scene|gd_resource … uid="…"] header of a .tscn/.tres — a whole token;
+#   - a class_name it declares — a whole word.
+# The scan does NOT enumerate call forms: the form that was missing from a list
+# is the scenario that dropped out of the slice without a word. A comment or
+# a string naming a fixture over-selects, which is the safe direction. Pure
+# text — nothing boots. The files that may reference are the .gd/.tscn/.tres
+# under the fixture root and every scenario, read once.
+# shellcheck disable=SC2016  # an awk program, not a shell expansion
+FIXTURE_SLICE_AWK='
+	function slurp(f,   s, line) {
+		s = ""
+		while ((getline line < f) > 0) s = s line "\n"
+		close(f)
+		return s
+	}
+	function word_char(c) { return c ~ /[A-Za-z0-9_]/ }
+	# has_word — w occurs in t with no word character on either side.
+	function has_word(t, w,   p, off, before) {
+		off = 0
+		while ((p = index(substr(t, off + 1), w)) > 0) {
+			p += off
+			before = (p == 1) ? "" : substr(t, p - 1, 1)
+			if (!word_char(before) && !word_char(substr(t, p + length(w), 1))) return 1
+			off = p
+		}
+		return 0
+	}
+	function first_uid(t) {
+		return match(t, /uid:\/\/[A-Za-z0-9_]+/) ? substr(t, RSTART, RLENGTH) : ""
+	}
+	# uid_of — the fixture own uid://, or "".
+	function uid_of(f,   line, u) {
+		if (f ~ /\.(tscn|tres)$/) {
+			line = ""; getline line < f; close(f)
+			return (line ~ /^\[gd_(scene|resource)[ \t]/) ? first_uid(line) : ""
+		}
+		u = first_uid(slurp(f ".uid"))
+		return u != "" ? u : first_uid(slurp(f ".import"))
+	}
+	# names_of — fills need[1..n] / whole[1..n] with the names f goes by.
+	function names_of(f,   n, u, t, k, lines, m, i, b) {
+		n = 0
+		need[++n] = "res://" f; whole[n] = 0
+		# A relative path ("../support/x.gd") ends in the basename after a
+		# slash or a quote; another file of the same basename over-selects.
+		b = f; sub(/.*\//, "", b)
+		need[++n] = "/" b; whole[n] = 0
+		need[++n] = "\"" b; whole[n] = 0
+		need[++n] = "\047" b; whole[n] = 0
+		u = uid_of(f)
+		if (u != "") { need[++n] = u; whole[n] = 1 }
+		if (f ~ /\.gd$/) {
+			t = (f in text) ? text[f] : slurp(f)
+			k = split(t, lines, "\n")
+			for (i = 1; i <= k; i++)
+				if (match(lines[i], /(^|[^A-Za-z0-9_])class_name[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) {
+					m = substr(lines[i], RSTART, RLENGTH)
+					sub(/.*class_name[ \t]+/, "", m)
+					need[++n] = m; whole[n] = 1
+				}
+		}
+		return n
+	}
+	function refers(t, n,   k) {
+		for (k = 1; k <= n; k++)
+			if (whole[k] ? has_word(t, need[k]) : index(t, need[k]) > 0) return 1
+		return 0
+	}
+	FILENAME == ARGV[1] { if ($0 != "") fx[++nf] = $0; next }
+	FILENAME == ARGV[2] { if ($0 != "") { gate[$0] = 1; if (!($0 in text)) { file[++nu] = $0; text[$0] = "" } }; next }
+	FILENAME == ARGV[3] { if ($0 != "" && !($0 in text)) { file[++nu] = $0; text[$0] = "" }; next }
+	END {
+		for (j = 1; j <= nu; j++) text[file[j]] = slurp(file[j])
+		for (i = 1; i <= nf; i++) {
+			split("", seen); split("", queue)
+			key = fx[i]; sub(/\.(uid|import)$/, "", key)
+			seen[key] = 1; queue[1] = key; head = 1; tail = 1
+			# The reverse closure: whoever names anything already reached,
+			# until nothing new is reached.
+			while (head <= tail) {
+				n = names_of(queue[head++])
+				for (j = 1; j <= nu; j++) {
+					f = file[j]
+					if (!(f in seen) && refers(text[f], n)) { seen[f] = 1; queue[++tail] = f }
+				}
+			}
+			found = 0
+			for (s in seen) if (s in gate) {
+				name = s; sub(/.*\//, "", name); sub(/\.gd$/, "", name)
+				print "FIXTURE\t" fx[i] "\t" name; found++
+			}
+			if (found == 0) print "ORPHAN\t" fx[i]
+		}
+	}
+'
+
+# fixture_slice [scenario dir] [fixture dir] — touched REPO-relative paths on
+# stdin; the ones under the fixture dir are looked up, and out, sorted:
+#   FIXTURE\t<fixture>\t<name>   a scenario that references <fixture>,
+#                                directly or through other fixtures
+#   ORPHAN\t<fixture>            a touched fixture NO scenario references
+# A `.uid` / `.import` sidecar is looked up as the file it belongs to. Paths are
+# relative to the cwd, which is REPO_ROOT, as res:// is. Sorted bytewise.
+fixture_slice() {
+	local sdir="${1:-$GDK_SCENARIO_SOURCE_DIR}" fdir="${2:-$GDK_SCENARIO_FIXTURE_DIR}" touched gates files
+	sdir="${sdir%/}"; fdir="${fdir%/}"
+	touched="$(mktemp "${TMPDIR:-/tmp}/gdk-fixtures.XXXXXX")" || return 2
+	gates="$(mktemp "${TMPDIR:-/tmp}/gdk-gates.XXXXXX")" || { rm -f "$touched"; return 2; }
+	files="$(mktemp "${TMPDIR:-/tmp}/gdk-refs.XXXXXX")" || { rm -f "$touched" "$gates"; return 2; }
+	awk -v root="$fdir/" 'index($0, root) == 1' > "$touched"
+	if [ ! -s "$touched" ]; then rm -f "$touched" "$gates" "$files"; return 0; fi
+	discover_gate_files "$sdir" > "$gates"
+	# BSD find prints `dir//x` for a trailing slash, hence the strip above.
+	# What may reference a fixture: the fixture root AND everything under the
+	# scenario dir — a scenario_base, a runner or a scenario-local support
+	# script that loads a fixture on a scenario's behalf is a path to it.
+	find "$fdir" "$sdir" -type f \( -name '*.gd' -o -name '*.tscn' -o -name '*.tres' \) 2>/dev/null \
+		| LC_ALL=C sort -u > "$files"
+	awk "$FIXTURE_SLICE_AWK" "$touched" "$gates" "$files" | LC_ALL=C sort -u
+	rm -f "$touched" "$gates" "$files"
+}
+
+# fixture_root <value> — GDK_SCENARIO_FIXTURE_DIR as one spelling, `a/b/`: a
+# leading `./` and extra trailing `/` stripped. Returns 1, the reason on
+# stdout, when it is not a directory under the cwd (REPO_ROOT). The stock
+# default is exempt from existing: a project with no fixtures has none, and a
+# touch under a missing root still boots the tier as ORPHAN.
+FIXTURE_DIR_STOCK="tests/support/"
+fixture_root() {
+	local d="$1"
+	while [ "${d#./}" != "$d" ]; do d="${d#./}"; done
+	while [ "${d%/}" != "$d" ]; do d="${d%/}"; done
+	case "$d" in
+		''|.) echo "names no directory"; return 1 ;;
+		/*|..|../*|*/..|*/../*) echo "is not a path under the repo root"; return 1 ;;
+	esac
+	d="$d/"
+	if [ ! -d "$d" ] && [ "$d" != "$FIXTURE_DIR_STOCK" ]; then
+		echo "is not a directory under the repo root"; return 1
+	fi
+	printf '%s\n' "$d"
+}
+
+# --- the import cache, checked BEFORE the sweep -------------------------------
+# A merge of worktree lanes brings in `.uid` sidecars the cache has never seen,
+# and every scenario then fails `uid index is STALE`. scenario.sh can detect
+# that, but inside a sweep it must not remove the `.godot` its peers boot in —
+# so the repair has to happen once, serially, before anything boots.
+IMPORT_CACHE_STAMP=".godot/uid_cache.bin"
+IMPORT_CACHE_RUNNER="import_cache.sh"
+
+# import_inputs — the tracked files an import pass reads the cache from,
+# NUL-separated: project.godot, every *.uid and *.import. Outside a git work
+# tree, the same set by find (minus .godot/).
+import_inputs() {
+	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		git ls-files -z -- 'project.godot' '*.uid' '*.import' 2>/dev/null
+	else
+		find . -path ./.godot -prune -o -type f \
+			\( -name project.godot -o -name '*.uid' -o -name '*.import' \) -print0 2>/dev/null
+	fi
+}
+
+# import_cache_stale — prints why the import cache is stale and returns 0;
+# silent and 1 when it is current. The cwd is the project root.
+import_cache_stale() {
+	local f
+	if [ ! -f "$IMPORT_CACHE_STAMP" ]; then echo "$IMPORT_CACHE_STAMP is missing"; return 0; fi
+	while IFS= read -r -d '' f; do
+		if [ "$f" -nt "$IMPORT_CACHE_STAMP" ]; then
+			echo "${f#./} is newer than $IMPORT_CACHE_STAMP"; return 0
+		fi
+	done < <(import_inputs)
+	return 1
+}
+
+# --- git on a SCRATCH repo ----------------------------------------------------
+# A hook exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE, and a bare `git init`
+# under them re-initialises the HOST repo rather than the scratch one. Every git
+# call the self-test makes on a fixture goes through one of these.
+unset_git_env() {
+	# Repeated until gone: each `unset` pops one scope, and a prefix
+	# assignment over an exported variable is two.
+	local v
+	for v in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR \
+		GIT_ALTERNATE_OBJECT_DIRECTORIES; do
+		while [ -n "${!v+x}" ]; do unset "$v" 2>/dev/null || break; done
+	done
+}
+# scratch_git <dir> <git args…>
+# `env -u`, not `unset`: under a caller's prefix assignment (`GIT_DIR=x f`)
+# bash's `unset` pops only that temporary binding, and a hook's exported
+# GIT_DIR underneath comes back — the host repo gets the commit.
+scratch_git() {
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
+		-u GIT_COMMON_DIR -u GIT_ALTERNATE_OBJECT_DIRECTORIES git -C "$@"
+}
+
 # detect_jobs — cores minus two, floor one. Two are left for the shell, the
 # aggregator and whatever else the machine is doing; a sweep that saturates
 # every core makes each engine slower than the parallelism buys back.
@@ -440,12 +739,298 @@ keep_list_cases() {
 	done < <(capture_gate_names)
 }
 
+# mono_fixture <dir> — commit <dir> as its own scratch repo, with core.quotePath
+# on (git's default made explicit). Every call is scratch_git: the caller may
+# be a hook with the host repo's git env exported.
+mono_fixture() {
+	scratch_git "$1" init -q && scratch_git "$1" config core.quotePath true \
+		&& scratch_git "$1" add -A \
+		&& scratch_git "$1" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m fixture
+} >/dev/null 2>&1
+
+# cache_cases <dir> — self_test's import-cache precheck cases, by stub
+# timestamps in a scratch repo; nothing imports, nothing boots. Uses self_test's
+# `cases` and `miss`.
+cache_cases() {
+	local dir="$1" out rc
+	mkdir -p "$dir/.godot" "$dir/a"
+	: > "$dir/project.godot"; : > "$dir/a/x.gd.uid"; : > "$dir/a/y.png.import"
+	{ scratch_git "$dir" init -q && scratch_git "$dir" add -A; } >/dev/null 2>&1 \
+		|| miss "the cache git fixture could not be built"
+	touch -t 202001010000 "$dir/project.godot" "$dir/a/x.gd.uid" "$dir/a/y.png.import"
+	cases=$((cases + 1))
+	out="$(unset_git_env; cd "$dir" && import_cache_stale)"
+	[ "$out" = "$IMPORT_CACHE_STAMP is missing" ] || miss "a missing cache is stale, got '$out'"
+	touch -t 202101010000 "$dir/$IMPORT_CACHE_STAMP"
+	cases=$((cases + 1))
+	rc=0; (unset_git_env; cd "$dir" && import_cache_stale >/dev/null) || rc=$?
+	[ "$rc" -eq 1 ] || miss "a cache newer than every tracked input is current, got $rc"
+	touch -t 202201010000 "$dir/a/x.gd.uid"
+	cases=$((cases + 1))
+	out="$(unset_git_env; cd "$dir" && import_cache_stale)"
+	[ "$out" = "a/x.gd.uid is newer than $IMPORT_CACHE_STAMP" ] \
+		|| miss "a tracked .uid newer than the cache (a merged lane) is stale, got '$out'"
+	touch -t 202001010000 "$dir/a/x.gd.uid"; touch -t 202201010000 "$dir/project.godot"
+	cases=$((cases + 1))
+	out="$(unset_git_env; cd "$dir" && import_cache_stale)"
+	[ "$out" = "project.godot is newer than $IMPORT_CACHE_STAMP" ] \
+		|| miss "a project.godot newer than the cache is stale, got '$out'"
+	touch -t 202001010000 "$dir/project.godot"; touch -t 202201010000 "$dir/a/untracked.gd.uid"
+	cases=$((cases + 1))
+	rc=0; (unset_git_env; cd "$dir" && import_cache_stale >/dev/null) || rc=$?
+	[ "$rc" -eq 1 ] || miss "an UNTRACKED newer .uid is not a stale cache, got $rc"
+}
+
+# sweep_cases <proj> — self_test's end-to-end cases: THIS file installed at the
+# stock depth of a scratch repo, beside a stub scenario.sh (flaky fails its
+# first boot, red every boot) and a stub import_cache.sh. The stubs record
+# every boot and repair in order, so what is asserted is what the sweep DID.
+# Uses self_test's `cases` and `miss`. Each case is one chain of claims ending
+# in `|| miss`, the rest of self_test's shape.
+# shellcheck disable=SC2015
+sweep_cases() {
+	local proj="$1" state="$1.state" runners out rc n
+	runners="$proj/tools/dev/runners"
+	mkdir -p "$runners" "$proj/tests/integration" "$proj/tests/support" "$proj/.godot"
+	cp "$0" "$runners/integration.sh"
+	cat > "$runners/scenario.sh" <<'STUB_EOF'
+#!/usr/bin/env bash
+state="$GDK_STUB_STATE"; name="$1"
+echo "$name" >> "$state/order"
+echo "$name ${GDK_SCENARIO_IN_SWEEP:-unset}" >> "$state/env"
+n=$(( $(cat "$state/$name.n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$state/$name.n"
+case "$name" in
+	flaky) [ "$n" -ge 2 ] || { echo "[SCENARIO] $name FAIL — load flake"; exit 1; } ;;
+	red*) echo "[SCENARIO] $name FAIL — real"; exit 1 ;;
+esac
+echo "[SCENARIO] $name PASS"
+STUB_EOF
+	cat > "$runners/import_cache.sh" <<'STUB_EOF'
+#!/usr/bin/env bash
+echo import >> "$GDK_STUB_STATE/order"
+[ "${GDK_STUB_IMPORT_RC:-0}" -eq 0 ] || exit "$GDK_STUB_IMPORT_RC"
+mkdir -p .godot && touch .godot/uid_cache.bin
+STUB_EOF
+	: > "$proj/project.godot"
+	for n in flaky red smoke green; do printf 'extends Node\n' > "$proj/tests/integration/$n.gd"; done
+	printf 'extends Node\n' > "$proj/tests/support/orphan.gd"
+	printf '.godot/\n' > "$proj/.gitignore"
+	{ scratch_git "$proj" init -q && scratch_git "$proj" add -A \
+		&& scratch_git "$proj" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m proj; } >/dev/null 2>&1 \
+		|| miss "the sweep git fixture could not be built"
+	touch -t 202001010000 "$proj/project.godot"; touch "$proj/$IMPORT_CACHE_STAMP"
+
+	# sweep <args…> — one run of the installed copy, fresh stub state, the
+	# caller's GDK_* and git env out of the way.
+	sweep() {
+		rm -rf "$state"; mkdir -p "$state"
+		( unset_git_env
+		  unset GDK_SCENARIO_SUBSTRATE_RE GDK_INTEGRATION_INFRA_RE GDK_CAPTURE_SUFFIX_RE GDK_CAPTURE_GATE_RE
+		  GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
+			GDK_SCENARIO_SOURCE_DIR=tests/integration GDK_SCENARIO_FIXTURE_DIR="${GDK_STUB_FIXTURE_DIR:-tests/support/}" \
+			GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN-1}" bash "$runners/integration.sh" "$@" 2>&1 )
+	}
+	flake_line() { printf '  FLAKE  %s — failed in the sweep, passed alone' "$1"; }
+
+	# Six runs, each a real sweep of stubs — every one a claim the pure
+	# functions above cannot make: what was booted, in what order, how often.
+
+	# A flake alone, over a STALE cache: the repair ran once, before any boot;
+	# the scenario failed in the sweep, passed alone, and the run is GREEN.
+	rm -f "$proj/$IMPORT_CACHE_STAMP"
+	echo '# touched' >> "$proj/tests/integration/flaky.gd"
+	cases=$((cases + 1))
+	out="$(sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 0 ] && grep -qxF -- "$(flake_line flaky)" <<<"$out" \
+		&& grep -qF 'SUMMARY: 2 passed (1 flaky), 0 failed (of 2)' <<<"$out" \
+		|| miss "a scenario that fails in the sweep and passes alone is a FLAKE and counts green (rc $rc): $out"
+	cases=$((cases + 1))
+	[ "$(head -1 "$state/order")" = import ] && [ "$(grep -c '^import$' "$state/order")" = 1 ] \
+		&& grep -qF 'import cache is stale' <<<"$out" \
+		|| miss "a stale cache is repaired once, before the sweep boots anything: $(tr '\n' ' ' < "$state/order")"
+	# The rerun is alone, but the cache was repaired ONCE above: scenario.sh
+	# must not repair it again in the tree (rm -rf .godot, an editor pass).
+	cases=$((cases + 1))
+	[ "$(grep -c '^flaky ' "$state/env")" = 2 ] && ! grep -qv ' 1$' "$state/env" \
+		|| miss "every boot, the rerun alone included, carries GDK_SCENARIO_IN_SWEEP=1: $(tr '\n' '|' < "$state/env")"
+
+	echo '# touched' >> "$proj/tests/integration/red.gd"
+	cases=$((cases + 1))
+	out="$(sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 1 ] && grep -qxF -- "$(flake_line flaky)" <<<"$out" \
+		&& ! grep -qF -- "$(flake_line red)" <<<"$out" \
+		&& grep -qF 'SUMMARY: 2 passed (1 flaky), 1 failed (of 3)' <<<"$out" \
+		&& [ "$(cat "$state/red.n")" = 2 ] \
+		|| miss "a scenario that fails in the sweep AND alone stays red, after exactly one rerun (rc $rc): $out"
+	cases=$((cases + 1))
+	out="$(sweep --diff HEAD --no-rerun)"; rc=$?
+	[ "$rc" -eq 1 ] && ! grep -qF 'FLAKE' <<<"$out" && [ "$(cat "$state/flaky.n")" = 1 ] \
+		&& grep -qF 'SUMMARY: 1 passed, 2 failed (of 3)' <<<"$out" \
+		|| miss "--no-rerun reports a sweep failure red at once (rc $rc): $out"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_RERUN=maybe sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] || miss "a GDK_INTEGRATION_RERUN that is not 0 or 1 is a config error (exit 2), got $rc"
+	# Past the cap (max of 3 and 10% of the slice) nothing reruns: the answer
+	# is already red, and serial cold boots would only make it slower.
+	for n in red2 red3 red4; do echo 'extends Node' > "$proj/tests/integration/$n.gd"; done
+	cases=$((cases + 1))
+	out="$(sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 1 ] && grep -qF 'over the rerun cap of 3' <<<"$out" \
+		&& [ "$(cat "$state/flaky.n")" = 1 ] && ! grep -qF 'FLAKE' <<<"$out" \
+		|| miss "past the rerun cap nothing reruns and the failures stay red (rc $rc): $out"
+	rm -f "$proj/tests/integration/red2.gd" "$proj/tests/integration/red3.gd" "$proj/tests/integration/red4.gd"
+
+	# A touched fixture no scenario references boots the tier and says why —
+	# and the env spelling of --no-rerun holds on the way.
+	echo '# touched' >> "$proj/tests/support/orphan.gd"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_RERUN=0 sweep --diff HEAD)"; rc=$?
+	grep -qxF '[INTEGRATION] fixture tests/support/orphan.gd is referenced by no scenario — booting the tier' <<<"$out" \
+		&& [ "$(sort "$state/order" | tr '\n' ' ')" = "flaky green red smoke " ] \
+		|| miss "an unreferenced fixture falls back to the whole tier with its line: $out"
+	cases=$((cases + 1))
+	[ "$rc" -eq 1 ] && [ "$(cat "$state/flaky.n")" = 1 ] \
+		|| miss "GDK_INTEGRATION_RERUN=0 turns the rerun off (rc $rc): $out"
+
+	# The fixture root, as configured (M2): a leading ./ is the same root; a
+	# root that does not exist is a config error, never a slice of smoke.
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_RERUN=0 GDK_STUB_FIXTURE_DIR=./tests/support sweep --diff HEAD)"; rc=$?
+	grep -qxF '[INTEGRATION] fixture tests/support/orphan.gd is referenced by no scenario — booting the tier' <<<"$out" \
+		&& [ "$(sort "$state/order" | tr '\n' ' ')" = "flaky green red smoke " ] \
+		|| miss "GDK_SCENARIO_FIXTURE_DIR=./tests/support is tests/support/ (rc $rc): $out"
+	cases=$((cases + 1))
+	out="$(GDK_STUB_FIXTURE_DIR=tests/suport/ sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] && grep -qF "GDK_SCENARIO_FIXTURE_DIR='tests/suport/'" <<<"$out" && [ ! -s "$state/order" ] \
+		|| miss "a fixture root that does not exist exits 2 naming it, before any boot (rc $rc): $out"
+	# A root elsewhere: tests/support/ was 1.3.0's ground, so a touch there
+	# that the fixture rule no longer looks at still boots the tier.
+	mkdir -p "$proj/tests/fixtures"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_RERUN=0 GDK_STUB_FIXTURE_DIR=tests/fixtures sweep --diff HEAD)"; rc=$?
+	grep -qxF '[INTEGRATION] tests/support/orphan.gd is outside the fixture root tests/fixtures/ — booting the tier' <<<"$out" \
+		&& [ "$(sort "$state/order" | tr '\n' ' ')" = "flaky green red smoke " ] \
+		|| miss "a touch under tests/support/ outside a configured fixture root boots the tier with its line (rc $rc): $out"
+
+	# A repair that fails starts nothing, and names itself.
+	rm -f "$proj/$IMPORT_CACHE_STAMP"
+	cases=$((cases + 1))
+	out="$(GDK_STUB_IMPORT_RC=1 sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 1 ] && [ "$(tr '\n' ' ' < "$state/order")" = "import " ] \
+		&& grep -qF "$IMPORT_CACHE_RUNNER" <<<"$out" \
+		|| miss "a failed repair must stop the sweep (exit 1, naming it) before any boot (rc $rc): $out"
+	rm -rf "$state"
+}
+
+# warm_cases <proj> — self_test's warm-mode cases: THIS file installed at the
+# stock depth of a scratch repo, beside a stub scenario.sh that speaks the
+# --suite results protocol (a `--suite` call writes results/unrun into
+# GDK_SCENARIO_SUITE_RESULTS; `leaky` fails warm and passes cold; the suite
+# crashes at GDK_STUB_CRASH, handing back the rest). Every call's argv is
+# recorded, so what is asserted is what the run BOOTED. Uses self_test's
+# `cases` and `miss`.
+# shellcheck disable=SC2015
+warm_cases() {
+	local proj="$1" state="$1.state" runners out rc n
+	runners="$proj/tools/dev/runners"
+	mkdir -p "$runners" "$proj/tests/integration" "$proj/.godot"
+	cp "$0" "$runners/integration.sh"
+	cat > "$runners/scenario.sh" <<'STUB_EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$GDK_STUB_STATE/argv"
+echo "$* ${GDK_SCENARIO_IN_SWEEP:-unset}" >> "$GDK_STUB_STATE/env"
+if [ "$1" = --suite ]; then
+	shift; out="$GDK_SCENARIO_SUITE_RESULTS"; gone=0
+	for name in "$@"; do
+		if [ "$gone" -eq 1 ] || [ "$name" = "${GDK_STUB_CRASH:-}" ]; then
+			gone=1; echo "$name" >> "$out/unrun"; continue
+		fi
+		case "$name" in
+			leaky) printf '%s\t1\n' "$name" >> "$out/results"; echo "[SCENARIO] $name FAIL — warm" > "$out/$name.log" ;;
+			*) printf '%s\t0\n' "$name" >> "$out/results"; echo "[SCENARIO] $name PASS" > "$out/$name.log" ;;
+		esac
+	done
+	[ "$gone" -eq 0 ] || { echo "  WARM-ABORT  after a — n scenario(s) handed back"; exit 4; }
+	exit 0
+fi
+echo "[SCENARIO] $1 PASS"
+STUB_EOF
+	: > "$proj/project.godot"
+	for n in alpha beta leaky smoke; do printf 'extends Node\n' > "$proj/tests/integration/$n.gd"; done
+	printf 'extends Node\n## Isolated because: it reads the process clock\n' > "$proj/tests/integration/iso.gd"
+	printf '.godot/\n' > "$proj/.gitignore"
+	{ scratch_git "$proj" init -q && scratch_git "$proj" add -A \
+		&& scratch_git "$proj" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m proj; } >/dev/null 2>&1 \
+		|| miss "the warm git fixture could not be built"
+	touch -t 202001010000 "$proj/project.godot"; touch "$proj/$IMPORT_CACHE_STAMP"
+	# The runners are the tier's ground: --diff HEAD is the whole roster.
+	echo '# touched' >> "$runners/scenario.sh"
+
+	warm() {
+		rm -rf "$state"; mkdir -p "$state"
+		( unset_git_env
+		  unset GDK_SCENARIO_SUBSTRATE_RE GDK_INTEGRATION_INFRA_RE GDK_CAPTURE_SUFFIX_RE GDK_CAPTURE_GATE_RE \
+			GDK_INTEGRATION_RERUN
+		  GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
+			GDK_SCENARIO_SOURCE_DIR=tests/integration bash "$runners/integration.sh" "$@" 2>&1 )
+	}
+	argv() { sort "$state/argv" | tr '\n' '|'; }
+
+	# Two workers over alpha beta leaky smoke (iso is isolated): alpha+leaky
+	# and beta+smoke. The second crashes at beta, handing back beta and smoke.
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 GDK_STUB_CRASH=beta warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 0 ] \
+		&& grep -qF '[INTEGRATION] SUMMARY: 5 passed (0 flaky, 1 warm-only), 0 failed (of 5); warm 2, cold 1, handed back 2' <<<"$out" \
+		&& grep -qE '^\[INTEGRATION\] WALL: warm workers [0-9]+s, cold remainder [0-9]+s$' <<<"$out" \
+		&& grep -qF '[INTEGRATION] BOOTS: 6 scenario(s) booted' <<<"$out" \
+		|| miss "warm mode sums its census to the roster and boots once per worker (rc $rc): $out"
+	cases=$((cases + 1))
+	[ "$(argv)" = "--suite alpha leaky|--suite beta smoke|beta|iso|leaky|smoke|" ] \
+		|| miss "an Isolated scenario runs cold, never warm; the handed-back ones run cold — argv '$(argv)'"
+	cases=$((cases + 1))
+	[ "$(wc -l < "$state/env" | tr -d ' ')" = 6 ] && ! grep -qv ' 1$' "$state/env" \
+		|| miss "warm, handed-back cold and the WARM-ONLY rerun all carry GDK_SCENARIO_IN_SWEEP=1: $(tr '\n' '|' < "$state/env")"
+	cases=$((cases + 1))
+	grep -qxF '  WARM-ONLY  leaky — failed warm, passed cold: it leans on process state; mark it "## Isolated because:" or fix its reset' <<<"$out" \
+		&& grep -qxF '  WARM-ABORT  after a — n scenario(s) handed back' <<<"$out" \
+		&& ! grep -qF 'FLAKE' <<<"$out" \
+		|| miss "a warm failure that passes cold prints WARM-ONLY, not FLAKE, and counts green: $out"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD --no-rerun)"; rc=$?
+	[ "$rc" -eq 1 ] && ! grep -qF 'WARM-ONLY' <<<"$out" \
+		&& grep -qF 'SUMMARY: 4 passed, 1 failed (of 5); warm 4, cold 1, handed back 0' <<<"$out" \
+		&& grep -qF 'FAIL — warm' <<<"$out" \
+		|| miss "--no-rerun leaves a warm failure red, its warm report in FAILURES (rc $rc): $out"
+
+	# Unset, and --cold: today's argv exactly — one bare name per boot.
+	cases=$((cases + 1))
+	out="$(warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(argv)" = "alpha|beta|iso|leaky|smoke|" ] \
+		&& ! grep -qE 'WALL|warm' <<<"$out" \
+		|| miss "with GDK_INTEGRATION_WARM unset the run is today's cold one (rc $rc, argv '$(argv)'): $out"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD --cold)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(argv)" = "alpha|beta|iso|leaky|smoke|" ] \
+		|| miss "--cold forces the cold path for one run (rc $rc, argv '$(argv)')"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=yes warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] || miss "a GDK_INTEGRATION_WARM that is not 0 or 1 is a config error (exit 2), got $rc"
+
+	printf 'extends Node\n## Isolated because:   \n' > "$proj/tests/integration/iso.gd"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] && grep -qF 'tests/integration/iso.gd' <<<"$out" && [ ! -s "$state/argv" ] \
+		|| miss "an '## Isolated because:' with no reason exits 2 naming the file, before any boot (rc $rc): $out"
+	rm -rf "$state"
+}
+
 # --- --self-test -------------------------------------------------------------
-# Boots nothing: discovery, the header reader and the slicing are pure
+# Boots nothing:discovery, the header reader and the slicing are pure
 # filesystem and text, which is exactly why they are written as functions over
 # a directory and a list.
 self_test() {
-	local scratch rc out failures=0 cases=0 name bad
+	local scratch rc out failures=0 cases=0 name bad fx mono host host_before host_after
 
 	miss() { echo "  MISS — $1" >&2; failures=$((failures + 1)); }
 
@@ -649,11 +1234,98 @@ FIXTURE_EOF
 		|| miss "a multi-path touched list should slice like a single one, got '$out'"
 
 	# --- the tier's ground --------------------------------------------------
+	# A fixture under tests/support/ is NOT ground (#33): one fixture edit
+	# booted the whole tier when two scenarios load it. It is sliced below.
 	cases=$((cases + 1))
-	out="$(printf '%s\n' tests/support/maps/x.tscn tests/integration/scenario_base.gd systems/alpha/x.gd tools/dev/runners/scenario.sh \
+	out="$(printf '%s\n' tests/support/maps/x.tscn tests/integration/scenario_base.gd systems/alpha/x.gd \
+		tools/dev/runners/scenario.sh tools/dev/gdk_runners.sh tests/integration/scenario_runner.gd \
 		| touched_substrate | tr '\n' ' ')"
-	[ "$out" = "tests/support/maps/x.tscn tests/integration/scenario_base.gd tools/dev/runners/scenario.sh " ] \
-		|| miss "substrate: fixtures, the base class and the runners are ground; a system is not — got '$out'"
+	[ "$out" = "tests/integration/scenario_base.gd tools/dev/runners/scenario.sh tools/dev/gdk_runners.sh tests/integration/scenario_runner.gd " ] \
+		|| miss "substrate: the base/runner scripts and the runners are ground; a fixture and a system are not — got '$out'"
+	cases=$((cases + 1))
+	out="$(printf '%s\n' tests/support/maps/x.tscn \
+		| GDK_SCENARIO_SUBSTRATE_RE='^tests/support/' touched_substrate | tr '\n' ' ')"
+	[ "$out" = "tests/support/maps/x.tscn " ] \
+		|| miss "a consumer's own GDK_SCENARIO_SUBSTRATE_RE must keep its value — got '$out'"
+
+	# --- the fixture slice: who LOADS the touched fixture ---------------------
+	# Three scenarios: a preloads direct.gd; b loads mid.tscn, whose
+	# ext_resource is leaf.gd (fixture → fixture → scenario); c loads nothing.
+	# lone.gd is loaded by no scenario, which must fall back, not select zero.
+	fx="$scratch/fx"
+	mkdir -p "$fx/tests/integration" "$fx/tests/support"
+	printf '%s\n' 'extends "res://tests/integration/scenario_base.gd"' \
+		'const D = preload("res://tests/support/direct.gd")' > "$fx/tests/integration/a.gd"
+	printf '%s\n' 'extends Node' 'func run() -> void:' \
+		'	var m = load( "res://tests/support/mid.tscn" )' > "$fx/tests/integration/b.gd"
+	printf '%s\n' 'extends Node' > "$fx/tests/integration/c.gd"
+	printf '%s\n' '[gd_scene load_steps=2 format=3]' \
+		'[ext_resource type="Script" path="res://tests/support/leaf.gd" id="1_a"]' \
+		'[node name="Mid" type="Node"]' > "$fx/tests/support/mid.tscn"
+	: > "$fx/tests/support/direct.gd"; : > "$fx/tests/support/leaf.gd"; : > "$fx/tests/support/lone.gd"
+	cases=$((cases + 1))
+	out="$(cd "$fx" && printf '%s\n' tests/support/direct.gd systems/x.gd | fixture_slice | tr '\t\n' ': ')"
+	[ "$out" = "FIXTURE:tests/support/direct.gd:a " ] \
+		|| miss "a fixture one of three scenarios preloads selects exactly that one — got '$out'"
+	cases=$((cases + 1))
+	out="$(cd "$fx" && printf '%s\n' tests/support/leaf.gd tests/support/leaf.gd.uid | fixture_slice | tr '\t\n' ': ')"
+	[ "$out" = "FIXTURE:tests/support/leaf.gd:b FIXTURE:tests/support/leaf.gd.uid:b " ] \
+		|| miss "a fixture reached through another fixture (and its .uid sidecar) selects the scenario — got '$out'"
+	cases=$((cases + 1))
+	out="$(cd "$fx" && printf '%s\n' tests/support/lone.gd | fixture_slice | tr '\t\n' ': ')"
+	[ "$out" = "ORPHAN:tests/support/lone.gd " ] \
+		|| miss "a fixture no scenario references must read as ORPHAN, never as zero scenarios — got '$out'"
+	# Every way a scenario can name a fixture (M1): the scan does not
+	# enumerate call forms. It matches the fixture's res:// path in any quote
+	# or none, its uid://, and a class_name it declares as a whole word.
+	printf '%s\n' 'class_name SharedThing' 'extends Node' > "$fx/tests/support/shared.gd"
+	printf '%s\n' 'uid://cshared1' > "$fx/tests/support/shared.gd.uid"
+	printf '%s\n' '[gd_scene format=3 uid="uid://clevel9"]' '[node name="Level" type="Node"]' > "$fx/tests/support/level.tscn"
+	printf '%s\n' 'extends Node' "const S = preload('res://tests/support/shared.gd')" > "$fx/tests/integration/sq.gd"
+	printf '%s\n' 'extends Node' 'const P := "res://tests/support/shared.gd"' 'func f(): return load(P)' > "$fx/tests/integration/cst.gd"
+	printf '%s\n' 'extends Node' 'const U = preload("uid://cshared1")' > "$fx/tests/integration/uid.gd"
+	printf '%s\n' 'extends Node' 'var x := SharedThing.new()' > "$fx/tests/integration/cls.gd"
+	printf '%s\n' "extends 'res://tests/support/shared.gd'" > "$fx/tests/integration/ext.gd"
+	printf '%s\n' 'extends Node' 'const R = preload("../support/shared.gd")' > "$fx/tests/integration/rel.gd"
+	# Reached through a scenario base that lives in the scenario dir (C2).
+	printf '%s\n' 'extends Node' > "$fx/tests/support/via.gd"
+	printf '%s\n' 'extends Node' 'const V = preload("res://tests/support/via.gd")' > "$fx/tests/integration/scenario_base.gd"
+	printf '%s\n' 'extends "res://tests/integration/scenario_base.gd"' > "$fx/tests/integration/beta.gd"
+	printf '%s\n' 'extends Node' 'var y := SharedThingy.new()' 'const V = preload("uid://cshared12")' > "$fx/tests/integration/decoy.gd"
+	printf '%s\n' 'extends Node' 'const L = preload("uid://clevel9")' > "$fx/tests/integration/lvl.gd"
+	out="$(cd "$fx" && printf '%s\n' tests/support/shared.gd | fixture_slice | tr '\t\n' ': ')"
+	for name in 'sq:single quotes' 'cst:a const path' 'uid:its uid://' 'cls:its class_name' "ext:extends '…'" 'rel:a relative path'; do
+		cases=$((cases + 1))
+		case "$out" in
+			*"FIXTURE:tests/support/shared.gd:${name%%:*} "*) ;;
+			*) miss "a scenario that names a fixture by ${name#*:} must be selected — got '$out'" ;;
+		esac
+	done
+	cases=$((cases + 1))
+	case "$out" in
+		*:decoy\ *) miss "a longer class_name or uid is not the fixture's (whole words only) — got '$out'" ;;
+	esac
+	cases=$((cases + 1))
+	out="$(cd "$fx" && printf '%s\n' tests/support/via.gd | fixture_slice | tr '\t\n' ': ')"
+	case "$out" in
+		*"FIXTURE:tests/support/via.gd:beta "*) ;;
+		*) miss "a fixture a scenario reaches through a scenario base in the scenario dir selects it — got '$out'" ;;
+	esac
+	cases=$((cases + 1))
+	out="$(cd "$fx" && printf '%s\n' tests/support/level.tscn | fixture_slice | tr '\t\n' ': ')"
+	[ "$out" = "FIXTURE:tests/support/level.tscn:lvl " ] \
+		|| miss "a scene fixture named by the uid in its own header selects its scenario — got '$out'"
+	# The fixture root as configured: a leading ./ and the trailing / are
+	# spelling; a root that is not a directory under the repo is a defect,
+	# except the stock default, which a project with no fixtures lacks.
+	cases=$((cases + 1))
+	out="$(cd "$fx" && fixture_root ./tests/support) $(cd "$fx" && fixture_root tests/support//) $(cd "$scratch" && fixture_root tests/support/)"
+	[ "$out" = "tests/support/ tests/support/ tests/support/" ] \
+		|| miss "a fixture root normalises to one trailing / with no leading ./ — got '$out'"
+	for bad in '' '.' './' '/abs/support' '../support' 'tests/../support' 'tests/suport' 'tests/support/direct.gd'; do
+		cases=$((cases + 1))
+		(cd "$fx" && fixture_root "$bad" >/dev/null) && miss "a fixture root '$bad' is admitted"
+	done
 
 	# --- touched_paths: REPO_ROOT-relative and literal ------------------------
 	# `git diff --name-only` names a path relative to the git TOPLEVEL and
@@ -665,20 +1337,43 @@ FIXTURE_EOF
 	mono="$scratch/mono"
 	mkdir -p "$mono/game/systems/alpha" "$mono/game/tests/support"
 	: > "$mono/README.md"; : > "$mono/game/project.godot"; : > "$mono/game/tests/support/base.gd"
-	( cd "$mono" && git init -q . && git config core.quotePath true && git add -A \
-		&& git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m fixture ) >/dev/null 2>&1 \
-		|| miss "the git fixture could not be built"
+	# #24: built while a HOST repo's GIT_DIR / GIT_WORK_TREE are exported, the
+	# way a hook runs this self-test. A bare `git init -q .` re-initialised the
+	# host (core.bare=true in a shared config) and committed into it.
+	host="$scratch/host"
+	mkdir -p "$host"; : > "$host/tracked"
+	{ scratch_git "$host" init -q && scratch_git "$host" add -A \
+		&& scratch_git "$host" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m host; } >/dev/null 2>&1 \
+		|| miss "the host git fixture could not be built"
+	host_before="$(scratch_git "$host" rev-parse HEAD 2>&1) $(cksum < "$host/.git/config")"
+	# Exported in a subshell, as a hook exports it — a prefix assignment is a
+	# different scope, and it hid this runner's own escape (C1, 1.4.0 checkup).
+	( export GIT_DIR="$host/.git" GIT_WORK_TREE="$host" GIT_INDEX_FILE="$host/.git/index"
+	  mono_fixture "$mono" ) || miss "the git fixture could not be built"
+	cases=$((cases + 1))
+	host_after="$(scratch_git "$host" rev-parse HEAD 2>&1) $(cksum < "$host/.git/config")"
+	[ "$host_after" = "$host_before" ] && [ -z "$(scratch_git "$host" config --get core.quotePath)" ] \
+		|| miss "the mono fixture wrote into a GIT_DIR-exported host repo (before '$host_before', after '$host_after')"
 	: > "$mono/game/systems/alpha/x.gd"
 	: > "$mono/game/systems/alpha/café.gd"
 	echo change >> "$mono/README.md"
 	echo change >> "$mono/game/tests/support/base.gd"
 	cases=$((cases + 1))
-	out="$( (cd "$mono/game" && touched_paths HEAD) | tr '\n' ' ')"
+	out="$( (unset_git_env; cd "$mono/game" && touched_paths HEAD) | tr '\n' ' ')"
 	[ "$out" = "systems/alpha/café.gd systems/alpha/x.gd tests/support/base.gd " ] \
 		|| miss "touched paths must be REPO_ROOT-relative and literal (a project under game/, a café.gd; the toplevel README is outside the project) — got '$out'"
 	cases=$((cases + 1))
-	rc=0; (cd "$mono/game" && touched_paths no-such-ref >/dev/null 2>&1) || rc=$?
+	rc=0; (unset_git_env; cd "$mono/game" && touched_paths no-such-ref >/dev/null 2>&1) || rc=$?
 	[ "$rc" -eq 2 ] || miss "touched_paths with no such ref should return 2, got $rc"
+
+	# --- the import-cache precheck, by timestamps ----------------------------
+	cache_cases "$scratch/cache"
+
+	# --- the sweep end to end: rerun-alone and the repair before it -----------
+	sweep_cases "$scratch/proj"
+
+	# --- warm mode end to end: the census, isolation, the hand-back -----------
+	warm_cases "$scratch/warm"
 
 	# --- every keep-listed gate must EXIST and survive the filter ------------
 	# A renamed or deleted keep-listed capture must fail loudly here, never
@@ -753,6 +1448,27 @@ case "${1:-}" in
 		self_test_rc=0; self_test || self_test_rc=$?; exit "$self_test_rc" ;;
 esac
 
+# --no-rerun is a modifier, taken from anywhere on the line; what remains is
+# the mode. The env spelling is validated here: a value that is neither 0 nor
+# 1 is a config error, never a silent default.
+case "$GDK_INTEGRATION_RERUN" in
+	0|1) RERUN="$GDK_INTEGRATION_RERUN" ;;
+	*) echo "[$GATE_TAG] GDK_INTEGRATION_RERUN='$GDK_INTEGRATION_RERUN' — expected 0 or 1" >&2; exit 2 ;;
+esac
+case "$GDK_INTEGRATION_WARM" in
+	0|1) WARM="$GDK_INTEGRATION_WARM" ;;
+	*) echo "[$GATE_TAG] GDK_INTEGRATION_WARM='$GDK_INTEGRATION_WARM' — expected 0 or 1" >&2; exit 2 ;;
+esac
+REST=()
+for arg in "$@"; do
+	case "$arg" in
+		--no-rerun) RERUN=0 ;;
+		--cold) WARM=0 ;;
+		*) REST+=("$arg") ;;
+	esac
+done
+set -- ${REST[@]+"${REST[@]}"}
+
 # Resolved before the cd: a relative $0 stops resolving once the cwd moves.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/$REPO_ROOT_FROM_HERE" && pwd)" || exit 2
@@ -810,15 +1526,56 @@ case "${1:-}" in
 			|| { echo "[$GATE_TAG] --diff needs a git repository at $REPO_ROOT" >&2; exit 2; }
 		touched="$(touched_paths "$2")" \
 			|| { echo "[$GATE_TAG] --diff: '$2' does not name a commit" >&2; exit 2; }
+		# A root that names nothing would make every fixture touch neither a
+		# fixture nor ground: a slice of smoke, exit 0, no line (rule 4).
+		if ! FIXTURE_ROOT="$(fixture_root "$GDK_SCENARIO_FIXTURE_DIR")"; then
+			echo "[$GATE_TAG] GDK_SCENARIO_FIXTURE_DIR='$GDK_SCENARIO_FIXTURE_DIR' $FIXTURE_ROOT — name the directory your scenarios load fixtures from" >&2
+			exit 2
+		fi
+		GDK_SCENARIO_FIXTURE_DIR="$FIXTURE_ROOT"
 		touched_count="$(printf '%s' "$touched" | grep -c . || true)"
 		substrate="$(printf '%s\n' "$touched" | touched_substrate)"
+		# Only asked when the ground is not touched: the ground boots it all.
+		fixtures=''
+		[ -n "$substrate" ] || fixtures="$(printf '%s\n' "$touched" | fixture_slice)"
+		orphans="$(printf '%s\n' "$fixtures" | awk -F'\t' '$1 == "ORPHAN" { print $2 }')"
+		# 1.3.0 booted the tier for any touch under tests/support/. With the
+		# fixture root moved elsewhere, a touch there is looked up by nothing,
+		# and must not shrink to smoke without a word.
+		unclaimed=''
+		[ "$FIXTURE_ROOT" = "$FIXTURE_DIR_STOCK" ] || unclaimed="$(printf '%s\n' "$touched" \
+			| awk -v old="$FIXTURE_DIR_STOCK" -v root="$FIXTURE_ROOT" 'index($0, old) == 1 && index($0, root) != 1')"
+		if [ -n "$fixtures" ]; then
+			scanned="$(find "${FIXTURE_ROOT%/}" -type f \( -name '*.gd' -o -name '*.tscn' -o -name '*.tres' \) 2>/dev/null | wc -l | tr -d ' ')"
+			echo "[$GATE_TAG] fixture root $FIXTURE_ROOT: $scanned file(s) scanned for references"
+		fi
 		if [ -n "$substrate" ]; then
 			while IFS= read -r n; do NAMES+=("$n"); done < <(discover_all)
 			echo "[$GATE_TAG] --diff $2: the change touches the tier's own ground — every scenario is the honest slice:"
 			printf '%s\n' "$substrate" | sed 's/^/    /'
 			SLICE_NOTE="; substrate touched, whole tier"
+		elif [ -n "$unclaimed" ]; then
+			while IFS= read -r n; do NAMES+=("$n"); done < <(discover_all)
+			printf '%s\n' "$unclaimed" | while IFS= read -r f; do
+				echo "[$GATE_TAG] $f is outside the fixture root $FIXTURE_ROOT — booting the tier"
+			done
+			SLICE_NOTE="; $FIXTURE_DIR_STOCK touched outside the fixture root, whole tier"
+		elif [ -n "$orphans" ]; then
+			# Rule 4: a reference the text scan cannot see (a path built at
+			# runtime) must not read as "no scenario needs this".
+			while IFS= read -r n; do NAMES+=("$n"); done < <(discover_all)
+			printf '%s\n' "$orphans" | while IFS= read -r f; do
+				echo "[$GATE_TAG] fixture $f is referenced by no scenario — booting the tier"
+			done
+			SLICE_NOTE="; unreferenced fixture touched, whole tier"
 		else
-			slice="$(printf '%s\n' "$touched" | slice_for_touched)"
+			# The fixture census: what each touched fixture selected.
+			printf '%s\n' "$fixtures" | awk -F'\t' -v tag="$GATE_TAG" '
+				$1 == "FIXTURE" { if (!($2 in n)) order[++k] = $2; n[$2]++ }
+				END { for (i = 1; i <= k; i++) printf "[%s] fixture %s selected %d scenario(s)\n", tag, order[i], n[order[i]] }
+			'
+			slice="$(printf '%s\n' "$touched" | slice_for_touched
+				printf '%s\n' "$fixtures" | awk -F'\t' '$1 == "FIXTURE" { print "SELECT\t" $3 }')"
 			undeclared="$(printf '%s\n' "$slice" | awk -F'\t' '$1 == "UNDECLARED" { print $2 }')"
 			undeclared_count="$(printf '%s' "$undeclared" | grep -c . || true)"
 			while IFS= read -r n; do [ -n "$n" ] && NAMES+=("$n"); done \
@@ -843,8 +1600,62 @@ for n in ${NAMES[@]+"${NAMES[@]}"}; do
 done
 [ "${#NAMES[@]}" -gt 0 ] || { echo "[$GATE_TAG] no scenarios matched" >&2; exit 2; }
 
+MODE="${1:-}"
+# Only the slice that gates a merge batch reruns; --all is the milestone gate
+# and a named run is someone looking at one scenario on purpose.
+[ "$MODE" = "--diff" ] || RERUN=0
+
+# Warm mode is for the sweeps; --smoke and a named run are one boot anyway.
+case "$MODE" in --all|--diff|--system) ;; *) WARM=0 ;; esac
+# Which scenarios may share a process, decided BEFORE anything boots: an
+# `## Isolated because:` with no reason is a declaration that says nothing,
+# and it stops the run naming its file.
+WARM_NAMES=(); ISO_NAMES=()
+if [ "$WARM" -eq 1 ]; then
+	ROSTER_NL="$(printf '%s\n' "${NAMES[@]}")"
+	while IFS= read -r f; do
+		n="${f##*/}"; n="${n%.gd}"
+		case $'\n'"$ROSTER_NL"$'\n' in *$'\n'"$n"$'\n'*) ;; *) continue ;; esac
+		if reason="$(scenario_isolation "$f")"; then
+			if [ -z "$reason" ]; then
+				echo "[$GATE_TAG] $f: '## $ISOLATED_KEY' gives no reason — say what process state it needs, or remove the line" >&2
+				exit 2
+			fi
+			ISO_NAMES+=("$n")
+		fi
+	done < <(discover_gate_files)
+	ISO_NL="$(printf '%s\n' ${ISO_NAMES[@]+"${ISO_NAMES[@]}"})"
+	for n in "${NAMES[@]}"; do
+		case $'\n'"$ISO_NL"$'\n' in *$'\n'"$n"$'\n'*) ;; *) WARM_NAMES+=("$n") ;; esac
+	done
+fi
+
+# The repair a sweep cannot do, done once before it (#16): a sweep is where a
+# stale cache fails every scenario, and where scenario.sh must NOT repair it.
+if { [ "$MODE" = "--diff" ] || [ "$MODE" = "--all" ]; } && [ -f project.godot ] \
+	&& stale="$(import_cache_stale)"; then
+	repair="$SCRIPT_DIR/$IMPORT_CACHE_RUNNER"
+	if [ ! -f "$repair" ]; then
+		echo "[$GATE_TAG] the import cache is stale ($stale) and $IMPORT_CACHE_RUNNER is not installed at $repair — the sweep did not start" >&2
+		exit 2
+	fi
+	echo "[$GATE_TAG] import cache is stale ($stale) — running $IMPORT_CACHE_RUNNER once, before the sweep"
+	repair_rc=0; bash "$repair" || repair_rc=$?
+	if [ "$repair_rc" -ne 0 ]; then
+		echo "[$GATE_TAG] FAIL — the import-cache repair ($IMPORT_CACHE_RUNNER) exited $repair_rc; the sweep did not start. Run it alone (make import-cache) and read its report."
+		exit 1
+	fi
+fi
+
 JOBS="${GDK_JOBS:-$(detect_jobs)}"
-echo "[$GATE_TAG] ${#NAMES[@]} scenario(s), ${JOBS}-way parallel, isolated per process"
+WORKERS=0
+if [ "$WARM" -eq 1 ]; then
+	WORKERS="${#WARM_NAMES[@]}"
+	[ "$WORKERS" -le "$JOBS" ] || WORKERS="$JOBS"
+	echo "[$GATE_TAG] ${#NAMES[@]} scenario(s), warm: ${#WARM_NAMES[@]} in $WORKERS worker(s), ${#ISO_NAMES[@]} isolated (cold)"
+else
+	echo "[$GATE_TAG] ${#NAMES[@]} scenario(s), ${JOBS}-way parallel, isolated per process"
+fi
 
 TMP="$(mktemp -d)" || exit 2
 trap 'rm -rf "$TMP"' EXIT
@@ -876,8 +1687,10 @@ trap 'rm -rf "$TMP"' EXIT
 # The CPU the fan-out burns is the difference of this shell's `times` across
 # it: every job is reaped through xargs before the pipeline returns.
 children_cpu "$TMP/times"; CPU_BEFORE="$CHILD_CPU_MS"
+# cold_fanout <name>... — the cold path: one scenario.sh per name, JOBS at once.
+cold_fanout() {
 # shellcheck disable=SC2016
-printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
+printf '%s\n' "$@" | xargs -P "$JOBS" -I{} bash -c '
 	name="$1"; tmp="$2"
 	export GDK_HEADLESS_HOME="$tmp/home-$name"
 	export GDK_SCENARIO_IN_SWEEP=1
@@ -885,9 +1698,51 @@ printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
 	printf "%s\n" "$out" > "$tmp/$name.log"
 	printf "%s\t%s\n" "$name" "$code" >> "$tmp/results"
 ' _ {} "$TMP"
-children_cpu "$TMP/times"
-BOOT_CPU_MS=''
-[ -z "$CPU_BEFORE" ] || [ -z "$CHILD_CPU_MS" ] || BOOT_CPU_MS=$((CHILD_CPU_MS - CPU_BEFORE))
+}
+
+HANDED=(); WARM_FAILED_NL=''; WARM_RAN=0; WARM_SECS=0; COLD_T0="$SECONDS"
+if [ "$WARM" -eq 0 ]; then
+	cold_fanout "${NAMES[@]}"
+else
+	# The warm phase. Slices balanced by count: name j goes to worker j mod W.
+	# Every worker's finished scenarios land in $TMP/warm/results in the shape
+	# the cold jobs write; what is not there afterwards was never finished,
+	# whatever the worker said, and runs cold (rule 4: a worker that died
+	# without a word must not shrink the census).
+	mkdir -p "$TMP/warm"; : > "$TMP/warm/results"
+	WARM_T0="$SECONDS"; WORKER_PIDS=()
+	for ((w = 0; w < WORKERS; w++)); do
+		slice=()
+		for ((j = w; j < ${#WARM_NAMES[@]}; j += WORKERS)); do slice+=("${WARM_NAMES[$j]}"); done
+		GDK_HEADLESS_HOME="$TMP/home-warm-$w" GDK_SCENARIO_IN_SWEEP=1 GDK_SCENARIO_SUITE_RESULTS="$TMP/warm" \
+			bash "$SCENARIO_SH" --suite "${slice[@]}" > "$TMP/warm-$w.out" 2>&1 &
+		WORKER_PIDS+=("$!")
+	done
+	for ((w = 0; w < WORKERS; w++)); do
+		wrc=0; wait "${WORKER_PIDS[$w]}" || wrc=$?
+		case "$wrc" in
+			0|1|4) ;;
+			*) echo "[$GATE_TAG] warm worker $w exited $wrc — what it did not finish runs cold:"
+			   tail -"$FAILURE_SUMMARY_LINES" "$TMP/warm-$w.out" | sed 's/^/    /' ;;
+		esac
+	done
+	WARM_SECS=$((SECONDS - WARM_T0))
+	grep -hE '^  WARM-ABORT  |^    handed back: ' "$TMP"/warm-*.out 2>/dev/null || true
+	for n in ${WARM_NAMES[@]+"${WARM_NAMES[@]}"}; do
+		code="$(awk -F'\t' -v n="$n" '$1 == n { c = $2 } END { print c }' "$TMP/warm/results")"
+		if [ -z "$code" ]; then HANDED+=("$n"); continue; fi
+		WARM_RAN=$((WARM_RAN + 1))
+		printf '%s\t%s\n' "$n" "$code" >> "$TMP/results"
+		[ ! -f "$TMP/warm/$n.log" ] || mv -f "$TMP/warm/$n.log" "$TMP/$n.log"
+		[ "$code" -eq 0 ] || WARM_FAILED_NL="$WARM_FAILED_NL$n"$'\n'
+	done
+	COLD_T0="$SECONDS"
+	COLD_RUN=(${ISO_NAMES[@]+"${ISO_NAMES[@]}"} ${HANDED[@]+"${HANDED[@]}"})
+	if [ "${#COLD_RUN[@]}" -gt 0 ]; then
+		echo "[$GATE_TAG] cold: ${#ISO_NAMES[@]} isolated + ${#HANDED[@]} handed back, ${JOBS}-way parallel"
+		cold_fanout "${COLD_RUN[@]}"
+	fi
+fi
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 while IFS=$'\t' read -r name code; do
@@ -901,6 +1756,56 @@ done < "$TMP/results"
 # Counted before the unreported are folded into FAIL below — a job that never
 # reported is a failure, and not a boot anyone can show happened.
 BOOTS=$((PASS + FAIL))
+# Warm: each worker is ONE boot, however many scenarios it ran.
+[ "$WARM" -eq 0 ] || BOOTS=$((BOOTS - WARM_RAN + WORKERS))
+
+# Rerun alone, once (#34). A scenario that fails among N peers and passes on
+# its own failed on LOAD, not on what it asserts — and a merge batch stopped
+# for one costs a story. Serial, one engine, no peers — and still with
+# GDK_SCENARIO_IN_SWEEP=1: the cache was repaired once, before the sweep, and
+# the runner's own recovery is `rm -rf .godot` plus an editor pass IN THE
+# TREE, which removes the .godot a playing session reads and re-serialises
+# tracked resources into a diff. The runner reports that repair; it does not
+# perform it. Still red alone is red, exactly as before. The FLAKE line is the
+# record; nothing is filed.
+FLAKY=0; WARM_ONLY=0
+# A rerun is for the few a loaded machine reddens. Past a cap the answer is
+# already red, and 166 serial cold boots would only make it slower.
+RERUN_CAP=$(( ${#NAMES[@]} / 10 )); [ "$RERUN_CAP" -ge 3 ] || RERUN_CAP=3
+if [ "$RERUN" -eq 1 ] && [ "${#FAILED_NAMES[@]}" -gt "$RERUN_CAP" ]; then
+	echo "[$GATE_TAG] ${#FAILED_NAMES[@]} scenario(s) failed, over the rerun cap of $RERUN_CAP (max of 3 and 10% of ${#NAMES[@]}) — not rerunning; they are red"
+	RERUN=0
+fi
+if [ "$RERUN" -eq 1 ] && [ "${#FAILED_NAMES[@]}" -gt 0 ]; then
+	echo "[$GATE_TAG] rerunning ${#FAILED_NAMES[@]} failed scenario(s) alone, once each"
+	STILL_RED=()
+	for n in "${FAILED_NAMES[@]}"; do
+		code=0
+		GDK_HEADLESS_HOME="$TMP/home-$n-alone" GDK_SCENARIO_IN_SWEEP=1 \
+			bash "$SCENARIO_SH" "$n" > "$TMP/$n.alone.log" 2>&1 || code=$?
+		BOOTS=$((BOOTS + 1))
+		if [ "$code" -eq 0 ]; then
+			PASS=$((PASS + 1)); FAIL=$((FAIL - 1))
+			# A warm failure that passes cold leans on process state — which is
+			# a different finding from a load flake, and counted apart.
+			case $'\n'"$WARM_FAILED_NL" in
+				*$'\n'"$n"$'\n'*)
+					WARM_ONLY=$((WARM_ONLY + 1))
+					echo "  WARM-ONLY  $n — failed warm, passed cold: it leans on process state; mark it \"## $ISOLATED_KEY\" or fix its reset" ;;
+				*)
+					FLAKY=$((FLAKY + 1))
+					echo "  FLAKE  $n — failed in the sweep, passed alone" ;;
+			esac
+		else
+			STILL_RED+=("$n")
+		fi
+	done
+	FAILED_NAMES=(${STILL_RED[@]+"${STILL_RED[@]}"})
+fi
+COLD_SECS=$((SECONDS - COLD_T0))
+children_cpu "$TMP/times"
+BOOT_CPU_MS=''
+[ -z "$CPU_BEFORE" ] || [ -z "$CHILD_CPU_MS" ] || BOOT_CPU_MS=$((CHILD_CPU_MS - CPU_BEFORE))
 
 # A job that never wrote a result line is a job that died before scenario.sh
 # could report — counted as a failure, because the alternative is a sweep that
@@ -909,6 +1814,18 @@ UNREPORTED=$(( ${#NAMES[@]} - PASS - FAIL ))
 if [ "$UNREPORTED" -gt 0 ]; then
 	echo "[$GATE_TAG] $UNREPORTED scenario(s) produced no result at all — counting them failed"
 	FAIL=$((FAIL + UNREPORTED))
+fi
+
+# Warm mode's census (rule 4): warm + cold + handed back is the roster, and
+# every name on it has a result. Anything else is a FAIL naming the missing.
+CENSUS_NOTE=''
+if [ "$WARM" -eq 1 ]; then
+	CENSUS_NOTE="; warm $WARM_RAN, cold ${#ISO_NAMES[@]}, handed back ${#HANDED[@]}"
+	missing="$(printf '%s\n' "${NAMES[@]}" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1] = 1; next } !($0 in seen)' "$TMP/results" -)"
+	if [ $((WARM_RAN + ${#ISO_NAMES[@]} + ${#HANDED[@]})) -ne "${#NAMES[@]}" ] || [ -n "$missing" ]; then
+		echo "[$GATE_TAG] FAIL — census: warm $WARM_RAN + cold ${#ISO_NAMES[@]} + handed back ${#HANDED[@]} is not the roster of ${#NAMES[@]}; no result for: $(printf '%s' "$missing" | tr '\n' ' ')"
+		[ "$UNREPORTED" -gt 0 ] || FAIL=$((FAIL + 1))
+	fi
 fi
 
 if [ "$FAIL" -gt 0 ]; then
@@ -931,7 +1848,11 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 
 echo ""
+[ "$WARM" -eq 0 ] || echo "[$GATE_TAG] WALL: warm workers ${WARM_SECS}s, cold remainder ${COLD_SECS}s"
 boots_line "$BOOTS" "$BOOT_CPU_MS"
-echo "[$GATE_TAG] SUMMARY: $PASS passed, $FAIL failed (of ${#NAMES[@]})$SLICE_NOTE"
+FLAKY_NOTE=''
+[ "$FLAKY" -eq 0 ] || FLAKY_NOTE=" ($FLAKY flaky)"
+[ "$WARM_ONLY" -eq 0 ] || FLAKY_NOTE=" ($FLAKY flaky, $WARM_ONLY warm-only)"
+echo "[$GATE_TAG] SUMMARY: $PASS passed$FLAKY_NOTE, $FAIL failed (of ${#NAMES[@]})$CENSUS_NOTE$SLICE_NOTE"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0

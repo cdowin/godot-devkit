@@ -20,10 +20,16 @@
 # (0.11.0 passes scripts apt's copy flags), `gdtoolkit==4.*` floats, and a run
 # with no import pass does not resolve `class_name` globals or imported assets.
 #
+# godot-devkit itself, when your uv.lock names it (the locked shape, #38): the
+# first step runs `uv run --frozen godot-devkit --version` — the command
+# Makefile.tiers runs — so .venv is synced to the lock, at exactly the locked
+# version and hash, before any gate, and a kit that does not start fails here.
+# The index is public: no token. A lock that does not name the kit skips it.
+#
 # After this file is written it is YOURS. Edit it here; re-installing needs
 # --force, and `--diff` shows what a re-install would change.
 name: godot-toolchain
-description: The Godot engine (line from project.godot), gdlint and shellcheck at pinned versions, and an import pass.
+description: godot-devkit from uv.lock (when locked), the Godot engine (line from project.godot), gdlint and shellcheck at pinned versions, and an import pass.
 
 inputs:
   godot-patch:
@@ -41,6 +47,17 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: godot-devkit, from uv.lock
+      # Only when the lock names it; a sync in a repo that never locked the
+      # kit would install an environment this step has no business with.
+      shell: bash
+      run: |
+        set -eu
+        if [ -f uv.lock ] && grep -qx 'name = "godot-devkit"' uv.lock; then
+          uv run --frozen godot-devkit --version
+        else
+          echo "uv.lock does not name godot-devkit — nothing to sync (the legacy GODOT_DEVKIT_VERSION pin resolves through uvx)."
+        fi
     - name: Godot version, from project.godot
       id: godot-version
       # The first `config/features` entry shaped MAJOR.MINOR is the engine

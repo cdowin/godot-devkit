@@ -5,14 +5,18 @@
 # `precommit`, `milestone`, `help`, the `gdk_gate` capture define — is
 # agentic-sdlc's Makefile.devkit, which your Makefile `include`s; that include
 # `-include`s THIS file and reads the two tier lists it declares. Your
-# Makefile is three lines plus whatever is yours:
+# Makefile is two lines plus whatever is yours:
 #
 #     DEVKIT_VERSION       := v0.2.0     # agentic-sdlc — the gate framework
-#     GODOT_DEVKIT_VERSION := v0.25.0    # godot-devkit — this roster, `check all`
 #     include Makefile.devkit
 #
-# Two pins, one `make`. The Godot CHECKS join `check` by config, never by a
-# fork of the include — seed this in devkit.toml:
+# and godot-devkit itself is LOCKED by uv: a `godot-devkit==X.Y.Z` dev
+# dependency in pyproject.toml, from this kit's index, hash-pinned in uv.lock
+# and run as `uv run --frozen godot-devkit` (`install-runners` prints the
+# pyproject block). The legacy pin, `GODOT_DEVKIT_VERSION := vX.Y.Z` above the
+# include, still works and wins over the lock, with a warning — keep one. The
+# Godot CHECKS join `check` by config, never by a fork of the include — seed
+# this in devkit.toml:
 #
 #     [gates]
 #     extra = ["godot-check"]
@@ -38,14 +42,30 @@
 # scenario tiers pass `gdk_gate` a census of BOOTS: a scenario file is one cold
 # engine whatever its length, so `[tests] cases` on them caps what they cost.
 
-# The godot-devkit pin: GODOT_DEVKIT_VERSION, set in your Makefile above the
-# include — or GODOT_DEVKIT set to the command itself, and there is nothing to
-# resolve (the package's own tree runs it from src/ that way).
+# The godot-devkit command, resolved in this order:
+#   1. GODOT_DEVKIT set by the caller — used as is, nothing to resolve (the
+#      package's own tree runs it from src/ that way).
+#   2. GODOT_DEVKIT_VERSION set above the include — the legacy uvx pin, built
+#      from the git tag on every call, exactly as before the lock existed. When
+#      uv.lock ALSO names the kit this warns (two pins of one tool ship two
+#      products) and still runs the pin: a minor never makes you edit a line.
+#   3. uv.lock at the repo root names godot-devkit — the locked shape, run as
+#      `uv run --frozen godot-devkit`: uv syncs .venv to the lock first, so a
+#      pulled lock bump takes effect on the next make, and --frozen never
+#      rewrites the lock. What .venv already holds decides nothing.
+# Neither is refused, naming the locked shape first.
 ifeq ($(origin GODOT_DEVKIT),undefined)
-ifndef GODOT_DEVKIT_VERSION
-$(error GODOT_DEVKIT_VERSION is not set — put `GODOT_DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit` (or set GODOT_DEVKIT to the command that runs the package))
+GDK_LOCKED := $(if $(wildcard uv.lock),$(shell grep -qx 'name = "godot-devkit"' uv.lock && echo yes))
+ifdef GODOT_DEVKIT_VERSION
+ifneq ($(GDK_LOCKED),)
+$(warning godot-devkit is pinned twice — uv.lock names it AND `GODOT_DEVKIT_VERSION := $(GODOT_DEVKIT_VERSION)` is in your Makefile; running the GODOT_DEVKIT_VERSION pin. Delete the GODOT_DEVKIT_VERSION line to use the lock)
 endif
 GODOT_DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(GODOT_DEVKIT_VERSION)" godot-devkit
+else ifneq ($(GDK_LOCKED),)
+GODOT_DEVKIT := uv run --frozen godot-devkit
+else
+$(error godot-devkit is not pinned — lock it: add `godot-devkit==X.Y.Z` to the dev dependency group in pyproject.toml, with the index block `godot-devkit install-runners` prints, and run `uv sync` (it writes uv.lock, which names the kit; make then runs `uv run --frozen godot-devkit`). The legacy pin, `GODOT_DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit`, still works; or set GODOT_DEVKIT to the command that runs the package)
+endif
 endif
 
 # Where `install-runners` put what this file calls (GDK_DEV_DIR is the

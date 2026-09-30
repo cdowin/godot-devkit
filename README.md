@@ -20,23 +20,39 @@ without re-reading the file.
 
 ## Install — two pins
 
-A consumer sets two pins in its Makefile and includes one file. `agentic-sdlc` is the gate framework
-and the SDLC (`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this
-kit is the Godot tiers and gates.
+A consumer pins two kits and includes one file. `agentic-sdlc` is the gate framework and the SDLC
+(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this kit is the
+Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
+
+| shape | the pin | what `make` runs |
+|---|---|---|
+| **locked** (recommended) | `godot-devkit==X.Y.Z` in `pyproject.toml`, hash-pinned in `uv.lock` — [below](#consume-it-locked) | `uv run --frozen godot-devkit` — uv syncs `.venv` to the lock first |
+| legacy | `GODOT_DEVKIT_VERSION := vX.Y.Z` in the Makefile, ABOVE the include | `uvx --from git+…@vX.Y.Z godot-devkit`, built from the tag |
+
+"Locked" means `uv.lock` names `godot-devkit`; what `.venv` happens to hold decides nothing. With
+both, the legacy pin runs, as it did before the lock existed, and `make` warns you to delete the
+`GODOT_DEVKIT_VERSION` line (two pins of one tool ship two products). Neither is refused at parse
+time. `GODOT_DEVKIT` set to a command overrides both.
+
+Both kits lock the same way: a dev dependency from each kit's own index, hash-pinned in `uv.lock`.
+agentic-sdlc runs only from the lock since its 1.0.0 (no `DEVKIT_VERSION` line), so the Makefile
+is the include plus your own targets:
 
 ```make
-DEVKIT_VERSION       := v0.11.0      # agentic-sdlc — the framework and the SDLC
-GODOT_DEVKIT_VERSION := v1.3.0     # this kit — the Godot tiers and the eight gates
-include Makefile.devkit
+include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
 ```
-
-`GODOT_DEVKIT_VERSION` goes ABOVE the include. Then write the two files the include reads, and join
-the gates to `make check`:
 
 ```sh
-uvx --from "git+https://github.com/cdowin/agentic-sdlc@v0.11.0" agentic-sdlc install-gates    # Makefile.devkit
-uvx --from "git+https://github.com/cdowin/godot-devkit@v1.3.0" godot-devkit install-runners  # Makefile.tiers + runners
+uv add --dev agentic-sdlc==1.0.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
+uv add --dev godot-devkit==1.4.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+# then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
+uv run agentic-sdlc install-gates     # Makefile.devkit
+uv run godot-devkit install-runners   # Makefile.tiers + runners
 ```
+
+The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v1.4.0` above the include and
+`uvx --from "git+https://github.com/cdowin/godot-devkit@v1.4.0" godot-devkit install-runners`.
+Then join the gates to `make check`:
 
 ```toml
 # devkit.toml
@@ -46,7 +62,7 @@ extra = ["godot-check"]     # `godot-devkit check all`, the target install-runne
 
 `make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make precommit` and
 `make milestone` run the Godot tiers `Makefile.tiers` declares. Every machine and CI runs the same
-gate code because the pin is a tag.
+gate code because `uv.lock` pins the bits.
 
 **A repo with a PM tree has a third step.** agentic-sdlc's flow — the states `pm` moves work
 through, `[pm.states.*]` in `devkit.toml` — has no default, so a repo that skips this step has a
@@ -63,6 +79,40 @@ make pm ARGS='vocabulary'   # reads back the states it wrote, by category
 - **A consumer bumping a pin:** read both CHANGELOGs; re-run `pm init` once, then `pm vocabulary`;
   `install-runners --diff` prints what a re-install would change and writes nothing;
   `agentic-sdlc adopt <version>` proves the bump.
+
+### Consume it locked
+
+Every `v*` tag is built once into a wheel and an sdist, attached to its GitHub Release (a re-tag is
+refused), and listed on a static PEP 503 index on this repo's GitHub Pages,
+`https://cdowin.github.io/godot-devkit/simple/` — public, no token. The PyPI name is someone
+else's, so the index is declared `explicit` and the kit never resolves from PyPI. `install-runners`
+prints this block at the version that ran it:
+
+```toml
+# pyproject.toml
+[dependency-groups]
+dev = ["godot-devkit==X.Y.Z"]
+
+[[tool.uv.index]]
+name = "cdowin"
+url = "https://cdowin.github.io/godot-devkit/simple/"
+explicit = true
+
+[tool.uv.sources]
+godot-devkit = { index = "cdowin" }
+```
+
+`uv sync` writes `uv.lock`, which records the version and the wheel's hash, so every machine and CI
+run gets the same bits and a moved tag cannot change them. Delete the `GODOT_DEVKIT_VERSION` line:
+once `uv.lock` names the kit, `Makefile.tiers` runs `uv run --frozen godot-devkit`, which syncs
+`.venv` to the lock before it runs, so a lock bump you pull takes effect on the next `make` with no
+`uv sync` to forget, and never rewrites the lock. In CI the installed `godot-toolchain` action runs
+the same command, `--version`, whenever `uv.lock` names the kit.
+
+- **Upgrade:** `uv add --dev godot-devkit==X.Y.Z`, then agentic-sdlc's adopt belt
+  (`agentic-sdlc adopt <version>`).
+- **Bots:** the pin lives in `pyproject.toml` and `uv.lock`, where Renovate and Dependabot can see it
+  and open the bump PR themselves.
 
 ## Quickstart
 
@@ -88,7 +138,7 @@ same command twice is a no-op the second time.
 |---|---|
 | `scene <file> [--props] [--paths]` | a `.tscn`/`.tres`'s node tree and resources; `--props` every `[resource]`/`[sub_resource]` property value, packed data elided, each id verbatim — the address the write verbs take |
 | `scene-diff <file> [--git <ref>]` · `scene-diff <old> <new>` | a structural diff — nodes, properties, resources, reparents — keyed the way the write verbs address them |
-| `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind |
+| `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind; signal hits on a receiver the index cannot type (`x.sig.connect(`, `emit_signal(&"sig"`, `connect("sig"`) print under `dynamic (untyped receiver)`, and `(no references found)` prints only when that bucket is empty too |
 | `orphans [--tests]` | tracked files nothing references |
 | `autoloads` | the `project.godot` autoload census, grouped by suffix, layout flagged |
 | `tiles <file> [--layer NAME] [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]` | a `TileMapLayer`'s grid: cell count, bounds, tile-kind histogram, per-column/row counts |
@@ -231,8 +281,10 @@ convention_files = ["default_bus_layout.tres"]
 
 Each file once; after that it is the repo's. A differing destination is refused by name (`--force`
 overwrites it), `--diff` prints what would change and writes nothing, and the run ends by printing
-the `.claude/settings.json` entry that fires the engine-boot guard. It reads `GODOT_DEVKIT_VERSION`
-from the Makefile above the include.
+the `.claude/settings.json` entry that fires the engine-boot guard, after the `pyproject.toml` block
+that locks the kit. It runs `uv run --frozen godot-devkit` when `uv.lock` names the kit, or the
+legacy `GODOT_DEVKIT_VERSION` from the Makefile above the include, which wins with a warning when
+both are present.
 
 ```
 Makefile.tiers                          the Godot tier roster on the seam Makefile.devkit -includes:
@@ -247,10 +299,16 @@ tools/dev/runners/compile_sweep.gd      stage 2 of parse.sh (+ its .uid sidecar)
 tools/dev/runners/lint.sh               gdlint over every tracked source dir
 tools/dev/runners/warnings.sh           the analyzer warnings only the editor shows
 tools/dev/runners/unit.sh               the GUT tier, no boot; a census that must reconcile
-tools/dev/runners/integration.sh        the scenario fan-out: --all, --diff <ref>, --system <dir>, --list
-tools/dev/runners/scenario.sh           one scenario, cold, with the cache-recovery ladder
-tools/dev/runners/capture.sh            a headed visual capture to PNG (local, needs a display)
-tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed
+tools/dev/runners/integration.sh        the scenario fan-out: --all, --diff <ref>, --system <dir>, --list;
+                                        warm (one boot per worker) under GDK_INTEGRATION_WARM=1
+tools/dev/runners/scenario.sh           one scenario, cold, with the cache-recovery ladder; --suite <name>...
+                                        is the warm worker: one boot, several scenarios
+tools/dev/runners/capture.sh            a headed visual capture to PNG (local, needs a display); the window
+                                        is placed off screen unless CAPTURE_VISIBLE=1 (a desktop may clamp it to the edge), and the last PNG of a
+                                        name moves to previous/ for a before/after
+tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed, in a scratch copy:
+                                        .godot/ comes back by rename, new .uid/.import sidecars
+                                        are copied back, other rewrites are dropped and counted
 tools/dev/runners/hermetic_run_scan.sh  a headless run's sandbox HOME self-destructs
 tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw engine boot
 .github/actions/godot-toolchain/action.yml
@@ -274,9 +332,75 @@ safe to delete only when `[gates] extra` names `godot-check` and `[checks] godot
 and so in `make milestone`. `uid-scan` is not a milestone tier, so without `godot-check` the run
 says `check uid` is not in the repo's gate and tells you to keep the file.
 
+**The diff slice.** `integration.sh --diff <ref>` (`make integration-diff`) boots the scenarios
+whose `## covers:` header names a touched path, plus smoke. A touched file under
+`GDK_SCENARIO_FIXTURE_DIR` (default `tests/support/`) selects every scenario whose text names it,
+followed through other fixtures. A fixture is named by its `res://` path in any quote or none, by
+its own `uid://`, or by a `class_name` it declares, so no call form can drop a scenario out of the
+slice. Each fixture prints how many scenarios it selected. A touched fixture that no scenario names
+boots the whole tier with the line `fixture <path> is referenced by no scenario — booting the
+tier`. A fixture root that is not a directory under the repo exits 2. With the root set elsewhere,
+a touch under `tests/support/` (1.3.0's ground) still boots the tier. Only the runners and the scenario base/runner scripts are the tier's
+ground (`GDK_SCENARIO_SUBSTRATE_RE`; a value you set is kept). After the sweep, `--diff` reruns each
+failed scenario once, alone. One that passes alone counts green and prints `  FLAKE  <name> —
+failed in the sweep, passed alone`, and the summary reads `N passed (K flaky)`. `--no-rerun` or
+`GDK_INTEGRATION_RERUN=0` turns the rerun off; `--all` and named runs never rerun. Before a
+`--diff`/`--all` sweep boots anything, a stale import cache (`.godot/uid_cache.bin` missing, or
+older than a tracked `*.uid`, `*.import` or `project.godot`) is repaired once by `import_cache.sh`.
+If the repair fails, the sweep does not start (exit 1).
+
+**Warm mode (opt-in).** Every scenario is one cold engine boot, 13-15 s of CPU before its first
+assertion. With `GDK_INTEGRATION_WARM=1`, `integration.sh --all|--diff|--system` splits the roster
+(after `--diff` slicing) into `GDK_JOBS` slices, balanced by count, and runs each through ONE
+`scenario.sh --suite a b c`, so the engine boots once per worker. Unset (the default), every path is
+the cold one, byte for byte; `--cold` forces it for one run, and a value other than 0 or 1 exits 2.
+Turn it on only once your scenario runner implements the contract:
+
+1. Booted with `-- <GDK_SCENARIO_SUITE_ARG> a,b,c` (default `--scenarios`, comma-separated), print
+   `[SCENARIO] <name> START` before each scenario: a line matching `<GDK_SCENARIO_START_RE> <name>
+   START`, where the ERE defaults to `\[SCENARIO\]` like `GDK_SCENARIO_RESULT_RE`.
+2. Run it against a fresh World, with the reset your `scenario_base` owns (autoload state, World,
+   player).
+3. Finish the scenario's teardown, THEN print your usual verdict line: `GDK_SCENARIO_RESULT_RE`,
+   then `PASS` or `FAIL` as a word. The verdict closes the scenario; nothing it causes may follow.
+4. Exit 0 after the last one. A FAIL is carried by its verdict line, never by the exit code.
+
+The single-scenario `--scenario <name>` path is unchanged. The worker splits the stream at the START
+markers. A scenario's slice runs from its START to the next one, with the boot preamble in front,
+and is published to `.scenario-reports/<name>.log`. An engine error in the slice upgrades that
+scenario's PASS to FAIL, exactly as a cold run would, and each scenario gets one console line, as
+today. A worker is killed when no new START or verdict arrives within `GDK_SCENARIO_HARD_TIMEOUT`
+seconds (a per-scenario bound). A hang hands back the scenario in progress and every one that never
+started, unrun: `  WARM-ABORT  after <last finished> — N scenario(s) handed back`, and
+`scenario.sh --suite` exits 4. Two findings belong to no scenario, so they hand back EVERY member,
+even ones with a verdict, and the WARM-ABORT line names the reason after a colon. The first is an
+engine exit that is non-zero and not the hang kill (`: the engine exited 139`), even after the last
+verdict. The second is an engine error after a verdict and before the next START or the exit
+(`: engine errors after the last verdict`), which is where exit-time leak warnings land. A passing
+slice that carries the cold-import-cache warning is handed back too, so the cold path's recovery
+ladder gets it. Every handed-back scenario then runs cold.
+
+A scenario whose header carries `## Isolated because: <reason>` never runs warm. An empty reason
+exits 2 and names the file. With `--diff`, a warm failure is rerun cold and alone. One that passes
+prints `  WARM-ONLY  <name> — failed warm, passed cold: it leans on process state; mark it "##
+Isolated because:" or fix its reset`, and counts green. `--no-rerun` leaves it red. The summary
+reads `N passed (K flaky, W warm-only), F failed (of T); warm A, cold B, handed back C`. A, B and C
+must sum to the roster, and every scenario must have a result. Otherwise the run FAILS and names
+what is missing. `[INTEGRATION] WALL: warm workers Xs, cold remainder Ys` splits the wall clock,
+and `BOOTS` counts one boot per worker. Compare before and after in your own ledger.
+
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
+
+**Several lanes on one machine.** `unit.sh` bounds its run at 180 s times `ceil(1-minute load /
+cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (load
+1.4x)`); an explicit `GDK_UNIT_TIMEOUT` is used as given, and a `HARD_TIMEOUT` names the value to
+rerun with. Sourcing `gdk_runners.sh` exports `GIT_OPTIONAL_LOCKS=0`, so a gate killed mid-`git
+status` leaves no `.git/index.lock`. A pid counts as dead only on positive evidence (`kill -0`
+says `No such process`, or a visible process table lacks it), so the HOME reaper never deletes a
+peer's live run. Where a sandbox hides pid 1 from `ps`, the library's self-test prints `SKIP — …`
+for its two foreign-pid cases instead of failing them.
 
 **What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `check budget` can
 put a ceiling on each: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner

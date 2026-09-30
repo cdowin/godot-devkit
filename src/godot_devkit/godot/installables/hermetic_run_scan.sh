@@ -294,7 +294,7 @@ self_test() {
 	miss() { echo "  MISS — $1${detected}" >&2; failures=$((failures + 1)); }
 	# score — open a scored block: baseline the counter and drop the held
 	# detections, so a miss renders THIS block's hits rather than the run's.
-	# shellcheck disable=SC2329  # invoked indirectly, by name
+	# shellcheck disable=SC2317,SC2329  # invoked indirectly, by name
 	score() { before=$scored; detected=""; }
 
 	# argument handling: --help is 0, an unknown or extra argument is 2.

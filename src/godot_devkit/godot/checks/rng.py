@@ -20,6 +20,13 @@ drowns the signal in menu shimmer and cosmetic jitter; the roots that hold
 run-scoped randomness are the roots worth gating, and widening them is not a
 free improvement.
 
+A DECLARATION is not a call: a seeded-stream owner that exposes the draw API
+under the engine's names (`func randf() -> float:`) is the thing the gate asks
+for, so the `func <name>` head of a line is never matched (#30). And inside a
+script that DECLARES one of those names, an unqualified call to it is a call to
+the script's OWN method, not the global generator — so that is not a hit
+either. A script that declares none of them is judged exactly as before.
+
 HONEST SCOPE: matching is per line, after quoted strings and a trailing `#`
 comment are stripped, with `##` doc-comment lines skipped whole — a call NAMED
 in prose is not a call. A call split across a line break slips through.
@@ -64,7 +71,14 @@ DOC_COMMENT_RE = re.compile(r'^\s*##')
 RANDOMIZE_RE = re.compile(r'randomize\s*\(')
 # `(?<![.\w])` is the whole of CHECK 1: `rng.randf(` and `my_randf(` are not
 # the global generator, and neither is a match.
-BARE_DRAW_RE = re.compile(r'(?<![.\w])(?:randi_range|randf_range|randi|randf)\s*\(')
+DRAW_NAMES = ('randi_range', 'randf_range', 'randi', 'randf')
+BARE_DRAW_RE = re.compile(rf'(?<![.\w])(?:{"|".join(DRAW_NAMES)})\s*\(')
+# The names a script can shadow with its own `func`: every draw, and
+# `randomize` (whose QUALIFIED spellings stay CHECK 2's either way).
+SHADOWABLE = frozenset((*DRAW_NAMES, 'randomize'))
+# The `func <name>` head of a declaration line — blanked before matching, so a
+# one-line body after it (`func f(): return randf()`) is still judged.
+FUNC_HEAD_RE = re.compile(r'^\s*(?:static\s+)?func\s+[A-Za-z_]\w*')
 
 
 class Hit:
@@ -88,13 +102,23 @@ def scan_text(text: str, path: str) -> list[Hit]:
     """Every bare-RNG / `randomize()` call in one GDScript source."""
     hits: list[Hit] = []
     func = FILE_SCOPE
-    for lineno, raw in enumerate(text.split('\n'), start=1):
+    lines = text.split('\n')
+    # Only a column-0 `func` shadows the global for the whole script; an inner
+    # class's `func randi()` does not, and the outer `randi()` stays a draw.
+    own = sorted({m.group(1) for line in lines if not line[:1].isspace()
+                  for m in [FUNC_RE.match(line)] if m} & SHADOWABLE)
+    own_call = (re.compile(rf'(?<![.\w])(?:{"|".join(own)})\s*\(') if own else None)
+    for lineno, raw in enumerate(lines, start=1):
         declaration = FUNC_RE.match(raw)
         if declaration:
             func = declaration.group(1)
         if DOC_COMMENT_RE.match(raw):
             continue
         code = code_only(raw)
+        if declaration:
+            code = FUNC_HEAD_RE.sub('', code, count=1)
+        if own_call:
+            code = own_call.sub('', code)
         # One line is one hit however many spellings it holds: `rng.randomize()`
         # matches CHECK 2 and not CHECK 1, and reporting a line twice would
         # inflate the count a consumer reads as "how much is broken".
