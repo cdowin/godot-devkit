@@ -274,6 +274,21 @@ safe to delete only when `[gates] extra` names `godot-check` and `[checks] godot
 and so in `make milestone`. `uid-scan` is not a milestone tier, so without `godot-check` the run
 says `check uid` is not in the repo's gate and tells you to keep the file.
 
+**The diff slice.** `integration.sh --diff <ref>` (`make integration-diff`) boots the scenarios
+whose `## covers:` header names a touched path, plus smoke. A touched file under
+`GDK_SCENARIO_FIXTURE_DIR` (default `tests/support/`) selects every scenario that loads it,
+followed through other fixtures by a text scan of `preload`/`load`/`extends "res://…"` and
+`[ext_resource path=…]`, and each fixture prints how many scenarios it selected. A touched fixture
+that no scenario loads boots the whole tier with the line `fixture <path> is referenced by no
+scenario — booting the tier`. Only the runners and the scenario base/runner scripts are the tier's
+ground (`GDK_SCENARIO_SUBSTRATE_RE`; a value you set is kept). After the sweep, `--diff` reruns each
+failed scenario once, alone. One that passes alone counts green and prints `  FLAKE  <name> —
+failed in the sweep, passed alone`, and the summary reads `N passed (K flaky)`. `--no-rerun` or
+`GDK_INTEGRATION_RERUN=0` turns the rerun off; `--all` and named runs never rerun. Before a
+`--diff`/`--all` sweep boots anything, a stale import cache (`.godot/uid_cache.bin` missing, or
+older than a tracked `*.uid`, `*.import` or `project.godot`) is repaired once by `import_cache.sh`.
+If the repair fails, the sweep does not start (exit 1).
+
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
 and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
