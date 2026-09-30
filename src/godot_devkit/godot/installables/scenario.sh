@@ -8,7 +8,32 @@
 #
 # Usage:
 #   tools/dev/runners/scenario.sh [--verbose|-v] <scenario_name>
+#   tools/dev/runners/scenario.sh [--verbose|-v] --suite <name> [<name>…]
 #   tools/dev/runners/scenario.sh --help | --self-test
+#
+# THE WARM CONTRACT (`--suite`, #36). A cold boot costs 13-15 s of CPU before
+# the first assertion, so `--suite` boots the engine ONCE and runs several
+# scenarios in sequence. It passes `-- <GDK_SCENARIO_SUITE_ARG> a,b,c` (stock
+# `--scenarios`, comma-separated), and YOUR scenario runner, which owns the
+# reset, then:
+#   1. prints `[SCENARIO] <name> START` before each scenario — a line matching
+#      `<GDK_SCENARIO_START_RE> <name> START`;
+#   2. runs it against a fresh World, with the reset its scenario_base owns
+#      (autoload state, World, player);
+#   3. prints its usual verdict line (GDK_SCENARIO_RESULT_RE, then PASS|FAIL
+#      as a word);
+#   4. exits after the last one.
+# The stream is split at the START markers: a scenario's slice runs from its
+# START to the next one, with the boot preamble before the first START
+# prepended to every slice, so an engine error in a slice upgrades THAT
+# scenario's PASS to FAIL exactly as a cold run would. Each slice is published
+# to <report dir>/<name>.log, one console line per scenario as today. A worker
+# that crashes, or that goes GDK_SCENARIO_HARD_TIMEOUT seconds without a new
+# START or verdict (the bound is per scenario, not per suite), is stopped: the
+# scenario in progress and every one that never started get NO verdict and are
+# handed back unrun (exit 4) — run them cold. A slice that passed but carries
+# the cold-import-cache class is handed back too, so the cold path's recovery
+# ladder gets it. `--scenario <name>` (the single path) is unchanged.
 #
 # OUTPUT: the full transcript is ALWAYS published to
 # .scenario-reports/<name>.log — written to a private per-run file first, then
@@ -27,6 +52,8 @@
 #
 # Exit: 0 passed and the engine was quiet | 1 failed | 2 harness/usage error
 #       | 3 hard timeout (a hang)
+#       | 4 --suite only: scenario(s) handed back unrun — the ones that DID
+#         finish still carry their verdicts; the caller runs the rest cold
 set -uo pipefail
 
 # --- project config (yours to edit after install — the file is your repo's) --
@@ -44,15 +71,27 @@ GDK_SCENARIO_NOISE_ALLOWLIST="${GDK_SCENARIO_NOISE_ALLOWLIST:-tests/integration/
 GDK_SCENARIO_USER_ARG="${GDK_SCENARIO_USER_ARG:---scenario}"
 # How your runner spells its own verdict line, as an ERE.
 GDK_SCENARIO_RESULT_RE="${GDK_SCENARIO_RESULT_RE:-\[SCENARIO\]}"
+# --suite: the user argument carrying the comma-separated scenario list, and
+# how your runner spells its START marker — an ERE built the same way as the
+# verdict's; a marker line is `<this> <name> START`.
+GDK_SCENARIO_SUITE_ARG="${GDK_SCENARIO_SUITE_ARG:---scenarios}"
+GDK_SCENARIO_START_RE="${GDK_SCENARIO_START_RE:-\[SCENARIO\]}"
 # A transcript is evidence about the tree AS IT WAS WHEN IT RAN. Past this many
 # days it is archaeology that reads as current, and any run reaps it.
 GDK_REPORT_RETENTION_DAYS="${GDK_REPORT_RETENTION_DAYS:-7}"
-# Env: GDK_SCENARIO_HARD_TIMEOUT  seconds bounding one scenario (default 60)
+# Env: GDK_SCENARIO_HARD_TIMEOUT  seconds bounding one scenario (default 60);
+#                                 under --suite, the longest a worker may go
+#                                 without a new START or verdict
 #      GDK_GODOT                  the engine binary (default `godot`)
 #      GDK_SCENARIO_IN_SWEEP      set by integration.sh: this run has PEERS
 #                                 booting in the same tree, so the cache
 #                                 recovery below reports its last remedy
 #                                 instead of performing it on them.
+#      GDK_SCENARIO_SUITE_RESULTS set by integration.sh for --suite: a
+#                                 directory where each FINISHED scenario gets
+#                                 <name>.log (its console block) and a
+#                                 `<name>\t<code>` line in `results`, and each
+#                                 handed-back one a line in `unrun`.
 # -----------------------------------------------------------------------------
 
 GATE_TAG="SCENARIO"
@@ -80,15 +119,22 @@ IMPORT_DIR=".godot"
 usage() {
 	cat <<'USAGE_EOF'
 usage: scenario.sh [--verbose|-v] <scenario_name>
+       scenario.sh [--verbose|-v] --suite <name> [<name>...]
        scenario.sh --help | --self-test
 
 Boots the project headless in a sandboxed HOME and runs ONE scenario, reading
 the engine's own stream for errors your in-process runner cannot see.
 
   --verbose|-v  stream the whole transcript to the console
+  --suite       boot ONCE and run the named scenarios in sequence (the warm
+                worker): the runner gets `-- GDK_SCENARIO_SUITE_ARG a,b,c`,
+                prints `[SCENARIO] <name> START` before each and its verdict
+                after. A crash or a stall hands the unfinished ones back:
+                `  WARM-ABORT  after <last finished> — N scenario(s) handed
+                back`, exit 4
   --self-test   prove the argument handling, the report-freshness rules, the
-                allowlist builder and what the cache recovery fires on,
-                booting nothing
+                allowlist builder, what the cache recovery fires on, and the
+                warm split against a stub engine
   --help        this message
 
 Env: GDK_SCENARIO_SOURCE_DIR       where scenario scripts live
@@ -96,12 +142,19 @@ Env: GDK_SCENARIO_SOURCE_DIR       where scenario scripts live
      GDK_SCENARIO_NOISE_ALLOWLIST  EREs for engine lines you expect
      GDK_SCENARIO_USER_ARG         the user arg carrying the scenario name
      GDK_SCENARIO_RESULT_RE        how your runner spells its verdict line
-     GDK_SCENARIO_HARD_TIMEOUT     seconds bounding the run (default 60)
+     GDK_SCENARIO_HARD_TIMEOUT     seconds bounding the run (default 60); with
+                                   --suite, per scenario: no START or verdict
+                                   for this long kills the worker
+     GDK_SCENARIO_SUITE_ARG        the user arg carrying the --suite list
+                                   (default --scenarios)
+     GDK_SCENARIO_START_RE         how your runner spells its START marker
+     GDK_SCENARIO_SUITE_RESULTS    --suite: a directory for per-scenario results
      GDK_SCENARIO_IN_SWEEP         this run has peers in the same tree
      GDK_REPORT_RETENTION_DAYS     transcript retention (default 7)
      GDK_RUNNERS_LIB               path to gdk_runners.sh, relative to this file
      GDK_GODOT                     the engine binary (default `godot`)
 Exit: 0 pass | 1 fail | 2 harness/usage error | 3 hard timeout
+      | 4 --suite: scenario(s) handed back unrun
 USAGE_EOF
 }
 
@@ -232,6 +285,390 @@ cold_cache_only() {
 allowlist_regex() {
 	[ -f "$1" ] || return 0
 	grep -vE '^[[:space:]]*($|#)' "$1" | tr '\n' '|' | sed 's/|$//'
+}
+
+# --- the live stream: parse errors, and (--suite) progress --------------------
+# Pure definitions; ALLOW_REGEX is read when they are CALLED, after the
+# argument surface has set it.
+
+# parse_error_line <report> — the first parse-error line the noise allowlist
+# does not admit, or return 1. The allowlist applies because a scenario that
+# loads a deliberately broken script has already said so there.
+parse_error_line() {
+	local line
+	if [ -n "$ALLOW_REGEX" ]; then
+		line="$(grep -E "$PARSE_ERROR_PATTERN" "$1" | grep -vE "$ALLOW_REGEX" | head -1)"
+	else
+		line="$(grep -E "$PARSE_ERROR_PATTERN" "$1" | head -1)"
+	fi
+	[ -n "$line" ] || return 1
+	printf '%s\n' "$line"
+}
+
+# tap_parse_errors <hits> — pass the live stream through untouched, appending
+# every parse-error line to <hits> AS IT ARRIVES. The watch cannot read the
+# report instead: `head -c` block-buffers into it, so a short transcript
+# reaches the disk only when the engine exits — which is the thing that never
+# happens.
+tap_parse_errors() {
+	PARSE_RE="$PARSE_ERROR_PATTERN" awk -v hits="$1" \
+		'{ print } $0 ~ ENVIRON["PARSE_RE"] { print >> hits; close(hits) }'
+}
+
+# watch_for_parse_error <pidfile> <hits> <marker> — poll the tapped lines; on
+# the first parse error the allowlist does not admit, write it to <marker> and
+# stop the engine through the bound's own kill path. Ends with this run's
+# shell, whichever way it ends.
+watch_for_parse_error() {
+	local pidfile="$1" hits="$2" marker="$3" line pid
+	while kill -0 "$$" 2>/dev/null; do
+		if line="$(parse_error_line "$hits")"; then
+			printf '%s\n' "$line" > "$marker"
+			pid="$(cat "$pidfile" 2>/dev/null)"
+			# The bound's own process: `timeout` forwards the TERM to the
+			# engine's whole group and escalates to KILL after its grace, so an
+			# engine a wrapper script started (not exec'd) is stopped too.
+			[ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null
+			return 0
+		fi
+		sleep 0.2
+	done
+}
+
+# --- --suite: one boot, several scenarios ------------------------------------
+# The awk half of both functions below: `start_name(line)` is the scenario a
+# START marker names (empty when the line is not one, or names a scenario this
+# suite did not ask for — a marker cannot aim a slice outside the list), and
+# `verdict_of(line)` the first PASS|FAIL WORD after the verdict ERE's match
+# (empty when the line is not a verdict). Reads START_RE, RESULT_RE and
+# SUITE_NAMES (comma-separated) from the environment.
+# shellcheck disable=SC2016  # an awk program, not a shell expansion
+SUITE_AWK_LIB='
+	function suite_init(   n, i, f) {
+		n = split(ENVIRON["SUITE_NAMES"], f, ",")
+		for (i = 1; i <= n; i++) asked[f[i]] = 1
+		start_re = ENVIRON["START_RE"] "[[:space:]]+[^[:space:]]+[[:space:]]+START[[:space:]]*$"
+	}
+	function start_name(line,   s, n, f) {
+		if (line !~ start_re) return ""
+		s = line; sub(/[[:space:]]+START[[:space:]]*$/, "", s)
+		n = split(s, f, /[[:space:]]+/)
+		return (f[n] in asked) ? f[n] : ""
+	}
+	function verdict_of(line,   rest, n, f, i) {
+		if (!match(line, ENVIRON["RESULT_RE"])) return ""
+		rest = substr(line, RSTART + RLENGTH)
+		n = split(rest, f, /[[:space:]]+/)
+		for (i = 1; i <= n; i++) if (f[i] == "PASS" || f[i] == "FAIL") return f[i]
+		return ""
+	}
+'
+
+# suite_env — run "$@" with the three variables SUITE_AWK_LIB reads.
+suite_env() {
+	local IFS=,
+	START_RE="$GDK_SCENARIO_START_RE" RESULT_RE="$GDK_SCENARIO_RESULT_RE" \
+		SUITE_NAMES="${SUITE_NAMES[*]}" "$@"
+}
+
+# tap_suite_progress <progress> — pass the live stream through untouched,
+# appending one line to <progress> per START marker or verdict AS IT ARRIVES:
+# the per-scenario bound's clock is "the last time this file grew".
+# shellcheck disable=SC2016  # an awk program, not a shell expansion
+tap_suite_progress() {
+	suite_env awk -v progress="$1" "$SUITE_AWK_LIB"'
+		BEGIN { suite_init() }
+		{ print }
+		start_name($0) != "" || verdict_of($0) != "" {
+			print "." >> progress; close(progress)
+		}'
+}
+
+# watch_for_stall <pidfile> <progress> <marker> — the per-scenario bound. When
+# <progress> has not grown for more than GDK_SCENARIO_HARD_TIMEOUT seconds, say
+# so in <marker> and stop the engine through the bound's own kill path, as the
+# parse-error watch does. Ends with this run's shell.
+watch_for_stall() {
+	local pidfile="$1" progress="$2" marker="$3" seen=0 now last="$SECONDS" pid
+	while kill -0 "$$" 2>/dev/null; do
+		now="$(wc -l < "$progress" 2>/dev/null | tr -d ' ')"
+		if [ "${now:-0}" != "$seen" ]; then
+			seen="${now:-0}"; last="$SECONDS"
+		elif [ $((SECONDS - last)) -gt "$HARD_TIMEOUT_SECONDS" ]; then
+			printf '%s\n' "$((SECONDS - last))" > "$marker"
+			pid="$(cat "$pidfile" 2>/dev/null)"
+			[ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null
+			return 0
+		fi
+		sleep 0.2
+	done
+}
+
+# split_suite_transcript <transcript> <dir> — write <dir>/<name>.slice for
+# every scenario that STARTed, and print one row per such scenario, in START
+# order: `<name>\t<PASS|FAIL|->\t<verdict line>`. A slice runs from its START
+# to the next START; the boot preamble before the first START opens every
+# slice, as it opens every cold transcript. A verdict re-emitted later wins,
+# as the cold path's `tail -1` does. Pure over a file, for the corpus.
+# shellcheck disable=SC2016  # an awk program, not a shell expansion
+split_suite_transcript() {
+	suite_env awk -v out="$2" "$SUITE_AWK_LIB"'
+		BEGIN { suite_init() }
+		{
+			name = start_name($0)
+			if (name != "") {
+				if (file != "") close(file)
+				cur = name; file = out "/" cur ".slice"
+				if (!(cur in started)) { order[++k] = cur; started[cur] = 1; printf "%s", pre >> file }
+				print >> file
+				next
+			}
+			if (cur == "") { pre = pre $0 "\n"; next }
+			print >> file
+			v = verdict_of($0)
+			if (v != "") { verdict[cur] = v; vline[cur] = $0 }
+		}
+		END {
+			for (i = 1; i <= k; i++) {
+				n = order[i]
+				printf "%s\t%s\t%s\n", n, ((n in verdict) ? verdict[n] : "-"), vline[n]
+			}
+		}' "$1"
+}
+
+# suite_name_defect <name> — why <name> cannot be a --suite member (it becomes
+# a file name, a user argument, and one field of a comma-separated list), or
+# return 1.
+suite_name_defect() {
+	case "${1-}" in
+		''|*/*|.|..|-*) echo "is not a scenario name"; return 0 ;;
+		*,*|*[[:space:]]*) echo "carries a comma or whitespace — the suite list is comma-separated"; return 0 ;;
+	esac
+	return 1
+}
+
+# engine_error_lines <file> — the engine-level lines the allowlist does not
+# admit, the same filter the cold path applies to its whole transcript.
+engine_error_lines() {
+	if [ -n "$ALLOW_REGEX" ]; then
+		grep -E "$ENGINE_ERROR_PATTERN" "$1" | grep -vE "$ALLOW_REGEX" || true
+	else
+		grep -E "$ENGINE_ERROR_PATTERN" "$1" || true
+	fi
+}
+
+# publish_report <name> <source> — the private-file-then-move rule, for one
+# slice: a publish can be stale, never spliced.
+publish_report() {
+	local tmp
+	tmp="$(mktemp "$GDK_SCENARIO_REPORT_DIR/$(report_temp_template "$1")")" || return 2
+	if ! { cat "$2" > "$tmp" && mv -f "$tmp" "$GDK_SCENARIO_REPORT_DIR/$1.log"; }; then
+		rm -f "$tmp"
+	fi
+}
+
+# run_suite — the warm worker, after the shared setup. Boots once under a
+# backstop bound of HARD_TIMEOUT x (N + 2); the per-scenario bound is the stall
+# watch. Returns the documented exit code.
+run_suite() {
+	local n="${#SUITE_NAMES[@]}" list transcript pidfile hits marker progress stalled
+	local watch_pid stall_pid code rcode slices table name row verdict vline block
+	local killed=0 in_progress='' last_started='' last_finished='(none)' failed=0
+	local results="${GDK_SCENARIO_SUITE_RESULTS:-}" unexpected parse_error stall
+	local -a aborted=() cached=()
+	list="$(IFS=,; printf '%s' "${SUITE_NAMES[*]}")"
+	transcript="$(gdk_sandbox_tmpfile suite.XXXXXX)" || return 2
+	pidfile="$(gdk_sandbox_tmpfile engine-pid.XXXXXX)" || return 2
+	hits="$(gdk_sandbox_tmpfile parse-hits.XXXXXX)" || return 2
+	marker="$(gdk_sandbox_tmpfile parse-error.XXXXXX)" || return 2
+	progress="$(gdk_sandbox_tmpfile progress.XXXXXX)" || return 2
+	stalled="$(gdk_sandbox_tmpfile stalled.XXXXXX)" || return 2
+	slices="$(mktemp -d "${TMPDIR:-/tmp}/gdk-suite.XXXXXX")" || return 2
+	gdk_on_exit "rm -rf '$slices'"
+	[ -z "$results" ] || mkdir -p "$results" || return 2
+	# Rule 1 of the freshness rules, per member: each clears its own slot.
+	for name in "${SUITE_NAMES[@]}"; do rm -f "$GDK_SCENARIO_REPORT_DIR/$name.log"; done
+
+	watch_for_parse_error "$pidfile" "$hits" "$marker" &
+	watch_pid=$!
+	watch_for_stall "$pidfile" "$progress" "$stalled" &
+	stall_pid=$!
+	# shellcheck disable=SC2016  # $$ and $0 are the shim's own, not ours
+	if [ "$VERBOSE_STREAM" -eq 1 ]; then
+		gdk_run_bounded $((HARD_TIMEOUT_SECONDS * (n + 2))) -- \
+			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
+			"$GDK_GODOT" --path . --headless -- \
+			"$GDK_SCENARIO_SUITE_ARG" "$list" 2>&1 \
+			| tap_parse_errors "$hits" | tap_suite_progress "$progress" \
+			| head -c "$GDK_LOG_CAP_BYTES" | tee "$transcript"
+	else
+		gdk_run_bounded $((HARD_TIMEOUT_SECONDS * (n + 2))) -- \
+			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
+			"$GDK_GODOT" --path . --headless -- \
+			"$GDK_SCENARIO_SUITE_ARG" "$list" 2>&1 \
+			| tap_parse_errors "$hits" | tap_suite_progress "$progress" \
+			| head -c "$GDK_LOG_CAP_BYTES" > "$transcript"
+	fi
+	code="${PIPESTATUS[0]}"
+	kill "$watch_pid" "$stall_pid" 2>/dev/null
+	wait "$watch_pid" "$stall_pid" 2>/dev/null
+	parse_error="$(cat "$marker")"; stall="$(cat "$stalled")"
+	if [ -n "$parse_error" ] || [ -n "$stall" ] || gdk_timeout_is_hang "$code"; then
+		killed=1
+	fi
+
+	table="$(split_suite_transcript "$transcript" "$slices")"
+	last_started="$(printf '%s\n' "$table" | awk -F'\t' 'NF { n = $1 } END { print n }')"
+
+	for name in "${SUITE_NAMES[@]}"; do
+		row="$(printf '%s\n' "$table" | awk -F'\t' -v n="$name" '$1 == n { print; exit }')"
+		[ -z "$row" ] || publish_report "$name" "$slices/$name.slice"
+		verdict="$(printf '%s' "$row" | cut -f2)"
+		vline="$(printf '%s' "$row" | cut -f3-)"
+		# No verdict, or the one in progress when the worker was stopped: a
+		# stop after its verdict is a runner that never exited (contract step
+		# 4), and a cold run is what says so.
+		if [ -z "$row" ] || [ "$verdict" = "-" ] \
+			|| { [ "$killed" -eq 1 ] && [ "$name" = "$last_started" ]; }; then
+			[ -n "$in_progress" ] || [ -z "$row" ] || in_progress="$name"
+			aborted+=("$name")
+			continue
+		fi
+		# A passing slice carrying the cold-cache class is the cold path's
+		# case: its recovery ladder is the one that can repair the tree.
+		if [ "$verdict" = PASS ] && grep -qE "$COLD_CACHE_PATTERN" "$slices/$name.slice"; then
+			echo "[$GATE_TAG] $name — cold import cache on a passing run; handed back to the cold path"
+			cached+=("$name")
+			continue
+		fi
+		last_finished="$name"
+		unexpected="$(engine_error_lines "$slices/$name.slice")"
+		if [ -n "$unexpected" ]; then
+			block="$(printf '%s\n' "[$GATE_TAG] $name FAIL — engine-level errors your runner could not see" \
+				"  engine errors:"
+				printf '%s\n' "$unexpected" | sed 's/^/    /'
+				echo "  full report: $GDK_SCENARIO_REPORT_DIR/$name.log")"
+			verdict=FAIL
+		elif [ "$VERBOSE_STREAM" -eq 1 ]; then
+			block=''
+		elif [ "$verdict" = FAIL ]; then
+			block="$(printf '%s\n' "$vline"
+				grep -E "$FAILED_ASSERTION_PATTERN" "$slices/$name.slice" | sed 's/^/  /' || true
+				echo "  full report: $GDK_SCENARIO_REPORT_DIR/$name.log")"
+		else
+			block="$vline"
+		fi
+		[ -z "$block" ] || printf '%s\n' "$block"
+		if [ "$verdict" = FAIL ]; then failed=$((failed + 1)); fi
+		if [ -n "$results" ]; then
+			printf '%s\n' "$block" > "$results/$name.log"
+			if [ "$verdict" = FAIL ]; then rcode=1; else rcode=0; fi
+			printf '%s\t%s\n' "$name" "$rcode" >> "$results/results"
+		fi
+	done
+
+	if [ "${#aborted[@]}" -gt 0 ]; then
+		if [ -n "$parse_error" ]; then
+			echo "[$GATE_TAG] ${in_progress:-(boot)} — GDScript parse error: $parse_error; the worker was stopped"
+		elif [ -n "$stall" ]; then
+			echo "[$GATE_TAG] ${in_progress:-(boot)} HARD_TIMEOUT — no START or verdict for ${HARD_TIMEOUT_SECONDS}s, worker killed (likely hang)"
+		elif gdk_timeout_is_hang "$code"; then
+			echo "[$GATE_TAG] suite HARD_TIMEOUT — exceeded $((HARD_TIMEOUT_SECONDS * (n + 2)))s, worker killed"
+		else
+			echo "[$GATE_TAG] ${in_progress:-(boot)} — the engine exited before its verdict"
+			[ -n "$in_progress" ] || tail -3 "$transcript" | sed 's/^/    /'
+		fi
+		echo "  WARM-ABORT  after $last_finished — ${#aborted[@]} scenario(s) handed back"
+		echo "    handed back: ${aborted[*]}"
+	fi
+	if [ -n "$results" ]; then
+		for name in ${aborted[@]+"${aborted[@]}"} ${cached[@]+"${cached[@]}"}; do
+			printf '%s\n' "$name" >> "$results/unrun"
+		done
+	fi
+	[ $(( ${#aborted[@]} + ${#cached[@]} )) -eq 0 ] || return 4
+	[ "$failed" -eq 0 ] || return 1
+	return 0
+}
+
+# suite_cases <scratch> <library> — self_test's warm-worker cases: THIS file
+# installed at the stock depth of a scratch project, a stub `godot` on PATH that
+# runs the --scenarios list the way the contract says (GDK_STUB_MODE makes B
+# shout an engine ERROR, crash, or stall), and the results directory
+# integration.sh reads. Uses self_test's `cases` and `failures`. Each case is
+# one chain of claims ending in `|| miss`.
+# shellcheck disable=SC2015
+suite_cases() {
+	local scratch="$1" lib="$2" proj bin res out rc t0 n
+	proj="$scratch/suite"; bin="$scratch/bin"; res="$scratch/results"
+	mkdir -p "$proj/tools/dev/runners" "$proj/tests/integration" "$bin"
+	cp "$0" "$proj/tools/dev/runners/scenario.sh"
+	cp "$lib" "$proj/tools/dev/gdk_runners.sh"
+	: > "$proj/project.godot"
+	for n in a b c; do : > "$proj/tests/integration/$n.gd"; done
+	cat > "$bin/godot" <<'STUB_EOF'
+#!/usr/bin/env bash
+list=''
+while [ "$#" -gt 0 ]; do [ "$1" = --scenarios ] && list="${2-}"; shift; done
+echo "Godot Engine v4.stub"
+IFS=, read -r -a names <<<"$list"
+for n in "${names[@]}"; do
+	echo "[SCENARIO] $n START"
+	case "${GDK_STUB_MODE:-}:$n" in
+		error:b) echo "ERROR: b broke the engine" ;;
+		crash:b) exit 139 ;;
+		stall:b) sleep 30 ;;
+	esac
+	echo "[SCENARIO] $n PASS steps=1 errors=0"
+done
+STUB_EOF
+	chmod +x "$bin/godot"
+	# suite <mode> [hard timeout] — one warm run of a,b,c, fresh results, the
+	# caller's GDK_* out of the way.
+	suite() {
+		rm -rf "$res" "$proj/.scenario-reports"
+		( unset GDK_SCENARIO_REPORT_DIR GDK_SCENARIO_SOURCE_DIR GDK_SCENARIO_NOISE_ALLOWLIST \
+			GDK_SCENARIO_START_RE GDK_SCENARIO_RESULT_RE GDK_SCENARIO_SUITE_ARG GDK_RUNNERS_LIB \
+			GDK_HEADLESS_HOME GDK_SCENARIO_IN_SWEEP VERBOSE
+		  PATH="$bin:$PATH" GDK_GODOT=godot GDK_SCENARIO_SUITE_RESULTS="$res" \
+			GDK_SCENARIO_HARD_TIMEOUT="${2:-20}" GDK_STUB_MODE="$1" \
+			bash "$proj/tools/dev/runners/scenario.sh" --suite a b c 2>&1 )
+	}
+	miss() { echo "  MISS — $1" >&2; failures=$((failures + 1)); }
+
+	cases=$((cases + 1))
+	out="$(suite ok)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(grep -cE '^\[SCENARIO\] [abc] PASS steps=1' <<<"$out")" = 3 ] \
+		&& [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 b:0 c:0 " ] \
+		|| miss "three scenarios in one boot are three verdicts (rc $rc): $out"
+	cases=$((cases + 1))
+	[ "$(ls "$proj/.scenario-reports")" = "$(printf 'a.log\nb.log\nc.log')" ] \
+		&& grep -qx '\[SCENARIO\] b START' "$proj/.scenario-reports/b.log" \
+		&& ! grep -q 'a START' "$proj/.scenario-reports/b.log" \
+		&& grep -qx 'Godot Engine v4.stub' "$proj/.scenario-reports/c.log" \
+		|| miss "each scenario is published to its own report: its slice, opened by the boot preamble"
+
+	cases=$((cases + 1))
+	out="$(suite error)"; rc=$?
+	[ "$rc" -eq 1 ] && [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 b:1 c:0 " ] \
+		&& grep -qF '[SCENARIO] b FAIL — engine-level errors your runner could not see' <<<"$out" \
+		&& grep -qx '\[SCENARIO\] c PASS steps=1 errors=0' <<<"$out" \
+		|| miss "an engine ERROR between B's START and its verdict fails B only (rc $rc): $out"
+
+	cases=$((cases + 1))
+	out="$(suite crash)"; rc=$?
+	[ "$rc" -eq 4 ] && grep -qxF '  WARM-ABORT  after a — 2 scenario(s) handed back' <<<"$out" \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b c " ] \
+		&& [ "$(tr '\t\n' ': ' < "$res/results")" = "a:0 " ] \
+		|| miss "a worker that crashes during B hands back B and C, exit 4 (rc $rc): $out"
+
+	cases=$((cases + 1))
+	t0="$SECONDS"
+	out="$(suite stall 1)"; rc=$?
+	[ "$rc" -eq 4 ] && [ $((SECONDS - t0)) -lt 15 ] \
+		&& grep -qF '[SCENARIO] b HARD_TIMEOUT — no START or verdict for 1s' <<<"$out" \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b c " ] \
+		|| miss "a worker that stalls in B is killed at the per-scenario bound, B and C handed back (rc $rc, $((SECONDS - t0))s): $out"
 }
 
 # --- --self-test -------------------------------------------------------------
@@ -376,6 +813,19 @@ self_test() {
 	[ "$rc" -ne 0 ] \
 		|| { echo "  MISS — a HUNG run's truncated transcript must not trigger a rebuild" >&2; failures=$((failures + 1)); }
 
+	# --- --suite: the argument surface --------------------------------------
+	local -a bad_suite
+	for bad in '' 'a a' 'a,b'; do
+		cases=$((cases + 1))
+		# Split on purpose: 'a a' is the same name twice.
+		read -r -a bad_suite <<<"$bad"
+		rc=0; bash "$0" --suite ${bad_suite[@]+"${bad_suite[@]}"} >/dev/null 2>&1 || rc=$?
+		[ "$rc" -eq 2 ] || { echo "  MISS — --suite '$bad' should exit 2, got $rc" >&2; failures=$((failures + 1)); }
+	done
+
+	# --- --suite end to end, over a stub engine that honours the contract ----
+	suite_cases "$scratch" "$lib"
+
 	rm -rf "$scratch"
 
 	if [ "$failures" -eq 0 ]; then
@@ -397,20 +847,39 @@ case "${1:-}" in
 		self_test_rc=0; self_test || self_test_rc=$?; exit "$self_test_rc" ;;
 	-v|--verbose) VERBOSE_STREAM=1; shift ;;
 esac
-if [ "$#" -ne 1 ]; then
-	echo "[$GATE_TAG] exactly one scenario name — got $#. See --help." >&2
-	usage >&2
-	exit 2
+SUITE=0
+SUITE_NAMES=()
+if [ "${1:-}" = "--suite" ]; then
+	SUITE=1; shift
+	[ "$#" -ge 1 ] || { echo "[$GATE_TAG] --suite takes one or more scenario names. See --help." >&2; exit 2; }
+	for name in "$@"; do
+		if defect="$(suite_name_defect "$name")"; then
+			echo "[$GATE_TAG] '$name' $defect. See --help." >&2; exit 2
+		fi
+		case $'\n'"$(printf '%s\n' ${SUITE_NAMES[@]+"${SUITE_NAMES[@]}"})"$'\n' in
+			*$'\n'"$name"$'\n'*) echo "[$GATE_TAG] '$name' is named twice in the suite. See --help." >&2; exit 2 ;;
+		esac
+		SUITE_NAMES+=("$name")
+	done
+	case "$HARD_TIMEOUT_SECONDS" in
+		''|*[!0-9]*|0) echo "[$GATE_TAG] GDK_SCENARIO_HARD_TIMEOUT='$HARD_TIMEOUT_SECONDS' — expected whole seconds above 0" >&2; exit 2 ;;
+	esac
+else
+	if [ "$#" -ne 1 ]; then
+		echo "[$GATE_TAG] exactly one scenario name — got $#. See --help." >&2
+		usage >&2
+		exit 2
+	fi
+	SCENARIO_NAME="$1"
+	# The name becomes a FILE NAME and a user argument. An empty one is an unset
+	# variable at the call site; anything carrying a separator or a leading dash
+	# would aim the report write outside the report directory.
+	case "$SCENARIO_NAME" in
+		''|*/*|.|..|-*)
+			echo "[$GATE_TAG] '$SCENARIO_NAME' is not a scenario name. See --help." >&2
+			exit 2 ;;
+	esac
 fi
-SCENARIO_NAME="$1"
-# The name becomes a FILE NAME and a user argument. An empty one is an unset
-# variable at the call site; anything carrying a separator or a leading dash
-# would aim the report write outside the report directory.
-case "$SCENARIO_NAME" in
-	''|*/*|.|..|-*)
-		echo "[$GATE_TAG] '$SCENARIO_NAME' is not a scenario name. See --help." >&2
-		exit 2 ;;
-esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/$REPO_ROOT_FROM_HERE" && pwd)" || exit 2
 if ! LIB="$(resolve_library)"; then
@@ -441,6 +910,20 @@ else
 	exit 2
 fi
 
+# The warm worker shares everything above and nothing below: no single report
+# slot, and no cache-recovery ladder — a slice that needs the ladder is handed
+# back to the cold path, which has it.
+if [ "$SUITE" -eq 1 ]; then
+	mkdir -p "$GDK_SCENARIO_REPORT_DIR"
+	reap_stale_scenario_reports "$GDK_SCENARIO_REPORT_DIR"
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	gdk_sandbox_home
+	ALLOW_REGEX="$(allowlist_regex "$GDK_SCENARIO_NOISE_ALLOWLIST")"
+	suite_rc=0; run_suite || suite_rc=$?
+	exit "$suite_rc"
+fi
+
 REPORT_FILE="$GDK_SCENARIO_REPORT_DIR/$SCENARIO_NAME.log"
 mkdir -p "$GDK_SCENARIO_REPORT_DIR"
 reap_stale_scenario_reports "$GDK_SCENARIO_REPORT_DIR"
@@ -465,50 +948,6 @@ trap 'exit 143' TERM
 gdk_sandbox_home
 
 ALLOW_REGEX="$(allowlist_regex "$GDK_SCENARIO_NOISE_ALLOWLIST")"
-
-# parse_error_line <report> — the first parse-error line the noise allowlist
-# does not admit, or return 1. The allowlist applies because a scenario that
-# loads a deliberately broken script has already said so there.
-parse_error_line() {
-	local line
-	if [ -n "$ALLOW_REGEX" ]; then
-		line="$(grep -E "$PARSE_ERROR_PATTERN" "$1" | grep -vE "$ALLOW_REGEX" | head -1)"
-	else
-		line="$(grep -E "$PARSE_ERROR_PATTERN" "$1" | head -1)"
-	fi
-	[ -n "$line" ] || return 1
-	printf '%s\n' "$line"
-}
-
-# tap_parse_errors <hits> — pass the live stream through untouched, appending
-# every parse-error line to <hits> AS IT ARRIVES. The watch cannot read the
-# report instead: `head -c` block-buffers into it, so a short transcript
-# reaches the disk only when the engine exits — which is the thing that never
-# happens.
-tap_parse_errors() {
-	PARSE_RE="$PARSE_ERROR_PATTERN" awk -v hits="$1" \
-		'{ print } $0 ~ ENVIRON["PARSE_RE"] { print >> hits; close(hits) }'
-}
-
-# watch_for_parse_error <pidfile> <hits> <marker> — poll the tapped lines; on
-# the first parse error the allowlist does not admit, write it to <marker> and
-# stop the engine through the bound's own kill path. Ends with this run's
-# shell, whichever way it ends.
-watch_for_parse_error() {
-	local pidfile="$1" hits="$2" marker="$3" line pid
-	while kill -0 "$$" 2>/dev/null; do
-		if line="$(parse_error_line "$hits")"; then
-			printf '%s\n' "$line" > "$marker"
-			pid="$(cat "$pidfile" 2>/dev/null)"
-			# The bound's own process: `timeout` forwards the TERM to the
-			# engine's whole group and escalates to KILL after its grace, so an
-			# engine a wrapper script started (not exec'd) is stopped too.
-			[ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null
-			return 0
-		fi
-		sleep 0.2
-	done
-}
 
 # Boot the scenario once, capturing the transcript. A function so the
 # cold-cache recovery below can re-run it without duplicating the plumbing.

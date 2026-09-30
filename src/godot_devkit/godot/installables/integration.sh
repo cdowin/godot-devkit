@@ -6,6 +6,16 @@
 # — so no scenario can observe another's global state. That is the tier's whole
 # contract; the parallelism is what makes paying for it affordable.
 #
+# WARM MODE (#36, opt-in: GDK_INTEGRATION_WARM=1). A cold boot costs 13-15 s of
+# CPU before the first assertion, so warm mode splits the --all/--diff/--system
+# roster into GDK_JOBS slices, balanced by count, and runs each through ONE
+# `scenario.sh --suite` — one boot per worker, a fresh World per scenario,
+# under the contract scenario.sh's header states and YOUR runner implements.
+# A scenario whose header carries `## Isolated because: <reason>` never goes
+# warm; every scenario a worker hands back (a crash, a stall) runs cold after
+# it. With --diff, a warm failure is rerun COLD, alone: passing, it prints
+# WARM-ONLY and counts green. Unset, every path is the cold one, byte for byte.
+#
 # A SCENARIO DECLARES WHAT IT COVERS. Its header — the leading run of comment
 # lines — carries `## covers: <path>[, <path>…]`, repo-relative prefixes of the
 # code it exercises, and `--diff <ref>` maps a change to the slice that
@@ -30,6 +40,8 @@
 #   tools/dev/runners/integration.sh --diff HEAD --no-rerun   # a sweep failure is red at once
 #   tools/dev/runners/integration.sh boot_a boot_b      # an explicit list
 #   GDK_JOBS=4 tools/dev/runners/integration.sh --all   # cap the parallelism
+#   GDK_INTEGRATION_WARM=1 tools/dev/runners/integration.sh --all   # one boot per worker
+#   GDK_INTEGRATION_WARM=1 tools/dev/runners/integration.sh --all --cold   # not this run
 #   tools/dev/runners/integration.sh --help | --self-test
 #
 # Exit: 0 = all passed | 1 = any failed, or a slice that selected nothing
@@ -80,6 +92,11 @@ GDK_SCENARIO_FIXTURE_DIR="${GDK_SCENARIO_FIXTURE_DIR:-tests/support/}"
 # passes alone counts green and prints a FLAKE line. 0 turns it off (as does
 # --no-rerun). --all and named runs never rerun.
 GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN:-1}"
+# 1 runs --all/--diff/--system WARM: one scenario.sh --suite per job, each
+# booting once. Turn it on only once your scenario runner implements the
+# contract in scenario.sh's header. 0 (the default) is the cold path; --cold
+# forces it for one run.
+GDK_INTEGRATION_WARM="${GDK_INTEGRATION_WARM:-0}"
 # Env: GDK_JOBS  parallelism (default: cores - 2, floor 1)
 # -----------------------------------------------------------------------------
 
@@ -95,6 +112,8 @@ FAILURE_SUMMARY_LINES=3
 # The header line a scenario declares its coverage on. Matched at the start of
 # a `##` comment line inside the header block only.
 COVERS_KEY='covers:'
+# The header line that keeps a scenario out of warm mode, with its reason.
+ISOLATED_KEY='Isolated because:'
 # A `--system` argument is ONE directory name under the source dir — never a
 # path, never a pattern. Bounded so an over-long argument is refused, not
 # interpolated.
@@ -104,7 +123,7 @@ COVERS_ENTRY_MAX=200
 
 usage() {
 	cat <<'USAGE_EOF'
-usage: integration.sh --all | --smoke | --system <dir> | --diff <ref> [--no-rerun] | <name>...
+usage: integration.sh --all | --smoke | --system <dir> | --diff <ref> [--no-rerun] [--cold] | <name>...
        integration.sh --help | --self-test
 
 Runs integration scenarios, each in its own process, N in parallel. Each one
@@ -133,6 +152,7 @@ convention.
                    alone: passing alone, it counts green and prints
                    `  FLAKE  <name> — failed in the sweep, passed alone`
   --no-rerun       with --diff: report a sweep failure red at once
+  --cold           with GDK_INTEGRATION_WARM=1: run this one cold
   <name>...        an explicit list, discovery bypassed
   --self-test      prove the argument handling, the discovery filter, the
                    header reader, the slicing, the rerun and the cache
@@ -143,6 +163,18 @@ convention.
 A scenario header (the leading comment block) declares, one `##` line each:
   ## Boots because: tests/unit/<path> cannot <what only a boot can assert>
   ## covers: systems/<x>, resources/<y>.gd     repo-relative path prefixes
+  ## Isolated because: <reason>                never run warm (the reason is
+                                               required: an empty one exits 2)
+
+Warm mode (GDK_INTEGRATION_WARM=1, --all/--diff/--system only): the roster is
+split into GDK_JOBS slices, each run by ONE `scenario.sh --suite` (one boot
+per worker); `## Isolated because:` scenarios and every scenario a worker
+hands back (`  WARM-ABORT  after <name> — N scenario(s) handed back`) run
+cold after. With --diff, a warm failure reruns cold, alone; passing, it prints
+`  WARM-ONLY  <name> — failed warm, passed cold: …` and counts green. The
+SUMMARY adds `(K flaky, W warm-only)` and `; warm A, cold B, handed back C`,
+which must sum to the roster or the run FAILS naming what is missing; a
+`[INTEGRATION] WALL:` line splits the wall clock between the two phases.
 
 Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_SCENARIO_RUNNER        scenario.sh, relative to this file
@@ -154,6 +186,7 @@ Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_SCENARIO_FIXTURE_DIR   the fixture root --diff slices by reference
                                 (default tests/support/)
      GDK_INTEGRATION_RERUN      0 turns off --diff's rerun-alone (default 1)
+     GDK_INTEGRATION_WARM       1 runs --all/--diff/--system warm (default 0)
      GDK_JOBS                   parallelism (default: cores - 2, floor 1)
 Sets: GDK_SCENARIO_IN_SWEEP=1 on every job — the runner's import-cache
      recovery must not remove a .godot its peers are booting in. So before a
@@ -165,6 +198,7 @@ Cost: every scenario FILE is one cold engine boot, whatever its length, so a
      run ends with `[INTEGRATION] BOOTS: <n> scenario(s) booted, <cpu>` above
      its SUMMARY — the census Makefile.tiers files on the gate's cost row.
      Merging two scenarios saves a boot; trimming lines saves nothing.
+     Warm mode counts one boot per worker, however many scenarios it ran.
 Exit: 0 all passed | 1 any failed, or a slice selecting nothing | 2 usage/harness error
 USAGE_EOF
 }
@@ -294,6 +328,28 @@ scenario_covers() {
 		covers_entry_defect "$entry" >/dev/null && continue
 		printf '%s\n' "$entry"
 	done
+}
+
+# scenario_isolation <file> — the reason the header gives on its first
+# `## Isolated because:` line, printed (EMPTY when the line gives none) and 0;
+# silent and 1 when the header declares no isolation. The header is the same
+# leading block scenario_covers reads.
+scenario_isolation() {
+	local found
+	found="$(awk -v key="$ISOLATED_KEY" '
+		/^[[:space:]]*$/ || /^#/ || /^extends[[:space:]]/ || /^class_name[[:space:]]/ || /^@/ {
+			if ($0 ~ ("^##[[:space:]]*" key)) {
+				sub("^##[[:space:]]*" key "[[:space:]]*", "")
+				sub(/[[:space:]]+$/, "")
+				print "D" $0
+				exit
+			}
+			next
+		}
+		{ exit }
+	' "$1")"
+	[ -n "$found" ] || return 1
+	printf '%s\n' "${found#D}"
 }
 
 # covers_table [dir] — one tab-separated line per declared entry:
@@ -740,6 +796,105 @@ STUB_EOF
 	rm -rf "$state"
 }
 
+# warm_cases <proj> — self_test's warm-mode cases: THIS file installed at the
+# stock depth of a scratch repo, beside a stub scenario.sh that speaks the
+# --suite results protocol (a `--suite` call writes results/unrun into
+# GDK_SCENARIO_SUITE_RESULTS; `leaky` fails warm and passes cold; the suite
+# crashes at GDK_STUB_CRASH, handing back the rest). Every call's argv is
+# recorded, so what is asserted is what the run BOOTED. Uses self_test's
+# `cases` and `miss`.
+# shellcheck disable=SC2015
+warm_cases() {
+	local proj="$1" state="$1.state" runners out rc n
+	runners="$proj/tools/dev/runners"
+	mkdir -p "$runners" "$proj/tests/integration" "$proj/.godot"
+	cp "$0" "$runners/integration.sh"
+	cat > "$runners/scenario.sh" <<'STUB_EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$GDK_STUB_STATE/argv"
+if [ "$1" = --suite ]; then
+	shift; out="$GDK_SCENARIO_SUITE_RESULTS"; gone=0
+	for name in "$@"; do
+		if [ "$gone" -eq 1 ] || [ "$name" = "${GDK_STUB_CRASH:-}" ]; then
+			gone=1; echo "$name" >> "$out/unrun"; continue
+		fi
+		case "$name" in
+			leaky) printf '%s\t1\n' "$name" >> "$out/results"; echo "[SCENARIO] $name FAIL — warm" > "$out/$name.log" ;;
+			*) printf '%s\t0\n' "$name" >> "$out/results"; echo "[SCENARIO] $name PASS" > "$out/$name.log" ;;
+		esac
+	done
+	[ "$gone" -eq 0 ] || { echo "  WARM-ABORT  after a — n scenario(s) handed back"; exit 4; }
+	exit 0
+fi
+echo "[SCENARIO] $1 PASS"
+STUB_EOF
+	: > "$proj/project.godot"
+	for n in alpha beta leaky smoke; do printf 'extends Node\n' > "$proj/tests/integration/$n.gd"; done
+	printf 'extends Node\n## Isolated because: it reads the process clock\n' > "$proj/tests/integration/iso.gd"
+	printf '.godot/\n' > "$proj/.gitignore"
+	{ scratch_git "$proj" init -q && scratch_git "$proj" add -A \
+		&& scratch_git "$proj" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m proj; } >/dev/null 2>&1 \
+		|| miss "the warm git fixture could not be built"
+	touch -t 202001010000 "$proj/project.godot"; touch "$proj/$IMPORT_CACHE_STAMP"
+	# The runners are the tier's ground: --diff HEAD is the whole roster.
+	echo '# touched' >> "$runners/scenario.sh"
+
+	warm() {
+		rm -rf "$state"; mkdir -p "$state"
+		( unset_git_env
+		  unset GDK_SCENARIO_SUBSTRATE_RE GDK_INTEGRATION_INFRA_RE GDK_CAPTURE_SUFFIX_RE GDK_CAPTURE_GATE_RE \
+			GDK_INTEGRATION_RERUN
+		  GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
+			GDK_SCENARIO_SOURCE_DIR=tests/integration bash "$runners/integration.sh" "$@" 2>&1 )
+	}
+	argv() { sort "$state/argv" | tr '\n' '|'; }
+
+	# Two workers over alpha beta leaky smoke (iso is isolated): alpha+leaky
+	# and beta+smoke. The second crashes at beta, handing back beta and smoke.
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 GDK_STUB_CRASH=beta warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 0 ] \
+		&& grep -qF '[INTEGRATION] SUMMARY: 5 passed (0 flaky, 1 warm-only), 0 failed (of 5); warm 2, cold 1, handed back 2' <<<"$out" \
+		&& grep -qE '^\[INTEGRATION\] WALL: warm workers [0-9]+s, cold remainder [0-9]+s$' <<<"$out" \
+		&& grep -qF '[INTEGRATION] BOOTS: 6 scenario(s) booted' <<<"$out" \
+		|| miss "warm mode sums its census to the roster and boots once per worker (rc $rc): $out"
+	cases=$((cases + 1))
+	[ "$(argv)" = "--suite alpha leaky|--suite beta smoke|beta|iso|leaky|smoke|" ] \
+		|| miss "an Isolated scenario runs cold, never warm; the handed-back ones run cold — argv '$(argv)'"
+	cases=$((cases + 1))
+	grep -qxF '  WARM-ONLY  leaky — failed warm, passed cold: it leans on process state; mark it "## Isolated because:" or fix its reset' <<<"$out" \
+		&& grep -qxF '  WARM-ABORT  after a — n scenario(s) handed back' <<<"$out" \
+		&& ! grep -qF 'FLAKE' <<<"$out" \
+		|| miss "a warm failure that passes cold prints WARM-ONLY, not FLAKE, and counts green: $out"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD --no-rerun)"; rc=$?
+	[ "$rc" -eq 1 ] && ! grep -qF 'WARM-ONLY' <<<"$out" \
+		&& grep -qF 'SUMMARY: 4 passed, 1 failed (of 5); warm 4, cold 1, handed back 0' <<<"$out" \
+		&& grep -qF 'FAIL — warm' <<<"$out" \
+		|| miss "--no-rerun leaves a warm failure red, its warm report in FAILURES (rc $rc): $out"
+
+	# Unset, and --cold: today's argv exactly — one bare name per boot.
+	cases=$((cases + 1))
+	out="$(warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(argv)" = "alpha|beta|iso|leaky|smoke|" ] \
+		&& ! grep -qE 'WALL|warm' <<<"$out" \
+		|| miss "with GDK_INTEGRATION_WARM unset the run is today's cold one (rc $rc, argv '$(argv)'): $out"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD --cold)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(argv)" = "alpha|beta|iso|leaky|smoke|" ] \
+		|| miss "--cold forces the cold path for one run (rc $rc, argv '$(argv)')"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=yes warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] || miss "a GDK_INTEGRATION_WARM that is not 0 or 1 is a config error (exit 2), got $rc"
+
+	printf 'extends Node\n## Isolated because:   \n' > "$proj/tests/integration/iso.gd"
+	cases=$((cases + 1))
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] && grep -qF 'tests/integration/iso.gd' <<<"$out" && [ ! -s "$state/argv" ] \
+		|| miss "an '## Isolated because:' with no reason exits 2 naming the file, before any boot (rc $rc): $out"
+	rm -rf "$state"
+}
+
 # --- --self-test -------------------------------------------------------------
 # Boots nothing:discovery, the header reader and the slicing are pure
 # filesystem and text, which is exactly why they are written as functions over
@@ -1034,6 +1189,9 @@ FIXTURE_EOF
 	# --- the sweep end to end: rerun-alone and the repair before it -----------
 	sweep_cases "$scratch/proj"
 
+	# --- warm mode end to end: the census, isolation, the hand-back -----------
+	warm_cases "$scratch/warm"
+
 	# --- every keep-listed gate must EXIST and survive the filter ------------
 	# A renamed or deleted keep-listed capture must fail loudly here, never
 	# drop silently out of --all.
@@ -1114,9 +1272,17 @@ case "$GDK_INTEGRATION_RERUN" in
 	0|1) RERUN="$GDK_INTEGRATION_RERUN" ;;
 	*) echo "[$GATE_TAG] GDK_INTEGRATION_RERUN='$GDK_INTEGRATION_RERUN' — expected 0 or 1" >&2; exit 2 ;;
 esac
+case "$GDK_INTEGRATION_WARM" in
+	0|1) WARM="$GDK_INTEGRATION_WARM" ;;
+	*) echo "[$GATE_TAG] GDK_INTEGRATION_WARM='$GDK_INTEGRATION_WARM' — expected 0 or 1" >&2; exit 2 ;;
+esac
 REST=()
 for arg in "$@"; do
-	if [ "$arg" = "--no-rerun" ]; then RERUN=0; else REST+=("$arg"); fi
+	case "$arg" in
+		--no-rerun) RERUN=0 ;;
+		--cold) WARM=0 ;;
+		*) REST+=("$arg") ;;
+	esac
 done
 set -- ${REST[@]+"${REST[@]}"}
 
@@ -1233,6 +1399,31 @@ MODE="${1:-}"
 # and a named run is someone looking at one scenario on purpose.
 [ "$MODE" = "--diff" ] || RERUN=0
 
+# Warm mode is for the sweeps; --smoke and a named run are one boot anyway.
+case "$MODE" in --all|--diff|--system) ;; *) WARM=0 ;; esac
+# Which scenarios may share a process, decided BEFORE anything boots: an
+# `## Isolated because:` with no reason is a declaration that says nothing,
+# and it stops the run naming its file.
+WARM_NAMES=(); ISO_NAMES=()
+if [ "$WARM" -eq 1 ]; then
+	ROSTER_NL="$(printf '%s\n' "${NAMES[@]}")"
+	while IFS= read -r f; do
+		n="${f##*/}"; n="${n%.gd}"
+		case $'\n'"$ROSTER_NL"$'\n' in *$'\n'"$n"$'\n'*) ;; *) continue ;; esac
+		if reason="$(scenario_isolation "$f")"; then
+			if [ -z "$reason" ]; then
+				echo "[$GATE_TAG] $f: '## $ISOLATED_KEY' gives no reason — say what process state it needs, or remove the line" >&2
+				exit 2
+			fi
+			ISO_NAMES+=("$n")
+		fi
+	done < <(discover_gate_files)
+	ISO_NL="$(printf '%s\n' ${ISO_NAMES[@]+"${ISO_NAMES[@]}"})"
+	for n in "${NAMES[@]}"; do
+		case $'\n'"$ISO_NL"$'\n' in *$'\n'"$n"$'\n'*) ;; *) WARM_NAMES+=("$n") ;; esac
+	done
+fi
+
 # The repair a sweep cannot do, done once before it (#16): a sweep is where a
 # stale cache fails every scenario, and where scenario.sh must NOT repair it.
 if { [ "$MODE" = "--diff" ] || [ "$MODE" = "--all" ]; } && [ -f project.godot ] \
@@ -1251,7 +1442,14 @@ if { [ "$MODE" = "--diff" ] || [ "$MODE" = "--all" ]; } && [ -f project.godot ] 
 fi
 
 JOBS="${GDK_JOBS:-$(detect_jobs)}"
-echo "[$GATE_TAG] ${#NAMES[@]} scenario(s), ${JOBS}-way parallel, isolated per process"
+WORKERS=0
+if [ "$WARM" -eq 1 ]; then
+	WORKERS="${#WARM_NAMES[@]}"
+	[ "$WORKERS" -le "$JOBS" ] || WORKERS="$JOBS"
+	echo "[$GATE_TAG] ${#NAMES[@]} scenario(s), warm: ${#WARM_NAMES[@]} in $WORKERS worker(s), ${#ISO_NAMES[@]} isolated (cold)"
+else
+	echo "[$GATE_TAG] ${#NAMES[@]} scenario(s), ${JOBS}-way parallel, isolated per process"
+fi
 
 TMP="$(mktemp -d)" || exit 2
 trap 'rm -rf "$TMP"' EXIT
@@ -1283,8 +1481,10 @@ trap 'rm -rf "$TMP"' EXIT
 # The CPU the fan-out burns is the difference of this shell's `times` across
 # it: every job is reaped through xargs before the pipeline returns.
 children_cpu "$TMP/times"; CPU_BEFORE="$CHILD_CPU_MS"
+# cold_fanout <name>... — the cold path: one scenario.sh per name, JOBS at once.
+cold_fanout() {
 # shellcheck disable=SC2016
-printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
+printf '%s\n' "$@" | xargs -P "$JOBS" -I{} bash -c '
 	name="$1"; tmp="$2"
 	export GDK_HEADLESS_HOME="$tmp/home-$name"
 	export GDK_SCENARIO_IN_SWEEP=1
@@ -1292,6 +1492,51 @@ printf '%s\n' "${NAMES[@]}" | xargs -P "$JOBS" -I{} bash -c '
 	printf "%s\n" "$out" > "$tmp/$name.log"
 	printf "%s\t%s\n" "$name" "$code" >> "$tmp/results"
 ' _ {} "$TMP"
+}
+
+HANDED=(); WARM_FAILED_NL=''; WARM_RAN=0; WARM_SECS=0; COLD_T0="$SECONDS"
+if [ "$WARM" -eq 0 ]; then
+	cold_fanout "${NAMES[@]}"
+else
+	# The warm phase. Slices balanced by count: name j goes to worker j mod W.
+	# Every worker's finished scenarios land in $TMP/warm/results in the shape
+	# the cold jobs write; what is not there afterwards was never finished,
+	# whatever the worker said, and runs cold (rule 4: a worker that died
+	# without a word must not shrink the census).
+	mkdir -p "$TMP/warm"; : > "$TMP/warm/results"
+	WARM_T0="$SECONDS"; WORKER_PIDS=()
+	for ((w = 0; w < WORKERS; w++)); do
+		slice=()
+		for ((j = w; j < ${#WARM_NAMES[@]}; j += WORKERS)); do slice+=("${WARM_NAMES[$j]}"); done
+		GDK_HEADLESS_HOME="$TMP/home-warm-$w" GDK_SCENARIO_IN_SWEEP=1 GDK_SCENARIO_SUITE_RESULTS="$TMP/warm" \
+			bash "$SCENARIO_SH" --suite "${slice[@]}" > "$TMP/warm-$w.out" 2>&1 &
+		WORKER_PIDS+=("$!")
+	done
+	for ((w = 0; w < WORKERS; w++)); do
+		wrc=0; wait "${WORKER_PIDS[$w]}" || wrc=$?
+		case "$wrc" in
+			0|1|4) ;;
+			*) echo "[$GATE_TAG] warm worker $w exited $wrc — what it did not finish runs cold:"
+			   tail -"$FAILURE_SUMMARY_LINES" "$TMP/warm-$w.out" | sed 's/^/    /' ;;
+		esac
+	done
+	WARM_SECS=$((SECONDS - WARM_T0))
+	grep -hE '^  WARM-ABORT  |^    handed back: ' "$TMP"/warm-*.out 2>/dev/null || true
+	for n in ${WARM_NAMES[@]+"${WARM_NAMES[@]}"}; do
+		code="$(awk -F'\t' -v n="$n" '$1 == n { c = $2 } END { print c }' "$TMP/warm/results")"
+		if [ -z "$code" ]; then HANDED+=("$n"); continue; fi
+		WARM_RAN=$((WARM_RAN + 1))
+		printf '%s\t%s\n' "$n" "$code" >> "$TMP/results"
+		[ ! -f "$TMP/warm/$n.log" ] || mv -f "$TMP/warm/$n.log" "$TMP/$n.log"
+		[ "$code" -eq 0 ] || WARM_FAILED_NL="$WARM_FAILED_NL$n"$'\n'
+	done
+	COLD_T0="$SECONDS"
+	COLD_RUN=(${ISO_NAMES[@]+"${ISO_NAMES[@]}"} ${HANDED[@]+"${HANDED[@]}"})
+	if [ "${#COLD_RUN[@]}" -gt 0 ]; then
+		echo "[$GATE_TAG] cold: ${#ISO_NAMES[@]} isolated + ${#HANDED[@]} handed back, ${JOBS}-way parallel"
+		cold_fanout "${COLD_RUN[@]}"
+	fi
+fi
 
 PASS=0; FAIL=0; FAILED_NAMES=()
 while IFS=$'\t' read -r name code; do
@@ -1305,13 +1550,15 @@ done < "$TMP/results"
 # Counted before the unreported are folded into FAIL below — a job that never
 # reported is a failure, and not a boot anyone can show happened.
 BOOTS=$((PASS + FAIL))
+# Warm: each worker is ONE boot, however many scenarios it ran.
+[ "$WARM" -eq 0 ] || BOOTS=$((BOOTS - WARM_RAN + WORKERS))
 
 # Rerun alone, once (#34). A scenario that fails among N peers and passes on
 # its own failed on LOAD, not on what it asserts — and a merge batch stopped
 # for one costs a story. Serial, one engine, no peers: so GDK_SCENARIO_IN_SWEEP
 # is NOT set, and the runner may do its own cache recovery. Still red alone is
 # red, exactly as before. The FLAKE line is the record; nothing is filed.
-FLAKY=0
+FLAKY=0; WARM_ONLY=0
 if [ "$RERUN" -eq 1 ] && [ "${#FAILED_NAMES[@]}" -gt 0 ]; then
 	echo "[$GATE_TAG] rerunning ${#FAILED_NAMES[@]} failed scenario(s) alone, once each"
 	STILL_RED=()
@@ -1320,14 +1567,24 @@ if [ "$RERUN" -eq 1 ] && [ "${#FAILED_NAMES[@]}" -gt 0 ]; then
 		GDK_HEADLESS_HOME="$TMP/home-$n-alone" bash "$SCENARIO_SH" "$n" > "$TMP/$n.alone.log" 2>&1 || code=$?
 		BOOTS=$((BOOTS + 1))
 		if [ "$code" -eq 0 ]; then
-			FLAKY=$((FLAKY + 1)); PASS=$((PASS + 1)); FAIL=$((FAIL - 1))
-			echo "  FLAKE  $n — failed in the sweep, passed alone"
+			PASS=$((PASS + 1)); FAIL=$((FAIL - 1))
+			# A warm failure that passes cold leans on process state — which is
+			# a different finding from a load flake, and counted apart.
+			case $'\n'"$WARM_FAILED_NL" in
+				*$'\n'"$n"$'\n'*)
+					WARM_ONLY=$((WARM_ONLY + 1))
+					echo "  WARM-ONLY  $n — failed warm, passed cold: it leans on process state; mark it \"## $ISOLATED_KEY\" or fix its reset" ;;
+				*)
+					FLAKY=$((FLAKY + 1))
+					echo "  FLAKE  $n — failed in the sweep, passed alone" ;;
+			esac
 		else
 			STILL_RED+=("$n")
 		fi
 	done
 	FAILED_NAMES=(${STILL_RED[@]+"${STILL_RED[@]}"})
 fi
+COLD_SECS=$((SECONDS - COLD_T0))
 children_cpu "$TMP/times"
 BOOT_CPU_MS=''
 [ -z "$CPU_BEFORE" ] || [ -z "$CHILD_CPU_MS" ] || BOOT_CPU_MS=$((CHILD_CPU_MS - CPU_BEFORE))
@@ -1339,6 +1596,18 @@ UNREPORTED=$(( ${#NAMES[@]} - PASS - FAIL ))
 if [ "$UNREPORTED" -gt 0 ]; then
 	echo "[$GATE_TAG] $UNREPORTED scenario(s) produced no result at all — counting them failed"
 	FAIL=$((FAIL + UNREPORTED))
+fi
+
+# Warm mode's census (rule 4): warm + cold + handed back is the roster, and
+# every name on it has a result. Anything else is a FAIL naming the missing.
+CENSUS_NOTE=''
+if [ "$WARM" -eq 1 ]; then
+	CENSUS_NOTE="; warm $WARM_RAN, cold ${#ISO_NAMES[@]}, handed back ${#HANDED[@]}"
+	missing="$(printf '%s\n' "${NAMES[@]}" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1] = 1; next } !($0 in seen)' "$TMP/results" -)"
+	if [ $((WARM_RAN + ${#ISO_NAMES[@]} + ${#HANDED[@]})) -ne "${#NAMES[@]}" ] || [ -n "$missing" ]; then
+		echo "[$GATE_TAG] FAIL — census: warm $WARM_RAN + cold ${#ISO_NAMES[@]} + handed back ${#HANDED[@]} is not the roster of ${#NAMES[@]}; no result for: $(printf '%s' "$missing" | tr '\n' ' ')"
+		[ "$UNREPORTED" -gt 0 ] || FAIL=$((FAIL + 1))
+	fi
 fi
 
 if [ "$FAIL" -gt 0 ]; then
@@ -1361,9 +1630,11 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 
 echo ""
+[ "$WARM" -eq 0 ] || echo "[$GATE_TAG] WALL: warm workers ${WARM_SECS}s, cold remainder ${COLD_SECS}s"
 boots_line "$BOOTS" "$BOOT_CPU_MS"
 FLAKY_NOTE=''
 [ "$FLAKY" -eq 0 ] || FLAKY_NOTE=" ($FLAKY flaky)"
-echo "[$GATE_TAG] SUMMARY: $PASS passed$FLAKY_NOTE, $FAIL failed (of ${#NAMES[@]})$SLICE_NOTE"
+[ "$WARM_ONLY" -eq 0 ] || FLAKY_NOTE=" ($FLAKY flaky, $WARM_ONLY warm-only)"
+echo "[$GATE_TAG] SUMMARY: $PASS passed$FLAKY_NOTE, $FAIL failed (of ${#NAMES[@]})$CENSUS_NOTE$SLICE_NOTE"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
