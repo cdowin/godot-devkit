@@ -277,7 +277,7 @@ fs_dev() {
 # ppid (`ps -A -o pid= -o ppid=`, POSIX). The pass is a subshell → timeout →
 # engine chain; signalling the subshell alone would orphan the engine, still
 # writing into a copy that is being removed.
-# shellcheck disable=SC2329  # invoked from the exit hook and the signal trap
+# shellcheck disable=SC2317,SC2329  # invoked from the exit hook and the signal trap
 kill_tree() {
 	local pid="$1" child
 	for child in $(ps -A -o pid= -o ppid= 2>/dev/null | awk -v p="$pid" '$2 == p { print $1 }'); do
@@ -687,7 +687,7 @@ OLD_BESIDE=''
 # The removal runs with INT/TERM IGNORED — inherited by the rm, so a Ctrl-C
 # landing mid-delete (seconds, on a large cache) cannot leave half a cache
 # behind. It is already the way out; there is nothing left to interrupt.
-# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via gdk_on_exit
 remove_copy() {
 	trap '' INT TERM
 	[ -z "$PASS_PID" ] || kill_tree "$PASS_PID"
@@ -702,7 +702,7 @@ remove_copy() {
 
 # The engine is stopped HERE, before exit, because the EXIT hooks remove the
 # run home and the copy — which a still-running pass would keep writing into.
-# shellcheck disable=SC2329  # invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via trap
 on_signal() {
 	trap '' INT TERM
 	[ -z "$PASS_PID" ] || kill_tree "$PASS_PID"

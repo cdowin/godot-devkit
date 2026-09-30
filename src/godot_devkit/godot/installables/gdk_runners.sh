@@ -92,7 +92,7 @@ GDK_LIB_TAG="gdk-runners"
 # exit status.
 _GDK_EXIT_HOOKS=()
 
-# shellcheck disable=SC2329  # invoked indirectly via `trap … EXIT`
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via `trap … EXIT`
 _gdk_run_exit_hooks() {
 	local status=$?
 	local hook
@@ -129,7 +129,7 @@ GDK_SANDBOX_RUN_PREFIX="run-"
 # _gdk_destroy_run_home — remove THIS run's HOME. Guarded: it will only ever
 # delete a path that looks like one we minted, so a mis-set variable can never
 # point `rm -rf` at the real ~/Library/Application Support.
-# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via gdk_on_exit
 _gdk_destroy_run_home() {
 	local home="${_GDK_RUN_HOME:-}"
 	[ -n "$home" ] || return 0
@@ -305,7 +305,7 @@ _gdk_normalize_project_file() {
 
 # gdk_restore_project_file — idempotent; silent when the run left the file
 # alone (the overwhelmingly common case), one line otherwise.
-# shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via gdk_on_exit
 gdk_restore_project_file() {
 	local snapshot="${_GDK_PROJECT_SNAPSHOT:-}"
 	[ -n "$snapshot" ] || return 0
