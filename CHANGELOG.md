@@ -23,6 +23,13 @@
   sidecars are copied back; other rewrites are dropped and printed as `dropped N re-serialised files
   (import churn): …`. A killed run leaves the tree byte-identical, and a Godot process holding the
   project gets a `WARN` before the swap (#20, #23).
+- `integration.sh --diff` boots only the scenarios that load a touched `tests/support/` fixture,
+  following references through other fixtures (`GDK_SCENARIO_FIXTURE_DIR`); a fixture no scenario
+  loads boots the whole tier and says so (#33). It reruns each failed scenario once, alone: one that
+  passes alone prints `  FLAKE  <name> — failed in the sweep, passed alone` and counts green as
+  `N passed (K flaky)`; `--no-rerun` or `GDK_INTEGRATION_RERUN=0` turns this off (#34). Before a
+  `--diff`/`--all` sweep boots anything, `import_cache.sh` repairs a stale import cache once (#16).
+  The self-test's scratch git repos can no longer write into the host repo under a hook (#24).
 
 ## v1.3.0 — 2026-09-28
 

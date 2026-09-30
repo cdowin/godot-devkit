@@ -19,3 +19,4 @@ tools/hooks/*.local
 
 # Lane checkouts planted by tools/dev/agent-worktree.sh.
 .claude/worktrees/
+pm/roadmap/ledger.local.jsonl
