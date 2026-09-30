@@ -349,18 +349,24 @@ Turn it on only once your scenario runner implements the contract:
    START`, where the ERE defaults to `\[SCENARIO\]` like `GDK_SCENARIO_RESULT_RE`.
 2. Run it against a fresh World, with the reset your `scenario_base` owns (autoload state, World,
    player).
-3. Print your usual verdict line: `GDK_SCENARIO_RESULT_RE`, then `PASS` or `FAIL` as a word.
-4. Exit after the last one.
+3. Finish the scenario's teardown, THEN print your usual verdict line: `GDK_SCENARIO_RESULT_RE`,
+   then `PASS` or `FAIL` as a word. The verdict closes the scenario; nothing it causes may follow.
+4. Exit 0 after the last one. A FAIL is carried by its verdict line, never by the exit code.
 
 The single-scenario `--scenario <name>` path is unchanged. The worker splits the stream at the START
 markers. A scenario's slice runs from its START to the next one, with the boot preamble in front,
 and is published to `.scenario-reports/<name>.log`. An engine error in the slice upgrades that
 scenario's PASS to FAIL, exactly as a cold run would, and each scenario gets one console line, as
 today. A worker is killed when no new START or verdict arrives within `GDK_SCENARIO_HARD_TIMEOUT`
-seconds (a per-scenario bound). A crash or hang hands back the scenario in progress and every one
-that never started, unrun: `  WARM-ABORT  after <last finished> — N scenario(s) handed back`, and
-`scenario.sh --suite` exits 4. A passing slice that carries the cold-import-cache warning is handed
-back too, so the cold path's recovery ladder gets it. Every handed-back scenario then runs cold.
+seconds (a per-scenario bound). A hang hands back the scenario in progress and every one that never
+started, unrun: `  WARM-ABORT  after <last finished> — N scenario(s) handed back`, and
+`scenario.sh --suite` exits 4. Two findings belong to no scenario, so they hand back EVERY member,
+even ones with a verdict, and the WARM-ABORT line names the reason after a colon. The first is an
+engine exit that is non-zero and not the hang kill (`: the engine exited 139`), even after the last
+verdict. The second is an engine error after a verdict and before the next START or the exit
+(`: engine errors after the last verdict`), which is where exit-time leak warnings land. A passing
+slice that carries the cold-import-cache warning is handed back too, so the cold path's recovery
+ladder gets it. Every handed-back scenario then runs cold.
 
 A scenario whose header carries `## Isolated because: <reason>` never runs warm. An empty reason
 exits 2 and names the file. With `--diff`, a warm failure is rerun cold and alone. One that passes

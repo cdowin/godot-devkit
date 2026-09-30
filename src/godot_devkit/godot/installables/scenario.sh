@@ -20,20 +20,26 @@
 #      `<GDK_SCENARIO_START_RE> <name> START`;
 #   2. runs it against a fresh World, with the reset its scenario_base owns
 #      (autoload state, World, player);
-#   3. prints its usual verdict line (GDK_SCENARIO_RESULT_RE, then PASS|FAIL
-#      as a word);
-#   4. exits after the last one.
+#   3. FINISHES that scenario's teardown, then prints its usual verdict line
+#      (GDK_SCENARIO_RESULT_RE, then PASS|FAIL as a word) — the verdict closes
+#      the scenario, so nothing it causes may come after it;
+#   4. exits 0 after the last one: a FAIL is carried by its verdict line,
+#      never by the exit code.
 # The stream is split at the START markers: a scenario's slice runs from its
 # START to the next one, with the boot preamble before the first START
-# prepended to every slice, so an engine error in a slice upgrades THAT
-# scenario's PASS to FAIL exactly as a cold run would. Each slice is published
-# to <report dir>/<name>.log, one console line per scenario as today. A worker
-# that crashes, or that goes GDK_SCENARIO_HARD_TIMEOUT seconds without a new
-# START or verdict (the bound is per scenario, not per suite), is stopped: the
-# scenario in progress and every one that never started get NO verdict and are
-# handed back unrun (exit 4) — run them cold. A slice that passed but carries
-# the cold-import-cache class is handed back too, so the cold path's recovery
-# ladder gets it. `--scenario <name>` (the single path) is unchanged.
+# prepended to every slice, so an engine error between a START and its
+# verdict upgrades THAT scenario's PASS to FAIL exactly as a cold run would.
+# Each slice is published to <report dir>/<name>.log, one console line per
+# scenario as today. A worker that goes GDK_SCENARIO_HARD_TIMEOUT seconds
+# without a new START or verdict (the bound is per scenario, not per suite) is
+# stopped: the scenario in progress and every one that never started get NO
+# verdict and are handed back unrun (exit 4) — run them cold. Two findings
+# belong to NO scenario, and hand back EVERY member, verdict or not: an engine
+# exit that is non-zero and not the bound's kill (a crash, even one after the
+# last verdict), and an engine error after a verdict and before the next START
+# or the exit (exit-time leak warnings land there). A slice that passed but
+# carries the cold-import-cache class is handed back too, so the cold path's
+# recovery ladder gets it. `--scenario <name>` (the single path) is unchanged.
 #
 # OUTPUT: the full transcript is ALWAYS published to
 # .scenario-reports/<name>.log — written to a private per-run file first, then
@@ -52,8 +58,10 @@
 #
 # Exit: 0 passed and the engine was quiet | 1 failed | 2 harness/usage error
 #       | 3 hard timeout (a hang)
-#       | 4 --suite only: scenario(s) handed back unrun — the ones that DID
-#         finish still carry their verdicts; the caller runs the rest cold
+#       | 4 --suite only: scenario(s) handed back unrun — after a stall or a
+#         parse error the ones that DID finish still carry their verdicts;
+#         after a crash or an unattributable engine error none does. The
+#         caller runs every handed-back one cold
 set -uo pipefail
 
 # --- project config (yours to edit after install — the file is your repo's) --
@@ -129,9 +137,11 @@ the engine's own stream for errors your in-process runner cannot see.
   --suite       boot ONCE and run the named scenarios in sequence (the warm
                 worker): the runner gets `-- GDK_SCENARIO_SUITE_ARG a,b,c`,
                 prints `[SCENARIO] <name> START` before each and its verdict
-                after. A crash or a stall hands the unfinished ones back:
-                `  WARM-ABORT  after <last finished> — N scenario(s) handed
-                back`, exit 4
+                after its teardown, and exits 0. A stall hands the unfinished
+                ones back: `  WARM-ABORT  after <last finished> — N
+                scenario(s) handed back`, exit 4; a crash, or an engine error
+                outside every START..verdict window, hands back every member
+                and names why after a colon
   --self-test   prove the argument handling, the report-freshness rules, the
                 allowlist builder, what the cache recovery fires on, and the
                 warm split against a stub engine
@@ -309,10 +319,12 @@ parse_error_line() {
 # every parse-error line to <hits> AS IT ARRIVES. The watch cannot read the
 # report instead: `head -c` block-buffers into it, so a short transcript
 # reaches the disk only when the engine exits — which is the thing that never
-# happens.
+# happens. Every line is flushed downstream as it passes: awk block-buffers
+# into a pipe, and the --suite progress tap below it would otherwise see the
+# stream in 4 KB lumps, turning the per-scenario bound into a per-suite one.
 tap_parse_errors() {
 	PARSE_RE="$PARSE_ERROR_PATTERN" awk -v hits="$1" \
-		'{ print } $0 ~ ENVIRON["PARSE_RE"] { print >> hits; close(hits) }'
+		'{ print; fflush() } $0 ~ ENVIRON["PARSE_RE"] { print >> hits; close(hits) }'
 }
 
 # watch_for_parse_error <pidfile> <hits> <marker> — poll the tapped lines; on
@@ -378,7 +390,7 @@ suite_env() {
 tap_suite_progress() {
 	suite_env awk -v progress="$1" "$SUITE_AWK_LIB"'
 		BEGIN { suite_init() }
-		{ print }
+		{ print; fflush() }
 		start_name($0) != "" || verdict_of($0) != "" {
 			print "." >> progress; close(progress)
 		}'
@@ -409,7 +421,11 @@ watch_for_stall() {
 # order: `<name>\t<PASS|FAIL|->\t<verdict line>`. A slice runs from its START
 # to the next START; the boot preamble before the first START opens every
 # slice, as it opens every cold transcript. A verdict re-emitted later wins,
-# as the cold path's `tail -1` does. Pure over a file, for the corpus.
+# as the cold path's `tail -1` does. Output after a scenario's verdict belongs
+# to NO scenario (the contract has the runner finish its teardown first): it
+# stays in the slice's report, and is also written to <dir>/between when a
+# START follows it and to <dir>/after when none does, where the caller can
+# refuse to attribute it. Pure over a file, for the corpus.
 # shellcheck disable=SC2016  # an awk program, not a shell expansion
 split_suite_transcript() {
 	suite_env awk -v out="$2" "$SUITE_AWK_LIB"'
@@ -417,6 +433,7 @@ split_suite_transcript() {
 		{
 			name = start_name($0)
 			if (name != "") {
+				if (orph != "") { printf "%s", orph >> (out "/between"); close(out "/between"); orph = "" }
 				if (file != "") close(file)
 				cur = name; file = out "/" cur ".slice"
 				if (!(cur in started)) { order[++k] = cur; started[cur] = 1; printf "%s", pre >> file }
@@ -425,10 +442,12 @@ split_suite_transcript() {
 			}
 			if (cur == "") { pre = pre $0 "\n"; next }
 			print >> file
+			if (cur in verdict) orph = orph $0 "\n"
 			v = verdict_of($0)
 			if (v != "") { verdict[cur] = v; vline[cur] = $0 }
 		}
 		END {
+			if (orph != "") printf "%s", orph >> (out "/after")
 			for (i = 1; i <= k; i++) {
 				n = order[i]
 				printf "%s\t%s\t%s\n", n, ((n in verdict) ? verdict[n] : "-"), vline[n]
@@ -475,6 +494,7 @@ run_suite() {
 	local watch_pid stall_pid code rcode slices table name row verdict vline block
 	local killed=0 in_progress='' last_started='' last_finished='(none)' failed=0
 	local results="${GDK_SCENARIO_SUITE_RESULTS:-}" unexpected parse_error stall
+	local whole='' orphans='' where last_verdict
 	local -a aborted=() cached=()
 	list="$(IFS=,; printf '%s' "${SUITE_NAMES[*]}")"
 	transcript="$(gdk_sandbox_tmpfile suite.XXXXXX)" || return 2
@@ -519,12 +539,38 @@ run_suite() {
 
 	table="$(split_suite_transcript "$transcript" "$slices")"
 	last_started="$(printf '%s\n' "$table" | awk -F'\t' 'NF { n = $1 } END { print n }')"
+	last_verdict="$(printf '%s\n' "$table" | awk -F'\t' 'NF && $2 != "-" { n = $1 } END { print n }')"
+	# Two findings belong to no one scenario, so NO member keeps a warm
+	# verdict and the cold path judges each: an engine exit that is non-zero
+	# and not the bound's own kill (a crash, even after every verdict), and an
+	# unallowed engine error outside every START..verdict window.
+	for where in between after; do
+		[ -z "$orphans" ] && [ -f "$slices/$where" ] || continue
+		orphans="$(engine_error_lines "$slices/$where")"
+		[ -n "$orphans" ] || continue
+		case "$where" in
+			between) whole="engine errors between a verdict and the next START" ;;
+			*) whole="engine errors after the last verdict" ;;
+		esac
+	done
+	if [ "$killed" -eq 0 ] && [ "$code" -ne 0 ]; then
+		whole="the engine exited $code"
+	fi
+	[ -z "$whole" ] || last_finished="${last_verdict:-(none)}"
 
 	for name in "${SUITE_NAMES[@]}"; do
 		row="$(printf '%s\n' "$table" | awk -F'\t' -v n="$name" '$1 == n { print; exit }')"
 		[ -z "$row" ] || publish_report "$name" "$slices/$name.slice"
 		verdict="$(printf '%s' "$row" | cut -f2)"
 		vline="$(printf '%s' "$row" | cut -f3-)"
+		if [ -n "$whole" ]; then
+			# Still name the one in progress, for a kill's reason line below.
+			if [ -n "$row" ] && { [ "$verdict" = "-" ] || { [ "$killed" -eq 1 ] && [ "$name" = "$last_started" ]; }; }; then
+				[ -n "$in_progress" ] || in_progress="$name"
+			fi
+			aborted+=("$name")
+			continue
+		fi
 		# No verdict, or the one in progress when the worker was stopped: a
 		# stop after its verdict is a runner that never exited (contract step
 		# 4), and a cold run is what says so.
@@ -574,11 +620,18 @@ run_suite() {
 			echo "[$GATE_TAG] ${in_progress:-(boot)} HARD_TIMEOUT — no START or verdict for ${HARD_TIMEOUT_SECONDS}s, worker killed (likely hang)"
 		elif gdk_timeout_is_hang "$code"; then
 			echo "[$GATE_TAG] suite HARD_TIMEOUT — exceeded $((HARD_TIMEOUT_SECONDS * (n + 2)))s, worker killed"
+		elif [ -n "$whole" ]; then
+			echo "[$GATE_TAG] suite — $whole: no one scenario owns that, so every member runs cold"
+			if [ -n "$orphans" ]; then
+				printf '%s\n' "$orphans" | sed 's/^/    /'
+			else
+				tail -3 "$transcript" | sed 's/^/    /'
+			fi
 		else
 			echo "[$GATE_TAG] ${in_progress:-(boot)} — the engine exited before its verdict"
 			[ -n "$in_progress" ] || tail -3 "$transcript" | sed 's/^/    /'
 		fi
-		echo "  WARM-ABORT  after $last_finished — ${#aborted[@]} scenario(s) handed back"
+		echo "  WARM-ABORT  after $last_finished — ${#aborted[@]} scenario(s) handed back${whole:+: $whole}"
 		echo "    handed back: ${aborted[*]}"
 	fi
 	if [ -n "$results" ]; then
@@ -608,19 +661,28 @@ suite_cases() {
 	for n in a b c; do : > "$proj/tests/integration/$n.gd"; done
 	cat > "$bin/godot" <<'STUB_EOF'
 #!/usr/bin/env bash
-list=''
-while [ "$#" -gt 0 ]; do [ "$1" = --scenarios ] && list="${2-}"; shift; done
+list=''; single=''
+while [ "$#" -gt 0 ]; do
+	case "$1" in --scenarios) list="${2-}" ;; --scenario) single="${2-}" ;; esac
+	shift
+done
 echo "Godot Engine v4.stub"
-IFS=, read -r -a names <<<"$list"
+if [ -n "$list" ]; then IFS=, read -r -a names <<<"$list"; warm=1; else names=("$single"); warm=0; fi
+leak=0
 for n in "${names[@]}"; do
-	echo "[SCENARIO] $n START"
+	[ "$warm" -eq 0 ] || echo "[SCENARIO] $n START"
 	case "${GDK_STUB_MODE:-}:$n" in
 		error:b) echo "ERROR: b broke the engine" ;;
 		crash:b) exit 139 ;;
 		stall:b) sleep 30 ;;
+		slow:*) sleep 1.5 ;;
+		exitleak:a) leak=1 ;;
 	esac
 	echo "[SCENARIO] $n PASS steps=1 errors=0"
+	[ "${GDK_STUB_MODE:-}:$n" != gap:a ] || echo "ERROR: a tore down after its verdict"
 done
+[ "$leak" -eq 0 ] || echo "WARNING: ObjectDB instances leaked at exit (run with --verbose for details)."
+[ "${GDK_STUB_MODE:-}" != crashexit ] || exit 139
 STUB_EOF
 	chmod +x "$bin/godot"
 	# suite <mode> [hard timeout] — one warm run of a,b,c, fresh results, the
@@ -633,6 +695,15 @@ STUB_EOF
 		  PATH="$bin:$PATH" GDK_GODOT=godot GDK_SCENARIO_SUITE_RESULTS="$res" \
 			GDK_SCENARIO_HARD_TIMEOUT="${2:-20}" GDK_STUB_MODE="$1" \
 			bash "$proj/tools/dev/runners/scenario.sh" --suite a b c 2>&1 )
+	}
+	# cold <mode> <name> — the cold path the caller runs a handed-back member
+	# through, against the same stub; prints nothing, returns its exit code.
+	cold() {
+		( unset GDK_SCENARIO_REPORT_DIR GDK_SCENARIO_SOURCE_DIR GDK_SCENARIO_NOISE_ALLOWLIST \
+			GDK_SCENARIO_RESULT_RE GDK_SCENARIO_USER_ARG GDK_RUNNERS_LIB GDK_HEADLESS_HOME \
+			GDK_SCENARIO_IN_SWEEP VERBOSE
+		  PATH="$bin:$PATH" GDK_GODOT=godot GDK_SCENARIO_HARD_TIMEOUT=20 GDK_STUB_MODE="$1" \
+			bash "$proj/tools/dev/runners/scenario.sh" "$2" >/dev/null 2>&1 )
 	}
 	miss() { echo "  MISS — $1" >&2; failures=$((failures + 1)); }
 
@@ -655,12 +726,43 @@ STUB_EOF
 		&& grep -qx '\[SCENARIO\] c PASS steps=1 errors=0' <<<"$out" \
 		|| miss "an engine ERROR between B's START and its verdict fails B only (rc $rc): $out"
 
+	# A non-zero engine exit that is not the bound's kill belongs to no one
+	# scenario, so no member keeps a warm verdict — A's PASS included.
 	cases=$((cases + 1))
 	out="$(suite crash)"; rc=$?
-	[ "$rc" -eq 4 ] && grep -qxF '  WARM-ABORT  after a — 2 scenario(s) handed back' <<<"$out" \
-		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b c " ] \
-		&& [ "$(tr '\t\n' ': ' < "$res/results")" = "a:0 " ] \
-		|| miss "a worker that crashes during B hands back B and C, exit 4 (rc $rc): $out"
+	[ "$rc" -eq 4 ] \
+		&& grep -qxF '  WARM-ABORT  after a — 3 scenario(s) handed back: the engine exited 139' <<<"$out" \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "a b c " ] && [ ! -s "$res/results" ] \
+		|| miss "a worker that crashes during B hands back every member, exit 4 (rc $rc): $out"
+	cases=$((cases + 1))
+	out="$(suite crashexit)"; rc=$?
+	[ "$rc" -eq 4 ] \
+		&& grep -qxF '  WARM-ABORT  after c — 3 scenario(s) handed back: the engine exited 139' <<<"$out" \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "a b c " ] && [ ! -s "$res/results" ] \
+		|| miss "three PASS verdicts then exit 139 hand back every member, exit 4 (rc $rc): $out"
+
+	# Engine errors outside every START..verdict window are nobody's: the
+	# slice goes cold, where the leaker is red and nobody else is blamed.
+	cases=$((cases + 1))
+	out="$(suite exitleak)"; rc=$?
+	[ "$rc" -eq 4 ] \
+		&& grep -qxF '  WARM-ABORT  after c — 3 scenario(s) handed back: engine errors after the last verdict' <<<"$out" \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "a b c " ] && [ ! -s "$res/results" ] \
+		&& ! cold exitleak a && cold exitleak c \
+		|| miss "a leak-at-exit line after the last verdict hands the slice back; cold, A is red and C green (rc $rc): $out"
+	cases=$((cases + 1))
+	out="$(suite gap)"; rc=$?
+	[ "$rc" -eq 4 ] \
+		&& grep -qxF '  WARM-ABORT  after c — 3 scenario(s) handed back: engine errors between a verdict and the next START' <<<"$out" \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "a b c " ] \
+		|| miss "an engine error between A's verdict and B's START hands the slice back (rc $rc): $out"
+
+	# The bound is per scenario: three scenarios of 1.5 s each under a 2 s
+	# bound finish warm, although the suite takes longer than the bound.
+	cases=$((cases + 1))
+	out="$(suite slow 2)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 b:0 c:0 " ] \
+		|| miss "a slow-but-progressing suite completes warm under a per-scenario bound (rc $rc): $out"
 
 	cases=$((cases + 1))
 	t0="$SECONDS"
