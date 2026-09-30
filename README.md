@@ -249,7 +249,9 @@ tools/dev/runners/warnings.sh           the analyzer warnings only the editor sh
 tools/dev/runners/unit.sh               the GUT tier, no boot; a census that must reconcile
 tools/dev/runners/integration.sh        the scenario fan-out: --all, --diff <ref>, --system <dir>, --list
 tools/dev/runners/scenario.sh           one scenario, cold, with the cache-recovery ladder
-tools/dev/runners/capture.sh            a headed visual capture to PNG (local, needs a display)
+tools/dev/runners/capture.sh            a headed visual capture to PNG (local, needs a display); the window
+                                        opens off screen unless CAPTURE_VISIBLE=1, and the last PNG of a
+                                        name moves to previous/ for a before/after
 tools/dev/runners/import_cache.sh       rebuild the .godot import cache, sandboxed
 tools/dev/runners/hermetic_run_scan.sh  a headless run's sandbox HOME self-destructs
 tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw engine boot
