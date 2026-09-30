@@ -179,6 +179,7 @@ class RefsScope(unittest.TestCase):
         '\tentity.spawn_handler_changed.connect(on_gear_changed)\n'
         '\tentity.emit_signal(&"spawn_handler_changed")\n'
         '\t# entity.spawn_handler_changed.disconnect(on_gear_changed)\n'
+        '\tentity.disconnect("spawn_handler_changed", on_gear_changed)\n'
     )
     # (symbol, lines its report carries, lines it must not)
     EXPECTED = (
@@ -187,8 +188,8 @@ class RefsScope(unittest.TestCase):
         ('shard_taken', ('## definitions (1)', '## call / emit sites (3)'),
          ('## dynamic',)),
         ('spawn_handler_changed',
-         ('## dynamic (untyped receiver) (2)',
-          '(0 typed references; 2 dynamic hit(s) above'),
+         ('## dynamic (untyped receiver) (3)',
+          '(0 typed references; 3 dynamic hit(s) above'),
          ('(no references found)', '## call / emit sites')),
         ('hurt', (), ('grammar.gd',)),
     )

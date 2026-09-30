@@ -103,7 +103,10 @@ def scan_text(text: str, path: str) -> list[Hit]:
     hits: list[Hit] = []
     func = FILE_SCOPE
     lines = text.split('\n')
-    own = sorted({m.group(1) for m in map(FUNC_RE.match, lines) if m} & SHADOWABLE)
+    # Only a column-0 `func` shadows the global for the whole script; an inner
+    # class's `func randi()` does not, and the outer `randi()` stays a draw.
+    own = sorted({m.group(1) for line in lines if not line[:1].isspace()
+                  for m in [FUNC_RE.match(line)] if m} & SHADOWABLE)
     own_call = (re.compile(rf'(?<![.\w])(?:{"|".join(own)})\s*\(') if own else None)
     for lineno, raw in enumerate(lines, start=1):
         declaration = FUNC_RE.match(raw)

@@ -72,6 +72,14 @@ class Spares(unittest.TestCase):
         caller = 'func coin() -> bool:\n\treturn randf() < 0.5\n'
         self.assertEqual([str(h) for h in rng.scan_text(caller, 'caller.gd')],
                          ['caller.gd:2:coin:return randf() < 0.5'])
+        # An inner class's `func randi()` shadows nothing outside it.
+        inner = ('class Inner:\n'
+                 '\tfunc randi() -> int:\n'
+                 '\t\treturn 4\n'
+                 'func roll() -> int:\n'
+                 '\treturn randi()\n')
+        self.assertEqual([str(h) for h in rng.scan_text(inner, 'inner.gd')],
+                         ['inner.gd:5:roll:return randi()'])
 
 
 class TheAllowlist(unittest.TestCase):

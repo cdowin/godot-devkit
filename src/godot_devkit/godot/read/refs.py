@@ -152,7 +152,7 @@ def _dynamic_pattern(symbol: str) -> re.Pattern:
     alternatives = [
         rf'\.{word}\.(?:connect|disconnect|emit)\(',       # expr.name.connect(
         rf'\bemit_signal\(\s*&?["\']{word}["\']',          # emit_signal(&"name"
-        rf'\bconnect\(\s*&?["\']{word}["\']',              # connect("name"
+        rf'\b(?:dis)?connect\(\s*&?["\']{word}["\']',       # connect("name" / disconnect("name"
     ]
     return re.compile('|'.join(alternatives))
 
