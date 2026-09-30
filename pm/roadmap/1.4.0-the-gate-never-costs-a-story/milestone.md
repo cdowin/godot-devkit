@@ -21,7 +21,7 @@ after every merge, an import pass that rewrote authored `.tres`, and a capture w
 focus. GitHub #16 #17 #19 #20 #23 #24 #28 #30 #31 #32 #33 #34 #35 #37.
 
 Out of this package (closed with a pointer): #21 (a uid pre-commit hook), #22 (a codex generator),
-#25 (a loc hook). Deferred to 1.5.0: #18 (`stats` verb), #36 (warm-process integration tier).
+#25 (a loc hook). Deferred to 1.5.0: #18 (`stats` verb). #36 (warm-process integration tier) was pulled in mid-milestone so #36 and #37 ship on one pin.
 
 ## Ship criterion
 
