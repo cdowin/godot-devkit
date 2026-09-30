@@ -33,9 +33,13 @@
 # `rm -rf .godot` rebuild pulled imported textures out from under a game being
 # played from that checkout. So the pass runs in a scratch copy of the project
 # (an APFS/reflink clone where the filesystem has one) under the sandbox runs
-# dir, and only two things come back:
+# dir. The copy is the WHOLE project directory but `.git/` and the sandbox dir
+# — gitignored inputs included (an addon a plugin manager installed, generated
+# scripts, override.cfg): a copy that lacks one builds a `.godot/` for a
+# different project, and the swap would install it. Only two things come back:
 #   1. `.godot/` as a whole, swapped in by RENAME — a running game keeps the
-#      old inodes it has open, and no reader ever sees a half-written cache;
+#      old inodes it has open, and no reader ever sees a half-written cache.
+#      The old cache is renamed INTO the scratch copy and dies with it;
 #   2. `.uid` / `.import` sidecars the pass created that the tree does NOT
 #      have — the point of the exercise. Commit them.
 # Everything else the pass rewrote is DROPPED with the copy and reported as a
@@ -47,7 +51,8 @@
 #        tools/dev/runners/import_cache.sh --help | --self-test
 # Exit:  0 = cache refreshed | 1 = it was not (import failed or hit the bound)
 #        2 = harness error (unusable repo, the copy failed, or a usage mistake)
-#        A run killed by INT/TERM exits 130/143 and leaves the tree as it was.
+#        A run killed by INT/TERM before the swap exits 130/143 and leaves the
+#        tree as it was; one killed after it says so.
 set -uo pipefail
 
 # --- project config (yours to edit after install — the file is your repo's) --
@@ -207,16 +212,15 @@ pick_clone_flag() {
 	return 0
 }
 
-# project_file_list — what the import needs to resolve, NUL-separated and
-# relative to the project root: git's tracked files plus untracked-not-ignored
-# ones (assets, addons, project.godot, .uid sidecars). Outside a git checkout
-# (a tarball), every file. `.godot/` is carried separately and the sandbox dir
-# never — copy_listed drops both whatever the list says.
+# project_file_list — every file under the project root, NUL-separated and
+# relative to it, but `.git/`, `.godot/` (carried separately) and the sandbox
+# dir. NOT git's tracked + untracked-not-ignored set: Godot reads ignored files
+# too (a plugin manager's addons, generated scripts, override.cfg), and a pass
+# that cannot see them writes a class registry missing their class_names — a
+# cache for a different project, which the swap would then install. A clone
+# makes the ignored bulk cheap. copy_listed drops .godot/ and the sandbox dir
+# again whatever the list says.
 project_file_list() {
-	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-		git ls-files -z --cached --others --exclude-standard
-		return
-	fi
 	find . \( -path ./.git -o -path "./$IMPORT_DIR" -o -path "./$GDK_SANDBOX_DIRNAME" \) -prune \
 		-o \( -type f -o -type l \) -print0
 }
@@ -242,8 +246,7 @@ copy_listed() {
 		case "$path" in
 			''|"$IMPORT_DIR"|"$IMPORT_DIR"/*|"$GDK_SANDBOX_DIRNAME"|"$GDK_SANDBOX_DIRNAME"/*) continue ;;
 		esac
-		# --cached lists a tracked file deleted in the worktree; it has
-		# nothing to copy.
+		# A file deleted between the listing and the copy has nothing to copy.
 		[ -e "$path" ] || [ -L "$path" ] || continue
 		case "$path" in */*) dir="${path%/*}" ;; *) dir=. ;; esac
 		if [ "${#batch[@]}" -gt 0 ] && { [ "$dir" != "$cur" ] || [ "${#batch[@]}" -ge "$COPY_BATCH_MAX" ]; }; then
@@ -259,6 +262,15 @@ copy_listed() {
 	fi
 	printf '%s\n' "$count"
 	return "$rc"
+}
+
+# fs_dev <path> — the device number of the filesystem holding <path>, GNU
+# (`stat -c`) or BSD/macOS (`stat -f`). Empty when neither answers.
+fs_dev() {
+	local dev
+	dev="$(stat -c '%d' "$1" 2>/dev/null)" || dev="$(stat -f '%d' "$1" 2>/dev/null)" || dev=''
+	case "$dev" in *[!0-9]*|"") dev='' ;; esac
+	printf '%s\n' "$dev"
 }
 
 # kill_tree <pid> — TERM <pid> and every descendant, children first, found by
@@ -478,6 +490,8 @@ printf 'uid://stubnew\n' > scripts/new.gd.uid
 mkdir -p .godot
 printf 'stub-uid-cache\n' > .godot/uid_cache.bin
 printf 'stub-classes\n' > .godot/global_script_class_cache.cfg
+# An engine registers every class_name it can SEE — a gitignored addon too.
+[ ! -f addons/vendored/thing.gd ] || printf 'VendoredThing\n' >> .godot/global_script_class_cache.cfg
 if [ -n "${STUB_MARKER:-}" ]; then
 	printf '%s\n' "$$" > "$STUB_MARKER.tmp" && mv "$STUB_MARKER.tmp" "$STUB_MARKER"
 	exec sleep 30
@@ -485,12 +499,31 @@ fi
 STUB_EOF
 	chmod +x "$stub"
 
+	# An `rm` shim for the swap-cleanup case: the first rm whose target IS, or
+	# directly holds, an old `.godot.old*` cache records its pid and stalls, so
+	# an interrupt can land mid-delete; then it deletes for real.
+	mkdir -p "$scratch/shim"
+	cat > "$scratch/shim/rm" <<'SHIM_EOF'
+#!/bin/sh
+for a in "$@"; do
+	case "$a" in -*) continue ;; esac
+	if [ -n "${STUB_RM_MARKER:-}" ] && [ ! -f "$STUB_RM_MARKER" ] \
+		&& [ -n "$(find "$a" -maxdepth 1 -name '.godot.old*' 2>/dev/null)" ]; then
+		printf '%s\n' "$$" > "$STUB_RM_MARKER"
+		sleep 2
+	fi
+done
+exec /bin/rm "$@"
+SHIM_EOF
+	chmod +x "$scratch/shim/rm"
+
 	proj="$scratch/proj"
-	mkdir -p "$proj/data" "$proj/scripts" "$proj/.godot/imported"
+	mkdir -p "$proj/data" "$proj/scripts" "$proj/.godot/imported" "$proj/addons/vendored"
 	printf 'config_version=5\n' > "$proj/project.godot"
 	printf '[gd_resource type="Resource"]\nvalue = 1.0\n' > "$proj/data/thing.tres"
 	printf 'extends Node\nclass_name New\n' > "$proj/scripts/new.gd"
-	printf '.godot/\n.headless-userdata/\n' > "$proj/.gitignore"
+	printf 'extends Node\nclass_name VendoredThing\n' > "$proj/addons/vendored/thing.gd"
+	printf '.godot/\n.headless-userdata/\naddons/vendored/\n' > "$proj/.gitignore"
 	printf 'old-uid-cache\n' > "$proj/.godot/uid_cache.bin"
 	printf 'texture\n' > "$proj/.godot/imported/a.ctex"
 	script="$(_st_install "$proj")"
@@ -539,9 +572,46 @@ STUB_EOF
 	printf '%s\n' "$out" | grep -qF "$TAG dropped 1 re-serialised files (import churn): data/thing.tres" \
 		|| i="$i no dropped line naming data/thing.tres;"
 	[ -z "$(ls -A "$proj/.headless-userdata/runs" 2>/dev/null)" ] || i="$i a scratch copy was left behind;"
-	[ -z "$(cd "$proj" && ls -d "$IMPORT_DIR".old.* 2>/dev/null)" ] || i="$i the old .godot/ was left behind;"
+	[ -z "$(cd "$proj" && ls -d "$IMPORT_DIR".old* 2>/dev/null)" ] || i="$i the old .godot/ was left behind;"
 	[ -z "$i" ] \
 		|| { echo "  MISS — a full run:$i output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
+
+	# a GITIGNORED input (an addon a plugin manager installed) is in the copy:
+	# the pass registers its class_name, so the cache swapped into the tree
+	# describes the tree's project, not a smaller one.
+	cases=$((cases + 1))
+	grep -qx 'VendoredThing' "$proj/.godot/global_script_class_cache.cfg" 2>/dev/null \
+		|| { echo "  MISS — a gitignored addon was not in the copy: its class_name is missing from the swapped cache" >&2; failures=$((failures + 1)); }
+
+	# interrupted while the OLD cache is deleted (a group SIGINT — a Ctrl-C —
+	# landing on the runner and the rm alike): no `.godot.old*` is left in the
+	# tree, no scratch copy is left behind, and "the tree is as it was" is
+	# printed only if .godot/ really is the old one. Job control (`set -m`)
+	# gives the run its own process group, which is what a terminal signals.
+	cases=$((cases + 1))
+	printf 'old-uid-cache\n' > "$proj/.godot/uid_cache.bin"
+	rm -f "$scratch/rm-marker"
+	set -m
+	_st_run "$script" "$stub" PATH="$scratch/shim:$PATH" STUB_RM_MARKER="$scratch/rm-marker" \
+		</dev/null >"$scratch/swap.out" 2>&1 &
+	rc=$!
+	set +m
+	for i in $(seq 1 100); do [ -f "$scratch/rm-marker" ] && break; sleep 0.1; done
+	out=''
+	if [ -f "$scratch/rm-marker" ]; then
+		kill -INT -- -"$rc" 2>/dev/null
+	else
+		out="$out the old cache's delete was never reached;"
+	fi
+	wait "$rc" 2>/dev/null
+	[ -z "$(cd "$proj" && ls -d "$IMPORT_DIR".old* 2>/dev/null)" ] || out="$out an old .godot/ was left in the tree;"
+	[ -z "$(ls -A "$proj/.headless-userdata/runs" 2>/dev/null)" ] || out="$out a scratch copy was left behind;"
+	if grep -q 'the tree is as it was' "$scratch/swap.out" \
+		&& [ "$(cat "$proj/.godot/uid_cache.bin" 2>/dev/null)" != 'old-uid-cache' ]; then
+		out="$out it said the tree is as it was after swapping .godot/;"
+	fi
+	[ -z "$out" ] \
+		|| { echo "  MISS — interrupted during the swap cleanup:$out output was:" >&2; cat "$scratch/swap.out" >&2; failures=$((failures + 1)); }
 
 	rm -rf "$scratch"
 
@@ -608,11 +678,22 @@ RUNS_DIR="$PWD/$GDK_SANDBOX_DIRNAME/$GDK_SANDBOX_RUNS_SUBDIR"
 mkdir -p "$RUNS_DIR" || exit 2
 COPY="$(mktemp -d "$RUNS_DIR/${GDK_SANDBOX_RUN_PREFIX}$$-import-XXXXXX")" || exit 2
 PASS_PID=''
+# Set once the new .godot/ is in the tree, so no message claims otherwise.
+SWAPPED=''
+# The old cache, when it had to be set aside BESIDE .godot/ rather than in the
+# copy (the copy on another filesystem). Removed on exit like the copy.
+OLD_BESIDE=''
 
+# The removal runs with INT/TERM IGNORED — inherited by the rm, so a Ctrl-C
+# landing mid-delete (seconds, on a large cache) cannot leave half a cache
+# behind. It is already the way out; there is nothing left to interrupt.
 # shellcheck disable=SC2329  # invoked indirectly via gdk_on_exit
 remove_copy() {
+	trap '' INT TERM
 	[ -z "$PASS_PID" ] || kill_tree "$PASS_PID"
 	PASS_PID=''
+	case "$OLD_BESIDE" in "$IMPORT_DIR".old.*) rm -rf "$OLD_BESIDE" ;; esac
+	OLD_BESIDE=''
 	case "$COPY" in
 		*"/$GDK_SANDBOX_DIRNAME/$GDK_SANDBOX_RUNS_SUBDIR/$GDK_SANDBOX_RUN_PREFIX"*) rm -rf "$COPY" ;;
 	esac
@@ -626,7 +707,11 @@ on_signal() {
 	trap '' INT TERM
 	[ -z "$PASS_PID" ] || kill_tree "$PASS_PID"
 	PASS_PID=''
-	echo "$TAG interrupted — the tree is as it was; the scratch copy is removed." >&2
+	if [ -n "$SWAPPED" ]; then
+		echo "$TAG interrupted after the swap — $IMPORT_DIR/ is the refreshed one, but new sidecars may not all be back; run it again." >&2
+	else
+		echo "$TAG interrupted — the tree is as it was; the scratch copy is removed." >&2
+	fi
 	exit "$1"
 }
 arm_signal_traps() {
@@ -718,23 +803,43 @@ if [ -n "$live" ]; then
 fi
 
 # The swap: two renames on one filesystem, signals held off between them so no
-# INT/TERM can leave the tree with no $IMPORT_DIR/ at all.
-old="$IMPORT_DIR.old.$$"
-rm -rf "$old"
+# INT/TERM can leave the tree with no $IMPORT_DIR/ at all. The old cache goes
+# INTO the scratch copy, so the exit hook that removes the copy removes it —
+# with signals ignored — and a SIGKILLed run's is reaped with its copy by the
+# next run. Renamed BESIDE $IMPORT_DIR/, a Ctrl-C during its delete left an
+# untracked, unignored `.godot.old.<pid>/` in the tree that no run reaped.
+# `mv` across filesystems silently COPIES, so the device is compared first; a
+# copy on another filesystem sets the old cache aside beside $IMPORT_DIR/.
+if [ -n "$(fs_dev "$COPY")" ] && [ "$(fs_dev "$COPY")" = "$(fs_dev .)" ]; then
+	old="$COPY/$IMPORT_DIR.old"
+else
+	old="$IMPORT_DIR.old.$$"
+	rm -rf "$old"
+	echo "${C_WARN}$TAG the scratch copy is on another filesystem — the old $IMPORT_DIR/ is set aside at $old and removed on exit${C_OFF}"
+fi
 trap '' INT TERM
 swap_rc=0
+restored=1
 if [ -e "$IMPORT_DIR" ] && ! mv "$IMPORT_DIR" "$old"; then
 	swap_rc=1
 elif ! mv "$COPY/$IMPORT_DIR" "$IMPORT_DIR"; then
 	swap_rc=1
-	[ ! -e "$old" ] || mv "$old" "$IMPORT_DIR"
+	if [ -e "$old" ] && ! mv "$old" "$IMPORT_DIR"; then restored=0; fi
+else
+	SWAPPED=1
+	case "$old" in "$COPY"/*) ;; *) OLD_BESIDE="$old" ;; esac
+fi
+if [ "$restored" -eq 0 ]; then
+	# The old cache could not go back: keep it, and the copy holding it.
+	COPY=''
+	echo "${C_BAD}$TAG could not swap the new $IMPORT_DIR/ in, NOR put the old one back — it is at $old; move it back to $REPO_ROOT/$IMPORT_DIR${C_OFF}" >&2
+	exit 2
 fi
 arm_signal_traps
 if [ "$swap_rc" -ne 0 ]; then
 	echo "${C_BAD}$TAG could not swap the new $IMPORT_DIR/ into $REPO_ROOT — the old one is in place${C_OFF}" >&2
 	exit 2
 fi
-rm -rf "$old"
 
 while IFS= read -r rel; do
 	[ -n "$rel" ] || continue
