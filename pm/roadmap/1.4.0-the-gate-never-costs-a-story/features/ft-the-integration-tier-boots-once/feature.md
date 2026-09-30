@@ -4,7 +4,7 @@ kind: feature
 milestone: 1.4.0
 name: the integration tier boots once
 status: building
-reviewed:
+reviewed: docs/reviews/2026-09-29-1.4.0-the-integration-tier-boots-once.md
 depends_on: []
 consumed_by: []
 changelog:

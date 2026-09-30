@@ -26,25 +26,32 @@
   (import churn): …`. A killed run leaves the tree byte-identical, and a Godot process holding the
   project gets a `WARN` before the swap (#20, #23).
 - `integration.sh --diff` boots only the scenarios that load a touched `tests/support/` fixture,
-  following references through other fixtures (`GDK_SCENARIO_FIXTURE_DIR`); a fixture no scenario
-  loads boots the whole tier and says so (#33). It reruns each failed scenario once, alone: one that
+  following references through other fixtures (`GDK_SCENARIO_FIXTURE_DIR`, validated: a missing or
+  absolute root exits 2). A reference is the fixture's `res://` path in any form, its basename after
+  a `/` or a quote, its `uid://`, or a `class_name` it declares. A fixture no scenario names boots
+  the whole tier and says so (#33). It reruns each failed scenario once, alone: one that
   passes alone prints `  FLAKE  <name> — failed in the sweep, passed alone` and counts green as
-  `N passed (K flaky)`; `--no-rerun` or `GDK_INTEGRATION_RERUN=0` turns this off (#34). Before a
+  `N passed (K flaky)`. Past max(3, 10% of the slice) failures nothing reruns, and a line says so.
+  `--no-rerun` or `GDK_INTEGRATION_RERUN=0` turns this off (#34). Before a
   `--diff`/`--all` sweep boots anything, `import_cache.sh` repairs a stale import cache once (#16).
   The self-test's scratch git repos can no longer write into the host repo under a hook (#24).
 - Opt-in warm integration tier (#36): with `GDK_INTEGRATION_WARM=1`, `integration.sh` boots Godot
   once per worker through the new `scenario.sh --suite`, which runs a slice of scenarios against a
   documented START/verdict contract your scenario runner implements. A scenario marked
   `## Isolated because: <reason>` always runs cold, and `--cold` forces the old path for one run.
-  Exit 4 hands crashed or stalled scenarios back to the cold path. A scenario that fails warm and
+  The contract requires the runner to exit 0 and to finish each scenario's teardown before its
+  verdict line. A crash, a non-zero exit, or an engine error outside a scenario hands the whole
+  slice back to the cold path (exit 4, `WARM-ABORT`), as does a stalled scenario. A scenario that fails warm and
   passes cold prints `WARM-ONLY` and counts green. `WARM-ABORT` names a crashed worker, a `WALL:`
   line splits warm from cold time, and `SUMMARY` carries the warm/cold/handed-back census. Unset,
   nothing changes.
 - The kit ships as a hash-locked wheel from `https://cdowin.github.io/godot-devkit/simple/`, built
   once per tag by `release.yml`. Add the `pyproject.toml` block that `install-runners` prints
-  (a dev dependency plus an `explicit = true` index) and run `uv sync`, and `Makefile.tiers` runs
-  `.venv/bin/godot-devkit`. The `GODOT_DEVKIT_VERSION` pin still works, but setting both is refused.
-  The CI toolchain action runs `uv sync --frozen` when the caller's `uv.lock` names the kit (#38).
+  (a dev dependency plus an `explicit = true` index) and run `uv lock`. When `uv.lock` names
+  `godot-devkit`, `Makefile.tiers` runs `uv run --frozen godot-devkit`, so a pulled lock bump takes
+  effect without a manual sync. The `GODOT_DEVKIT_VERSION` pin still works exactly as before. With
+  both present the pin runs and make warns once. The CI toolchain action runs the same
+  `uv run --frozen` when the caller's `uv.lock` names the kit (#38).
 
 ## v1.3.0 — 2026-09-28
 
