@@ -56,6 +56,7 @@ from pathlib import Path
 from godot_devkit.core import apply
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.project import repo_root
+from godot_devkit.godot.checks.roster import all_roster
 
 PACKAGE = 'godot_devkit.godot.installables'
 COMMAND = 'install-runners'
@@ -214,11 +215,13 @@ def retired_line(rel: str) -> str:
     and so `make milestone`, only through `godot-check` — and only when
     `[gates] extra` names it and `[checks] godot` keeps `uid`. "Safe to
     delete" said to any other repo removes its only CI uid gate, and nothing
-    would say so. Raises ConfigError on a malformed value (exit 2).
+    would say so. The roster is `all_roster()`, the one `check all` reads: an
+    absent key is all eight, and a malformed value or an unknown gate raises
+    ConfigError (exit 2) here exactly as it does there (#28).
     """
     head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
     extra = str_tuple(config_section('gates'), 'gates', 'extra', ())
-    roster = str_tuple(config_section('checks'), 'checks', 'godot', ('uid',))
+    roster = all_roster()
     if 'godot-check' not in extra:
         return (head + '`check uid` is NOT in this repo\'s gate: `[gates] '
                 'extra` does not name `godot-check`; it was left in place — '
