@@ -99,7 +99,12 @@ GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN:-1}"
 # contract in scenario.sh's header. 0 (the default) is the cold path; --cold
 # forces it for one run.
 GDK_INTEGRATION_WARM="${GDK_INTEGRATION_WARM:-0}"
-GDK_RUNNERS_LIB="${GDK_RUNNERS_LIB:-$(dirname "${BASH_SOURCE[0]}")/../gdk_runners.sh}"
+if [ -z "${GDK_RUNNERS_LIB:-}" ]; then
+	GDK_INTEGRATION_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	GDK_RUNNERS_LIB="$GDK_INTEGRATION_SCRIPT_DIR/../gdk_runners.sh"
+	[ -f "$GDK_RUNNERS_LIB" ] || GDK_RUNNERS_LIB="$GDK_INTEGRATION_SCRIPT_DIR/gdk_runners.sh"
+	unset GDK_INTEGRATION_SCRIPT_DIR
+fi
 # Env: GDK_JOBS  parallelism (default: cores - 2, floor 1)
 # -----------------------------------------------------------------------------
 
