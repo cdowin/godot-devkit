@@ -679,7 +679,7 @@ detect_jobs() {
 # runner reports is the boots, with the CPU they burned beside it: merging two
 # scenarios saves a boot, trimming lines saves nothing. Makefile.tiers reads
 # the count off the BOOTS line into the gate's cost row, where agentic-sdlc's
-# `[tests] cases` is the ceiling on it.
+# `pm ledger report` shows it.
 
 # cpu_ms <XmY.YYYs> — one field of `times`, in milliseconds; empty when it is
 # not that shape. Bash writes the fraction with the locale's radix.

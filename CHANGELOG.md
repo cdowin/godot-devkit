@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.0.0 — 2026-10-01
 
 **Upgrading (major).** Re-install the runners (`install-runners --force`) and edit two things.
 Drop `hooks-self-test` from `[gates] extra` and from any recipe: the target is gone, with no
@@ -19,6 +19,9 @@ alias. A builder's command is now `make spot SYS=<slice>`, not `make precommit`.
   scenario targets, so a reused run files no cost row.
 - `hooks-self-test` is deleted (agentic-sdlc#122). The guard's corpus is replayed by this kit's
   tests; the hook's comment no longer tells you to wire it into `check`.
+- This repo runs agentic-sdlc 2.0.0: build wide, integrate once. Its `[verify]` is `spot` and
+  `milestone`, `[integrate]` proves a batch with `check` + `test`, `[tests]` and the `hooks` and
+  `budget` gates are gone, and the five retired hooks and eight unshipped agents are removed.
 
 ## v1.6.0 — 2026-09-30
 

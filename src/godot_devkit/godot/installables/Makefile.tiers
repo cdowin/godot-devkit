@@ -47,7 +47,7 @@
 # gdk_runners.sh hands both to the include's library (GDK_GATE_LIB, exported
 # below) — the row a wrapper would file, without the second wrapper. The
 # scenario tiers pass `gdk_gate` a census of BOOTS: a scenario file is one cold
-# engine whatever its length, so `[tests] cases` on them caps what they cost.
+# engine whatever its length, so their boot count is what they cost (`pm ledger report`).
 
 # The godot-devkit command, resolved in this order:
 #   1. GODOT_DEVKIT set by the caller — used as is, nothing to resolve (the

@@ -47,7 +47,7 @@
 # gdk_runners.sh hands both to the include's library (GDK_GATE_LIB, exported
 # below) — the row a wrapper would file, without the second wrapper. The
 # scenario tiers pass `gdk_gate` a census of BOOTS: a scenario file is one cold
-# engine whatever its length, so `[tests] cases` on them caps what they cost.
+# engine whatever its length, so their boot count is what they cost (`pm ledger report`).
 
 # The godot-devkit command, resolved in this order:
 #   1. GODOT_DEVKIT set by the caller — used as is, nothing to resolve (the
@@ -267,7 +267,7 @@ GDK_MILESTONE_TIERS := matrix
 
 # Each pytest tier's one-line summary, read back out of its own transcript.
 SUM_PYTEST := grep -aoE '[0-9]+ (passed|failed)[^|]*' "$$log" | tail -1
-# The census the ledger row carries, for `check budget`'s `[tests] cases`: the
+# The census the ledger row carries, which `pm ledger report` reads: the
 # cases the run WALKED (passed + failed + skipped + errors), read off pytest's
 # own summary line — never the deselected, which a narrower tier did not run.
 SUM_CASES  := tail -1 "$$log" | grep -oE '[0-9]+ (passed|failed|skipped|errors?)' \

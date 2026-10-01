@@ -435,13 +435,13 @@ says `No such process`, or a visible process table lacks it), so the HOME reaper
 peer's live run. Where a sandbox hides pid 1 from `ps`, the library's self-test prints `SKIP — …`
 for its two foreign-pid cases instead of failing them.
 
-**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `check budget` can
-put a ceiling on each: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
+**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `pm ledger report` shows
+what each one costs: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
 (`unit` with its GUT test count as the census), and the scenario tiers carry a census of **boots**.
 A scenario file is one cold engine boot whatever its length, so the scenario tier's cost is its
-file count: merging two scenarios saves a boot, trimming lines saves nothing. `[tests] cases` on
-`integration-all` / `integration-diff` is the ceiling on it; `check test-shape`'s line cap is a
-readability gate, not a cost one.
+file count: merging two scenarios saves a boot, trimming lines saves nothing. The boots
+census on `integration-all` / `integration-diff` rows is that cost; `check test-shape`'s line cap
+is a readability gate, not a cost one.
 
 ## Development
 

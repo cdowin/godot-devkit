@@ -74,8 +74,8 @@ GDK_SUM_TAIL   := { grep -aE '^\[[A-Za-z][A-Za-z:_-]*\] ' "$$log" || tail -1 "$$
 
 # $(call gdk_gate,<log slot>,<TAG>,<summary command>,<argv...>[,<census command>])
 # Quiet capture, one verdict line, the command's own exit code. The fifth
-# argument prints how many things the run walked, for the ledger row and
-# `check budget`; guarded on `$(origin 5)` because of --warn-undefined-variables.
+# argument prints how many things the run walked, for the ledger row;
+# guarded on `$(origin 5)` because of --warn-undefined-variables.
 # The run captures into `<slot>.<pid>` and renames it onto the slot at the end:
 # `$$log` in the summary, census and failure excerpt is THIS run's transcript,
 # never a slot a concurrent run of the same gate is appending to, and the slot
@@ -123,7 +123,7 @@ pm sdlc: export AGENTIC_SDLC_ARGS = $(value ARGS)
 pm: ## PM-tree CLI (the ONLY sanctioned status transition):  make pm ARGS='story building <id>'
 	@unset ARGS; MAKEFLAGS= $(DEVKIT) pm $(if $(value ARGS),,--help)
 
-sdlc: ## Every verb, at the pin:  make sdlc ARGS='close story <id>'. make exits 2 on any failure; the verb's own exit code is the N in make's "Error N"
+sdlc: ## Every verb, at the pin:  make sdlc ARGS='release <version>'. make exits 2 on any failure; the verb's own exit code is the N in make's "Error N"
 	@unset ARGS; MAKEFLAGS= $(DEVKIT) $(if $(value ARGS),,--help)
 
 # --- Aggregate gates ----------------------------------------------------------
@@ -139,7 +139,8 @@ sdlc: ## Every verb, at the pin:  make sdlc ARGS='close story <id>'. make exits 
 #
 # A gate whose inputs are byte-identical to a recorded PASS is reused (#98):
 # `check all` keys each devkit gate on what it reads, and a `[gates] extra`
-# target with `[gates.inputs]` declared runs through `gates-extra --run`, keyed
+# target with `[gates.inputs]` declared runs through ONE `gates-extra --run`
+# call for all of them (one listing and one read of each path), keyed
 # the same way. A `check all` that reused anything and passed creates the
 # file GDK_GATE_UNMEASURED names, and its slot files no cost row.
 #
@@ -164,13 +165,24 @@ check: ## Static gate: the devkit checks + this project's own ([gates] extra); a
 	[ -n "$$extra" ] || exit "$$worst"; \
 	log="$${GDK_GATE_REPORT_DIR:-.gate-reports}/check.log"; closes="$$($(GDK_SUM_CLOSES))"; \
 	reuse="$$($(DEVKIT) gates-extra --inputs)" || exit $$?; \
-	reuse=" $$(echo $$reuse) "; \
+	reuse=" $$(echo $$reuse) "; batch=; rest=; \
 	for target in $$extra; do \
 		m=$$((m + 1)); \
-		case "$$reuse" in \
-		*" $$target "*) $(DEVKIT) gates-extra --run "$$target" && continue ;; \
-		*) $${MAKE:-make} GDK_IN_CHECK=1 "$$target" && continue ;; \
-		esac; \
+		case "$$reuse" in *" $$target "*) batch="$$batch $$target" ;; *) rest="$$rest $$target" ;; esac; \
+	done; \
+	if [ -n "$$batch" ]; then \
+		fails="$${GDK_GATE_REPORT_DIR:-.gate-reports}/.check.extra-failed.$$$$"; rm -f -- "$$fails"; \
+		GDK_EXTRA_FAILED="$$fails" $(DEVKIT) gates-extra --run $$batch; rc=$$?; \
+		if [ "$$rc" -ne 0 ]; then \
+			for target in $$(cat "$$fails" 2>/dev/null || echo gates-extra); do \
+				n=$$((n + 1)); failed="$${failed:+$$failed, }$$target"; \
+			done; \
+			[ "$$rc" -le "$$worst" ] || worst=$$rc; \
+		fi; \
+		rm -f -- "$$fails"; \
+	fi; \
+	for target in $$rest; do \
+		$${MAKE:-make} GDK_IN_CHECK=1 "$$target" && continue; \
 		rc=$$?; n=$$((n + 1)); failed="$${failed:+$$failed, }$$target"; \
 		[ "$$rc" -le "$$worst" ] || worst=$$rc; \
 	done; \
@@ -242,7 +254,7 @@ define gdk_composition
 @set -o pipefail; . $(GDK_GATE_LIB); \
 slot="$$(gdk_gate_log $(1))"; log="$$slot.$$$$"; : > "$$log"; \
 gdk_on_exit 'rm -f -- "$$log"'; verbose="$$VERBOSE"; \
-VERBOSE=1 gdk_gate_capture "$$log" -- env VERBOSE="$$verbose" $${MAKE:-make} $(3); \
+VERBOSE=1 gdk_gate_capture "$$log" -- env $(if $(value 4),$(4) )VERBOSE="$$verbose" $${MAKE:-make} $(3); \
 status="$$GDK_GATE_EXIT"; \
 summary="PASS ($(strip $(3)))"; \
 [ "$$status" -eq 0 ] || summary="FAIL (exit $$status) — $(strip $(3))"; \
