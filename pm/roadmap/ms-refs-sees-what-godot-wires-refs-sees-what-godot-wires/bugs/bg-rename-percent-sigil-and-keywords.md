@@ -3,9 +3,9 @@ id: bg-rename-percent-sigil-and-keywords
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs --rename treats a modulo as a node sigil and accepts keywords
-status: open
+status: closed
 caused_by: ft-refs-renames-a-symbol
-changelog:
+changelog: none
 ---
 
 # rename-percent-sigil-and-keywords

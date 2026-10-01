@@ -3,9 +3,9 @@ id: bg-autoloads-classname-scan-ignores-excludes
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: autoloads add class_name scan ignores refs excludes
-status: open
+status: closed
 caused_by: ft-project-verb-edits-autoloads
-changelog:
+changelog: none
 ---
 
 # autoloads-classname-scan-ignores-excludes

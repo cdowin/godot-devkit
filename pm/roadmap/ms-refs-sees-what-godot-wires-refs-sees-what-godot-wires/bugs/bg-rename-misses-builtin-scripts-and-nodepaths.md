@@ -3,9 +3,9 @@ id: bg-rename-misses-builtin-scripts-and-nodepaths
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs --rename misses built-in scripts and NodePaths
-status: open
+status: closed
 caused_by: ft-refs-renames-a-symbol
-changelog:
+changelog: none
 ---
 
 # rename-misses-builtin-scripts-and-nodepaths

@@ -3,9 +3,9 @@ id: bg-autoloads-path-case-insensitive
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: autoloads add accepts a wrong-case path on macOS
-status: open
+status: closed
 caused_by: ft-project-verb-edits-autoloads
-changelog:
+changelog: none
 ---
 
 # autoloads-path-case-insensitive
