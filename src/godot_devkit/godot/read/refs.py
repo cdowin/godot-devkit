@@ -13,8 +13,9 @@ signal deleted (#19). `refs --retarget` never acts on a dynamic hit.
 It also indexes what Godot itself wires, which no `.gd` line spells: a
 `[connection signal=… method=…]` in a scene (typed, `scene connections`), and
 an autoload NAME from `project.godot [autoload]`, indexed like a `class_name`
-(its `project.godot` entry the definition, `Name.` / `Name)` / `Name,` a typed
-ref). A signal or handler named as an argument — `is_connected("sig"`,
+(its `project.godot` entry the definition, the name as a bare identifier
+anywhere in code a typed ref, and a `"/root/Name"` node-path string a dynamic
+hit). A signal or handler named as an argument — `is_connected("sig"`,
 `has_signal("sig"`, `Signal(obj, "sig"` — is a dynamic hit; a bare handler
 in `is_connected(…, h)` / `disconnect(…, h)` is a call site.
 Comment-stripped (the capability-scan
@@ -112,9 +113,12 @@ def strip_comment(line: str) -> str:
 
 def _typed_ref_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
     """`autoload`: the symbol is a `project.godot [autoload]` NAME, which a
-    script reaches as a global — `Name.method(`, `f(Name)`, `[Name, …]` — with
-    no type annotation to anchor on. Only an autoload gets those arms: on any
-    other symbol a bare `name.` is far more often a variable than a type."""
+    script reaches as a global — `Name.method(`, `var g = Name`, `if Name:` —
+    with no type annotation to anchor on, so the bare identifier anywhere in
+    code is the reference. Not after `.` (a member), nor after `/`, `$` or `%`
+    (a node path — `"/root/Name"` is the dynamic bucket's). Only an autoload
+    gets this arm: on any other symbol a bare `name` is far more often a
+    variable than a type."""
     word = re.escape(symbol)
     alternatives = [
         rf':\s*{word}\b',            # : Sym  (typed var/param/return)
@@ -124,7 +128,7 @@ def _typed_ref_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
     ]
     alternatives += [rf'\b{kw}\s+{word}\b' for kw in TYPED_REF_KEYWORDS]
     if autoload:
-        alternatives.append(rf'(?<![\w.]){word}\s*[.),]')  # Name.  Name)  Name,
+        alternatives.append(rf'(?<![\w./$%]){word}\b')  # Name.  = Name  if Name:
     return re.compile('|'.join(alternatives))
 
 
@@ -169,11 +173,12 @@ def _definition_pattern(symbol: str) -> re.Pattern:
     return re.compile('|'.join(alternatives))
 
 
-def _dynamic_pattern(symbol: str) -> re.Pattern:
+def _dynamic_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
     """A signal reached through a receiver the index cannot type — the
     textual spellings, owned by no typed arm. `<expr>.name.connect(` is the
     live-subscriber shape on an untyped parameter; the string forms name the
-    signal as data."""
+    signal as data. `autoload`: an autoload reached by its node path,
+    `get_node("/root/Name")` / `$"/root/Name"` — a string, never typed."""
     word = re.escape(symbol)
     alternatives = [
         rf'\.{word}\.(?:connect|disconnect|emit)\(',       # expr.name.connect(
@@ -182,6 +187,8 @@ def _dynamic_pattern(symbol: str) -> re.Pattern:
         rf'\b(?:is_connected|has_signal|has_user_signal)\(\s*&?["\']{word}["\']',  # has_signal("name"
         rf'\bSignal\(.*?,\s*&?["\']{word}["\']',          # Signal(obj, "name"
     ]
+    if autoload:
+        alternatives.append(rf'["\']/root/{word}\b')         # get_node("/root/Name"
     return re.compile('|'.join(alternatives))
 
 
@@ -200,7 +207,7 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path],
     typed_ref_pattern = _typed_ref_pattern(symbol, autoload)
     call_emit_pattern = _call_emit_pattern(symbol)
     bare_call_pattern = _bare_call_pattern(symbol)
-    dynamic_pattern = _dynamic_pattern(symbol)
+    dynamic_pattern = _dynamic_pattern(symbol, autoload)
     needle = symbol.lower()
 
     hits: dict[str, list[Hit]] = {DEFINITION_KIND: [], TYPED_REF_KIND: [], CALL_EMIT_KIND: [],
