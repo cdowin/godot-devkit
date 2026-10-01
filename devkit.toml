@@ -8,20 +8,16 @@
 
 [checks]
 # `all` is the PINNED kit's roster — what `agentic-sdlc check all` runs here,
-# and the first half of `make check`. The four repo-discipline gates all
-# apply to this tree: `shell` since the repo started self-hosting its hook
-# corpus under tools/ (0.23.0), and `hooks` because the sentence was not
-# enough — `core.hooksPath` was unset in every checkout of this repo for two
-# releases while CLAUDE.md said the corpus was armed, and no target looked.
-# It is stock-OFF for consumers (arming is a decision each makes once) and on
-# for the repo that told them to.
+# and the first half of `make check`. `shell` applies because the repo
+# self-hosts its hook corpus under tools/ (0.23.0). `hooks` and `budget` were
+# retired in agentic-sdlc 2.0.0.
 #
 # `godot` is THIS package's roster — what `godot-devkit check all` runs — and
 # it is deliberately NOT set: the stock eight, on the committed clean Godot
 # project that `godot-check` stages (tools/dev/godot_devkit_on_fixture.sh),
 # with no devkit.toml in that scratch tree either. Two kits read one file, so
 # each roster has its own key; a name in the wrong one is refused by both.
-all = ["doc", "pm", "shell", "hooks", "budget", "grain-shape"]
+all = ["doc", "pm", "shell", "grain-shape"]
 
 # This package's OWN gates, as make targets `make check` runs after the roster
 # above — the same seam a consumer uses. `godot-check` is Makefile.tiers'
@@ -41,33 +37,16 @@ scope = ["CLAUDE.md", "README.md", "SDLC.md", "docs/*.md", "docs/design/*.md",
 ephemeral = ["docs/reviews/"]
 
 # The verification ladder `agentic-sdlc verify` runs, one make target per rung.
-# story is the inner loop (the suite minus the spawns, seconds); feature is the
-# close of a feature (static checks after its scoped builder proof); milestone is the
-# full gate and what CI runs (check + the matrix). Makefile.tiers defines them.
+# spot is the builder's one command (the suite minus the spawns, seconds);
+# milestone is the full gate CI runs on the release PR (check + the matrix).
 [verify]
-story = "make pyunit"
-feature = "make check"
+spot = "make pyunit"
 milestone = "make milestone"
 
-# The ceilings `check budget` grades, keyed by tier as the ledger records them
-# (`pyunit` is the story rung, `test` the feature rung). Measured at the close
-# of 0.25.0's suite pass and set roughly ten percent above the result: a tier
-# that grows past its number, or a case count that climbs, is a finding to
-# explain in the commit that caused it — never a number to raise in passing.
-# Raised at 1.4.0: +15 cases (228), and the suite costs 60.2 s of CPU against
-# 1.3.0's 45.0 s, both measured under the same load (+34%). The growth is the
-# runner self-test corpora (integration 126 -> 149 cases, scenario 32, import
-# 18) and shellcheck over a 1,000-line-larger integration.sh. Every new case
-# gates a rule-4 hole a 1.4.0 lane review found. 31 s x 1.34 is about 42 s
-# idle, so the ceiling is 46.
-# Raised at 1.6.0: +2 cases (234). One proves the engine gate queues (#41);
-# one proves a receipt keys on content and is shared by worktrees (#42).
-# Re-measured 2026-10-01 at load 3-6 on 8 cores: 1.5.0 main runs 52.8 s, this
-# branch 61.9 s. The 46 s ceiling no longer held on main either. 61.9 s x 1.3
-# is about 80 s. Wall-clock grading under load is agentic-sdlc #111.
-[tests]
-budget = { pyunit = 3, test = 80 }
-cases  = { pyunit = 57, test = 234 }
+# `agentic-sdlc integrate <slug>...` merges a batch of lanes and proves it once.
+[integrate]
+per_merge = []
+proof = ["check", "test"]
 
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines
@@ -167,6 +146,3 @@ shellcheck_version = "0.11.0"
 [release.version_files]
 "pyproject.toml" = '^version = "(.*)"$'
 "src/godot_devkit/__init__.py" = "^__version__ = '(.*)'$"
-
-[release.commands]
-prove-artifact = "uvx --no-cache --index https://cdowin.github.io/godot-devkit/simple/ godot-devkit@{version} --version"

@@ -284,8 +284,17 @@ gdk_sandbox_home() {
 # every worktree of one clone shares them: a builder's green unit run covers the
 # lead's checkout after a merge whose content is byte-identical. A FAIL is never
 # recorded. A run whose inputs moved while it ran records nothing. A reused run
-# files no cost row: it measured nothing. GDK_RECEIPTS=0 runs every tier.
+# files no cost row: it measured nothing. An unwrapped runner opens no slot; a
+# runner a Makefile wraps in `gdk_gate` is told the file GDK_GATE_UNMEASURED
+# names, and a hit creates it, so the wrapper files no row either.
+# GDK_RECEIPTS=0 runs every tier.
+#
+# GDK_RECEIPT_PATHS, set by a runner, joins more content to the key: the
+# entries `git ls-tree -r` lists for those paths (whitespace separated,
+# relative to the cwd). A scenario's `## covers:` path inside an excluded
+# directory is an input all the same, and this is how it counts.
 GDK_RECEIPT_EXCLUDE="${GDK_RECEIPT_EXCLUDE-docs pm product .claude .github}"
+GDK_RECEIPT_PATHS="${GDK_RECEIPT_PATHS:-}"
 
 # gdk_receipt_key <tier> [args...] — print the key for this tier, these args
 # and the tree as it stands. Status 1, nothing printed, when it cannot key
@@ -306,6 +315,11 @@ gdk_receipt_key() {
 	rm -f "$idx"
 	listing="$(git -C "$top" ls-tree "$tree" 2>/dev/null \
 		| awk -F'\t' -v ex=" $GDK_RECEIPT_EXCLUDE " 'index(ex, " " $2 " ") == 0')" || return 1
+	if [ -n "${GDK_RECEIPT_PATHS// /}" ]; then
+		local paths=()
+		read -r -a paths <<< "$(printf '%s' "$GDK_RECEIPT_PATHS" | tr '\n\t' '  ')"
+		listing="$listing"$'\n'"$(git ls-tree -r "$tree" -- "${paths[@]}" 2>/dev/null)" || return 1
+	fi
 	engine="$(command -v "${GDK_GODOT:-godot}" 2>/dev/null || true)"
 	[ -z "$engine" ] || engine="$engine:$(wc -c < "$engine" 2>/dev/null | tr -d ' ')"
 	printf '%s\n' "receipt-v1" "$*" "$engine" "$listing" | shasum -a 256 | cut -c1-40
@@ -318,7 +332,8 @@ _gdk_receipt_dir() {
 }
 
 # gdk_receipt_hit <tier> <key> — status 0 and the recorded verdict line,
-# marked reused, when a receipt covers this key; status 1 otherwise.
+# marked reused, when a receipt covers this key; status 1 otherwise. A hit
+# creates the file GDK_GATE_UNMEASURED names, when one is named.
 gdk_receipt_hit() {
 	local dir file
 	[ -n "${2:-}" ] || return 1
@@ -326,6 +341,35 @@ gdk_receipt_hit() {
 	file="$dir/$2"
 	[ -f "$file" ] || return 1
 	printf '%s; reused — receipt %s from %s\n' "$(sed -n 2p "$file")" "${2:0:12}" "$(sed -n 1p "$file")"
+	[ -z "${GDK_GATE_UNMEASURED:-}" ] || : > "$GDK_GATE_UNMEASURED" 2>/dev/null || true
+	return 0
+}
+
+# gdk_receipt_covers <file>... — each scenario file, then every `## covers:`
+# entry its header declares, one per line: the paths a scenario receipt keys
+# on. It reads the header as integration.sh's scenario_covers does, without
+# the grammar check: an extra path only widens a key, and the gate that
+# refuses a bad entry is `check test-shape`.
+gdk_receipt_covers() {
+	[ "$#" -gt 0 ] || return 0
+	awk '
+		FNR == 1 { print FILENAME; head = 1 }
+		!head { next }
+		/^[[:space:]]*$/ || /^#/ || /^extends[[:space:]]/ || /^class_name[[:space:]]/ || /^@/ {
+			if ($0 ~ /^##[[:space:]]*covers:/) {
+				sub(/^##[[:space:]]*covers:[[:space:]]*/, "")
+				n = split($0, parts, ",")
+				for (i = 1; i <= n; i++) {
+					e = parts[i]
+					gsub(/^[[:space:]]+|[[:space:]]+$/, "", e)
+					sub(/\/$/, "", e)
+					if (e != "") print e
+				}
+			}
+			next
+		}
+		{ head = 0 }
+	' "$@" 2>/dev/null
 }
 
 # gdk_receipt_write <tier> <key> <verdict line> [args...] — file a PASS
@@ -1294,7 +1338,7 @@ usage: source gdk_runners.sh            the normal use — a shell library
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
 gdk_engine_gate_run, gdk_engine_gate_held,
-gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write,
+gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write, gdk_receipt_covers,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.

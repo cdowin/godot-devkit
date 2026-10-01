@@ -60,8 +60,9 @@ Then join the gates to `make check`:
 extra = ["godot-check"]     # `godot-devkit check all`, the target install-runners wrote
 ```
 
-`make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make precommit` and
-`make milestone` run the Godot tiers `Makefile.tiers` declares. Every machine and CI runs the same
+`make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make milestone` runs
+the Godot tiers `Makefile.tiers` declares. A builder runs `make spot SYS=<slice>`: gdlint and a
+compile of only the `.gd` files changed against `BASE` (default `main`), then that unit slice. Every machine and CI runs the same
 gate code because `uv.lock` pins the bits.
 
 **A repo with a PM tree has a third step.** agentic-sdlc's flow — the states `pm` moves work
@@ -300,15 +301,16 @@ both are present.
 
 ```
 Makefile.tiers                          the Godot tier roster on the seam Makefile.devkit -includes:
-                                        parse lint warnings unit integration integration-all
+                                        parse lint spot warnings unit integration integration-all
                                         integration-diff integration-list scenario smoke capture
                                         import-cache godot-check uid-scan hermetic-scan
-                                        hooks-self-test runners-self-test, with
+                                        runners-self-test, with
                                         GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS
 tools/dev/gdk_runners.sh                the sandboxed headless-run library every runner sources
 tools/dev/runners/parse.sh              every .gd compiles + the headless boot is clean
 tools/dev/runners/compile_sweep.gd      stage 2 of parse.sh (+ its .uid sidecar)
 tools/dev/runners/lint.sh               gdlint over every tracked source dir
+tools/dev/runners/spot.sh               gdlint + a compile of only the .gd changed vs BASE
 tools/dev/runners/warnings.sh           the analyzer warnings only the editor shows
 tools/dev/runners/unit.sh               the GUT tier, no boot; a census that must reconcile
 tools/dev/runners/integration.sh        the scenario fan-out: --all, --diff <ref>, --system <dir>, --list;
@@ -401,9 +403,28 @@ must sum to the roster, and every scenario must have a result. Otherwise the run
 what is missing. `[INTEGRATION] WALL: warm workers Xs, cold remainder Ys` splits the wall clock,
 and `BOOTS` counts one boot per worker. Compare before and after in your own ledger.
 
-Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all
-and `make hooks-self-test` replays the guard's. Every gate prints ONE verdict line naming its full
+Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all.
+The guard's corpus (`bash tools/hooks/cc-godot-sandbox.sh --self-test`) is replayed by this kit's
+own tests, so do not add it to `[gates] extra`. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
+
+**The spot check.** `make spot SYS=<slice>` is a builder's whole proof. `spot.sh` runs gdlint and
+`compile_sweep.gd` over the `.gd` files that differ from the merge base of `HEAD` and `BASE`
+(`GDK_SPOT_BASE`, default `main`): committed, staged and unstaged edits, and untracked files. The
+sweep takes the list as user arguments (`-- res://a.gd …`) and walks nothing else. When no `.gd`
+changed, the verdict is `[SPOT] PASS — census 0: no .gd changed vs merge-base <sha> with <base>`.
+Then `unit.sh $(SYS)` runs, and the exit is the worse of the two. `GDK_PRECOMMIT_TIERS` is `spot`,
+so `make precommit` runs `check` + `spot` and its first line says it is retired.
+
+**Receipts.** A tier that passes files a receipt keyed on its inputs, and a run over the same inputs
+prints the recorded verdict with `; reused — receipt <id>` and boots nothing. `parse`, `lint`,
+`spot`, `unit`, `warnings` (keyed on `GDK_WARNING_CATEGORIES` too), `integration` and a direct
+`scenario` file them. The integration key holds the arguments, the roster env, the tree of the
+`--diff` ref, and the roster files with every `## covers:` path, and it is asked before the engine
+lease. A `scenario` run inside a sweep, under `--suite` or with `-v` files none. A path a runner
+names in `GDK_RECEIPT_PATHS` joins the key even inside a `GDK_RECEIPT_EXCLUDE` directory. A reused
+run files no cost row: the `gdk_gate`-wrapped targets export `GDK_GATE_UNMEASURED`, and a hit
+creates that file. `GDK_RECEIPTS=0` runs every tier.
 
 **Several lanes on one machine.** `unit.sh` bounds its run at 180 s times `ceil(1-minute load /
 cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (load
@@ -414,13 +435,13 @@ says `No such process`, or a visible process table lacks it), so the HOME reaper
 peer's live run. Where a sandbox hides pid 1 from `ps`, the library's self-test prints `SKIP — …`
 for its two foreign-pid cases instead of failing them.
 
-**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `check budget` can
-put a ceiling on each: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
+**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `pm ledger report` shows
+what each one costs: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
 (`unit` with its GUT test count as the census), and the scenario tiers carry a census of **boots**.
 A scenario file is one cold engine boot whatever its length, so the scenario tier's cost is its
-file count: merging two scenarios saves a boot, trimming lines saves nothing. `[tests] cases` on
-`integration-all` / `integration-diff` is the ceiling on it; `check test-shape`'s line cap is a
-readability gate, not a cost one.
+file count: merging two scenarios saves a boot, trimming lines saves nothing. The boots
+census on `integration-all` / `integration-diff` rows is that cost; `check test-shape`'s line cap
+is a readability gate, not a cost one.
 
 ## Development
 

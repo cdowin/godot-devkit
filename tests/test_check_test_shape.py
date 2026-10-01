@@ -164,7 +164,7 @@ class TheCap(unittest.TestCase):
         self.assertIn('READABILITY gate', doc)
         self.assertIn('WHAT THIS DOES NOT GOVERN: COST', doc)
         self.assertIn('BOOTS census', doc)
-        self.assertIn('`[tests] cases`', doc)
+        self.assertIn('`pm ledger report`', doc)
 
 
 class TheRatchet(unittest.TestCase):

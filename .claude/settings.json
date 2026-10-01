@@ -6,11 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash tools/hooks/cc-commit-pathspec.sh"
-          },
-          {
-            "type": "command",
-            "command": "bash tools/hooks/cc-git-allowlist.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/hooks/cc-git-denylist.sh\""
           },
           {
             "type": "command",
@@ -26,34 +22,11 @@
             "command": "bash tools/hooks/cc-write-confine.sh"
           }
         ]
-      },
-      {
-        "matcher": "Agent|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash tools/hooks/cc-agent-isolation.sh"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash tools/hooks/cc-session-preflight.sh"
-          }
-        ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "bash tools/hooks/cc-stop-gate.sh"
-          },
           {
             "type": "command",
             "command": "bash tools/hooks/cc-ledger-session.sh",

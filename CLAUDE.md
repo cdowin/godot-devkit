@@ -85,14 +85,13 @@ that is not a target gets a target first.
 | rung | command | what it is |
 |---|---|---|
 | a PM-tree or doc edit | `make check` | the pinned kit's `check all`, then `godot-check` through `[gates] extra`: `godot-devkit check all` from `src/` over `tests/fixtures/godot_project/`, the committed clean Godot project, staged by `tools/dev/godot_devkit_on_fixture.sh` — this tree holds no scene outside its fixtures |
-| the inner loop | `make pyunit` | the story rung: the suite minus the spawns (`-m "not shell"`), seconds |
-| before a commit | `make precommit` | `check` + `test` |
-| closing a story | `agentic-sdlc close story <id>` | the belt: its checks, then `done` |
-| closing a feature | scoped builder proof, `make check`, then `agentic-sdlc close feature <id>` | the declared feature rung is `[verify] feature = "make check"` |
-| closing a milestone | `make milestone`, then `agentic-sdlc release <version>` | `check` + `matrix`: every interpreter, the floor runs everything and the rest `-m "not shell"`; it runs LAST, after the review |
+| a builder's whole proof | `make pyunit` | `[verify] spot`: the suite minus the spawns (`-m "not shell"`), seconds. This tree has no Godot project; a consumer's spot is `make spot SYS=<slice>` |
+| a batch of lanes | `make sdlc ARGS='integrate <slug>...'` | merges the batch, runs `[integrate] proof` (`check` + `test`) once, closes its stories, deletes the lanes |
+| closing a story or feature | `make pm ARGS='story done <id>'` | a status write; `integrate` writes it for a batch |
+| closing a milestone | `make sdlc ARGS='release <version>'` | checks facts, writes `done`, runs no gate; CI runs `make milestone` (`check` + `matrix`) once on the release PR |
 | a pin bump | `agentic-sdlc adopt <version>` | what proves the bump; `install-* --diff` shows a hand-edit |
 
-Costs are the ledger's (`agentic-sdlc verify --plan`); `[tests] budget` / `cases` in `devkit.toml` are the ceilings `check budget` grades.
+Costs are the ledger's: `agentic-sdlc verify --plan` and `make pm ARGS='ledger report'`.
 
 - **Every gate prints ONE verdict line** naming its transcript under `.gate-reports/`; `VERBOSE=1` streams
   it. A new target routes through `$(call gdk_gate,…)`; never grep a gate's output for its result.
@@ -122,8 +121,8 @@ with its installable by something that runs, never by intention.
   (`install-hooks`, with `.claude/settings.json` carrying the entries it prints);
   `.github/workflows/verify.yml` (`install-ci`: one job, `make milestone`);
   `.claude/agents/` except `code-reviewer.md`, which is this repo's own (`install-agents`);
-  `.claude/rules/pm-execution.md` and `.claude/skills/` except `release/` (`pm install-skills`); `docs/sdlc-protocol.md`
-  (`install-sdlc`). `agentic-sdlc adopt` proves a pin bump; `install-* --diff` shows a hand-edit.
+  `.claude/rules/pm-execution.md` and `.claude/skills/` except `release/` (`pm install-skills`).
+  `agentic-sdlc adopt` proves a pin bump; `install-* --diff` shows a hand-edit.
 - `pm/roadmap/` is a real PM tree, moved only through `make pm ARGS="…"`; `devkit.toml` turns on every
   `[pm]` rule except D8 (bump at start — this repo bumps at close). A rule that fails here gets its
   finding fixed; switching one off is only right when it encodes a flow this repo does not run.

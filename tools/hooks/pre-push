@@ -1,42 +1,19 @@
 #!/usr/bin/env bash
-# pre-push — tracked git hook (core.hooksPath=tools/hooks). Stage 1 blocks a
-# direct push to a protected branch, always. Stage 2 runs the project's static
-# gate before a trunk push lands; skipped for agent worktrees (their Stop hook
-# already gates) and for pushes carrying no commit the remote lacks (up-to-date,
-# tag-only, delete, a new branch or a fast-forward at an already-pushed commit).
+# pre-push — tracked git hook (core.hooksPath=tools/hooks). Blocks a direct
+# push to a protected branch, always. It runs no gate: a hook refuses only an
+# act that cannot be undone or that harms another tree.
 # Stdin: one `<local_ref> <local_sha> <remote_ref> <remote_sha>` per ref.
 set -eu
 
 # --- project config (yours to edit after install — the file is your repo's) --
 # Branch names (exact, space-separated) that must never be pushed directly.
 PROTECTED_BRANCHES="main"
-# The gate a trunk push pays. Must exist as a target in your Makefile.
-PUSH_GATE=(make check)
-# The per-agent worktree marker written by tools/dev/agent-worktree.sh.
-SCOPE_MARKER=".agent-scope"
 # -----------------------------------------------------------------------------
 
 # A header carried from an older install may lack a key: it runs at its stock value.
 declare -p PROTECTED_BRANCHES >/dev/null 2>&1 || PROTECTED_BRANCHES="main"
-declare -p PUSH_GATE >/dev/null 2>&1 || PUSH_GATE=(make check)
-declare -p SCOPE_MARKER >/dev/null 2>&1 || SCOPE_MARKER=".agent-scope"
 
-# Inline, not sourced: a library the repo may lack would fail the hook.
-is_agent_context() {
-	local root
-	root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-	[ -n "${DEVKIT_AGENT_SCOPE:-}" ] && return 0
-	[ -n "$root" ] && [ -f "${root}/${SCOPE_MARKER}" ]
-}
-
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-ZERO_SHA="0000000000000000000000000000000000000000"
-# git passes the remote's name (or its URL, when none) as $1.
-remote_name="${1:-}"
-
-# One pass: the protected-branch block, and whether any real branch commit goes out.
-has_real_push=0
-while read -r _local_ref local_sha remote_ref _remote_sha; do
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
 	[ -z "${remote_ref:-}" ] && continue
 	# Exact match: a substring match would block refs/heads/maintenance for "main".
 	for protected in $PROTECTED_BRANCHES; do
@@ -48,48 +25,6 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
 			exit 1
 		fi
 	done
-	# A real push = a branch ref carrying a commit the remote does not have
-	# (delete = zero sha). A new branch or a fast-forward to a commit the
-	# remote already has is not one. No remote name, or a rev-list that
-	# fails, counts as a real push: fail closed.
-	case "$remote_ref" in
-		refs/heads/*)
-			[ "$local_sha" = "$ZERO_SHA" ] && continue
-			if [ -n "$remote_name" ] &&
-				new_commit="$(git rev-list -n 1 "$local_sha" --not \
-					--remotes="$remote_name" </dev/null 2>/dev/null)"; then
-				[ -n "$new_commit" ] && has_real_push=1
-			else
-				has_real_push=1
-			fi
-			;;
-	esac
 done
-
-# --- Stage 2: auto-gate, a TRUNK push concern ---------------------------------
-if is_agent_context; then
-	exit 0
-fi
-
-# Nothing real being pushed: no code state to gate.
-[ "$has_real_push" -eq 1 ] || exit 0
-
-# No Makefile, no gate: fail open; stage 1 already ran.
-[ -f "${REPO_ROOT}/Makefile" ] || exit 0
-
-# Run from the repo root so make/tools resolve, with git's repository-local
-# env vars unset: an inherited GIT_DIR would send a self-test's `git init`
-# into this repository instead of its scratch directory.
-cd "$REPO_ROOT"
-for local_var in $(git rev-parse --local-env-vars 2>/dev/null || true); do
-	unset "$local_var"
-done
-if ! "${PUSH_GATE[@]}"; then
-	echo "" >&2
-	echo "BLOCKED (pre-push gate): ${PUSH_GATE[*]} failed — fix before pushing." >&2
-	echo "  re-run locally: ${PUSH_GATE[*]}" >&2
-	echo "" >&2
-	exit 1
-fi
 
 exit 0

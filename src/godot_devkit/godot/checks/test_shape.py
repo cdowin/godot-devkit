@@ -13,8 +13,8 @@ engine per file, whatever its length: measured on one consumer, scenarios of
 number, and splitting a file to get under the cap ADDS a boot. What governs the
 tier's cost is the number of scenario FILES booted — the BOOTS census
 integration.sh prints, which `make integration`/`integration-all`/
-`integration-diff` file on the gate's ledger row — and the ceiling on it is
-agentic-sdlc's `[tests] cases` for those tiers, graded by `check budget`.
+`integration-diff` file on the gate's ledger row, which `pm ledger report`
+reads.
 Merging two scenarios saves a boot; trimming lines saves nothing.
 
 A RATCHET, not a big bang. Failing every over-cap file the day the gate lands

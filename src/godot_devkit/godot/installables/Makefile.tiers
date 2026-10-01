@@ -24,8 +24,15 @@
 # and `make check` runs agentic-sdlc's roster, then `godot-check`, which is
 # `godot-devkit check all` — the eight Godot gates, narrowed by `[checks] all`
 # in the same file. The static gates below that boot no engine
-# (`hermetic-scan`, `hooks-self-test`, `runners-self-test`, `uid-scan`) are
-# one more name each in that list, when the tree has decided to pay them.
+# (`hermetic-scan`, `runners-self-test`, `uid-scan`) are one more name each in
+# that list, when the tree has decided to pay them. The engine-boot guard's
+# own corpus is NOT one of them: this kit's tests replay it before a release,
+# and a consumer gate that replays it again proves nothing new.
+#
+# A BUILDER RUNS `make spot SYS=<slice>`: gdlint and a compile of only the .gd
+# files changed vs BASE, then the unit slice — under 30 s on a quiet machine.
+# The wide tiers are the integrator's, once per batch. `precommit` is retired
+# for that use: it still runs (check + spot) and says so on its first line.
 #
 # EVERY GATE PRINTS ONE LINE: its verdict, naming .gate-reports/<gate>.log;
 # `VERBOSE=1` streams the transcript. parse, lint, warnings and unit publish
@@ -40,7 +47,7 @@
 # gdk_runners.sh hands both to the include's library (GDK_GATE_LIB, exported
 # below) — the row a wrapper would file, without the second wrapper. The
 # scenario tiers pass `gdk_gate` a census of BOOTS: a scenario file is one cold
-# engine whatever its length, so `[tests] cases` on them caps what they cost.
+# engine whatever its length, so their boot count is what they cost (`pm ledger report`).
 
 # The godot-devkit command, resolved in this order:
 #   1. GODOT_DEVKIT set by the caller — used as is, nothing to resolve (the
@@ -98,20 +105,22 @@ GDK_CENSUS_BOOTS := sed -n 's/^\[INTEGRATION\] BOOTS: \([0-9][0-9]*\) .*/\1/p' "
 #   ARGS — passthrough              make integration ARGS="--system input"
 #   NAME — scenario / capture       make scenario NAME=boot_to_hub
 #   REF  — the diff base            make integration-diff REF=origin/main
+#   BASE — the spot check's base    make spot BASE=milestone/1.2.0-x SYS=input
 SYS  ?=
 NAME ?=
 REF  ?= HEAD
+BASE ?= main
 
-# What the include's compositions run AFTER `check`. `precommit` is the
-# per-change gate — `integration-diff` is smoke plus whatever the change's
-# declared coverage selects, exactly smoke on a clean tree. `milestone` is the
-# full gate: `unit` runs whole here where the per-change cadence slices it.
-GDK_PRECOMMIT_TIERS := parse lint unit integration-diff
+# What the include's compositions run AFTER `check`. `precommit` is `spot`
+# alone: a builder's proof is the spot check, and the batch's is the
+# integrator's (`integration-diff` is smoke plus whatever the change's
+# declared coverage selects). `milestone` is the full gate.
+GDK_PRECOMMIT_TIERS := spot
 GDK_MILESTONE_TIERS := parse lint warnings unit integration-all
 
-.PHONY: parse lint warnings unit integration integration-all integration-diff \
+.PHONY: parse lint spot warnings unit integration integration-all integration-diff \
         integration-list scenario smoke capture import-cache \
-        godot-check uid-scan hermetic-scan hooks-self-test runners-self-test
+        godot-check uid-scan hermetic-scan runners-self-test gdk-precommit-retired
 
 # --- Tier 1: static / fast gates ---------------------------------------------
 parse: ## Compile gate — every .gd compiles + the headless boot is clean
@@ -119,6 +128,23 @@ parse: ## Compile gate — every .gd compiles + the headless boot is clean
 
 lint: ## gdlint static analysis over every tracked source dir
 	@bash $(GDK_RUNNERS_DIR)/lint.sh
+
+# The builder's one command. spot.sh lints and compiles only the .gd files
+# changed vs the merge base with BASE (no changed .gd is a PASS, census 0);
+# then the unit slice SYS names runs. Both run, each prints its own verdict
+# and files a receipt, and the exit is the worse of the two.
+spot: export GDK_SPOT_BASE = $(BASE)
+spot: ## The builder's check: lint + compile of the .gd changed vs BASE (default main), then unit SYS=<slice>
+	@bash $(GDK_RUNNERS_DIR)/spot.sh; rc=$$?; \
+	bash $(GDK_RUNNERS_DIR)/unit.sh $(SYS); u=$$?; \
+	[ "$$u" -le "$$rc" ] || rc=$$u; exit "$$rc"
+
+# `precommit` is the include's composition; this adds a prerequisite and no
+# recipe. While GDK_PRECOMMIT_TIERS names `spot`, it prints one line saying
+# the tier is retired and what replaced it.
+precommit: gdk-precommit-retired
+gdk-precommit-retired:
+	@$(if $(filter spot,$(GDK_PRECOMMIT_TIERS)),echo "[PRECOMMIT] retired: it runs check + spot. A builder runs \`make spot SYS=<slice>\`; the integrator proves the batch once")
 
 warnings: ## GDScript analyzer-warnings gate (the editor-only ones)
 	@bash $(GDK_RUNNERS_DIR)/warnings.sh
@@ -134,9 +160,6 @@ uid-scan: ## .uid drift guard (script-ref <-> .gd.uid, sidecar presence, canonic
 
 hermetic-scan: ## Hermeticity gate (a headless run's sandbox HOME self-destructs)
 	$(call gdk_gate,hermetic-scan,HERMETIC,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/hermetic_run_scan.sh)
-
-hooks-self-test: ## The engine-boot guard's own block/allow corpus — proven, not claimed
-	$(call gdk_gate,hooks-self-test,HOOKS,$(GDK_SUM_TAIL),bash $(GDK_HOOKS_DIR)/cc-godot-sandbox.sh --self-test)
 
 # Derived, not listed: every installed runner's own corpus, so a runner that
 # lands tomorrow is proven the day it arrives. A census of ZERO says so and
@@ -173,10 +196,18 @@ unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
 # .gate-reports/<gate>.log, VERBOSE=1 streams it. (`scenario.sh -v` remains the
 # hand-run flag for the ENGINE transcript, which lands in .scenario-reports/
 # and is named in the runner's own output.)
+#
+# A run its receipt covers boots nothing and measured nothing: the runner
+# creates the file GDK_GATE_UNMEASURED names, and `gdk_gate` files no cost row.
+# Each recipe clears it first, so a marker left by an earlier run cannot drop
+# the next row.
+integration integration-all integration-diff scenario smoke: export GDK_GATE_UNMEASURED = $(CURDIR)/.gate-reports/.$@.unmeasured
 integration: ## Integration tier. Pass ARGS="--all|--system <dir>|--diff <ref>|<names>"
+	@rm -f -- "$$GDK_GATE_UNMEASURED"
 	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all),$(GDK_CENSUS_BOOTS))
 
 integration-all: ## Every integration scenario, one process each, N in parallel
+	@rm -f -- "$$GDK_GATE_UNMEASURED"
 	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all,$(GDK_CENSUS_BOOTS))
 
 # The per-change slice: every scenario whose header declares it covers a path
@@ -185,6 +216,7 @@ integration-all: ## Every integration scenario, one process each, N in parallel
 # runners) makes the whole tier the honest slice. REF defaults to HEAD — the
 # uncommitted change — so a clean tree runs exactly what `smoke` runs.
 integration-diff: ## The scenarios covering what the diff against REF touched, plus smoke
+	@rm -f -- "$$GDK_GATE_UNMEASURED"
 	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF),$(GDK_CENSUS_BOOTS))
 
 # The roster `--all` boots, one repo-relative path per line, booting nothing.
@@ -198,9 +230,11 @@ integration-list: ## The roster --all would boot, one path per line (what check 
 
 scenario: ## One scenario, cold:  make scenario NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make scenario NAME=<scenario>"; exit 2; }
+	@rm -f -- "$$GDK_GATE_UNMEASURED"
 	$(call gdk_gate,scenario,SCENARIO,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/scenario.sh $(NAME))
 
 smoke: ## The smoke scenario (GDK_SMOKE_SCENARIO) — the shortest proof the game boots
+	@rm -f -- "$$GDK_GATE_UNMEASURED"
 	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke,$(GDK_CENSUS_BOOTS))
 
 capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<scenario>

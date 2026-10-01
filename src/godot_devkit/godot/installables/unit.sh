@@ -232,7 +232,7 @@ self_test() {
 		|| { echo "  MISS — the Scripts count must parse as 14, got '$out'" >&2; failures=$((failures + 1)); }
 
 	# The census the cost row carries is the TESTS row of the same block — the
-	# count `[tests] cases` grades — and no totals block is NO census, never 0.
+	# count the ledger row carries — and no totals block is NO census, never 0.
 	cases=$((cases + 1))
 	out="$(printf '%s\n' 'Tests            99' 'Totals' 'Scripts 14' 'Tests            100' \
 		| gut_total Tests)"
@@ -447,7 +447,7 @@ GODOT_EXIT=$?
 
 PLAIN="$(printf '%s\n' "$RAW" | strip_ansi)"
 gdk_gate_publish "$LOG" "$RAW"
-# The census on the row: the tests GUT counted, what `[tests] cases` grades.
+# The census on the row: the tests GUT counted.
 # Empty (no totals block) leaves the row without one, never with a 0.
 GDK_GATE_CENSUS="$(printf '%s\n' "$PLAIN" | gut_total Tests)"
 export GDK_GATE_CENSUS

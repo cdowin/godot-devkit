@@ -1,0 +1,3 @@
+{"ts":"2026-10-01T14:57:01Z","kind":"status","grain":"ms-build-wide-integrate-once","from":"planning","to":"building","branch":"milestone/2.0.0-build-wide-integrate-once"}
+{"ts":"2026-10-01T14:57:01Z","kind":"status","grain":"ft-spot-and-adopt","from":"planning","to":"done","branch":"milestone/2.0.0-build-wide-integrate-once"}
+{"ts":"2026-10-01T14:58:44Z","kind":"status","grain":"ms-build-wide-integrate-once","from":"building","to":"done","branch":"milestone/2.0.0-build-wide-integrate-once"}
