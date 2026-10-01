@@ -28,6 +28,11 @@ reproduced on 657a0e4 with exit 0:
    and `Signal(obj, "died")` land in no bucket (1.4.0 read-verbs review N3 — moved here from the
    carry-forwards). They belong in the dynamic bucket at least, so the zero verdict cannot print.
 
+Holes 2 and 3 were raised by a DeepWiki review of the repo, then reproduced here:
+https://deepwiki.com/search/are-there-improvements-you-wou_13405135-c567-462c-baf2-cd2dca92dd81 —
+its line numbers predate 2.0.0, and its claims that `rng` inner-class shadowing is open and that
+nothing parses `project.godot` were checked and are false.
+
 ## Ship criterion
 
 Each of the three spellings above, in a scratch project, shows under a named bucket of `refs <symbol>`

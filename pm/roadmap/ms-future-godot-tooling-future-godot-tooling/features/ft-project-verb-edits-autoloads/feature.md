@@ -17,6 +17,9 @@ write verb. `autoloads` reads it (`read/autoloads.py`), nothing writes it. Start
 agents make most: `project autoload add <Name> <res://path>` and `project autoload remove <Name>`,
 through `core/apply`, same `--dry-run` diff contract as `scene`. Other sections wait for a real ask.
 
+Proposed in a DeepWiki design review of the repo (suggestion 2):
+https://deepwiki.com/search/are-there-improvements-you-wou_13405135-c567-462c-baf2-cd2dca92dd81
+
 ## Ship criterion
 
 Add and remove each touch only the `[autoload]` section (creating it when absent), keep every other

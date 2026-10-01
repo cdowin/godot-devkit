@@ -4,7 +4,7 @@ kind: milestone
 name: Future Godot tooling
 status: planning
 depends_on: []
-branch:
+branch: milestone/2.1.0-future-godot-tooling
 mode:
 version: 2.1.0
 changelog:

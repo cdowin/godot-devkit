@@ -24,6 +24,9 @@ The hard part is `.gd` text: the comment-stripped scan is not string-literal-awa
 string must refuse rather than rewrite. Any dynamic-bucket hit refuses the WHOLE plan, naming each
 site — never a partial rename.
 
+Proposed in a DeepWiki design review of the repo (suggestion 3):
+https://deepwiki.com/search/are-there-improvements-you-wou_13405135-c567-462c-baf2-cd2dca92dd81
+
 ## Ship criterion
 
 `refs --rename A B [--dry-run]` rewrites every typed hit in one plan, or refuses with every blocking

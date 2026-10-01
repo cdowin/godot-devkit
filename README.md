@@ -21,8 +21,8 @@ without re-reading the file.
 ## Install — two pins
 
 A consumer pins two kits and includes one file. `agentic-sdlc` is the gate framework and the SDLC
-(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this kit is the
-Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
+(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts; its overview is
+[on DeepWiki](https://deepwiki.com/cdowin/agentic-sdlc)); this kit is the Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
 
 | shape | the pin | what `make` runs |
 |---|---|---|
