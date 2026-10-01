@@ -122,8 +122,11 @@ def plan_add(text: str, name: str, res_path: str) -> tuple[str, str]:
         block = [HEADER, '', entry]
         if text:
             block.insert(0, '')
-        return text + lead + ''.join(line + eol for line in block), \
-            f'new {HEADER} section'
+        added = ''.join(line + eol for line in block)
+        # A file with no final newline keeps having none, so `rm` restores it.
+        if lead:
+            added = added[:-len(eol)]
+        return text + lead + added, f'new {HEADER} section'
     existing = _the_entry(section, name)
     if existing is not None:
         declared = _declared_path(existing.value)

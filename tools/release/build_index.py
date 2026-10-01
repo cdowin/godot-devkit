@@ -11,9 +11,10 @@
 
 and the two files written are `<out-dir>/simple/index.html` and
 `<out-dir>/simple/<normalised project>/index.html`, every link carrying
-`#sha256=<hex>` and `data-requires-python` from this checkout's
-pyproject.toml — the tag being released, so an older release is listed under
-the CURRENT floor (installers re-read each wheel's own metadata anyway). The
+`#sha256=<hex>`, and the files of the tag being released (this checkout's
+pyproject.toml `version`) carrying its `data-requires-python`. An older
+release carries none: the current floor is not ITS floor, and a raised floor
+stamped on an old wheel would hide it from an interpreter it supports. The
 whole index is regenerated from ALL releases on every run
 (.github/workflows/release.yml), so the output is a pure function of the list:
 sorted, byte-stable, and a run that lost a release is repaired by the next.
@@ -60,11 +61,27 @@ def distribution(filename: str) -> str:
     return normalise(filename[:-len('.tar.gz')].rsplit('-', 1)[0])
 
 
+def _project_key(key: str, pyproject: Path) -> str | None:
+    with pyproject.open('rb') as handle:
+        value = tomllib.load(handle).get('project', {}).get(key)
+    return value if isinstance(value, str) and value.strip() else None
+
+
 def requires_python(pyproject: Path = PYPROJECT) -> str | None:
     """`[project] requires-python` from `pyproject`, or None when undeclared."""
-    with pyproject.open('rb') as handle:
-        value = tomllib.load(handle).get('project', {}).get('requires-python')
-    return value if isinstance(value, str) and value.strip() else None
+    return _project_key('requires-python', pyproject)
+
+
+def project_version(pyproject: Path = PYPROJECT) -> str | None:
+    """`[project] version` from `pyproject` — the tag being released."""
+    return _project_key('version', pyproject)
+
+
+def file_version(filename: str) -> str:
+    """The version field of a wheel or sdist filename."""
+    if filename.endswith('.whl'):
+        return filename.split('-')[1]
+    return filename[:-len('.tar.gz')].rsplit('-', 1)[1]
 
 
 def _page(title: str, links: list[str]) -> str:
@@ -82,11 +99,13 @@ def _page(title: str, links: list[str]) -> str:
 
 
 def render(assets: list[dict], project: str = PROJECT,
-           python: str | None = None) -> dict[str, str]:
+           python: str | None = None,
+           version: str | None = None) -> dict[str, str]:
     """{relative path: text} for the two index files. Raises Refused.
 
-    `python` is the `requires-python` specifier every link carries as
-    `data-requires-python`; None omits the attribute.
+    `python` is the `requires-python` specifier a link carries as
+    `data-requires-python` — only the links of `version` when one is named,
+    every link when None; `python` None omits the attribute.
     """
     if not isinstance(assets, list) or not assets:
         raise Refused('the asset list is empty — an index of nothing is '
@@ -119,7 +138,8 @@ def render(assets: list[dict], project: str = PROJECT,
                  [f'<a href="{norm}/">{html.escape(norm)}</a>'])
     floor = ('' if python is None else
              f' data-requires-python="{html.escape(python, quote=True)}"')
-    links = [f'<a href="{html.escape(url, quote=True)}#sha256={sha}"{floor}>'
+    links = [f'<a href="{html.escape(url, quote=True)}#sha256={sha}"'
+             f'{floor if version in (None, file_version(name)) else ""}>'
              f'{html.escape(name)}</a>' for name, url, sha in rows]
     return {'simple/index.html': root,
             f'simple/{norm}/index.html': _page(f'Links for {norm}', links)}
@@ -132,7 +152,7 @@ def main(argv: list[str]) -> int:
     source, out = Path(argv[0]), Path(argv[1])
     try:
         assets = json.loads(source.read_text(encoding='utf-8'))
-        files = render(assets, PROJECT, requires_python())
+        files = render(assets, PROJECT, requires_python(), project_version())
     except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError,
             Refused) as err:
         print(f'build_index: {err} — nothing was written', file=sys.stderr)

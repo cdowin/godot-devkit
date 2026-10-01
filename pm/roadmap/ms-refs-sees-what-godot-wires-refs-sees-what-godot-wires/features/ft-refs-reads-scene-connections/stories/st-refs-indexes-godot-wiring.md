@@ -4,7 +4,7 @@ kind: story
 feature: ft-refs-reads-scene-connections
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs indexes what Godot wires
-status: building
+status: done
 owner:
 depends_on: []
 changelog:

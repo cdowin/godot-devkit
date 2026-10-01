@@ -45,15 +45,24 @@ TAIL = '  </body>\n</html>\n'
 ROOT_PAGE = HEAD.format('Simple index') + '    <a href="godot-devkit/">godot-devkit</a><br/>\n' + TAIL
 # This checkout's pyproject.toml `requires-python`, HTML-escaped.
 FLOOR = ' data-requires-python="&gt;=3.11"'
-PROJECT_PAGE = (
-    HEAD.format('Links for godot-devkit')
-    + f'    <a href="{URL}/v1.3.1/godot_devkit-1.3.1-py3-none-any.whl#sha256={A}"{FLOOR}>'
-      'godot_devkit-1.3.1-py3-none-any.whl</a><br/>\n'
-    + f'    <a href="{URL}/v1.4.0/godot_devkit-1.4.0-py3-none-any.whl#sha256={B}"{FLOOR}>'
-      'godot_devkit-1.4.0-py3-none-any.whl</a><br/>\n'
-    + f'    <a href="{URL}/v1.4.0/godot_devkit-1.4.0.tar.gz#sha256={C}"{FLOOR}>'
-      'godot_devkit-1.4.0.tar.gz</a><br/>\n'
-    + TAIL)
+
+
+def project_page(old: str = '', new: str = '') -> str:
+    """The project page, `old` on the 1.3.1 link and `new` on the 1.4.0 ones."""
+    return (
+        HEAD.format('Links for godot-devkit')
+        + f'    <a href="{URL}/v1.3.1/godot_devkit-1.3.1-py3-none-any.whl#sha256={A}"{old}>'
+          'godot_devkit-1.3.1-py3-none-any.whl</a><br/>\n'
+        + f'    <a href="{URL}/v1.4.0/godot_devkit-1.4.0-py3-none-any.whl#sha256={B}"{new}>'
+          'godot_devkit-1.4.0-py3-none-any.whl</a><br/>\n'
+        + f'    <a href="{URL}/v1.4.0/godot_devkit-1.4.0.tar.gz#sha256={C}"{new}>'
+          'godot_devkit-1.4.0.tar.gz</a><br/>\n'
+        + TAIL)
+
+
+# Run from this checkout, none of the listed releases is the tag being
+# released, so no link carries this checkout's floor.
+PROJECT_PAGE = project_page()
 
 
 def _main(*argv: str) -> tuple[int, str, str]:
@@ -78,6 +87,11 @@ def test_the_index_is_byte_stable_normalised_and_every_link_is_hashed(tmp_path):
     assert build_index.render(list(reversed(ASSETS))) == build_index.render(ASSETS)
     assert set(build_index.render(ASSETS, project='Godot_Devkit')) == {
         'simple/index.html', 'simple/godot-devkit/index.html'}
+    # The floor rides only the released tag's files; with no tag named, every link.
+    by_tag = build_index.render(ASSETS, python='>=3.11', version='1.4.0')
+    assert by_tag['simple/godot-devkit/index.html'] == project_page(new=FLOOR)
+    untagged = build_index.render(ASSETS, python='>=3.11')
+    assert untagged['simple/godot-devkit/index.html'] == project_page(FLOOR, FLOOR)
 
 
 @pytest.mark.parametrize('assets, says', [

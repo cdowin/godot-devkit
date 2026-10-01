@@ -4,7 +4,7 @@ kind: story
 feature: ft-the-1-4-0-carry-forwards
 milestone: "ms-refs-sees-what-godot-wires"
 name: the import and scenario runner findings
-status: building
+status: done
 owner:
 depends_on: []
 changelog:

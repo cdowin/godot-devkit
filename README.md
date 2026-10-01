@@ -435,8 +435,8 @@ run files no cost row: the `gdk_gate`-wrapped targets export `GDK_GATE_UNMEASURE
 creates that file. `GDK_RECEIPTS=0` runs every tier.
 
 **Several lanes on one machine.** `unit.sh` bounds its run at 180 s times `ceil(1-minute load /
-cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (load
-1.4x)`); an explicit `GDK_UNIT_TIMEOUT` is used as given, and a `HARD_TIMEOUT` names the value to
+cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (2x,
+load 4.04 on 4 cpu(s))`); an explicit `GDK_UNIT_TIMEOUT` is used as given, and a `HARD_TIMEOUT` names the value to
 rerun with. Sourcing `gdk_runners.sh` exports `GIT_OPTIONAL_LOCKS=0`, so a gate killed mid-`git
 status` leaves no `.git/index.lock`. A pid counts as dead only on positive evidence (`kill -0`
 says `No such process`, or a visible process table lacks it), so the HOME reaper never deletes a

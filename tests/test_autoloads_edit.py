@@ -51,10 +51,12 @@ class AutoloadsEdit(unittest.TestCase):
         return self.project.read_bytes()
 
     def variants(self) -> dict[str, bytes]:
-        """The fixture as-is, as CRLF, and with no `[autoload]` section at all."""
+        """The fixture as-is, as CRLF, with no `[autoload]` section at all, and
+        that last with no final newline."""
         lf = self.bytes_()
         bare = lf.split(b'[autoload]')[0].rstrip(b'\n') + b'\n'
-        return {'lf': lf, 'crlf': lf.replace(b'\n', b'\r\n'), 'no section': bare}
+        return {'lf': lf, 'crlf': lf.replace(b'\n', b'\r\n'), 'no section': bare,
+                'no section, no final newline': bare.rstrip(b'\n')}
 
     def test_add_is_one_line_the_census_reads_and_rm_restores_the_bytes(self) -> None:
         for label, before in self.variants().items():
@@ -65,7 +67,7 @@ class AutoloadsEdit(unittest.TestCase):
                 added = [line for line in difflib.ndiff(
                     before.decode().splitlines(), after.decode().splitlines())
                     if line.startswith(('+ ', '- '))]
-                expected = (['+ [autoload]', f'+ {ENTRY}'] if label == 'no section'
+                expected = (['+ [autoload]', f'+ {ENTRY}'] if label.startswith('no section')
                             else [f'+ {ENTRY}'])
                 self.assertEqual([line for line in added if line[2:].strip()],
                                  expected)

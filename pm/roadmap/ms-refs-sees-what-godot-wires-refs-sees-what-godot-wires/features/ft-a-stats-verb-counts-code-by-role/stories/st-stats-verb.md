@@ -4,7 +4,7 @@ kind: story
 feature: ft-a-stats-verb-counts-code-by-role
 milestone: "ms-refs-sees-what-godot-wires"
 name: the stats verb
-status: building
+status: done
 owner:
 depends_on: []
 changelog:

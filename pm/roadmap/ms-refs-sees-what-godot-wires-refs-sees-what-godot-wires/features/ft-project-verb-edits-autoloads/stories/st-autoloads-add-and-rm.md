@@ -4,7 +4,7 @@ kind: story
 feature: ft-project-verb-edits-autoloads
 milestone: "ms-refs-sees-what-godot-wires"
 name: autoloads add and rm
-status: building
+status: done
 owner:
 depends_on: []
 changelog:

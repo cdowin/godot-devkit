@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- `refs <symbol>` finds what Godot wires: a scene `[connection]` naming it as `signal=` or
+  `method=` (new bucket `scene connections`), an autoload name declared in `project.godot`
+  (indexed like a `class_name`), and a signal or handler named as an argument (`is_connected`,
+  `has_signal`, `has_user_signal`, `Signal(obj, "sig")`). None of these reads as unreferenced
+  any more.
+- New `autoloads add <Name> <res://path>` and `autoloads rm <Name>` declare or remove one
+  `project.godot` autoload (`Name="*res://path"`), editing only that line. `--dry-run` prints
+  the diff, a repeat is a no-op, add then rm restores the file byte for byte; a bad name, a
+  missing file or a name already pointing elsewhere exits 1, a missing or non-UTF-8
+  `project.godot` exits 2.
+- New `stats [<dir>...] [--by dir] [--json]` counts files, lines and code lines per role
+  (`.gd` as game, tests, tools or vendored, from the new `[stats]` section) and for `.gdshader`,
+  `.tscn` and `.tres`, with a `func test_` count per tests subdir. Zero files scanned exits 1.
+- `check rng` scopes a declared draw's shadow to its own class body, so a `func randf()` in
+  one class no longer hides a bare `randf()` in another.
+- `integration.sh` passes a cache repair's exit 2 through as 2, compares the import cache's age
+  to the nanosecond across tracked and untracked-not-ignored sidecars, summarises a scenario
+  still red after its rerun from that rerun, says why a warm worker handed back, and refuses a
+  near-miss `## Isolated because:` spelling (exit 2, naming the line).
+- `make import-cache` lists a rewritten existing `.uid`/`.import` sidecar on its own line
+  instead of calling it churn, says what copied the tree and how much, sees a live Godot on a
+  project root with a space in it, and puts `--` before paths in every `cp`.
+- `scenario.sh` inside a sweep also declines the in-tree editor pass and names
+  `make import-cache`; `GDK_LOG_CAP_BYTES` caps each `--suite` slice, and a verdict naming
+  another slice is not counted for this one.
+- `unit.sh` prints the timeout factor it applied (`timeout 360s (2x, load 4.04 on 4 cpu(s))`)
+  and records the bound in its transcript. The runners clear git's own `--local-env-vars` list
+  instead of six hand-kept names.
+- The release index refuses another project's file, gives only the released tag's files a
+  `data-requires-python`, and a re-dispatched tag with an identical wheel rebuilds the index
+  instead of refusing; the release workflow sets permissions per job.
+
 ## v2.0.0 — 2026-10-01
 
 **Upgrading (major).** Re-install the runners (`install-runners --force`) and edit two things.
