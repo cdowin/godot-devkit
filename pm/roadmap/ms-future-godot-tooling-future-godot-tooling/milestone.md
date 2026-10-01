@@ -6,7 +6,7 @@ status: planning
 depends_on: []
 branch:
 mode:
-version: 1.6.0
+version: 1.7.0
 changelog:
 order:
   - "ft-a-capture-never-takes-focus"

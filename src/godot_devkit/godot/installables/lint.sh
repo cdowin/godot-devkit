@@ -199,6 +199,13 @@ if [ "${#SCAN_DIRS[@]}" -eq 0 ]; then
 	exit 2
 fi
 
+# A receipt over these exact inputs is the proof already bought (gdk_runners.sh,
+# proof receipts).
+RECEIPT_KEY="$(gdk_receipt_key lint "$GDK_LINT_CMD")" || RECEIPT_KEY=""
+if gdk_receipt_hit lint "$RECEIPT_KEY"; then
+	exit 0
+fi
+
 LOG="$(gdk_gate_log "$GATE_SLOT")"
 # The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
 # one PASS below says otherwise.
@@ -216,4 +223,5 @@ fi
 GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (${#SCAN_DIRS[@]} source dir(s): ${SCAN_DIRS[*]})" "$LOG"
+gdk_receipt_write lint "$RECEIPT_KEY" "[$GATE_TAG] PASS (${#SCAN_DIRS[@]} source dir(s): ${SCAN_DIRS[*]})" "$GDK_LINT_CMD"
 exit 0

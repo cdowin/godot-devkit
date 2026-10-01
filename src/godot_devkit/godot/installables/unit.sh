@@ -394,6 +394,13 @@ elif [ -d "$GDK_UNIT_TEST_ROOT" ]; then
 	fi
 fi
 
+# A receipt over these exact inputs is the proof already bought: say so, boot
+# nothing, file no cost row (gdk_runners.sh, proof receipts).
+RECEIPT_KEY="$(gdk_receipt_key unit "$@")" || RECEIPT_KEY=""
+if gdk_receipt_hit unit "$RECEIPT_KEY"; then
+	exit 0
+fi
+
 # A bound the arithmetic below cannot read would turn a real hang into some
 # other verdict, so a malformed one is a usage error, said up front.
 if [ -n "${GDK_UNIT_TIMEOUT:-}" ]; then
@@ -509,8 +516,10 @@ fi
 # GUT's -gexit returns non-zero when any test fails or errors; 0 on all-pass.
 if [ "$GODOT_EXIT" -eq 0 ]; then
 	GDK_GATE_VERDICT=PASS
+	SAID="[$GATE_TAG] PASS (${RAN_SCRIPTS}/${DISK_SCRIPTS} scripts loaded — full coverage${GUARD_NOTE})"
 	gdk_gate_verdict "$GATE_TAG" \
 		"PASS (${RAN_SCRIPTS}/${DISK_SCRIPTS} scripts loaded — full coverage${GUARD_NOTE})" "$LOG"
+	gdk_receipt_write unit "$RECEIPT_KEY" "$SAID" "$@"
 	exit 0
 fi
 gdk_gate_verdict "$GATE_TAG" "FAIL (gut exit $GODOT_EXIT)${GUARD_NOTE:+ —${GUARD_NOTE#;}}" "$LOG"
