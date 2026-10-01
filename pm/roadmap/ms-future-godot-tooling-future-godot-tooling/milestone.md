@@ -9,10 +9,12 @@ mode:
 version: 1.7.0
 changelog:
 order:
+  - "ft-refs-reads-scene-connections"
   - "ft-a-capture-never-takes-focus"
   - "ft-a-stats-verb-counts-code-by-role"
-  - "ft-refs-reads-scene-connections"
   - "ft-the-1-4-0-carry-forwards"
+  - "ft-refs-renames-a-symbol"
+  - "ft-project-verb-edits-autoloads"
 ---
 
 # ms-future-godot-tooling — Future Godot tooling

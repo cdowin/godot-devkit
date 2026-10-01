@@ -2,7 +2,7 @@
 id: ft-refs-reads-scene-connections
 kind: feature
 milestone: ms-future-godot-tooling
-name: refs reads scene connections
+name: refs sees what Godot wires
 status: planning
 reviewed:
 depends_on: []
@@ -10,13 +10,29 @@ consumed_by: []
 changelog:
 ---
 
-# refs reads scene connections
+# refs sees what Godot wires
 
-From the 1.4.0 read-verbs review (M3): `refs` never reads a `.tscn`'s `[connection signal=… method=…]` sections, so a signal and a handler wired in the editor read as zero references, and deleting the handler breaks the connection at runtime with no parse error. The fix is a scene-side scan in `scan_scene_refs` (read/refs.py), not a regex.
+`refs` reports a symbol as unreferenced when Godot itself wires it, and an unreferenced verdict is
+the one that gets a handler or an autoload deleted — rule 4's read-side sin. Three holes, each
+reproduced on 657a0e4 with exit 0:
+
+1. **Scene connections** (1.4.0 read-verbs review M3). `scan_scene_refs` (read/refs.py) reads only
+   `ext_resource`/`sub_resource`, never `[connection signal=… method=…]`. A handler wired in the
+   editor prints `## definitions (1)` and nothing else; deleting it breaks the connection at runtime
+   with no parse error. The fix is a scene-side scan over the parsed sections, not a regex.
+2. **Autoload names.** Declared in `project.godot`, not by `class_name`, so `refs GameManager`
+   prints `(no references found)` over `GameManager.start()`. `read/autoloads.py`'s
+   `list_autoloads()` already parses the file; `refs` should index those names as it does a
+   `class_name`. Closes the known gap CLAUDE.md names.
+3. **A handler or signal named as an argument.** `is_connected("died", _on_x)`, `has_signal("died")`
+   and `Signal(obj, "died")` land in no bucket (1.4.0 read-verbs review N3 — moved here from the
+   carry-forwards). They belong in the dynamic bucket at least, so the zero verdict cannot print.
 
 ## Ship criterion
 
-<!-- What "done" means for this feature. -->
+Each of the three spellings above, in a scratch project, shows under a named bucket of `refs <symbol>`
+and the zero verdict does not print; a symbol with genuinely no references still prints it.
+`refs --retarget` behaviour is unchanged.
 
 ## Proof budget
 
