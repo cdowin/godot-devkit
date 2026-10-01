@@ -21,8 +21,10 @@
 #   2. runs it against a fresh World, with the reset its scenario_base owns
 #      (autoload state, World, player);
 #   3. FINISHES that scenario's teardown, then prints its usual verdict line
-#      (GDK_SCENARIO_RESULT_RE, then PASS|FAIL as a word) — the verdict closes
-#      the scenario, so nothing it causes may come after it;
+#      (GDK_SCENARIO_RESULT_RE, then PASS|FAIL as a word, with the scenario's
+#      name as a word after the ERE too: `[SCENARIO] <name> PASS …`) — the
+#      verdict closes the scenario, so nothing it causes may come after it, and
+#      a verdict naming another scenario is not this one's;
 #   4. exits 0 after the last one: a FAIL is carried by its verdict line,
 #      never by the exit code.
 # The stream is split at the START markers: a scenario's slice runs from its
@@ -39,7 +41,9 @@
 # last verdict), and an engine error after a verdict and before the next START
 # or the exit (exit-time leak warnings land there). A slice that passed but
 # carries the cold-import-cache class is handed back too, so the cold path's
-# recovery ladder gets it. `--scenario <name>` (the single path) is unchanged.
+# recovery ladder gets it, and so is a slice past GDK_LOG_CAP_BYTES, which caps
+# each slice as it caps one cold transcript. `--scenario <name>` (the single
+# path) is unchanged.
 #
 # OUTPUT: the full transcript is ALWAYS published to
 # .scenario-reports/<name>.log — written to a private per-run file first, then
@@ -93,8 +97,12 @@ GDK_REPORT_RETENTION_DAYS="${GDK_REPORT_RETENTION_DAYS:-7}"
 #      GDK_GODOT                  the engine binary (default `godot`)
 #      GDK_SCENARIO_IN_SWEEP      set by integration.sh: this run has PEERS
 #                                 booting in the same tree, so the cache
-#                                 recovery below reports its last remedy
-#                                 instead of performing it on them.
+#                                 recovery below reports its remedies (an
+#                                 editor pass in the tree, then removing
+#                                 .godot) instead of performing them on them.
+#      GDK_LOG_CAP_BYTES          (gdk_runners.sh) caps a transcript; with
+#                                 --suite, EACH scenario's slice — a slice
+#                                 past it is handed back to the cold path.
 #      GDK_SCENARIO_SUITE_RESULTS set by integration.sh for --suite: a
 #                                 directory where each FINISHED scenario gets
 #                                 <name>.log (its console block) and a
@@ -159,7 +167,11 @@ Env: GDK_SCENARIO_SOURCE_DIR       where scenario scripts live
                                    (default --scenarios)
      GDK_SCENARIO_START_RE         how your runner spells its START marker
      GDK_SCENARIO_SUITE_RESULTS    --suite: a directory for per-scenario results
-     GDK_SCENARIO_IN_SWEEP         this run has peers in the same tree
+     GDK_SCENARIO_IN_SWEEP         this run has peers in the same tree: the
+                                   cache recovery names its repair (make
+                                   import-cache) instead of running it
+     GDK_LOG_CAP_BYTES             caps a transcript; with --suite, each
+                                   scenario's slice
      GDK_REPORT_RETENTION_DAYS     transcript retention (default 7)
      GDK_RUNNERS_LIB               path to gdk_runners.sh, relative to this file
      GDK_GODOT                     the engine binary (default `godot`)
@@ -351,9 +363,13 @@ watch_for_parse_error() {
 # The awk half of both functions below: `start_name(line)` is the scenario a
 # START marker names (empty when the line is not one, or names a scenario this
 # suite did not ask for — a marker cannot aim a slice outside the list), and
-# `verdict_of(line)` the first PASS|FAIL WORD after the verdict ERE's match
-# (empty when the line is not a verdict). Reads START_RE, RESULT_RE and
-# SUITE_NAMES (comma-separated) from the environment.
+# `verdict_of(line, name)` the first PASS|FAIL WORD after the verdict ERE's
+# match (empty when the line is not a verdict). Given a <name>, a verdict
+# counts only when <name> is one of the words after that match: a verdict line
+# carrying ANOTHER scenario's name (a late re-emit, a nested log) is not this
+# slice's. With "" it is any verdict at all, which is what liveness needs.
+# Reads START_RE, RESULT_RE and SUITE_NAMES (comma-separated) from the
+# environment.
 # shellcheck disable=SC2016  # an awk program, not a shell expansion
 SUITE_AWK_LIB='
 	function suite_init(   n, i, f) {
@@ -367,12 +383,16 @@ SUITE_AWK_LIB='
 		n = split(s, f, /[[:space:]]+/)
 		return (f[n] in asked) ? f[n] : ""
 	}
-	function verdict_of(line,   rest, n, f, i) {
+	function verdict_of(line, name,   rest, n, f, i, v, named) {
 		if (!match(line, ENVIRON["RESULT_RE"])) return ""
 		rest = substr(line, RSTART + RLENGTH)
 		n = split(rest, f, /[[:space:]]+/)
-		for (i = 1; i <= n; i++) if (f[i] == "PASS" || f[i] == "FAIL") return f[i]
-		return ""
+		v = ""; named = (name == "")
+		for (i = 1; i <= n; i++) {
+			if (v == "" && (f[i] == "PASS" || f[i] == "FAIL")) v = f[i]
+			if (f[i] == name) named = 1
+		}
+		return named ? v : ""
 	}
 '
 
@@ -391,7 +411,7 @@ tap_suite_progress() {
 	suite_env awk -v progress="$1" "$SUITE_AWK_LIB"'
 		BEGIN { suite_init() }
 		{ print; fflush() }
-		start_name($0) != "" || verdict_of($0) != "" {
+		start_name($0) != "" || verdict_of($0, "") != "" {
 			print "." >> progress; close(progress)
 		}'
 }
@@ -418,17 +438,29 @@ watch_for_stall() {
 
 # split_suite_transcript <transcript> <dir> — write <dir>/<name>.slice for
 # every scenario that STARTed, and print one row per such scenario, in START
-# order: `<name>\t<PASS|FAIL|->\t<verdict line>`. A slice runs from its START
-# to the next START; the boot preamble before the first START opens every
-# slice, as it opens every cold transcript. A verdict re-emitted later wins,
-# as the cold path's `tail -1` does. Output after a scenario's verdict belongs
-# to NO scenario (the contract has the runner finish its teardown first): it
-# stays in the slice's report, and is also written to <dir>/between when a
-# START follows it and to <dir>/after when none does, where the caller can
-# refuse to attribute it. Pure over a file, for the corpus.
+# order: `<name>\t<PASS|FAIL|-|CAP>\t<verdict line>`. A slice runs from its
+# START to the next START; the boot preamble before the first START opens
+# every slice, as it opens every cold transcript. A verdict counts for a slice
+# only when it carries that slice's name (verdict_of); one re-emitted later
+# wins, as the cold path's `tail -1` does. Output after a scenario's verdict
+# belongs to NO scenario (the contract has the runner finish its teardown
+# first): it stays in the slice's report, and is also written to <dir>/between
+# when a START follows it and to <dir>/after when none does, where the caller
+# can refuse to attribute it.
+#
+# GDK_LOG_CAP_BYTES caps EACH slice, preamble included, the way it caps one
+# cold transcript: a slice that would pass it stops at the last whole line
+# under it and reads CAP — it was not all seen, so it has no verdict here. Its
+# neighbours keep theirs. Pure over a file, for the corpus.
 # shellcheck disable=SC2016  # an awk program, not a shell expansion
 split_suite_transcript() {
-	suite_env awk -v out="$2" "$SUITE_AWK_LIB"'
+	suite_env env LC_ALL=C awk -v out="$2" -v cap="$GDK_LOG_CAP_BYTES" "$SUITE_AWK_LIB"'
+		function put(s) {
+			if (cur in over) return
+			if (size[cur] + length(s) + 1 > cap + 0) { over[cur] = 1; return }
+			size[cur] += length(s) + 1
+			print s >> file
+		}
 		BEGIN { suite_init() }
 		{
 			name = start_name($0)
@@ -436,21 +468,25 @@ split_suite_transcript() {
 				if (orph != "") { printf "%s", orph >> (out "/between"); close(out "/between"); orph = "" }
 				if (file != "") close(file)
 				cur = name; file = out "/" cur ".slice"
-				if (!(cur in started)) { order[++k] = cur; started[cur] = 1; printf "%s", pre >> file }
-				print >> file
+				if (!(cur in started)) {
+					order[++k] = cur; started[cur] = 1; size[cur] = 0
+					printf "" >> file
+					if (pre != "") put(substr(pre, 1, length(pre) - 1))
+				}
+				put($0)
 				next
 			}
 			if (cur == "") { pre = pre $0 "\n"; next }
-			print >> file
+			put($0)
 			if (cur in verdict) orph = orph $0 "\n"
-			v = verdict_of($0)
+			v = verdict_of($0, cur)
 			if (v != "") { verdict[cur] = v; vline[cur] = $0 }
 		}
 		END {
 			if (orph != "") printf "%s", orph >> (out "/after")
 			for (i = 1; i <= k; i++) {
 				n = order[i]
-				printf "%s\t%s\t%s\n", n, ((n in verdict) ? verdict[n] : "-"), vline[n]
+				printf "%s\t%s\t%s\n", n, ((n in over) ? "CAP" : (n in verdict) ? verdict[n] : "-"), vline[n]
 			}
 		}' "$1"
 }
@@ -494,8 +530,16 @@ run_suite() {
 	local watch_pid stall_pid code rcode slices table name row verdict vline block
 	local killed=0 in_progress='' last_started='' last_finished='(none)' failed=0
 	local results="${GDK_SCENARIO_SUITE_RESULTS:-}" unexpected parse_error stall
-	local whole='' orphans='' where last_verdict
+	local whole='' orphans='' where last_verdict stream_cap
 	local -a aborted=() cached=()
+	case "$GDK_LOG_CAP_BYTES" in
+		''|*[!0-9]*|0) echo "[$GATE_TAG] GDK_LOG_CAP_BYTES='$GDK_LOG_CAP_BYTES' — expected whole bytes above 0" >&2; return 2 ;;
+	esac
+	# GDK_LOG_CAP_BYTES caps each SLICE (split_suite_transcript), so one chatty
+	# scenario is handed back alone rather than truncating every one after it.
+	# The stream keeps a backstop for a runaway engine, sized the way the time
+	# backstop is: one cap per member plus two.
+	stream_cap=$((GDK_LOG_CAP_BYTES * (n + 2)))
 	list="$(IFS=,; printf '%s' "${SUITE_NAMES[*]}")"
 	transcript="$(gdk_sandbox_tmpfile suite.XXXXXX)" || return 2
 	pidfile="$(gdk_sandbox_tmpfile engine-pid.XXXXXX)" || return 2
@@ -520,14 +564,14 @@ run_suite() {
 			"$GDK_GODOT" --path . --headless -- \
 			"$GDK_SCENARIO_SUITE_ARG" "$list" 2>&1 \
 			| tap_parse_errors "$hits" | tap_suite_progress "$progress" \
-			| head -c "$GDK_LOG_CAP_BYTES" | tee "$transcript"
+			| head -c "$stream_cap" | tee "$transcript"
 	else
 		gdk_run_bounded $((HARD_TIMEOUT_SECONDS * (n + 2))) -- \
 			sh -c 'echo "$PPID" > "$0"; exec "$@"' "$pidfile" \
 			"$GDK_GODOT" --path . --headless -- \
 			"$GDK_SCENARIO_SUITE_ARG" "$list" 2>&1 \
 			| tap_parse_errors "$hits" | tap_suite_progress "$progress" \
-			| head -c "$GDK_LOG_CAP_BYTES" > "$transcript"
+			| head -c "$stream_cap" > "$transcript"
 	fi
 	code="${PIPESTATUS[0]}"
 	kill "$watch_pid" "$stall_pid" 2>/dev/null
@@ -578,6 +622,13 @@ run_suite() {
 			|| { [ "$killed" -eq 1 ] && [ "$name" = "$last_started" ]; }; then
 			[ -n "$in_progress" ] || [ -z "$row" ] || in_progress="$name"
 			aborted+=("$name")
+			continue
+		fi
+		# Past its cap, the slice was not all read: the cold path judges it,
+		# under the same cap applied to its own transcript.
+		if [ "$verdict" = CAP ]; then
+			echo "[$GATE_TAG] $name — its transcript passed GDK_LOG_CAP_BYTES ($GDK_LOG_CAP_BYTES bytes); handed back to the cold path"
+			cached+=("$name")
 			continue
 		fi
 		# A passing slice carrying the cold-cache class is the cold path's
@@ -652,7 +703,7 @@ run_suite() {
 # one chain of claims ending in `|| miss`.
 # shellcheck disable=SC2015
 suite_cases() {
-	local scratch="$1" lib="$2" proj bin res out rc t0 n
+	local scratch="$1" lib="$2" proj bin res out rc t0 n why
 	proj="$scratch/suite"; bin="$scratch/bin"; res="$scratch/results"
 	mkdir -p "$proj/tools/dev/runners" "$proj/tests/integration" "$bin"
 	cp "$0" "$proj/tools/dev/runners/scenario.sh"
@@ -661,6 +712,8 @@ suite_cases() {
 	for n in a b c; do : > "$proj/tests/integration/$n.gd"; done
 	cat > "$bin/godot" <<'STUB_EOF'
 #!/usr/bin/env bash
+# An editor pass (the cache recovery's rung 1) leaves a mark, and nothing else.
+case " $* " in *" --editor "*) [ -z "${GDK_STUB_EDITOR_MARK:-}" ] || : > "$GDK_STUB_EDITOR_MARK"; exit 0 ;; esac
 list=''; single=''
 while [ "$#" -gt 0 ]; do
 	case "$1" in --scenarios) list="${2-}" ;; --scenario) single="${2-}" ;; esac
@@ -677,24 +730,27 @@ for n in "${names[@]}"; do
 		stall:b) sleep 30 ;;
 		slow:*) sleep 1.5 ;;
 		exitleak:a) leak=1 ;;
+		chatty:b) for i in $(seq 1 100); do echo "b says something rather long, line $i of a chatty one"; done ;;
+		coldcache:*) echo 'WARNING: invalid UID "uid://c" - using text path instead' ;;
 	esac
-	echo "[SCENARIO] $n PASS steps=1 errors=0"
+	v="$n"; [ "${GDK_STUB_MODE:-}:$n" != misname:b ] || v=a
+	echo "[SCENARIO] $v PASS steps=1 errors=0"
 	[ "${GDK_STUB_MODE:-}:$n" != gap:a ] || echo "ERROR: a tore down after its verdict"
 done
 [ "$leak" -eq 0 ] || echo "WARNING: ObjectDB instances leaked at exit (run with --verbose for details)."
 [ "${GDK_STUB_MODE:-}" != crashexit ] || exit 139
 STUB_EOF
 	chmod +x "$bin/godot"
-	# suite <mode> [hard timeout] — one warm run of a,b,c, fresh results, the
-	# caller's GDK_* out of the way.
+	# suite <mode> [hard timeout] [log cap] — one warm run of a,b,c, fresh
+	# results, the caller's GDK_* out of the way.
 	suite() {
 		rm -rf "$res" "$proj/.scenario-reports"
 		( unset GDK_SCENARIO_REPORT_DIR GDK_SCENARIO_SOURCE_DIR GDK_SCENARIO_NOISE_ALLOWLIST \
 			GDK_SCENARIO_START_RE GDK_SCENARIO_RESULT_RE GDK_SCENARIO_SUITE_ARG GDK_RUNNERS_LIB \
-			GDK_HEADLESS_HOME GDK_SCENARIO_IN_SWEEP VERBOSE
+			GDK_HEADLESS_HOME GDK_SCENARIO_IN_SWEEP VERBOSE GDK_LOG_CAP_BYTES
 		  PATH="$bin:$PATH" GDK_GODOT=godot GDK_SCENARIO_SUITE_RESULTS="$res" \
 			GDK_SCENARIO_HARD_TIMEOUT="${2:-20}" GDK_STUB_MODE="$1" \
-			bash "$proj/tools/dev/runners/scenario.sh" --suite a b c 2>&1 )
+			env ${3:+"GDK_LOG_CAP_BYTES=$3"} bash "$proj/tools/dev/runners/scenario.sh" --suite a b c 2>&1 )
 	}
 	# cold <mode> <name> — the cold path the caller runs a handed-back member
 	# through, against the same stub; prints nothing, returns its exit code.
@@ -771,6 +827,45 @@ STUB_EOF
 		&& grep -qF '[SCENARIO] b HARD_TIMEOUT — no START or verdict for 1s' <<<"$out" \
 		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b c " ] \
 		|| miss "a worker that stalls in B is killed at the per-scenario bound, B and C handed back (rc $rc, $((SECONDS - t0))s): $out"
+
+	# A verdict counts for a slice only when it carries that slice's name: B
+	# printing A's verdict has none of its own, and goes cold.
+	cases=$((cases + 1))
+	out="$(suite misname)"; rc=$?
+	[ "$rc" -eq 4 ] && [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 c:0 " ] \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b " ] \
+		|| miss "a verdict line naming A inside B's slice is not B's verdict (rc $rc): $out"
+
+	# GDK_LOG_CAP_BYTES caps each SLICE: a chatty B is handed back alone, and
+	# A and C, before and after it, keep their warm verdicts.
+	cases=$((cases + 1))
+	out="$(suite chatty 20 2000)"; rc=$?
+	[ "$rc" -eq 4 ] && [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 c:0 " ] \
+		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b " ] \
+		&& grep -qF '[SCENARIO] b — its transcript passed GDK_LOG_CAP_BYTES (2000 bytes)' <<<"$out" \
+		&& [ "$(wc -c < "$proj/.scenario-reports/b.log" | tr -d ' ')" -le 2000 ] \
+		|| miss "a slice past GDK_LOG_CAP_BYTES goes cold alone; its neighbours stay warm (rc $rc): $out"
+
+	# The cache recovery inside a sweep: rung 1's in-tree editor pass is
+	# declined and `make import-cache` named, as rung 2's removal already was.
+	# Outside a sweep the same run still takes rung 1 — the stub's mark is
+	# what proves the case reached the ladder at all.
+	cases=$((cases + 1))
+	rm -f "$scratch/editor-pass"
+	out="$( unset GDK_SCENARIO_REPORT_DIR GDK_SCENARIO_SOURCE_DIR GDK_SCENARIO_NOISE_ALLOWLIST \
+			GDK_SCENARIO_RESULT_RE GDK_SCENARIO_USER_ARG GDK_RUNNERS_LIB GDK_HEADLESS_HOME VERBOSE
+		PATH="$bin:$PATH" GDK_GODOT=godot GDK_SCENARIO_HARD_TIMEOUT=20 GDK_STUB_MODE=coldcache \
+			GDK_SCENARIO_IN_SWEEP=1 GDK_STUB_EDITOR_MARK="$scratch/editor-pass" \
+			bash "$proj/tools/dev/runners/scenario.sh" a 2>&1 )"; rc=$?
+	why=''
+	[ "$rc" -eq 1 ] || why="$why exit $rc;"
+	[ ! -e "$scratch/editor-pass" ] || why="$why the editor pass ran in the tree;"
+	grep -qxF '[SCENARIO]   make import-cache' <<<"$out" || why="$why make import-cache is not named;"
+	! grep -qF 'rebuilding and retrying' <<<"$out" || why="$why it said it was rebuilding;"
+	( export GDK_STUB_EDITOR_MARK="$scratch/editor-pass"; cold coldcache a )
+	[ -e "$scratch/editor-pass" ] || why="$why outside a sweep, rung 1 never ran;"
+	[ -z "$why" ] \
+		|| miss "a sweep job declines rung 1's in-tree editor pass and names make import-cache; a direct run still takes it:$why $out"
 }
 
 # --- --self-test -------------------------------------------------------------
@@ -1132,24 +1227,29 @@ run_scenario
 # own condition would reboot the engine forever on a tree that is genuinely
 # broken, and each reboot is an engine start plus an editor import.
 #
-# Rung 2 removes a directory a local editor owns, so it says so BEFORE it acts,
-# and it declines inside a sweep: integration.sh runs N scenarios in ONE tree,
-# and removing .godot under peers that are mid-boot converts one cache defect
-# into a scatter of failures that look like real ones. There the run names the
-# repair instead of performing it — the operator runs it once, serially.
-if cold_cache_only "$RUN_REPORT" "$godot_exit"; then
+# Rung 2 removes a directory a local editor owns, so it says so BEFORE it acts.
+#
+# BOTH rungs decline inside a sweep: integration.sh runs N scenarios in ONE
+# tree. Rung 1 is a headless editor pass IN THE TREE — run from every sweep job
+# that hits a cold cache, in parallel, it re-serialises tracked resources into
+# a diff that looks legitimate — and removing .godot under peers that are
+# mid-boot converts one cache defect into a scatter of failures that look like
+# real ones. There the run names the repair instead of performing it: the
+# operator runs `make import-cache` once, serially, which does the pass in a
+# scratch copy. Outside a sweep both rungs run as they always have.
+if [ -n "${GDK_SCENARIO_IN_SWEEP:-}" ] && cold_cache_only "$RUN_REPORT" "$godot_exit"; then
+	echo "[$GATE_TAG] $SCENARIO_NAME — cold import cache on a passing run." >&2
+	echo "[$GATE_TAG] A sweep shares one $IMPORT_DIR/ with every peer still booting, so this run will" >&2
+	echo "[$GATE_TAG] not run an editor pass in the tree. Repair the tree ONCE, serially, then re-run:" >&2
+	echo "[$GATE_TAG]   make import-cache" >&2
+	echo "[$GATE_TAG] Still reported after that, the uid index is STALE, not cold:" >&2
+	echo "[$GATE_TAG]   rm -rf $IMPORT_DIR && make import-cache" >&2
+elif cold_cache_only "$RUN_REPORT" "$godot_exit"; then
 	echo "[$GATE_TAG] $SCENARIO_NAME — cold import cache on a passing run; rebuilding and retrying once" >&2
 	gdk_rebuild_import_cache "$HARD_TIMEOUT_SECONDS"
 	run_scenario
-fi
-
-if cold_cache_only "$RUN_REPORT" "$godot_exit"; then
-	echo "[$GATE_TAG] $SCENARIO_NAME — the uid index is STALE, not cold: the rebuild did not repair it." >&2
-	if [ -n "${GDK_SCENARIO_IN_SWEEP:-}" ]; then
-		echo "[$GATE_TAG] A sweep shares one $IMPORT_DIR/ with every peer still booting, so this run will" >&2
-		echo "[$GATE_TAG] not remove it. Repair the tree ONCE, serially, then re-run the sweep:" >&2
-		echo "[$GATE_TAG]   rm -rf $IMPORT_DIR && make import-cache" >&2
-	else
+	if cold_cache_only "$RUN_REPORT" "$godot_exit"; then
+		echo "[$GATE_TAG] $SCENARIO_NAME — the uid index is STALE, not cold: the rebuild did not repair it." >&2
 		echo "[$GATE_TAG] REMOVING $IMPORT_DIR/ — a local editor's cache state, rebuilt from the tree —" >&2
 		echo "[$GATE_TAG] then rebuilding and retrying a final time." >&2
 		# The cwd is the project root: nothing above refused a tree without a
