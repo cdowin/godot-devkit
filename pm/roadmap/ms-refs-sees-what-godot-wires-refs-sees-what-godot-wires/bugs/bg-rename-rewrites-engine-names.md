@@ -3,9 +3,9 @@ id: bg-rename-rewrites-engine-names
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs --rename rewrites engine methods and signals
-status: open
+status: closed
 caused_by: ft-refs-renames-a-symbol
-changelog:
+changelog: none
 ---
 
 # rename-rewrites-engine-names

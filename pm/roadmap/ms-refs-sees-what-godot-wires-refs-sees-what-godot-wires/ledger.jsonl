@@ -33,3 +33,4 @@
 {"ts":"2026-10-01T19:39:02Z","kind":"status","grain":"bg-rename-percent-sigil-and-keywords","from":"open","to":"closed","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T19:39:02Z","kind":"status","grain":"bg-autoloads-classname-scan-ignores-excludes","from":"open","to":"closed","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T19:39:02Z","kind":"status","grain":"bg-autoloads-path-case-insensitive","from":"open","to":"closed","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T19:47:36Z","kind":"status","grain":"bg-rename-rewrites-engine-names","from":"open","to":"closed","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
