@@ -12,3 +12,5 @@
 {"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"1.5.0","state":"accepted","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
 {"ts":"2026-09-30T22:40:44Z","kind":"status","grain":"1.5.0","from":"accepted","to":"packaging","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
 {"ts":"2026-09-30T22:40:44Z","kind":"disposition","grain":"1.5.0","state":"packaging","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-10-01T00:21:12Z","kind":"status","grain":"1.5.0","from":"packaging","to":"done","branch":"milestone/1.5.0-bounded-parallel-engine-work"}
+{"ts":"2026-10-01T00:21:12Z","kind":"disposition","grain":"1.5.0","state":"done","answer":"none","branch":"milestone/1.5.0-bounded-parallel-engine-work"}

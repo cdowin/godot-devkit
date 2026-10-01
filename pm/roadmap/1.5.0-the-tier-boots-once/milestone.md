@@ -2,7 +2,7 @@
 id: "1.5.0"
 kind: milestone
 name: Bounded parallel engine work
-status: packaging
+status: done
 depends_on: []
 branch: milestone/1.5.0-bounded-parallel-engine-work
 mode:
