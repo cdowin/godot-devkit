@@ -38,11 +38,12 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # path attr + exact preload/load literal that
                                     # names old; anything unprovable is SKIPPED
                                     # with a reason, and skips exit 1
-    godot-devkit refs --rename <old> <new> [--tests] [--dry-run]
+    godot-devkit refs --rename <old> <new> [--dry-run]
                                     # rename a class_name / method / signal /
                                     # autoload across .gd, .tscn, .tres and
                                     # project.godot as one plan; any dynamic,
-                                    # string or unproven site refuses it whole
+                                    # string or unproven site refuses it whole;
+                                    # tests/ is always in scope
     godot-devkit scene canonicalize <file>... [--elide-defaults]
                                     [--respell] [--order]
                                     # restore what PackedScene.pack() drops:

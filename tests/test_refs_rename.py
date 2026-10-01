@@ -26,10 +26,10 @@ def run_cli(*argv):
 PATH_TITLES = ('preload / load', 'scene resource refs (.tscn/.tres)')
 
 
-def refs_count(symbol):
+def refs_count(symbol, *flags):
     """Every symbol hit `refs <symbol>` prints — every bucket but the two that
     match a res:// path, which a rename leaves where they are."""
-    _, out = run_check(types.SimpleNamespace(run=lambda: refs.main([symbol])))
+    _, out = run_check(types.SimpleNamespace(run=lambda: refs.main([symbol, *flags])))
     return sum(int(n) for title, n in re.findall(r'^## (.*) \((\d+)\)$', out, re.M)
                if title not in PATH_TITLES)
 
@@ -41,22 +41,27 @@ def snapshot(root):
 
 class RenameRewrites(unittest.TestCase):
     # (old, new, the file a dry run must show, files the rename must not
-    # touch, what it must print) — a `[connection] method=` plus its handler's
+    # touch, what it must print, files added first) — a `[connection] method=` plus its handler's
     # definition; an autoload's `project.godot` key plus a use; a class_name
     # with its bare uses, whose scene's `[node name="Player"]`, `$Player` and
-    # `res://systems/player.gd` are a node and a path, not the class.
+    # `res://systems/player.gd` are a node and a path, not the class — and a
+    # use under tests/, which a rename never leaves behind.
     RENAMES = (
-        ('_on_button_pressed', '_on_button_clicked', 'scenes/main.tscn', (), ()),
-        ('DataRegistry', 'Registry', 'project.godot', (), ()),
+        ('_on_button_pressed', '_on_button_clicked', 'scenes/main.tscn', (), (), {}),
+        ('DataRegistry', 'Registry', 'project.godot', (), (), {}),
         ('Player', 'Hero', 'systems/spawner.gd', ('scenes/main.tscn',),
          ('  PATH  scenes/main.tscn  res://systems/player.gd — left as is; '
-          'git mv + refs --retarget if the file should follow',)),
+          'git mv + refs --retarget if the file should follow',),
+         {'tests/unit/test_player.gd': 'extends Node\n\nvar made := Player.new()\n'}),
     )
 
     def test_every_typed_hit_is_rewritten_once_and_a_retry_is_a_no_op(self) -> None:
-        for old, new, shown, untouched, printed in self.RENAMES:
+        for old, new, shown, untouched, printed, extra in self.RENAMES:
             with self.subTest(old=old), temp_repo('read_repo') as root:
-                counted = refs_count(old)
+                for rel, text in extra.items():
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(text, encoding='utf-8')
+                counted = refs_count(old, '--tests')
                 before = snapshot(root)
                 code, dry = run_cli('refs', '--rename', old, new, '--dry-run')
                 self.assertEqual((code, snapshot(root)), (0, before), dry)
@@ -73,7 +78,8 @@ class RenameRewrites(unittest.TestCase):
                 for line in printed:
                     self.assertIn(line, out)
                 self.assertNotEqual(after, before)
-                self.assertEqual((refs_count(new), refs_count(old)), (counted, 0))
+                self.assertEqual((refs_count(new, '--tests'), refs_count(old, '--tests')),
+                                 (counted, 0))
                 code, again = run_cli('refs', '--rename', old, new)
                 self.assertEqual((code, snapshot(root)), (0, after), again)
                 self.assertIn('already renamed', again)
@@ -136,9 +142,11 @@ class RenameRefuses(unittest.TestCase):
                 for phrase in phrases:
                     self.assertIn(phrase, out)
 
-    def test_a_name_that_is_not_an_identifier_is_a_usage_error(self) -> None:
+    def test_a_bad_name_or_a_tests_flag_is_a_usage_error(self) -> None:
         with temp_repo('read_repo'):
-            for argv in (('hurt', '1bad'), ('hurt', 'hurt'), ('res://x.gd', 'y')):
+            # `--tests` too: a rename always covers tests/, so the flag names nothing.
+            for argv in (('hurt', '1bad'), ('hurt', 'hurt'), ('res://x.gd', 'y'),
+                         ('hurt', 'wound', '--tests')):
                 with self.subTest(argv=argv), self.assertRaises(SystemExit) as raised:
                     run_cli('refs', '--rename', *argv)
                 self.assertEqual(raised.exception.code, 2)

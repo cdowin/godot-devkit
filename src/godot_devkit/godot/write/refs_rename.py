@@ -1,6 +1,6 @@
 """refs_rename.py — rename a class_name, method, signal or autoload, everywhere or nowhere.
 
-    godot-devkit refs --rename <old> <new> [--tests] [--dry-run]
+    godot-devkit refs --rename <old> <new> [--dry-run]
 
 The hit set is `refs <old>`'s — definitions, typed refs, call/emit sites,
 scene `[connection] signal=`/`method=` attrs, the `project.godot [autoload]`
@@ -30,7 +30,8 @@ A comment and a node path (`$Name`, `%Name`) are not references and are left
 alone. The same rename twice is a no-op: zero hits of <old> with <new> defined
 prints `already renamed`, exit 0. Zero hits with <new> undefined is exit 1 —
 nothing to rename. <new> not an identifier, or equal to <old>, is exit 2.
-`--tests` widens the scope to tests/, as it does for `refs`; the
+tests/ is ALWAYS in scope — a rename that skips the tests strands their
+references — so there is no `--tests` (passing one is a usage error); the
 `[refs] exclude_prefixes` scope applies. `--dry-run` prints the diff and
 writes nothing.
 """
@@ -335,10 +336,10 @@ def _location(hit: refs.Hit) -> str:
     return f'{hit.path}:{hit.line}' if hit.line else hit.path
 
 
-def run(old: str, new: str, include_tests: bool, dry_run: bool) -> int:
+def run(old: str, new: str, dry_run: bool) -> int:
     root = repo_root()
-    found = refs.scan(root, old, include_tests)
-    new_definitions = refs.scan(root, new, include_tests).hits[refs.DEFINITION_KIND]
+    found = refs.scan(root, old, include_tests=True)
+    new_definitions = refs.scan(root, new, include_tests=True).hits[refs.DEFINITION_KIND]
     census = found.searched.census('file(s) searched')
     header = f'rename  {old} -> {new}' + ('  (dry run — nothing written)' if dry_run else '')
     total = sum(len(hits) for kind, hits in found.hits.items() if kind not in PATH_KINDS)
@@ -426,8 +427,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument('--rename', nargs=2, metavar=('OLD', 'NEW'), required=True,
                         help='a class_name / method / signal / autoload: every '
                              'reference to OLD is rewritten to NEW, or none is')
-    parser.add_argument('--tests', action='store_true',
-                        help='include tests/ in the scope (excluded by default)')
     parser.add_argument('--dry-run', action='store_true',
                         help='print the diff, write nothing')
     args = parser.parse_args(argv)
@@ -438,7 +437,7 @@ def main(argv: list[str]) -> int:
     if old == new:
         parser.error(f'old and new are the same name ({old}) — nothing to rename')
     try:
-        return run(old, new, args.tests, args.dry_run)
+        return run(old, new, args.dry_run)
     except ConfigError as err:
         print(f'godot-devkit: {err}', file=sys.stderr)
         return 2
