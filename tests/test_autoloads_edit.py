@@ -27,7 +27,10 @@ from godot_devkit.godot.write import autoloads_edit
 
 PLAYER = 'res://systems/player.gd'
 SPAWNER = 'res://systems/spawner.gd'
-ENTRY = f'Player="*{PLAYER}"'
+# Not `Player`: that is the fixture's `class_name`, and an autoload may not
+# shadow one.
+NAME = 'Hero'
+ENTRY = f'{NAME}="*{PLAYER}"'
 
 
 class AutoloadsEdit(unittest.TestCase):
@@ -62,7 +65,7 @@ class AutoloadsEdit(unittest.TestCase):
         for label, before in self.variants().items():
             with self.subTest(label):
                 self.project.write_bytes(before)
-                self.assertEqual(self.run_verb('add', 'Player', PLAYER)[0], 0)
+                self.assertEqual(self.run_verb('add', NAME, PLAYER)[0], 0)
                 after = self.bytes_()
                 added = [line for line in difflib.ndiff(
                     before.decode().splitlines(), after.decode().splitlines())
@@ -75,8 +78,8 @@ class AutoloadsEdit(unittest.TestCase):
                     self.assertIn(ENTRY.encode() + b'\r\n', after)
                     self.assertNotIn(b'\r\r', after)
                 self.assertEqual(autoloads.list_autoloads(self.root)[-1],
-                                 ('Player', 'systems/player.gd'))
-                self.assertEqual(self.run_verb('rm', 'Player')[0], 0)
+                                 (NAME, 'systems/player.gd'))
+                self.assertEqual(self.run_verb('rm', NAME)[0], 0)
                 self.assertEqual(self.bytes_(), before)
 
     def test_rm_removes_exactly_that_line(self) -> None:
@@ -93,7 +96,19 @@ class AutoloadsEdit(unittest.TestCase):
             (('add', '1Spawner', SPAWNER), 1, 'not a valid autoload name'),
             (('add', 'Spawner', 'systems/spawner.gd'), 1, 'not a res:// path'),
             (('add', 'Spawner', 'res://../outside.gd'), 1, 'inside the project'),
+            # Declared without `*`: `unchanged` would claim a singleton that
+            # does not exist.
+            (('add', 'Dormant', SPAWNER), 1, 'declared but disabled'),
+            # A second spelling of one file would make the next `add` of the
+            # canonical one refuse as a "different path".
+            (('add', 'Spawner', 'res://systems//spawner.gd'), 1, SPAWNER),
+            (('add', 'Spawner', 'res://systems/./spawner.gd'), 1, SPAWNER),
+            (('add', 'Spawner', 'res://autoloads/../systems/spawner.gd'), 1, SPAWNER),
+            # Names the editor refuses: an engine class, a project class_name.
+            (('add', 'Input', SPAWNER), 1, 'engine class'),
+            (('add', 'Player', PLAYER), 1, f'class_name of {PLAYER}'),
         ]
+        self.project.write_bytes(self.bytes_() + f'Dormant="{SPAWNER}"\n'.encode())
         before = self.bytes_()
         for argv, code, reason in cases:
             with self.subTest(argv=argv):
@@ -114,18 +129,18 @@ class AutoloadsEdit(unittest.TestCase):
                 self.assertEqual(self.project.read_bytes() if content else None, content)
 
     def test_the_same_add_or_rm_twice_is_a_no_op(self) -> None:
-        for argv in (('add', 'Player', PLAYER), ('rm', 'Player')):
+        for argv in (('add', NAME, PLAYER), ('rm', NAME)):
             with self.subTest(argv=argv):
                 self.assertEqual(self.run_verb(*argv)[0], 0)
                 settled = self.bytes_()
                 code, out, _ = self.run_verb(*argv)
                 self.assertEqual((code, self.bytes_()), (0, settled))
                 self.assertIn('unchanged', out)
-        self.assertIn('not declared', self.run_verb('rm', 'Player')[1])
+        self.assertIn('not declared', self.run_verb('rm', NAME)[1])
 
     def test_dry_run_prints_the_diff_and_writes_nothing(self) -> None:
         before = self.bytes_()
-        code, out, _ = self.run_verb('add', 'Player', PLAYER, '--dry-run')
+        code, out, _ = self.run_verb('add', NAME, PLAYER, '--dry-run')
         self.assertEqual((code, self.bytes_()), (0, before))
         self.assertIn(f'+{ENTRY}', out)
         self.assertIn('dry run', out)

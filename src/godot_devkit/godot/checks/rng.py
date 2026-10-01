@@ -85,6 +85,9 @@ FUNC_HEAD_RE = re.compile(r'^\s*(?:static\s+)?func\s+[A-Za-z_]\w*')
 # trailing `:` with nothing after it is what makes a body; `class_name` is not
 # a match (`class` must be followed by whitespace).
 CLASS_RE = re.compile(r'^(\s*)class\s+[A-Za-z_]\w*\b[^:]*:\s*$')
+OPENERS, CLOSERS = '([{', ')]}'
+# The only string spellings that may span a line break.
+TRIPLE_QUOTES = ('"""', "'''")
 
 
 class Hit:
@@ -108,26 +111,69 @@ def _indent(code: str) -> int:
     return len(code) - len(code.lstrip())
 
 
+def _carry(line: str, depth: int, quote: str) -> tuple[int, str, bool]:
+    """What one line leaves open for the next: bracket depth, string, `\\`.
+
+    `quote` is the delimiter of a string still open from an earlier line (only
+    a `\"\"\"` or `'''` one can be), '' for none. Brackets inside a string or
+    after a `#` count for nothing.
+    """
+    index, joined = 0, False
+    while index < len(line):
+        char = line[index]
+        if quote:
+            if char == '\\':
+                index += 2
+                continue
+            if line.startswith(quote, index):
+                index += len(quote)
+                quote = ''
+                continue
+        elif char == '#':
+            break
+        elif char in '"\'':
+            triple = line[index:index + 3]
+            quote = triple if triple in TRIPLE_QUOTES else char
+            index += len(quote)
+            continue
+        elif char in OPENERS:
+            depth += 1
+        elif char in CLOSERS:
+            depth = max(depth - 1, 0)
+        if not char.isspace():
+            joined = char == '\\' and not quote
+        index += 1
+    if quote not in TRIPLE_QUOTES:
+        quote = ''                     # a one-quote string ends with its line
+    return depth, quote, joined
+
+
 def _scopes(lines: list[str]) -> list[int]:
     """The class body each line sits in: 0 is the script, n the n-th `class`.
 
     A body is the indented block under a `class <Name>:` header, closed by the
     first code line at or left of the header's indentation; a blank or
-    comment-only line closes nothing. The header itself sits in the outer scope.
+    comment-only line closes nothing, and neither does a CONTINUATION — a line
+    that starts inside an open bracket, an open `\"\"\"` string or after a
+    trailing `\\`, which GDScript lets sit at any column. The header itself
+    sits in the outer scope.
     """
     scope_of: list[int] = []
     stack = [(-1, 0)]  # (header indent, scope id)
     opened = 0
+    depth, quote, joined = 0, '', False
     for raw in lines:
+        continuation = depth > 0 or bool(quote) or joined
         code = code_only(raw)
-        if code.strip():
+        if code.strip() and not continuation:
             while len(stack) > 1 and _indent(code) <= stack[-1][0]:
                 stack.pop()
         scope_of.append(stack[-1][1])
-        header = CLASS_RE.match(code)
+        header = None if continuation else CLASS_RE.match(code)
         if header:
             opened += 1
             stack.append((len(header.group(1)), opened))
+        depth, quote, joined = _carry(raw, depth, quote)
     return scope_of
 
 

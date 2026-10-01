@@ -12,9 +12,13 @@ blank lines would be left. Every other byte of `project.godot` is carried
 through verbatim, its own line endings included.
 
 Refusals (exit 1, nothing written, the reason named): a name that is not an
-identifier; a path that is not `res://`, escapes the project, or names no file
-on disk; a name already declared with a DIFFERENT path (the line names it); a
-name or an `[autoload]` section declared more than once. The same `add` twice
+identifier, or that the editor refuses because it is an engine class or a
+project script's `class_name`; a path that is not `res://`, escapes the project,
+is not in its canonical spelling (`//`, `/./`, `/../`, a trailing `/` — the
+refusal names the canonical one), or names no file on disk; a name already
+declared with a DIFFERENT path (the line names it), or with the same path but
+DISABLED (no `*`, so no singleton exists to be `unchanged`); a name or an
+`[autoload]` section declared more than once. The same `add` twice
 is a no-op that says `unchanged`, and so is `rm` of a name nobody declares —
 exit 0, because models retry. A `project.godot` that is missing or is not
 UTF-8 is exit 2: there is no project here to edit.
@@ -22,14 +26,17 @@ UTF-8 is exit 2: there is no project here to edit.
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import sys
 from pathlib import Path, PurePosixPath
 
-from godot_devkit.core import apply
+from godot_devkit.core import apply, walk
 from godot_devkit.core.project import repo_root
+from godot_devkit.godot.format import classdb
 from godot_devkit.godot.format.tscn import parse_lines, strip_quotes
 from godot_devkit.godot.format.tscn_document import read_scene_text
+from godot_devkit.godot.index.gdscript import ScriptIndex
 from godot_devkit.godot.read.autoloads import PROJECT_GODOT
 from godot_devkit.godot.write import file_exists, render_diff, utf8_refusal_reason
 
@@ -39,6 +46,8 @@ SECTION_KIND = 'autoload'
 HEADER = f'[{SECTION_KIND}]'
 RES_PREFIX = 'res://'
 ENABLED = '*'
+GD_SUFFIX = '.gd'
+PARENT = '..'
 # ASCII on purpose: a narrower rule than the editor's never writes a name the
 # editor would refuse, and the refusal says what was expected.
 IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
@@ -65,19 +74,37 @@ def _declared_path(value: str) -> str:
     return strip_quotes(value).lstrip(ENABLED)
 
 
-def _check_name(name: str) -> None:
+def _check_name(root: Path, name: str) -> None:
+    """The editor's refusals, as far as this package can know them: an
+    identifier, and not a name a script already resolves to something else."""
     if not IDENTIFIER.match(name):
         raise Refused(f'{name!r} is not a valid autoload name '
                       f'(expected an identifier: [A-Za-z_][A-Za-z0-9_]*)')
+    if classdb.is_known(name):
+        raise Refused(f'{name} is an engine class — the editor refuses an '
+                      f'autoload that shadows it; pick another name')
+    scripts = walk.descendants(root, walk.Kind.FILE, suffix=GD_SUFFIX,
+                               pattern=f'*{GD_SUFFIX}')
+    index = ScriptIndex(root, [path.relative_to(root).as_posix() for path in scripts])
+    owner = index.by_class.get(name)
+    if owner is not None:
+        raise Refused(f'{name} is the class_name of {owner} — the editor refuses '
+                      f'an autoload that shadows it; pick another name')
 
 
 def _check_path(root: Path, res_path: str) -> None:
     if not res_path.startswith(RES_PREFIX):
         raise Refused(f'{res_path!r} is not a {RES_PREFIX} path')
     rel = res_path[len(RES_PREFIX):]
-    parts = PurePosixPath(rel).parts
-    if not rel or rel.startswith('/') or '..' in parts:
+    canonical = posixpath.normpath(rel) if rel else rel
+    if (not rel or rel.startswith('/')
+            or PurePosixPath(canonical).parts[:1] == (PARENT,)):
         raise Refused(f'{res_path} does not name a file inside the project')
+    if canonical != rel:
+        # Normalising silently would write a spelling the user did not type;
+        # leaving it would make one file two autoload paths.
+        raise Refused(f'{res_path} is not the canonical spelling — '
+                      f'write {RES_PREFIX}{canonical}')
     if any(char in res_path for char in UNQUOTABLE):
         raise Refused(f'{res_path!r} holds a character this verb cannot '
                       f'write unescaped (one of {" ".join(map(repr, UNQUOTABLE))})')
@@ -131,6 +158,9 @@ def plan_add(text: str, name: str, res_path: str) -> tuple[str, str]:
     if existing is not None:
         declared = _declared_path(existing.value)
         if declared == res_path:
+            if not strip_quotes(existing.value).startswith(ENABLED):
+                raise Refused(f'{name} is declared but disabled (no `{ENABLED}`) — '
+                              f'`autoloads rm {name}` then add to enable it')
             return text, f'{UNCHANGED}  (already declared: {declared})'
         raise Refused(f'{name} is already declared with {declared} — '
                       f'`autoloads rm {name}` first to point it elsewhere')
@@ -203,7 +233,7 @@ def main(argv: list[str]) -> int:
         return EXIT_USAGE
     try:
         if args.verb == ADD:
-            _check_name(args.name)
+            _check_name(root, args.name)
             _check_path(root, args.path)
             after, note = plan_add(before, args.name, args.path)
         else:
