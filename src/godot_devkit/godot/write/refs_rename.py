@@ -13,8 +13,6 @@ the rest): a stranded old name is a runtime break with no parse error. Any
 blocking site refuses the WHOLE plan, exit 1, every site named, nothing
 written. A site blocks when it is:
   * a dynamic hit (`refs` prints these under `dynamic (untyped receiver)`);
-  * a res:// path or uid that names it — a path is not the symbol;
-    `git mv` + `refs --retarget` the file first;
   * in a `.gd`, a claimed token inside a string literal, a string literal
     that IS the name (`call("old")`, `&"old"`), or a code token no typed arm
     proves (a member `x.old`, a local, a callable reference);
@@ -25,6 +23,9 @@ It also refuses when <new> is already defined (a class_name, func, signal or
 autoload), and when <old> is defined nowhere in the scanned tree — an engine
 name (`pressed`, `_ready`) is not this project's to rename.
 
+A res:// path or uid that `refs` matches (a preload, an ext_resource) is
+neither rewritten nor a block — a rename changes identifiers, not files. Each
+prints as a PATH line after the plan, and leaves the exit code alone.
 A comment and a node path (`$Name`, `%Name`) are not references and are left
 alone. The same rename twice is a no-op: zero hits of <old> with <new> defined
 prints `already renamed`, exit 0. Zero hits with <new> undefined is exit 1 —
@@ -63,8 +64,10 @@ QUOTES = ('"', "'")
 NODE_PATH_SIGILS = ('$', '%')
 
 BLOCK_DYNAMIC = 'a dynamic hit — a receiver the index cannot type'
-BLOCK_PATH = ('a res:// path or uid that names it — a path is not the symbol; '
-              '`git mv` + `refs --retarget` first')
+PATH_LINE = ('  PATH  {location}  {path} — left as is; git mv + refs --retarget '
+             'if the file should follow')
+RESOURCE_PATH = re.compile(r'(?:res|uid)://[^"\s)]+')
+PATH_KINDS = (refs.PRELOAD_LOAD_KIND, refs.SCENE_REF_KIND)
 BLOCK_IN_STRING = 'inside a string literal — not provably a reference'
 BLOCK_STRING_NAMES = ('a string that IS the name — a by-name reference '
                       '(call, has_method, Callable, StringName) the index cannot type')
@@ -194,16 +197,13 @@ def _is_node_path(line: str, at: int) -> bool:
 
 
 def _plan_gd(plan: FilePlan, old: str, new: str, global_name: bool,
-             dynamic: set[int], paths: set[int]) -> None:
+             dynamic: set[int]) -> None:
     token, new_token = _token(old), _token(new)
     regions = _gd_regions(plan.contents)
     for index, content in enumerate(plan.contents):
         lineno = index + 1
         if lineno in dynamic:
             plan.block(index, BLOCK_DYNAMIC)
-            continue
-        if lineno in paths:
-            plan.block(index, BLOCK_PATH)
             continue
         if old not in content:
             continue
@@ -296,12 +296,11 @@ def _plan(root: Path, found: refs.Scan, old: str, new: str) -> tuple[list[FilePl
     """Every file's rewrite, and every site that blocks the whole plan."""
     hits = found.hits
     dynamic = _lines(hits[refs.DYNAMIC_KIND])
-    paths = _lines(hits[refs.PRELOAD_LOAD_KIND] + hits[refs.SCENE_REF_KIND])
     connections: dict[str, int] = {}
     for hit in hits[refs.SCENE_CONNECTION_KIND]:
         connections[hit.path] = connections.get(hit.path, 0) + 1
     plans: list[FilePlan] = []
-    blocks = [Site(hit.path, 0, hit.text, BLOCK_PATH) for hit in hits[refs.SCENE_REF_KIND]]
+    blocks: list[Site] = []
 
     def load(path: Path, hit: bool = False) -> FilePlan | None:
         loaded = _load(root, path, old, hit)
@@ -312,10 +311,10 @@ def _plan(root: Path, found: refs.Scan, old: str, new: str) -> tuple[list[FilePl
 
     for path in found.gd_files:
         rel = str(path.relative_to(root))
-        plan = load(path, rel in dynamic or rel in paths)
+        plan = load(path, rel in dynamic)
         if plan is not None:
             _plan_gd(plan, old, new, found.global_name,
-                     dynamic.get(rel, set()), paths.get(rel, set()))
+                     dynamic.get(rel, set()))
             plans.append(plan)
     for path in found.scene_files:
         plan = load(path, str(path.relative_to(root)) in connections)
@@ -342,9 +341,14 @@ def run(old: str, new: str, include_tests: bool, dry_run: bool) -> int:
     new_definitions = refs.scan(root, new, include_tests).hits[refs.DEFINITION_KIND]
     census = found.searched.census('file(s) searched')
     header = f'rename  {old} -> {new}' + ('  (dry run — nothing written)' if dry_run else '')
-    total = sum(len(hits) for hits in found.hits.values())
+    total = sum(len(hits) for kind, hits in found.hits.items() if kind not in PATH_KINDS)
 
     def verdict(rewritten: int, blocked: int) -> None:
+        for kind in PATH_KINDS:
+            for hit in found.hits[kind]:
+                shown = RESOURCE_PATH.search(hit.text)
+                print(PATH_LINE.format(location=_location(hit),
+                                       path=shown.group(0) if shown else hit.text))
         print(CENSUS.format(census=census, rewritten=rewritten, blocked=blocked))
 
     if total == 0:
@@ -361,7 +365,8 @@ def run(old: str, new: str, include_tests: bool, dry_run: bool) -> int:
     if not found.hits[refs.DEFINITION_KIND]:
         print(header)
         sites = [Site(hit.path, hit.line, hit.text, BLOCK_UNDEFINED.format(old=old))
-                 for hits in found.hits.values() for hit in hits]
+                 for kind, hits in found.hits.items() if kind not in PATH_KINDS
+                 for hit in hits]
         for site in sites:
             print(site.render())
         print(f'REFUSED  {old} is defined nowhere in the scanned tree — an engine '

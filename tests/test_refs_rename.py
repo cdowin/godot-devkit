@@ -23,10 +23,15 @@ def run_cli(*argv):
     return run_check(types.SimpleNamespace(run=lambda: cli.main(list(argv))))
 
 
+PATH_TITLES = ('preload / load', 'scene resource refs (.tscn/.tres)')
+
+
 def refs_count(symbol):
-    """Every hit `refs <symbol>` prints, across all its buckets."""
+    """Every symbol hit `refs <symbol>` prints — every bucket but the two that
+    match a res:// path, which a rename leaves where they are."""
     _, out = run_check(types.SimpleNamespace(run=lambda: refs.main([symbol])))
-    return sum(int(n) for n in re.findall(r'^## .* \((\d+)\)$', out, re.M))
+    return sum(int(n) for title, n in re.findall(r'^## (.*) \((\d+)\)$', out, re.M)
+               if title not in PATH_TITLES)
 
 
 def snapshot(root):
@@ -35,15 +40,21 @@ def snapshot(root):
 
 
 class RenameRewrites(unittest.TestCase):
-    # (old, new, the file a dry run must show) — a `[connection] method=` plus
-    # its handler's definition, and an autoload's `project.godot` key plus a use.
+    # (old, new, the file a dry run must show, files the rename must not
+    # touch, what it must print) — a `[connection] method=` plus its handler's
+    # definition; an autoload's `project.godot` key plus a use; a class_name
+    # with its bare uses, whose scene's `[node name="Player"]`, `$Player` and
+    # `res://systems/player.gd` are a node and a path, not the class.
     RENAMES = (
-        ('_on_button_pressed', '_on_button_clicked', 'scenes/main.tscn'),
-        ('DataRegistry', 'Registry', 'project.godot'),
+        ('_on_button_pressed', '_on_button_clicked', 'scenes/main.tscn', (), ()),
+        ('DataRegistry', 'Registry', 'project.godot', (), ()),
+        ('Player', 'Hero', 'systems/spawner.gd', ('scenes/main.tscn',),
+         ('  PATH  scenes/main.tscn  res://systems/player.gd — left as is; '
+          'git mv + refs --retarget if the file should follow',)),
     )
 
     def test_every_typed_hit_is_rewritten_once_and_a_retry_is_a_no_op(self) -> None:
-        for old, new, shown in self.RENAMES:
+        for old, new, shown, untouched, printed in self.RENAMES:
             with self.subTest(old=old), temp_repo('read_repo') as root:
                 counted = refs_count(old)
                 before = snapshot(root)
@@ -54,9 +65,13 @@ class RenameRewrites(unittest.TestCase):
                 after = snapshot(root)
                 self.assertEqual(code, 0, out)
                 # Only the token moved: every file is its old bytes with the
-                # name swapped, and nothing outside the hit set changed.
-                self.assertEqual(after, {p: b.replace(old.encode(), new.encode())
-                                         for p, b in before.items()})
+                # name swapped (never a node path), and nothing else changed.
+                token = re.compile(rf'(?<![$\w]){old}(?!\w)'.encode())
+                self.assertEqual(after, {
+                    p: b if str(p.relative_to(root)) in untouched
+                    else token.sub(new.encode(), b) for p, b in before.items()})
+                for line in printed:
+                    self.assertIn(line, out)
                 self.assertNotEqual(after, before)
                 self.assertEqual((refs_count(new), refs_count(old)), (counted, 0))
                 code, again = run_cli('refs', '--rename', old, new)
@@ -96,7 +111,6 @@ class RenameRefuses(unittest.TestCase):
         ({}, 'died', 'perished', ('systems/player.gd:21', 'systems/player.gd:24',
                                   'systems/player.gd:25', 'systems/player.gd:26',
                                   '4 blocked')),
-        ({}, 'Player', 'Hero', ('scenes/main.tscn  a res:// path',)),
         ({}, 'GameManager', 'Manager', ('systems/spawner.gd:10  a dynamic hit',)),
         ({'systems/extra.gd': EXTRA_GD, 'data/anim.tres': EXTRA_TRES}, 'hurt', 'wound',
          ('systems/extra.gd:3  inside a string literal', 'systems/extra.gd:5  a string that IS',
