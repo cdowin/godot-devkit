@@ -6,3 +6,7 @@
 
 [node name="Player" type="Node2D" parent="."]
 script = ExtResource("1_player")
+
+[node name="Button" type="Button" parent="."]
+
+[connection signal="pressed" from="Button" to="Player" method="_on_button_pressed"]

@@ -194,12 +194,46 @@ class RefsScope(unittest.TestCase):
         ('hurt', (), ('grammar.gd',)),
     )
 
+    # The fixture as it stands, one row per bucket a symbol must land in —
+    # and what Godot wires with no `.gd` line spelling it: a `[connection]`
+    # in a scene, an autoload NAME from `project.godot`, a signal or handler
+    # named as an argument. Each read as unreferenced before, the verdict
+    # that gets a handler, an autoload or a signal deleted.
+    BY_KIND = (
+        ('Player', ('systems/player.gd:1  class_name Player',
+                    'systems/spawner.gd:3', '## scene resource refs'), ()),
+        ('pressed', ('## scene connections (1)',
+                     'scenes/main.tscn:12  [connection] signal=pressed from=Button '
+                     'to=Player method=_on_button_pressed'),
+         ('(no references found)', '(0 typed references')),
+        ('_on_button_pressed', ('## scene connections (1)',), ()),
+        ('DataRegistry', ('## definitions (1)',
+                          'project.godot  [autoload] DataRegistry  res://autoloads/data_registry.gd',
+                          '## typed refs (1)', 'systems/player.gd:13  DataRegistry.lookup("hp")'),
+         ('(no references found)',)),
+        ('died', ('## dynamic (untyped receiver) (4)', 'is_connected("died", _on_died)',
+                  'has_signal("died")', 'has_user_signal("died")', 'Signal(self, "died")'), ()),
+        ('_on_died', ('## call / emit sites (2)', 'is_connected("died", _on_died)',
+                      'died.disconnect(_on_died)'), ('## dynamic',)),
+        ('nothing_here', ('(no references found)',), ()),
+    )
+
     def test_finds_the_symbol_grouped_by_kind(self) -> None:
-        code, out, _ = run_in(refs, ['Player'])
-        self.assertEqual(code, 0, out)
-        self.assertIn('systems/player.gd', out)          # definition
-        self.assertIn('systems/spawner.gd', out)         # typed ref
-        self.assertIn('scenes/main.tscn', out)           # scene resource ref
+        with temp_repo('read_repo'):
+            for symbol, present, absent in self.BY_KIND:
+                code, out, _ = run_main(refs, [symbol])
+                self.assertEqual(code, 0, out)
+                for phrase in present:
+                    self.assertIn(phrase, out, symbol)
+                for phrase in absent:
+                    self.assertNotIn(phrase, out, symbol)
+
+    def test_no_project_godot_is_no_autoload_and_no_error(self) -> None:
+        # refs works in a tree that is not a Godot project; the autoload arm
+        # simply has nothing to index there.
+        code, out, err = run_in(refs, ['DataRegistry'], only=['systems/player.gd'])
+        self.assertEqual(code, 0, err)
+        self.assertIn('(no references found)', out)
 
     def test_exclude_prefixes_scopes_the_scan(self) -> None:
         # Pre-fix `[refs]` did not exist: the exclusion list was a hardcoded
