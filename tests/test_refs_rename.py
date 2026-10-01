@@ -127,6 +127,21 @@ class RenameRefuses(unittest.TestCase):
                     '[node name="Hud" type="Node"]\n'
                     'script = SubResource("GDScript_1")\n'
                     'registry = NodePath("/root/DataRegistry")\n')  # 12
+    # An engine name the project ALSO defines: without types, `sfx.play()`,
+    # `$Anim.play()` and a Button's `[connection signal="pressed"]` (main.tscn:12)
+    # may be the engine's — a rename that rewrote them would break the game.
+    PLAY_GD = ('extends Node\n'
+               '\n'
+               '@onready var sfx: AudioStreamPlayer = $Sfx\n'
+               '\n'
+               'func play() -> void:\n'
+               '\tsfx.play()\n'
+               '\t$Anim.play()\n')
+    GHOST_TSCN = ('[gd_scene format=3]\n'
+                  '\n'
+                  '[node name="Root" type="Node"]\n'
+                  '\n'
+                  '[connection signal="fired" from="." to="." method="_on_ghost"]\n')
 
     # (extra files, old, new, every phrase the refusal must name)
     REFUSALS = (
@@ -143,8 +158,14 @@ class RenameRefuses(unittest.TestCase):
          ('scenes/hud.tscn:7  an occurrence in a scene', 'scenes/hud.tscn:12  an occurrence '
           'in a scene', '2 blocked')),
         ({}, 'hurt', 'watch', ('systems/player.gd:20  watch is already defined',)),
-        ({}, 'pressed', 'clicked', ('scenes/main.tscn:12  a reference to pressed, which '
-                                    'nothing here defines',)),
+        ({'scenes/ghost.tscn': GHOST_TSCN}, '_on_ghost', '_on_spirit',
+         ('scenes/ghost.tscn:5  a reference to _on_ghost, which nothing here defines',)),
+        ({'systems/jukebox.gd': PLAY_GD}, 'play', 'play_track',
+         ('play  an engine method', '1 blocked')),
+        ({'systems/card.gd': 'extends Node\n\nsignal pressed\n'}, 'pressed', 'clicked',
+         ('pressed  an engine signal', '1 blocked')),
+        ({}, '_ready', '_ready2', ('_ready  an engine method',)),
+        ({}, 'hurt', 'queue_free', ('queue_free  an engine method',)),
         ({}, 'nothing_here', 'anything', ('nothing to rename',)),
     )
 

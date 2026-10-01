@@ -159,7 +159,7 @@ same command twice is a no-op the second time.
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | author or remove one `[connection]`; ambiguous matches are refused, `--flags` names one |
 | `scene canonicalize <file>... [--elide-defaults] [--respell] [--order]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default; `--respell` re-spells floats in the saver's shortest form and wraps a bare list on an `Array[T]` export as `Array[T]([...])`; `--order` puts a scripted section's properties in declaration order — line edits only, anything unprovable named and left alone | <!-- doc-scan:allow -->
 | `refs --retarget <old-res-path> <new-res-path> [--dry-run]` | after a `git mv`: rewrite every `ext_resource` path and exact `preload`/`load` literal naming the old path; anything unprovable is SKIPPED with a reason, and skips exit 1 |
-| `refs --rename <old> <new> [--dry-run]` | rename a `class_name`, method, signal or autoload across `.gd`, `.tscn`, `.tres` and `project.godot` as one plan — only the identifier token at each typed hit, a `[connection]`'s `signal=`/`method=` value, an autoload's key; all or nothing: any dynamic hit, string or unproven occurrence, a defined `<new>` or an undefined `<old>` refuses the whole rename with every site named (exit 1), and a repeat prints `already renamed`; a res:// path that matches is never rewritten, only listed as a `PATH` line; `tests/` is always in scope |
+| `refs --rename <old> <new> [--dry-run]` | rename a `class_name`, method, signal or autoload across `.gd`, `.tscn`, `.tres` and `project.godot` as one plan — only the identifier token at each typed hit, a `[connection]`'s `signal=`/`method=` value, an autoload's key; all or nothing: an `<old>` or `<new>` the engine also names (a method or signal on any class — `play`, `pressed`, `_ready`), any dynamic hit, string or unproven occurrence, a defined `<new>` or an undefined `<old>` refuses the whole rename with every site named (exit 1), and a repeat prints `already renamed`; a res:// path that matches is never rewritten, only listed as a `PATH` line; `tests/` is always in scope |
 | `autoloads add <Name> <res://path> [--dry-run]` · `autoloads rm <Name>` | declare or remove one `project.godot` autoload as an enabled singleton (`Name="*res://path"`); a missing file, a non-canonical path, a bad name (not an identifier, an engine class or a project `class_name`), a name already pointing elsewhere or declared disabled is refused, and a repeat is a no-op |
 | `tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` · `tiles erase …` | fill or clear a rectangle of one `TileMapLayer`; only that property's base64 is regenerated |
 
@@ -465,11 +465,13 @@ data is vendored: `tests/fixtures/` holds purpose-built repos, a committed clean
 gates run over, and a scrubbed real-world scene corpus every write verb round-trips byte for byte.
 
 `check props` compares against a snapshot of Godot's ClassDB in `src/godot_devkit/data/classdb.json`;
-reading it boots nothing. Regenerate when the engine minor moves:
+reading it boots nothing. The same file carries the engine's method and signal names, which
+`refs --rename` refuses. Regenerate when the engine minor moves:
 
 ```sh
 godot --headless --dump-extension-api      # writes ./extension_api.json
 python3 tools/gen_classdb.py extension_api.json
+python3 tools/gen_classdb.py --names-only extension_api.json   # refresh only the names
 ```
 
 ## Requirements
