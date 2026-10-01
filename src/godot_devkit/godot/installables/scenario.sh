@@ -21,10 +21,9 @@
 #   2. runs it against a fresh World, with the reset its scenario_base owns
 #      (autoload state, World, player);
 #   3. FINISHES that scenario's teardown, then prints its usual verdict line
-#      (GDK_SCENARIO_RESULT_RE, then PASS|FAIL as a word, with the scenario's
-#      name as a word after the ERE too: `[SCENARIO] <name> PASS …`) — the
-#      verdict closes the scenario, so nothing it causes may come after it, and
-#      a verdict naming another scenario is not this one's;
+#      (GDK_SCENARIO_RESULT_RE, then PASS|FAIL as a word) — the verdict
+#      closes the scenario, so nothing it causes may come after it, and one
+#      carrying ANOTHER suite member's name as a word is not this one's;
 #   4. exits 0 after the last one: a FAIL is carried by its verdict line,
 #      never by the exit code.
 # The stream is split at the START markers: a scenario's slice runs from its
@@ -364,10 +363,11 @@ watch_for_parse_error() {
 # START marker names (empty when the line is not one, or names a scenario this
 # suite did not ask for — a marker cannot aim a slice outside the list), and
 # `verdict_of(line, name)` the first PASS|FAIL WORD after the verdict ERE's
-# match (empty when the line is not a verdict). Given a <name>, a verdict
-# counts only when <name> is one of the words after that match: a verdict line
-# carrying ANOTHER scenario's name (a late re-emit, a nested log) is not this
-# slice's. With "" it is any verdict at all, which is what liveness needs.
+# match (empty when the line is not a verdict). Given a <name>, a verdict does
+# NOT count when one of the words after that match is ANOTHER member of this
+# suite (a late re-emit, a nested log): that is not this slice's verdict. A
+# verdict naming no member it recognises (a runner printing `test_a.gd`)
+# still counts. With "" it is any verdict at all, which is what liveness needs.
 # Reads START_RE, RESULT_RE and SUITE_NAMES (comma-separated) from the
 # environment.
 # shellcheck disable=SC2016  # an awk program, not a shell expansion
@@ -383,16 +383,16 @@ SUITE_AWK_LIB='
 		n = split(s, f, /[[:space:]]+/)
 		return (f[n] in asked) ? f[n] : ""
 	}
-	function verdict_of(line, name,   rest, n, f, i, v, named) {
+	function verdict_of(line, name,   rest, n, f, i, v, other) {
 		if (!match(line, ENVIRON["RESULT_RE"])) return ""
 		rest = substr(line, RSTART + RLENGTH)
 		n = split(rest, f, /[[:space:]]+/)
-		v = ""; named = (name == "")
+		v = ""; other = 0
 		for (i = 1; i <= n; i++) {
 			if (v == "" && (f[i] == "PASS" || f[i] == "FAIL")) v = f[i]
-			if (f[i] == name) named = 1
+			if (name != "" && f[i] != name && (f[i] in asked)) other = 1
 		}
-		return named ? v : ""
+		return other ? "" : v
 	}
 '
 
@@ -440,8 +440,8 @@ watch_for_stall() {
 # every scenario that STARTed, and print one row per such scenario, in START
 # order: `<name>\t<PASS|FAIL|-|CAP>\t<verdict line>`. A slice runs from its
 # START to the next START; the boot preamble before the first START opens
-# every slice, as it opens every cold transcript. A verdict counts for a slice
-# only when it carries that slice's name (verdict_of); one re-emitted later
+# every slice, as it opens every cold transcript. A verdict naming another
+# member does not count for a slice (verdict_of); one re-emitted later
 # wins, as the cold path's `tail -1` does. Output after a scenario's verdict
 # belongs to NO scenario (the contract has the runner finish its teardown
 # first): it stays in the slice's report, and is also written to <dir>/between
@@ -733,7 +733,8 @@ for n in "${names[@]}"; do
 		chatty:b) for i in $(seq 1 100); do echo "b says something rather long, line $i of a chatty one"; done ;;
 		coldcache:*) echo 'WARNING: invalid UID "uid://c" - using text path instead' ;;
 	esac
-	v="$n"; [ "${GDK_STUB_MODE:-}:$n" != misname:b ] || v=a
+	v="$n"
+	case "${GDK_STUB_MODE:-}:$n" in misname:b) v=a ;; oddname:b) v=test_b.gd ;; esac
 	echo "[SCENARIO] $v PASS steps=1 errors=0"
 	[ "${GDK_STUB_MODE:-}:$n" != gap:a ] || echo "ERROR: a tore down after its verdict"
 done
@@ -828,13 +829,19 @@ STUB_EOF
 		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b c " ] \
 		|| miss "a worker that stalls in B is killed at the per-scenario bound, B and C handed back (rc $rc, $((SECONDS - t0))s): $out"
 
-	# A verdict counts for a slice only when it carries that slice's name: B
-	# printing A's verdict has none of its own, and goes cold.
+	# A verdict naming ANOTHER member is not this slice's: B printing A's
+	# verdict has none of its own, and goes cold...
 	cases=$((cases + 1))
 	out="$(suite misname)"; rc=$?
 	[ "$rc" -eq 4 ] && [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 c:0 " ] \
 		&& [ "$(tr '\n' ' ' < "$res/unrun")" = "b " ] \
 		|| miss "a verdict line naming A inside B's slice is not B's verdict (rc $rc): $out"
+	# ...while one naming no member at all (`test_b.gd`) is still B's.
+	cases=$((cases + 1))
+	out="$(suite oddname)"; rc=$?
+	[ "$rc" -eq 0 ] && [ "$(sort "$res/results" | tr '\t\n' ': ')" = "a:0 b:0 c:0 " ] \
+		&& grep -qxF '[SCENARIO] test_b.gd PASS steps=1 errors=0' <<<"$out" \
+		|| miss "a verdict naming no suite member still counts for its slice (rc $rc): $out"
 
 	# GDK_LOG_CAP_BYTES caps each SLICE: a chatty B is handed back alone, and
 	# A and C, before and after it, keep their warm verdicts.
