@@ -50,6 +50,8 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # fill / clear a rectangle of one
                                     # TileMapLayer; only that one property's
                                     # base64 is regenerated
+    godot-devkit autoloads add <Name> <res://path>  |  autoloads rm <Name>
+                                    # declare / remove one project.godot autoload
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 The installer (writes each file once; after that it is the repo's):
@@ -258,6 +260,9 @@ def main(argv: list[str] | None = None) -> int:
         from godot_devkit.godot.read import orphans
         return orphans.main(rest)
     if cmd == 'autoloads':
+        from godot_devkit.godot.write import autoloads_edit
+        if rest and rest[0] in autoloads_edit.VERBS:
+            return autoloads_edit.main(rest)
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
     if cmd == 'install-runners':
