@@ -112,6 +112,10 @@ class AutoloadsEdit(unittest.TestCase):
             # Names the editor refuses: an engine class, a project class_name.
             (('add', 'Input', SPAWNER), 1, 'engine class'),
             (('add', 'Player', PLAYER), 1, f'class_name of {PLAYER}'),
+            # A wrong-case path: a case-insensitive filesystem finds the file,
+            # a case-sensitive export does not. Refused on either, naming the
+            # on-disk spelling.
+            (('add', 'Spawner', 'res://Systems/Spawner.gd'), 1, SPAWNER),
         ]
         self.project.write_bytes(self.bytes_() + f'Dormant="{SPAWNER}"\n'.encode())
         before = self.bytes_()

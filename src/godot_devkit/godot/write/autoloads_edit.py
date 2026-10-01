@@ -16,7 +16,9 @@ identifier, or that the editor refuses because it is an engine class or a
 project script's `class_name` (a script inside `[refs] exclude_prefixes` — a
 stale worktree, the import cache — is not one); a path that is not `res://`, escapes the project,
 is not in its canonical spelling (`//`, `/./`, `/../`, a trailing `/` — the
-refusal names the canonical one), or names no file on disk; a name already
+refusal names the canonical one), differs from the file's on-disk spelling only
+by case (a case-insensitive filesystem finds it, a case-sensitive export does
+not — the refusal names the on-disk one), or names no file on disk; a name already
 declared with a DIFFERENT path (the line names it), or with the same path but
 DISABLED (no `*`, so no singleton exists to be `unchanged`); a name or an
 `[autoload]` section declared more than once. The same `add` twice
@@ -99,6 +101,24 @@ def _check_name(root: Path, name: str) -> None:
                       f'an autoload that shadows it; pick another name')
 
 
+def _case_mismatch(root: Path, rel: str) -> str | None:
+    """The on-disk spelling of `rel` when one differs from it only by case.
+
+    Read off the tree's own listing, never `stat`: a case-insensitive
+    filesystem answers `stat` for any spelling, so the listing is the only
+    place the real one is written down. An exact match wins — a case-sensitive
+    tree may hold both spellings."""
+    want = rel.casefold()
+    other = None
+    for path in walk.descendants(root):
+        found = path.relative_to(root).as_posix()
+        if found == rel:
+            return None
+        if other is None and found.casefold() == want:
+            other = found
+    return other
+
+
 def _check_path(root: Path, res_path: str) -> None:
     if not res_path.startswith(RES_PREFIX):
         raise Refused(f'{res_path!r} is not a {RES_PREFIX} path')
@@ -115,6 +135,13 @@ def _check_path(root: Path, res_path: str) -> None:
     if any(char in res_path for char in UNQUOTABLE):
         raise Refused(f'{res_path!r} holds a character this verb cannot '
                       f'write unescaped (one of {" ".join(map(repr, UNQUOTABLE))})')
+    # Before the existence check, so a case-sensitive filesystem names the
+    # on-disk spelling too, rather than calling the file missing.
+    spelled = _case_mismatch(root, rel)
+    if spelled is not None:
+        raise Refused(f'{res_path} is spelled {RES_PREFIX}{spelled} on disk — '
+                      f'a case-sensitive export would not find it; '
+                      f'write {RES_PREFIX}{spelled}')
     if not file_exists(root / rel):
         raise Refused(f'{res_path} does not exist on disk ({root / rel})')
 
