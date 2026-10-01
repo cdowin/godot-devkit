@@ -16,8 +16,11 @@ written. A site blocks when it is:
   * in a `.gd`, a claimed token inside a string literal, a string literal
     that IS the name (`call("old")`, `&"old"`), or a code token no typed arm
     proves (a member `x.old`, a local, a callable reference);
-  * in a scene, a StringName `&"old"` (a call-method track) or a
-    `script_class="old"`;
+  * in a scene, a StringName `&"old"` (a call-method track), a
+    `script_class="old"`, or any other line holding <old> as a word outside
+    a rewritten [connection] attr, a res:// or uid:// path and a section
+    header's `name=`/`parent=`/`from=`/`to=` — a built-in script's
+    `script/source`, a `NodePath("/root/old")`, a by-name value;
   * a line it would rewrite that already carries <new>.
 It also refuses when <new> is already defined (a class_name, func, signal or
 autoload), and when <old> is defined nowhere in the scanned tree — an engine
@@ -77,6 +80,11 @@ BLOCK_UNPROVEN = ('an occurrence no typed arm proves — a member, a local or a 
 BLOCK_CARRIES_NEW = 'the line already carries {new}'
 BLOCK_STRINGNAME = 'a StringName naming it — a call-method track or a by-name reference'
 BLOCK_SCRIPT_CLASS = 'a script_class naming it — `refs` does not index it; rename by hand'
+BLOCK_SCENE_UNPROVEN = ('an occurrence in a scene no [connection] rewrite covers — a built-in '
+                        'script, a NodePath, a by-name value; rename it by hand')
+# A section header's node addressing: a node's own name, its parent's path, a
+# connection's ends — a node in the tree, not the symbol.
+NODE_ATTRS = re.compile(r'\b(?:name|parent|from|to)="[^"]*"')
 BLOCK_CONNECTION_MISMATCH = ('{found} [connection] attr(s) here, `refs` counted '
                              '{counted} — refusing to guess which')
 BLOCK_CONNECTION_SPELLING = 'a [connection] whose signal=/method= is not spelled `attr="name"`'
@@ -240,18 +248,35 @@ def _plan_scene(plan: FilePlan, old: str, new: str, counted: int) -> None:
     attr = re.compile(rf'(\b(?:{"|".join(CONNECTION_ATTRS)})="){re.escape(old)}(")')
     stringname = re.compile(rf'&"{re.escape(old)}"')
     script_class = re.compile(rf'\bscript_class="{re.escape(old)}"')
-    new_token = _token(new)
-    headers = {section.header_line for section in parse_lines(plan.contents)
+    token, new_token = _token(old), _token(new)
+    sections = parse_lines(plan.contents)
+    section_headers = {section.header_line for section in sections}
+    headers = {section.header_line for section in sections
                if section.kind == CONNECTION_KIND
                and old in (section.attrs.get(a) for a in CONNECTION_ATTRS)}
     for index, content in enumerate(plan.contents):
         if old not in content:
             continue
+        connection = index in headers
+        # What is left once the parts that are provably not the symbol go: a
+        # res:// or uid:// path, a header's node addressing, the attr rewritten.
+        rest = RESOURCE_PATH.sub('', content)
+        if index in section_headers:
+            rest = NODE_ATTRS.sub('', rest)
+        if connection:
+            rest = attr.sub('', rest)
+        blocked = False
         if stringname.search(content):
             plan.block(index, BLOCK_STRINGNAME)
+            blocked = True
         if script_class.search(content):
             plan.block(index, BLOCK_SCRIPT_CLASS)
-        if index not in headers:
+            blocked = True
+        if (not blocked and token.search(rest)
+                and not (connection and not attr.search(content))):
+            plan.block(index, BLOCK_SCENE_UNPROVEN)
+            blocked = True
+        if not connection or blocked:
             continue
         if new_token.search(content):
             plan.block(index, BLOCK_CARRIES_NEW.format(new=new))
