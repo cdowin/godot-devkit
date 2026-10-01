@@ -17,3 +17,4 @@
 {"ts":"2026-10-01T19:05:14Z","kind":"status","grain":"st-python-and-release-findings","from":"building","to":"done","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T19:07:16Z","kind":"status","grain":"st-refs-rename","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T19:07:16Z","kind":"status","grain":"ft-refs-renames-a-symbol","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T19:12:00Z","kind":"status","grain":"bg-stats-prefix-not-path-aware","from":"open","to":"fixed","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}

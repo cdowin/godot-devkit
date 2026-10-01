@@ -144,6 +144,11 @@ class Scope(unittest.TestCase):
     def test_no_config_equals_declaring_the_defaults(self) -> None:
         declared = '[stats]\ntests = ["tests/"]\ntools = ["tools/"]\nvendored = ["addons/"]\n'
         self.assertEqual(run(TREE, toml=declared), run(TREE))
+        # A prefix names a directory with or without its slash: `tests` never
+        # takes in `testsuite/`.
+        beside = {**TREE, 'testsuite/x.gd': 'extends Node\n'}
+        slashless = '[stats]\ntests = ["tests"]\ntools = ["tools"]\nvendored = ["addons"]\n'
+        self.assertEqual(run(beside, toml=slashless), run(beside))
 
     def test_listing_only_the_vendored_addons_makes_the_rest_game(self) -> None:
         _, out, _ = run(TREE, toml='[stats]\nvendored = ["addons/other/"]\n')

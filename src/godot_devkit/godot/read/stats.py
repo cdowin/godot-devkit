@@ -105,12 +105,17 @@ class Row:
         return out
 
 
+def _dirs(prefixes: tuple[str, ...]) -> tuple[str, ...]:
+    """Each prefix as a directory: `tests` must not take in `testsuite/`."""
+    return tuple(p if p.endswith('/') else p + '/' for p in prefixes)
+
+
 def load_settings() -> Settings:
     sect = config_section(CONFIG_SECTION)
     return Settings(
-        tests=str_tuple(sect, CONFIG_SECTION, 'tests', DEFAULT_TESTS),
-        tools=str_tuple(sect, CONFIG_SECTION, 'tools', DEFAULT_TOOLS),
-        vendored=str_tuple(sect, CONFIG_SECTION, 'vendored', VENDORED_DEFAULT),
+        tests=_dirs(str_tuple(sect, CONFIG_SECTION, 'tests', DEFAULT_TESTS)),
+        tools=_dirs(str_tuple(sect, CONFIG_SECTION, 'tools', DEFAULT_TOOLS)),
+        vendored=_dirs(str_tuple(sect, CONFIG_SECTION, 'vendored', VENDORED_DEFAULT)),
     )
 
 
