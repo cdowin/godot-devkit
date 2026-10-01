@@ -88,7 +88,9 @@ GDSCRIPT_KEYWORDS = frozenset((
 BLOCK_DYNAMIC = 'a dynamic hit — a receiver the index cannot type'
 PATH_LINE = ('  PATH  {location}  {path} — left as is; git mv + refs --retarget '
              'if the file should follow')
-RESOURCE_PATH = re.compile(r'(?:res|uid)://[^"\s)]+')
+# A path ends where a quote, space or list/call punctuation does: a single-
+# quoted path in a built-in script must not swallow the name after it.
+RESOURCE_PATH = re.compile(r'(?:res|uid)://[^"\'\s),\]:]+')
 PATH_KINDS = (refs.PRELOAD_LOAD_KIND, refs.SCENE_REF_KIND)
 BLOCK_IN_STRING = 'inside a string literal — not provably a reference'
 BLOCK_STRING_NAMES = ('a string that IS the name — a by-name reference '

@@ -122,11 +122,12 @@ class RenameRefuses(unittest.TestCase):
                     '\n'
                     'func _ready():\n'
                     '\tDataRegistry.load_all()\n'      # 7: inside script/source
+                    "\tvar m = ['res://a.gd',DataRegistry]\n"  # 8: after a quoted path
                     '"\n'
                     '\n'
                     '[node name="Hud" type="Node"]\n'
                     'script = SubResource("GDScript_1")\n'
-                    'registry = NodePath("/root/DataRegistry")\n')  # 12
+                    'registry = NodePath("/root/DataRegistry")\n')  # 13
     # An engine name the project ALSO defines: without types, `sfx.play()`,
     # `$Anim.play()` and a Button's `[connection signal="pressed"]` (main.tscn:12)
     # may be the engine's — a rename that rewrote them would break the game.
@@ -155,8 +156,8 @@ class RenameRefuses(unittest.TestCase):
           'systems/extra.gd:7  the line already carries wound',
           'data/anim.tres:4  a StringName', '5 blocked')),
         ({'scenes/hud.tscn': BUILTIN_TSCN}, 'DataRegistry', 'Registry',
-         ('scenes/hud.tscn:7  an occurrence in a scene', 'scenes/hud.tscn:12  an occurrence '
-          'in a scene', '2 blocked')),
+         ('scenes/hud.tscn:7  an occurrence in a scene', 'scenes/hud.tscn:8  an occurrence '
+          'in a scene', 'scenes/hud.tscn:13  an occurrence in a scene', '3 blocked')),
         ({}, 'hurt', 'watch', ('systems/player.gd:20  watch is already defined',)),
         ({'scenes/ghost.tscn': GHOST_TSCN}, '_on_ghost', '_on_spirit',
          ('scenes/ghost.tscn:5  a reference to _on_ghost, which nothing here defines',)),
