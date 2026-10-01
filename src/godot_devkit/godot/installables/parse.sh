@@ -159,6 +159,13 @@ if [ ! -f "$GDK_PROJECT_FILE" ]; then
 	exit 2
 fi
 
+# A receipt over these exact inputs is the proof already bought (gdk_runners.sh,
+# proof receipts): say so, boot nothing.
+RECEIPT_KEY="$(gdk_receipt_key parse)" || RECEIPT_KEY=""
+if gdk_receipt_hit parse "$RECEIPT_KEY"; then
+	exit 0
+fi
+
 # user:// sandbox — both stages boot the project's full autoload stack.
 gdk_sandbox_home
 
@@ -232,4 +239,5 @@ fi
 GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (boot clean; ${COMPILED}/${TOTAL} scripts compiled)" "$LOG"
+gdk_receipt_write parse "$RECEIPT_KEY" "[$GATE_TAG] PASS (boot clean; ${COMPILED}/${TOTAL} scripts compiled)"
 exit 0

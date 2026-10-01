@@ -481,9 +481,10 @@ def _fanout_fixture(tmp_path: Path, stub_body: str, mode: int = 0o755) -> Path:
 
 
 def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_sandbox(tmp_path):
-    """The lock is host-scoped and descriptor-backed: a second gate fails
-    immediately with owner context, while sourced descendants still validate
-    the captured host path after HOME has become a per-run sandbox."""
+    """The lock is host-scoped and descriptor-backed: a second gate with
+    GDK_ENGINE_GATE_WAIT=0 fails immediately with owner context, while sourced
+    descendants still validate the captured host path after HOME has become a
+    per-run sandbox."""
     home = tmp_path / 'host-home'
     lib = LIBRARY
     owner = subprocess.Popen(
@@ -497,7 +498,8 @@ def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_s
         assert owner.stdout.readline().strip() == 'ready'
         competing = subprocess.run(
             ['bash', '-c', 'source "$1"; gdk_engine_gate_run parse -- true', '_', str(lib)],
-            text=True, capture_output=True, env=dict(os.environ, HOME=str(home)))
+            text=True, capture_output=True,
+            env=dict(os.environ, HOME=str(home), GDK_ENGINE_GATE_WAIT='0'))
         assert competing.returncode == 75, competing.stdout + competing.stderr
         assert 'engine gate busy' in competing.stderr, competing.stderr
         assert 'integration' in competing.stderr, competing.stderr
@@ -508,6 +510,29 @@ def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_s
         ['bash', '-c', 'source "$1"; gdk_engine_gate_run after-crash -- true', '_', str(lib)],
         text=True, capture_output=True, env=dict(os.environ, HOME=str(home)))
     assert released.returncode == 0, released.stdout + released.stderr
+
+
+def test_engine_gate_queues_until_the_owner_releases(tmp_path):
+    """#41: by default a second gate waits for the lease, says so once, and
+    runs when the owner exits; it never exits 75 while the bound holds."""
+    home = tmp_path / 'queue-home'
+    owner = subprocess.Popen(
+        ['bash', '-c', 'source "$1"; gdk_engine_gate_run integration -- '
+         'bash -c "echo ready; sleep 1"', '_', str(LIBRARY)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        env=dict(os.environ, HOME=str(home)))
+    try:
+        assert owner.stdout is not None
+        assert owner.stdout.readline().strip() == 'ready'
+        queued = subprocess.run(
+            ['bash', '-c', 'source "$1"; gdk_engine_gate_run parse -- true', '_', str(LIBRARY)],
+            text=True, capture_output=True, timeout=30,
+            env=dict(os.environ, HOME=str(home), GDK_ENGINE_GATE_WAIT='20'))
+        assert queued.returncode == 0, queued.stdout + queued.stderr
+        assert 'waits up to 20 s' in queued.stderr, queued.stderr
+        assert 'admitted parse' in queued.stderr, queued.stderr
+    finally:
+        owner.wait(timeout=10)
 
 
 def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp_path):
@@ -538,7 +563,8 @@ def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp
              'gdk_run_bounded 20 -- env GDK_GODOT="$GDK_GODOT" "$GDK_GODOT"',
              '_', str(LIBRARY), str(timeout), str(godot)], cwd=tmp_path,
             text=True, capture_output=True,
-            env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+            env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots'),
+                     GDK_ENGINE_GATE_WAIT='0'))
         assert competing.returncode == 75, competing.stdout + competing.stderr
         assert 'engine gate busy' in competing.stderr, competing.stderr
     finally:
@@ -1225,3 +1251,46 @@ def test_this_repos_tier_file_starts_with_the_installable():
         'Makefile.tiers no longer opens with the installable byte for byte — '
         'edit the installable and re-compose, never the copy')
     assert 'pyunit:' in own[len(installable):], 'the Python tiers are gone'
+
+
+def test_receipt_keys_on_inputs_not_prose_and_is_shared_by_worktrees(tmp_path):
+    """A PASS receipt covers the same content in any worktree of the clone; a
+    code edit re-keys it, a docs/ or pm/ edit and a commit do not."""
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-C', str(repo)]
+    subprocess.run([*git, 'init', '-q'], check=True)
+    (repo / 'game.gd').write_text('extends Node\n', encoding='utf-8')
+    (repo / 'docs').mkdir()
+    (repo / 'docs' / 'a.md').write_text('a\n', encoding='utf-8')
+    env = dict(os.environ, GDK_GODOT='no-such-godot')
+    env.pop('GDK_RECEIPTS', None)
+
+    def lib(snippet, where=repo):
+        return subprocess.run(['bash', '-c', 'source "$1"; ' + snippet, '_', str(LIBRARY)],
+                              cwd=where, text=True, capture_output=True, env=env)
+
+    key = lib('gdk_receipt_key unit world').stdout.strip()
+    assert len(key) == 40
+    assert lib(f'gdk_receipt_hit unit {key}').returncode == 1
+    wrote = lib(f'gdk_receipt_write unit {key} "[UNIT] PASS (1/1)" world')
+    assert wrote.returncode == 0, wrote.stderr
+    hit = lib(f'gdk_receipt_hit unit {key}')
+    assert hit.returncode == 0 and '[UNIT] PASS (1/1); reused — receipt' in hit.stdout
+    # Prose and a commit move no input.
+    (repo / 'docs' / 'a.md').write_text('b\n', encoding='utf-8')
+    subprocess.run([*git, 'add', '-A'], check=True)
+    subprocess.run([*git, 'commit', '-qm', 'x'], check=True)
+    assert lib('gdk_receipt_key unit world').stdout.strip() == key
+    # Another slice is another key; a code edit is a new key.
+    assert lib('gdk_receipt_key unit combat').stdout.strip() != key
+    # A worktree of the same clone sees the receipt.
+    wt = tmp_path / 'wt'
+    subprocess.run([*git, 'worktree', 'add', '-q', str(wt)], check=True)
+    assert lib('gdk_receipt_key unit world', wt).stdout.strip() == key
+    assert lib(f'gdk_receipt_hit unit {key}', wt).returncode == 0
+    (repo / 'game.gd').write_text('extends Node2D\n', encoding='utf-8')
+    assert lib('gdk_receipt_key unit world').stdout.strip() != key
+    # Off means off.
+    env['GDK_RECEIPTS'] = '0'
+    assert lib('gdk_receipt_key unit world').returncode == 1

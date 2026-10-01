@@ -270,6 +270,82 @@ gdk_sandbox_home() {
 	gdk_on_exit _gdk_destroy_run_home
 }
 
+# --- proof receipts ---------------------------------------------------------
+# A tier that PASSES files a receipt keyed to the content of what it read; a
+# later run of the same tier, with the same arguments, over the same content,
+# prints the recorded verdict with `; reused — receipt <id>` and boots nothing.
+# The content is the working tree as git sees it — tracked and untracked,
+# ignored excluded — minus the top-level paths in GDK_RECEIPT_EXCLUDE (default
+# `docs pm product .claude .github`: prose and the PM tree are never a tier's
+# input), plus the engine binary's identity. HEAD is NOT in the key: a commit,
+# a merge or a status flip that moves no input is not a new input.
+#
+# Receipts live in the git COMMON dir (`<common>/godot-devkit/receipts/`), so
+# every worktree of one clone shares them: a builder's green unit run covers the
+# lead's checkout after a merge whose content is byte-identical. A FAIL is never
+# recorded. A run whose inputs moved while it ran records nothing. A reused run
+# files no cost row: it measured nothing. GDK_RECEIPTS=0 runs every tier.
+GDK_RECEIPT_EXCLUDE="${GDK_RECEIPT_EXCLUDE-docs pm product .claude .github}"
+
+# gdk_receipt_key <tier> [args...] — print the key for this tier, these args
+# and the tree as it stands. Status 1, nothing printed, when it cannot key
+# (receipts off, not a git checkout, git failed): the tier then just runs.
+gdk_receipt_key() {
+	[ "${GDK_RECEIPTS:-1}" = 1 ] || return 1
+	local top idx tree listing engine
+	top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+	idx="$(mktemp "${TMPDIR:-/tmp}/gdk-receipt-index.XXXXXX")" || return 1
+	# A copy of the real index keeps git's stat cache, so `add -A` hashes only
+	# what changed; the real index and its lock are never touched.
+	cp "$(git -C "$top" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$idx" 2>/dev/null || rm -f "$idx"
+	if ! tree="$(GIT_INDEX_FILE="$idx" git -C "$top" add -A . >/dev/null 2>&1 \
+		&& GIT_INDEX_FILE="$idx" git -C "$top" write-tree 2>/dev/null)"; then
+		rm -f "$idx"
+		return 1
+	fi
+	rm -f "$idx"
+	listing="$(git -C "$top" ls-tree "$tree" 2>/dev/null \
+		| awk -F'\t' -v ex=" $GDK_RECEIPT_EXCLUDE " 'index(ex, " " $2 " ") == 0')" || return 1
+	engine="$(command -v "${GDK_GODOT:-godot}" 2>/dev/null || true)"
+	[ -z "$engine" ] || engine="$engine:$(wc -c < "$engine" 2>/dev/null | tr -d ' ')"
+	printf '%s\n' "receipt-v1" "$*" "$engine" "$listing" | shasum -a 256 | cut -c1-40
+}
+
+_gdk_receipt_dir() {
+	local common
+	common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+	printf '%s/godot-devkit/receipts/%s\n' "$common" "$1"
+}
+
+# gdk_receipt_hit <tier> <key> — status 0 and the recorded verdict line,
+# marked reused, when a receipt covers this key; status 1 otherwise.
+gdk_receipt_hit() {
+	local dir file
+	[ -n "${2:-}" ] || return 1
+	dir="$(_gdk_receipt_dir "$1")" || return 1
+	file="$dir/$2"
+	[ -f "$file" ] || return 1
+	printf '%s; reused — receipt %s from %s\n' "$(sed -n 2p "$file")" "${2:0:12}" "$(sed -n 1p "$file")"
+}
+
+# gdk_receipt_write <tier> <key> <verdict line> [args...] — file a PASS
+# receipt, but only when the tree still keys to <key>: a tree edited while the
+# tier ran was never wholly proven.
+gdk_receipt_write() {
+	local tier="$1" key="$2" said="$3" dir now
+	shift 3
+	[ -n "$key" ] || return 0
+	now="$(gdk_receipt_key "$tier" "$@")" || return 0
+	if [ "$now" != "$key" ]; then
+		echo "$GDK_LIB_TAG: the inputs of $tier moved while it ran; no receipt" >&2
+		return 0
+	fi
+	dir="$(_gdk_receipt_dir "$tier")" || return 0
+	mkdir -p "$dir" 2>/dev/null || return 0
+	printf '%s\n%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$said" > "$dir/$key.$$" \
+		&& mv -f "$dir/$key.$$" "$dir/$key"
+}
+
 # --- host-wide engine gate lease --------------------------------------------
 # gdk_engine_gate_run <check> -- <command...> — run one engine gate while
 # holding a nonblocking, per-user advisory lease shared by every checkout.
@@ -289,6 +365,7 @@ import pwd
 import stat
 import subprocess
 import sys
+import time
 
 TAG = "gdk-runners"
 FD_KEY = "GDK_ENGINE_GATE_FD"
@@ -391,7 +468,28 @@ def main():
             owner = read_owner(fd)
             pid = owner.get("pid", "unknown")
             name = owner.get("check", "unknown")
-            fail(f"engine gate busy; owner pid {pid} holds check {name}", 75)
+            # #41: queue for the lease. GDK_ENGINE_GATE_WAIT bounds the wait in
+            # seconds (default 1800); 0 keeps the fail-fast exit 75.
+            try:
+                bound = float(os.environ.get("GDK_ENGINE_GATE_WAIT", "1800"))
+            except ValueError:
+                fail("GDK_ENGINE_GATE_WAIT is not a number of seconds")
+            if bound <= 0:
+                fail(f"engine gate busy; owner pid {pid} holds check {name}", 75)
+            print(f"{TAG}: engine gate busy; owner pid {pid} holds check {name}; "
+                  f"{check} waits up to {int(bound)} s", file=sys.stderr, flush=True)
+            started = time.monotonic()
+            while True:
+                time.sleep(0.25)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() - started >= bound:
+                        fail(f"engine gate still busy after {int(bound)} s; owner pid "
+                             f"{read_owner(fd).get('pid', 'unknown')}", 75)
+            print(f"{TAG}: engine gate admitted {check} after "
+                  f"{time.monotonic() - started:.1f} s", file=sys.stderr, flush=True)
         owner = {"pid": os.getpid(), "check": check[:80]}
         payload = (json.dumps(owner, separators=(",", ":")) + "\n").encode("utf-8")
         os.ftruncate(fd, 0)
@@ -1196,13 +1294,15 @@ usage: source gdk_runners.sh            the normal use — a shell library
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
 gdk_engine_gate_run, gdk_engine_gate_held,
+gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.
 
 Engine admission defaults to the account home across checkouts.
 GDK_ENGINE_GATE_HOME explicitly selects an isolated domain for test fixtures.
-Production callers must share one domain. Competing engine work exits 75.
+Production callers must share one domain. Competing engine work waits for the lease
+(GDK_ENGINE_GATE_WAIT seconds, default 1800); GDK_ENGINE_GATE_WAIT=0 exits 75 at once.
 USAGE_EOF
 }
 
