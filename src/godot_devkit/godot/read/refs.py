@@ -13,8 +13,10 @@ signal deleted (#19). `refs --retarget` never acts on a dynamic hit.
 It also indexes what Godot itself wires, which no `.gd` line spells: a
 `[connection signal=… method=…]` in a scene (typed, `scene connections`), and
 an autoload NAME from `project.godot [autoload]`, indexed like a `class_name`
-(its `project.godot` entry the definition, `Name.` / `Name)` / `Name,` a typed
-ref). A signal or handler named as an argument — `is_connected("sig"`,
+(its `project.godot` entry the definition, the name as a bare identifier
+anywhere in code a typed ref, and a `"/root/Name"` node-path string a dynamic
+hit). A `class_name` is a global the same way: its bare identifier in code —
+`Player.new()`, `Player.CONST`, `var p := Player` — is a typed ref. A signal or handler named as an argument — `is_connected("sig"`,
 `has_signal("sig"`, `Signal(obj, "sig"` — is a dynamic hit; a bare handler
 in `is_connected(…, h)` / `disconnect(…, h)` is a call site.
 Comment-stripped (the capability-scan
@@ -110,11 +112,7 @@ def strip_comment(line: str) -> str:
     return line.split('#', 1)[0]
 
 
-def _typed_ref_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
-    """`autoload`: the symbol is a `project.godot [autoload]` NAME, which a
-    script reaches as a global — `Name.method(`, `f(Name)`, `[Name, …]` — with
-    no type annotation to anchor on. Only an autoload gets those arms: on any
-    other symbol a bare `name.` is far more often a variable than a type."""
+def _typed_ref_pattern(symbol: str) -> re.Pattern:
     word = re.escape(symbol)
     alternatives = [
         rf':\s*{word}\b',            # : Sym  (typed var/param/return)
@@ -123,9 +121,31 @@ def _typed_ref_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
         rf'\bDictionary\[.*{word}.*\]',  # Dictionary[..., Sym]
     ]
     alternatives += [rf'\b{kw}\s+{word}\b' for kw in TYPED_REF_KEYWORDS]
-    if autoload:
-        alternatives.append(rf'(?<![\w.]){word}\s*[.),]')  # Name.  Name)  Name,
     return re.compile('|'.join(alternatives))
+
+
+def _global_pattern(symbol: str) -> re.Pattern:
+    """A GLOBAL name — a `project.godot [autoload]` NAME or a `class_name` —
+    which a script reaches with no type annotation to anchor on: `Name.method(`,
+    `Name.new()`, `Name.CONST`, `var g = Name`, `if Name:`. The bare identifier
+    anywhere in code is the reference. Not after `.` (a member), nor after `/`,
+    `$` or `%` (a node path — `"/root/Name"` is the dynamic bucket's). Only a
+    global gets this arm: on any other symbol a bare `name` is far more often
+    a variable than a type."""
+    return re.compile(rf'(?<![\w./$%]){re.escape(symbol)}\b')
+
+
+def _class_name_pattern(symbol: str) -> re.Pattern:
+    return re.compile(rf'\bclass_name\s+{re.escape(symbol)}\b')
+
+
+def _global_use(global_pattern: re.Pattern, definition_pattern: re.Pattern,
+                stripped: str) -> bool:
+    """A bare use of the global on this line, outside its own declaration —
+    `class_name Player` is the definition, counted once, never a typed ref."""
+    declared = [m.span() for m in definition_pattern.finditer(stripped)]
+    return any(not any(start <= m.start() < end for start, end in declared)
+               for m in global_pattern.finditer(stripped))
 
 
 def _call_emit_pattern(symbol: str) -> re.Pattern:
@@ -169,11 +189,12 @@ def _definition_pattern(symbol: str) -> re.Pattern:
     return re.compile('|'.join(alternatives))
 
 
-def _dynamic_pattern(symbol: str) -> re.Pattern:
+def _dynamic_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
     """A signal reached through a receiver the index cannot type — the
     textual spellings, owned by no typed arm. `<expr>.name.connect(` is the
     live-subscriber shape on an untyped parameter; the string forms name the
-    signal as data."""
+    signal as data. `autoload`: an autoload reached by its node path,
+    `get_node("/root/Name")` / `$"/root/Name"` — a string, never typed."""
     word = re.escape(symbol)
     alternatives = [
         rf'\.{word}\.(?:connect|disconnect|emit)\(',       # expr.name.connect(
@@ -182,10 +203,33 @@ def _dynamic_pattern(symbol: str) -> re.Pattern:
         rf'\b(?:is_connected|has_signal|has_user_signal)\(\s*&?["\']{word}["\']',  # has_signal("name"
         rf'\bSignal\(.*?,\s*&?["\']{word}["\']',          # Signal(obj, "name"
     ]
+    if autoload:
+        alternatives.append(rf'["\']/root/{word}\b')         # get_node("/root/Name"
     return re.compile('|'.join(alternatives))
 
 
 PRELOAD_LOAD = re.compile(r'(?:preload|load)\(\s*"([^"]+)"\s*\)')
+
+
+def typed_spans(symbol: str, stripped: str, global_name: bool = False) -> set[tuple[int, int]]:
+    """The `(start, end)` of every `symbol` token the typed arms claim on one
+    comment-stripped `.gd` line — the definition, typed-ref and call/emit
+    grammar `scan_gd_files` counts the line by, down to the token. What
+    `refs --rename` may rewrite is exactly this set, so the read side and the
+    write side can never disagree about what a reference is. `global_name`:
+    the symbol is an autoload or a `class_name` — see `_global_pattern`."""
+    token = re.compile(rf'(?<!\w){re.escape(symbol)}(?!\w)')
+    tokens = [(m.start(), m.end()) for m in token.finditer(stripped)]
+    spans: set[tuple[int, int]] = set()
+    patterns = [_definition_pattern(symbol), _typed_ref_pattern(symbol),
+                _call_emit_pattern(symbol), _bare_call_pattern(symbol)]
+    if global_name:
+        patterns.append(_global_pattern(symbol))
+    for pattern in patterns:
+        for match in pattern.finditer(stripped):
+            spans.update(t for t in tokens
+                         if match.start() <= t[0] and t[1] <= match.end())
+    return spans
 
 
 def scan_gd_files(root: Path, symbol: str, files: list[Path],
@@ -194,20 +238,28 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path],
     once (definitions / typed refs / call-emit / preload-load) — the four
     kinds used to each re-read + re-split every file independently, a 4x
     redundant-I/O cost with no benefit (they all want the same comment-
-    stripped lines). `autoload`: the symbol is an autoload NAME — see
-    `_typed_ref_pattern`."""
+    stripped lines). `autoload`: the symbol is an autoload NAME. It and a
+    symbol some scanned file declares as its `class_name` are GLOBALS — see
+    `_global_pattern` — which is why every file is read before any is scanned.
+    """
     definition_pattern = _definition_pattern(symbol)
-    typed_ref_pattern = _typed_ref_pattern(symbol, autoload)
+    typed_ref_pattern = _typed_ref_pattern(symbol)
     call_emit_pattern = _call_emit_pattern(symbol)
     bare_call_pattern = _bare_call_pattern(symbol)
-    dynamic_pattern = _dynamic_pattern(symbol)
+    dynamic_pattern = _dynamic_pattern(symbol, autoload)
     needle = symbol.lower()
 
     hits: dict[str, list[Hit]] = {DEFINITION_KIND: [], TYPED_REF_KIND: [], CALL_EMIT_KIND: [],
                                   PRELOAD_LOAD_KIND: [], DYNAMIC_KIND: []}
-    for path in files:
+    texts = [(path, path.read_text(encoding='utf-8', errors='replace').split('\n'))
+             for path in files]
+    class_name_pattern = _class_name_pattern(symbol)
+    global_pattern = _global_pattern(symbol) if autoload or any(
+        class_name_pattern.search(strip_comment(raw))
+        for _, lines in texts for raw in lines) else None
+    for path, lines in texts:
         rel = _relpath(root, path)
-        for lineno, raw in enumerate(path.read_text(encoding='utf-8', errors='replace').split('\n'), 1):
+        for lineno, raw in enumerate(lines, 1):
             stripped = strip_comment(raw)
             if not stripped:
                 continue
@@ -216,7 +268,8 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path],
             typed = defines
             if defines:
                 hits[DEFINITION_KIND].append(Hit(DEFINITION_KIND, rel, lineno, text))
-            if typed_ref_pattern.search(stripped):
+            if typed_ref_pattern.search(stripped) or (global_pattern is not None and _global_use(
+                    global_pattern, definition_pattern, stripped)):
                 typed = True
                 hits[TYPED_REF_KIND].append(Hit(TYPED_REF_KIND, rel, lineno, text))
             # A receiverless `name(` is a call unless this line is where the
@@ -303,16 +356,20 @@ SECTION_TITLES = (
 )
 
 
-def run(symbol: str, include_tests: bool) -> int:
-    if not symbol.strip():
-        # Every pattern here is built around the symbol, so an empty one turns
-        # each into a match-anything: `(?<![\w.])\s*\(` alone claimed 880 call
-        # sites in a consumer. A census that large and that wrong is the read
-        # side's cardinal sin — there is no scan whose answer this could be.
-        raise EmptySymbol('a symbol is required — refs takes a class_name, a '
-                          'method, a signal, or a .gd/.tscn/.tres path or uid, '
-                          'never an empty or blank one')
-    root = repo_root()
+@dataclass
+class Scan:
+    """One symbol's hits over the `refs` scope, with the walk behind them —
+    the census a reader prints, and the files a writer re-reads."""
+    searched: walk.Walk
+    gd_files: list[Path]
+    scene_files: list[Path]
+    hits: dict[str, list[Hit]]
+    global_name: bool     # an autoload or a `class_name` — see `_global_pattern`
+
+
+def scan(root: Path, symbol: str, include_tests: bool) -> Scan:
+    """Every hit of `symbol`, by kind — what `refs <symbol>` prints and what
+    `refs --rename` rewrites or refuses on."""
     exclude = exclude_prefixes()
     gd_walk = iter_files(root, exclude, GD_GLOB, include_tests)
     scene_walk = walk.Walk(())
@@ -325,13 +382,30 @@ def run(symbol: str, include_tests: bool) -> int:
     hits_by_kind = scan_gd_files(root, symbol, gd_files, autoload=bool(autoload_hits))
     hits_by_kind[DEFINITION_KIND][:0] = autoload_hits
     hits_by_kind.update(scan_scene_refs(root, symbol, scene_files))
+    class_name_pattern = _class_name_pattern(symbol)
+    global_name = bool(autoload_hits) or any(
+        class_name_pattern.search(hit.text) for hit in hits_by_kind[DEFINITION_KIND])
+    return Scan(gd_walk.merge(scene_walk), gd_files, scene_files, hits_by_kind, global_name)
+
+
+def run(symbol: str, include_tests: bool) -> int:
+    if not symbol.strip():
+        # Every pattern here is built around the symbol, so an empty one turns
+        # each into a match-anything: `(?<![\w.])\s*\(` alone claimed 880 call
+        # sites in a consumer. A census that large and that wrong is the read
+        # side's cardinal sin — there is no scan whose answer this could be.
+        raise EmptySymbol('a symbol is required — refs takes a class_name, a '
+                          'method, a signal, or a .gd/.tscn/.tres path or uid, '
+                          'never an empty or blank one')
+    found = scan(repo_root(), symbol, include_tests)
+    hits_by_kind = found.hits
 
     typed_total = 0
     print(f'# refs: {symbol}')
     # The census, before the hits: a scan narrowed to nothing must not read as
     # a symbol with no references. `census()` is the only way to get the number,
     # and it carries what the number left out.
-    print(f'# {gd_walk.merge(scene_walk).census("file(s) searched")}')
+    print(f'# {found.searched.census("file(s) searched")}')
     for title, kind in SECTION_TITLES:
         hits = hits_by_kind[kind]
         if kind != DYNAMIC_KIND:
