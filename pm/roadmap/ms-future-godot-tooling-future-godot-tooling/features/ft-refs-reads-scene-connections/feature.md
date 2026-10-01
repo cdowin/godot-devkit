@@ -1,7 +1,7 @@
 ---
 id: ft-refs-reads-scene-connections
 kind: feature
-milestone: "1.5.0"
+milestone: ms-future-godot-tooling
 name: refs reads scene connections
 status: planning
 reviewed:

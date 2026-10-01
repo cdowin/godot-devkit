@@ -42,11 +42,11 @@ ephemeral = ["docs/reviews/"]
 
 # The verification ladder `agentic-sdlc verify` runs, one make target per rung.
 # story is the inner loop (the suite minus the spawns, seconds); feature is the
-# close of a feature (the whole suite on the floor, minutes); milestone is the
+# close of a feature (static checks after its scoped builder proof); milestone is the
 # full gate and what CI runs (check + the matrix). Makefile.tiers defines them.
 [verify]
 story = "make pyunit"
-feature = "make test"
+feature = "make check"
 milestone = "make milestone"
 
 # The ceilings `check budget` grades, keyed by tier as the ledger records them
@@ -89,6 +89,8 @@ exclude_prefixes = ["addons/", "tests/fixtures/"]
 exclude_prefixes = ["addons/", "tests/fixtures/"]
 
 [pm]
+version_file = "pyproject.toml"
+version_pattern = '^version = "(.*)"$'
 # Everything opt-in except D8. The rules this package ships OFF by default are
 # off because a consumer's legacy tree would go red on upgrade day — this tree
 # has no legacy, so it takes all of them and stays inside them from entry one.
@@ -156,3 +158,10 @@ ours = [".github/workflows/verify.yml"]
 # finding SC2317 that 0.11.0 names SC2329 (1.4.0's release PR).
 [shell]
 shellcheck_version = "0.11.0"
+
+[release.version_files]
+"pyproject.toml" = '^version = "(.*)"$'
+"src/godot_devkit/__init__.py" = "^__version__ = '(.*)'$"
+
+[release.commands]
+prove-artifact = "uvx --no-cache --index https://cdowin.github.io/godot-devkit/simple/ godot-devkit@{version} --version"

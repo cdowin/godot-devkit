@@ -1,7 +1,7 @@
 ---
 id: ft-the-1-4-0-carry-forwards
 kind: feature
-milestone: "1.5.0"
+milestone: ms-future-godot-tooling
 name: the 1.4.0 carry forwards
 status: planning
 reviewed:
@@ -12,7 +12,7 @@ changelog:
 
 # the 1.4.0 carry forwards
 
-The MINOR/NIT findings the 1.4.0 lane reviews deferred, each named with its record in the disposition table of docs/reviews/2026-09-29-1.4.0-*.md (`deferred: 1.5.0`). Sweep them in one lane.
+The MINOR/NIT findings the 1.4.0 lane reviews deferred, each named with its record in the disposition table of docs/reviews/2026-09-29-1.4.0-*.md (`deferred: 1.6.0`). Sweep them in one lane.
 
 ## Ship criterion
 

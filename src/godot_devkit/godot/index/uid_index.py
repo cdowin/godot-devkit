@@ -11,6 +11,9 @@ order of authority:
     (none of the above)   -> whatever the rest of the repo already says about
                              that path, which is evidence rather than invention
 
+An existing scene or resource supplies identity only through its own header.
+A headerless target never borrows an inner UID or a possibly poisoned reference.
+
 Returning `None` is a legitimate answer and callers must handle it: a wrong uid
 poisons Godot's cache far worse than a missing one does.
 """
@@ -62,12 +65,18 @@ class UidIndex:
         if not res_path.startswith(RES_PREFIX):
             return None
         file = self.root / res_path[len(RES_PREFIX):]
+        if file.suffix in ('.tscn', '.tres') and file.is_file():
+            for line in file.read_text(encoding='utf-8', errors='replace').splitlines():
+                if line.startswith(HEADER_PREFIXES):
+                    match = UID_ATTR.search(line)
+                    return match.group(1) if match else None
+            return None
         sidecar = file.with_suffix(file.suffix + UID_SIDECAR_SUFFIX)
         if sidecar.is_file():
             return sidecar.read_text(encoding='utf-8').strip() or None
         importer = file.with_suffix(file.suffix + IMPORT_SUFFIX)
         for candidate in (file, importer):
-            if candidate.is_file() and candidate.suffix in ('.tscn', '.tres', IMPORT_SUFFIX):
+            if candidate.is_file() and candidate.suffix == IMPORT_SUFFIX:
                 match = UID_ATTR.search(candidate.read_text(
                     encoding='utf-8', errors='replace')[:HEADER_SCAN_BYTES])
                 if match:

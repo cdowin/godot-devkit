@@ -1,7 +1,7 @@
 ---
 id: ft-a-stats-verb-counts-code-by-role
 kind: feature
-milestone: "1.5.0"
+milestone: ms-future-godot-tooling
 name: a stats verb counts code by role
 status: planning
 reviewed:
@@ -12,7 +12,7 @@ changelog:
 
 # a stats verb counts code by role
 
-Issues: #18. The issue body is the brief; plan it when 1.5.0 opens.
+Issues: #18. The issue body is the brief; plan it when 1.6.0 opens.
 
 ## Ship criterion
 

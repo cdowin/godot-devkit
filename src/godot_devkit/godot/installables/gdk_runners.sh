@@ -59,6 +59,16 @@ if [ -n "${_GDK_RUNNERS_SOURCED:-}" ]; then
 fi
 _GDK_RUNNERS_SOURCED=1
 
+# Keep the lease location stable across descendants that source this library
+# after gdk_sandbox_home changes HOME. The inherited location is retained only
+# alongside the descriptor markers; otherwise derive it from the account.
+if [ -n "${GDK_ENGINE_GATE_FD:-}" ] && [ -n "${GDK_ENGINE_GATE_OWNER_PID:-}" ] \
+	&& [ -n "${GDK_ENGINE_GATE_HOME:-}" ]; then
+	_GDK_ENGINE_GATE_HOME="$GDK_ENGINE_GATE_HOME"
+else
+	_GDK_ENGINE_GATE_HOME="${GDK_ENGINE_GATE_HOME:-$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')}"
+fi
+
 GDK_GATE_REPORT_DIR="${GDK_GATE_REPORT_DIR:-.gate-reports}"
 GDK_LOG_CAP_BYTES="${GDK_LOG_CAP_BYTES:-52428800}"
 GDK_TIMEOUT_KILL_AFTER="${GDK_TIMEOUT_KILL_AFTER:-5s}"
@@ -79,6 +89,9 @@ export GIT_OPTIONAL_LOCKS=0
 # consumer can tell the library's voice from its gate's.
 GDK_LIB_TAG="gdk-runners"
 
+# gdk_engine_gate_held — true only when this process inherited the real locked
+# descriptor. The captured host HOME is intentionally independent of HOME,
+# which each engine invocation may replace with a disposable user:// sandbox.
 # --- exit-hook dispatcher ----------------------------------------------------
 # Bash has ONE `trap … EXIT` slot per shell: a wrapper's own `trap cleanup EXIT`
 # silently CLOBBERS anything the sandbox installed (and vice versa, depending on
@@ -257,6 +270,177 @@ gdk_sandbox_home() {
 	gdk_on_exit _gdk_destroy_run_home
 }
 
+# --- host-wide engine gate lease --------------------------------------------
+# gdk_engine_gate_run <check> -- <command...> — run one engine gate while
+# holding a nonblocking, per-user advisory lease shared by every checkout.
+# Descendants inherit the real descriptor; an environment marker alone never
+# grants admission. The stable HOME was captured above, before sandboxing.
+gdk_engine_gate_run() {
+	local check="${1:?usage: gdk_engine_gate_run <check> -- <command...>}"; shift
+	[ "${1:-}" = "--" ] || { echo "$GDK_LIB_TAG: expected -- before engine-gate command" >&2; return 2; }
+	shift
+	[ "$#" -gt 0 ] || { echo "$GDK_LIB_TAG: engine-gate command is empty" >&2; return 2; }
+	python3 - "$_GDK_ENGINE_GATE_HOME" run "$check" "$@" <<'PY'
+import errno
+import fcntl
+import json
+import os
+import pwd
+import stat
+import subprocess
+import sys
+
+TAG = "gdk-runners"
+FD_KEY = "GDK_ENGINE_GATE_FD"
+OWNER_KEY = "GDK_ENGINE_GATE_OWNER_PID"
+
+def fail(message, code=2):
+    print(f"{TAG}: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+def lock_path(home):
+    if not home:
+        fail("HOME was empty before the headless sandbox; cannot locate the engine lease")
+    uid = os.getuid()
+    directory = os.path.join(os.path.abspath(home), ".cache", "godot-devkit")
+    try:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        dst = os.lstat(directory)
+    except OSError as exc:
+        fail(f"cannot prepare engine lease directory {directory!r}: {exc}")
+    if not stat.S_ISDIR(dst.st_mode) or dst.st_uid != uid:
+        fail(f"engine lease directory {directory!r} is not a directory owned by uid {uid}")
+    if dst.st_mode & 0o077:
+        try:
+            os.chmod(directory, 0o700)
+        except OSError as exc:
+            fail(f"cannot secure engine lease directory {directory!r}: {exc}")
+    path = os.path.join(directory, "engine-gates.lock")
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        fail(f"cannot open engine lease {path!r}: {exc}")
+    fst = os.fstat(fd)
+    if not stat.S_ISREG(fst.st_mode) or fst.st_uid != uid:
+        os.close(fd)
+        fail(f"engine lease {path!r} is not a regular file owned by uid {uid}")
+    return path, fd
+
+def read_owner(fd):
+    try:
+        raw = os.pread(fd, 4096, 0)
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, UnicodeError, ValueError):
+        return {}
+
+def inherited(path):
+    raw_fd = os.environ.get(FD_KEY)
+    raw_owner = os.environ.get(OWNER_KEY)
+    if raw_fd is None and raw_owner is None:
+        return None
+    if raw_fd is None or raw_owner is None:
+        fail("invalid inherited engine lease markers")
+    try:
+        fd = int(raw_fd)
+        fst = os.fstat(fd)
+        pst = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (pst.st_dev, pst.st_ino):
+            fail("inherited engine lease descriptor does not refer to the host lock file")
+        if fst.st_uid != os.getuid() or pst.st_uid != os.getuid():
+            fail("inherited engine lease file is owned by another uid")
+        # Re-locking this descriptor confirms it names the live lease file;
+        # inode and owner metadata bind it to the inherited owner record.
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner = read_owner(fd)
+        if str(owner.get("pid", "")) != raw_owner or not owner.get("check"):
+            fail("inherited engine lease metadata does not match its owner marker")
+        return fd
+    except (OSError, ValueError) as exc:
+        fail(f"invalid inherited engine lease descriptor: {exc}")
+
+def run(path, fd, check, command):
+    env = os.environ.copy()
+    env[FD_KEY] = str(fd)
+    env["GDK_ENGINE_GATE_HOME"] = os.path.dirname(os.path.dirname(os.path.dirname(path)))
+    env[OWNER_KEY] = str(os.getpid()) if env.get(OWNER_KEY) is None else env[OWNER_KEY]
+    try:
+        child = subprocess.Popen(command, env=env, pass_fds=(fd,))
+        code = child.wait()
+    except OSError as exc:
+        fail(f"cannot run {check}: {exc}")
+    raise SystemExit(code if code >= 0 else 128 - code)
+
+def main():
+    if len(sys.argv) < 4:
+        fail("internal engine lease call is malformed")
+    home, action, check, *command = sys.argv[1:]
+    path, fd = lock_path(home)
+    try:
+        held = inherited(path)
+        if action == "check":
+            raise SystemExit(0 if held is not None else 1)
+        if action != "run" or not command:
+            fail("internal engine lease action is invalid")
+        if held is not None:
+            run(path, held, check, command)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            owner = read_owner(fd)
+            pid = owner.get("pid", "unknown")
+            name = owner.get("check", "unknown")
+            fail(f"engine gate busy; owner pid {pid} holds check {name}", 75)
+        owner = {"pid": os.getpid(), "check": check[:80]}
+        payload = (json.dumps(owner, separators=(",", ":")) + "\n").encode("utf-8")
+        os.ftruncate(fd, 0)
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(fd, payload[offset:])
+        run(path, fd, check, command)
+    finally:
+        os.close(fd)
+
+main()
+PY
+}
+
+# gdk_engine_gate_held — 0 when this process inherited a live lease, 1 when
+# no lease exists, and 2 when caller-supplied markers fail descriptor checks.
+gdk_engine_gate_held() {
+	python3 - "$_GDK_ENGINE_GATE_HOME" check unused <<'PY'
+import fcntl
+import json
+import os
+import pwd
+import stat
+import sys
+
+def main():
+    home, action, _unused = sys.argv[1:]
+    if not os.environ.get("GDK_ENGINE_GATE_FD") and not os.environ.get("GDK_ENGINE_GATE_OWNER_PID"):
+        raise SystemExit(1)
+    try:
+        path = os.path.join(os.path.abspath(home), ".cache", "godot-devkit", "engine-gates.lock")
+        fd = int(os.environ["GDK_ENGINE_GATE_FD"])
+        fst = os.fstat(fd)
+        pst = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (pst.st_dev, pst.st_ino):
+            raise ValueError("descriptor does not match the host lock file")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner = json.loads(os.pread(fd, 4096, 0).decode("utf-8"))
+        if str(owner.get("pid", "")) != os.environ.get("GDK_ENGINE_GATE_OWNER_PID") or not owner.get("check"):
+            raise ValueError("owner metadata does not match")
+    except (OSError, ValueError, KeyError, UnicodeError) as exc:
+        print(f"gdk-runners: invalid inherited engine lease: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    raise SystemExit(0)
+
+main()
+PY
+}
+
 # gdk_sandbox_tmpfile <template> — a scratch file INSIDE the per-run HOME, so
 # it dies with the run. Wrapper logs used to land in shared /tmp, where
 # concurrent runs and separate users on one machine overwrite each other's
@@ -387,7 +571,26 @@ gdk_run_bounded() {
 		echo "$GDK_LIB_TAG: no timeout/gtimeout on PATH — install coreutils" >&2
 		return 2
 	fi
-	"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" "$@"
+	local engine_cmd="$1" arg_i=1
+	if [ "$engine_cmd" = env ]; then
+		local -a bounded_args=("$@")
+		while [ "$arg_i" -lt "${#bounded_args[@]}" ] \
+			&& [[ "${bounded_args[$arg_i]}" == *=* ]] \
+			&& [ "${bounded_args[$arg_i]}" != "--" ]; do
+			case "${bounded_args[$arg_i]}" in
+				GDK_GODOT=*) engine_cmd="${bounded_args[$arg_i]#GDK_GODOT=}" ;;
+			esac
+			arg_i=$((arg_i + 1))
+		done
+		[ "$engine_cmd" != env ] || engine_cmd="${bounded_args[$arg_i]:-}"
+	fi
+	if [ "$#" -gt 0 ] \
+		&& { [ "$engine_cmd" = "$GDK_GODOT" ] || [ "$(command -v "$GDK_GODOT" 2>/dev/null || true)" = "$engine_cmd" ]; }; then
+		gdk_engine_gate_run "${GDK_ENGINE_GATE_CHECK:-engine}" -- \
+			"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" "$@"
+	else
+		"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" "$@"
+	fi
 }
 
 # --- gate output: a summary on the console, the full transcript on disk ------
@@ -546,8 +749,16 @@ GDK_REBUILD_IMPORT_CACHE_TIMEOUT="${GDK_REBUILD_IMPORT_CACHE_TIMEOUT:-60}"
 gdk_rebuild_import_cache() {
 	local secs="${1:-$GDK_REBUILD_IMPORT_CACHE_TIMEOUT}"
 	if [ -n "$GDK_TIMEOUT" ]; then
-		"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-			"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+		gdk_engine_gate_held 2>/dev/null; local held=$?
+		[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
+		if [ "$held" -eq 1 ]; then
+			gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
+				"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
+				"$GDK_GODOT" --path . --headless --editor --quit || return $?
+		else
+			"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
+				"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+		fi
 		return 0
 	fi
 	# No timeout binary. This is best-effort recovery, so it still runs — but
@@ -555,7 +766,14 @@ gdk_rebuild_import_cache() {
 	# stating a bound nothing enforces. gdk_run_bounded REFUSES in the same
 	# situation; the difference is deliberate and is why this says it out loud.
 	echo "$GDK_LIB_TAG: no timeout/gtimeout on PATH — the import pass runs UNBOUNDED" >&2
-	"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+	gdk_engine_gate_held 2>/dev/null; local held=$?
+	[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
+	if [ "$held" -eq 1 ]; then
+		gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
+			"$GDK_GODOT" --path . --headless --editor --quit
+	else
+		"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+	fi
 }
 
 # --- --self-test — the contract, PROVEN rather than claimed ------------------
@@ -977,9 +1195,14 @@ usage: source gdk_runners.sh            the normal use — a shell library
 
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
+gdk_engine_gate_run, gdk_engine_gate_held,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.
+
+Engine admission defaults to the account home across checkouts.
+GDK_ENGINE_GATE_HOME explicitly selects an isolated domain for test fixtures.
+Production callers must share one domain. Competing engine work exits 75.
 USAGE_EOF
 }
 

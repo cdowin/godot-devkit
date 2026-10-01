@@ -99,6 +99,12 @@ GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN:-1}"
 # contract in scenario.sh's header. 0 (the default) is the cold path; --cold
 # forces it for one run.
 GDK_INTEGRATION_WARM="${GDK_INTEGRATION_WARM:-0}"
+if [ -z "${GDK_RUNNERS_LIB:-}" ]; then
+	GDK_INTEGRATION_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	GDK_RUNNERS_LIB="$GDK_INTEGRATION_SCRIPT_DIR/../gdk_runners.sh"
+	[ -f "$GDK_RUNNERS_LIB" ] || GDK_RUNNERS_LIB="$GDK_INTEGRATION_SCRIPT_DIR/gdk_runners.sh"
+	unset GDK_INTEGRATION_SCRIPT_DIR
+fi
 # Env: GDK_JOBS  parallelism (default: cores - 2, floor 1)
 # -----------------------------------------------------------------------------
 
@@ -793,6 +799,7 @@ sweep_cases() {
 	runners="$proj/tools/dev/runners"
 	mkdir -p "$runners" "$proj/tests/integration" "$proj/tests/support" "$proj/.godot"
 	cp "$0" "$runners/integration.sh"
+	cp "$GDK_RUNNERS_LIB" "$runners/../gdk_runners.sh" || return 1
 	cat > "$runners/scenario.sh" <<'STUB_EOF'
 #!/usr/bin/env bash
 state="$GDK_STUB_STATE"; name="$1"
@@ -826,7 +833,7 @@ STUB_EOF
 		rm -rf "$state"; mkdir -p "$state"
 		( unset_git_env
 		  unset GDK_SCENARIO_SUBSTRATE_RE GDK_INTEGRATION_INFRA_RE GDK_CAPTURE_SUFFIX_RE GDK_CAPTURE_GATE_RE
-		  GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
+		  GDK_ENGINE_GATE_HOME="$proj" GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
 			GDK_SCENARIO_SOURCE_DIR=tests/integration GDK_SCENARIO_FIXTURE_DIR="${GDK_STUB_FIXTURE_DIR:-tests/support/}" \
 			GDK_INTEGRATION_RERUN="${GDK_INTEGRATION_RERUN-1}" bash "$runners/integration.sh" "$@" 2>&1 )
 	}
@@ -935,6 +942,7 @@ warm_cases() {
 	runners="$proj/tools/dev/runners"
 	mkdir -p "$runners" "$proj/tests/integration" "$proj/.godot"
 	cp "$0" "$runners/integration.sh"
+	cp "$GDK_RUNNERS_LIB" "$runners/../gdk_runners.sh" || return 1
 	cat > "$runners/scenario.sh" <<'STUB_EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$GDK_STUB_STATE/argv"
@@ -971,7 +979,7 @@ STUB_EOF
 		( unset_git_env
 		  unset GDK_SCENARIO_SUBSTRATE_RE GDK_INTEGRATION_INFRA_RE GDK_CAPTURE_SUFFIX_RE GDK_CAPTURE_GATE_RE \
 			GDK_INTEGRATION_RERUN
-		  GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
+		  GDK_ENGINE_GATE_HOME="$proj" GDK_STUB_STATE="$state" GDK_JOBS=2 GDK_SCENARIO_RUNNER=scenario.sh GDK_SMOKE_SCENARIO=smoke \
 			GDK_SCENARIO_SOURCE_DIR=tests/integration bash "$runners/integration.sh" "$@" 2>&1 )
 	}
 	argv() { sort "$state/argv" | tr '\n' '|'; }
@@ -1031,6 +1039,20 @@ STUB_EOF
 # a directory and a list.
 self_test() {
 	local scratch rc out failures=0 cases=0 name bad fx mono host host_before host_after
+	local GDK_RUNNERS_LIB="${GDK_RUNNERS_LIB:-}"
+	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-integration-selftest.XXXXXX")" || return 1
+	if [ -f "$GDK_RUNNERS_LIB" ]; then
+		GDK_RUNNERS_LIB="$(cd "$(dirname "$GDK_RUNNERS_LIB")" && pwd)/$(basename "$GDK_RUNNERS_LIB")"
+	else
+		GDK_RUNNERS_LIB="$(cd "$(dirname "$0")" && pwd)/gdk_runners.sh"
+	fi
+	[ -f "$GDK_RUNNERS_LIB" ] || {
+		echo "  MISS — engine-gate library not found for self-test: $GDK_RUNNERS_LIB" >&2
+		rm -rf "$scratch"
+		return 1
+	}
+	export GDK_RUNNERS_LIB
+	export GDK_ENGINE_GATE_HOME="$scratch"
 
 	miss() { echo "  MISS — $1" >&2; failures=$((failures + 1)); }
 
@@ -1103,7 +1125,6 @@ self_test() {
 	done
 
 	# --- the discovery filter, against a fixture tree ------------------------
-	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-integration-selftest.XXXXXX")" || return 1
 	mkdir -p "$scratch/protocol" "$scratch/support" "$scratch/tools_only" "$scratch/alpha"
 	: > "$scratch/protocol/protocol_boot.gd"
 	: > "$scratch/plain_gate.gd"
@@ -1485,6 +1506,20 @@ if [ "${1:-}" = "--list" ]; then
 	fi
 	printf '%s\n' "$roster"
 	exit 0
+fi
+
+# Read-only exits above never take the lease. One owner covers repair and the
+# full fan-out; child workers validate and inherit its descriptor.
+ORIGINAL_ARGS=("$@")
+[ -f "$GDK_RUNNERS_LIB" ] || { echo "[$GATE_TAG] engine-gate library not found: $GDK_RUNNERS_LIB" >&2; exit 2; }
+# shellcheck source=/dev/null
+. "$GDK_RUNNERS_LIB"
+held_rc=0; gdk_engine_gate_held || held_rc=$?
+if [ "$held_rc" -eq 2 ]; then exit 2; fi
+if [ "$held_rc" -eq 1 ]; then
+	GDK_INTEGRATION_RERUN="$RERUN" GDK_INTEGRATION_WARM="$WARM" \
+		gdk_engine_gate_run "$GATE_TAG" -- bash "$SCRIPT_DIR/$(basename "$0")" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+	exit $?
 fi
 
 SCENARIO_SH="$SCRIPT_DIR/$GDK_SCENARIO_RUNNER"
