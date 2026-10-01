@@ -22,9 +22,15 @@ written. A site blocks when it is:
     header's `name=`/`parent=`/`from=`/`to=` — a built-in script's
     `script/source`, a `NodePath("/root/old")`, a by-name value;
   * a line it would rewrite that already carries <new>.
-It also refuses when <new> is already defined (a class_name, func, signal or
-autoload), and when <old> is defined nowhere in the scanned tree — an engine
-name (`pressed`, `_ready`) is not this project's to rename.
+Before any of that it refuses when <old> or <new> is an engine name — in
+the snapshot's `engine_methods` (a method on any class or builtin type, a
+utility function: `play`, `_ready`, `queue_free`) or `engine_signals`
+(`pressed`) — even when the project defines it too: without types,
+`sfx.play()` or a Button's `[connection signal="pressed"]` may be the
+engine's, and a rename that rewrote it would break the game. A name in
+neither set is unaffected. It also refuses when <new> is already defined (a
+class_name, func, signal or autoload), and when <old> is defined nowhere in
+the scanned tree — a typo or an engine name is not this project's to rename.
 
 A res:// path or uid that `refs` matches (a preload, an ext_resource) is
 neither rewritten nor a block — a rename changes identifiers, not files. Each
@@ -50,6 +56,7 @@ from pathlib import Path
 from godot_devkit.core import apply
 from godot_devkit.core.config import ConfigError
 from godot_devkit.core.project import repo_root
+from godot_devkit.godot.format import classdb
 from godot_devkit.godot.format.tscn import parse_lines
 from godot_devkit.godot.format.tscn_document import LINE_ENDING, read_scene_text
 from godot_devkit.godot.read import refs
@@ -102,6 +109,8 @@ BLOCK_CONNECTION_SPELLING = 'a [connection] whose signal=/method= is not spelled
 BLOCK_AUTOLOAD = 'the [autoload] entry for {old} is not one plain `{old}=` line'
 BLOCK_UNDEFINED = 'a reference to {old}, which nothing here defines'
 BLOCK_NEW_DEFINED = '{new} is already defined here — renaming onto it merges two symbols'
+ENGINE_LINE = ('  BLOCKED  {name}  an engine {sets} name ({names_from}) — without types a '
+               'call or [connection] on it may be the engine\'s')
 
 
 @dataclass
@@ -373,6 +382,14 @@ def _plan(root: Path, found: refs.Scan, old: str, new: str) -> tuple[list[FilePl
     return [p for p in plans if p.rewrites], blocks
 
 
+def _engine_sets(name: str) -> str:
+    """Which engine name set(s) hold `name` — `method`, `signal`, both — or ''."""
+    held = [kind for kind, names in (('method', classdb.engine_methods()),
+                                     ('signal', classdb.engine_signals()))
+            if name in names]
+    return ' and '.join(held)
+
+
 def _location(hit: refs.Hit) -> str:
     return f'{hit.path}:{hit.line}' if hit.line else hit.path
 
@@ -393,6 +410,17 @@ def run(old: str, new: str, dry_run: bool) -> int:
                                        path=shown.group(0) if shown else hit.text))
         print(CENSUS.format(census=census, rewritten=rewritten, blocked=blocked))
 
+    engine = [(name, sets) for name in (old, new) if (sets := _engine_sets(name))]
+    if engine:
+        print(header)
+        for name, sets in engine:
+            print(ENGINE_LINE.format(name=name, sets=sets,
+                                     names_from=classdb.engine_names_from()))
+        print(f'REFUSED  {" and ".join(name for name, _ in engine)} '
+              f'{"is an engine name" if len(engine) == 1 else "are engine names"} — '
+              f'a rename cannot tell the project\'s from the engine\'s; nothing written')
+        verdict(0, len(engine))
+        return EXIT_FINDINGS
     if total == 0:
         if new_definitions:
             print(f'{header}  {ALREADY}  ({new} is defined at '
