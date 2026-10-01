@@ -195,6 +195,23 @@ def _dynamic_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
 PRELOAD_LOAD = re.compile(r'(?:preload|load)\(\s*"([^"]+)"\s*\)')
 
 
+def typed_spans(symbol: str, stripped: str, autoload: bool = False) -> set[tuple[int, int]]:
+    """The `(start, end)` of every `symbol` token the typed arms claim on one
+    comment-stripped `.gd` line — the definition, typed-ref and call/emit
+    grammar `scan_gd_files` counts the line by, down to the token. What
+    `refs --rename` may rewrite is exactly this set, so the read side and the
+    write side can never disagree about what a reference is."""
+    token = re.compile(rf'(?<!\w){re.escape(symbol)}(?!\w)')
+    tokens = [(m.start(), m.end()) for m in token.finditer(stripped)]
+    spans: set[tuple[int, int]] = set()
+    for pattern in (_definition_pattern(symbol), _typed_ref_pattern(symbol, autoload),
+                    _call_emit_pattern(symbol), _bare_call_pattern(symbol)):
+        for match in pattern.finditer(stripped):
+            spans.update(t for t in tokens
+                         if match.start() <= t[0] and t[1] <= match.end())
+    return spans
+
+
 def scan_gd_files(root: Path, symbol: str, files: list[Path],
                   autoload: bool = False) -> dict[str, list[Hit]]:
     """One pass per `.gd` file, feeding all four line-based scan kinds at
@@ -310,16 +327,20 @@ SECTION_TITLES = (
 )
 
 
-def run(symbol: str, include_tests: bool) -> int:
-    if not symbol.strip():
-        # Every pattern here is built around the symbol, so an empty one turns
-        # each into a match-anything: `(?<![\w.])\s*\(` alone claimed 880 call
-        # sites in a consumer. A census that large and that wrong is the read
-        # side's cardinal sin — there is no scan whose answer this could be.
-        raise EmptySymbol('a symbol is required — refs takes a class_name, a '
-                          'method, a signal, or a .gd/.tscn/.tres path or uid, '
-                          'never an empty or blank one')
-    root = repo_root()
+@dataclass
+class Scan:
+    """One symbol's hits over the `refs` scope, with the walk behind them —
+    the census a reader prints, and the files a writer re-reads."""
+    searched: walk.Walk
+    gd_files: list[Path]
+    scene_files: list[Path]
+    hits: dict[str, list[Hit]]
+    autoload: bool
+
+
+def scan(root: Path, symbol: str, include_tests: bool) -> Scan:
+    """Every hit of `symbol`, by kind — what `refs <symbol>` prints and what
+    `refs --rename` rewrites or refuses on."""
     exclude = exclude_prefixes()
     gd_walk = iter_files(root, exclude, GD_GLOB, include_tests)
     scene_walk = walk.Walk(())
@@ -332,13 +353,28 @@ def run(symbol: str, include_tests: bool) -> int:
     hits_by_kind = scan_gd_files(root, symbol, gd_files, autoload=bool(autoload_hits))
     hits_by_kind[DEFINITION_KIND][:0] = autoload_hits
     hits_by_kind.update(scan_scene_refs(root, symbol, scene_files))
+    return Scan(gd_walk.merge(scene_walk), gd_files, scene_files, hits_by_kind,
+                bool(autoload_hits))
+
+
+def run(symbol: str, include_tests: bool) -> int:
+    if not symbol.strip():
+        # Every pattern here is built around the symbol, so an empty one turns
+        # each into a match-anything: `(?<![\w.])\s*\(` alone claimed 880 call
+        # sites in a consumer. A census that large and that wrong is the read
+        # side's cardinal sin — there is no scan whose answer this could be.
+        raise EmptySymbol('a symbol is required — refs takes a class_name, a '
+                          'method, a signal, or a .gd/.tscn/.tres path or uid, '
+                          'never an empty or blank one')
+    found = scan(repo_root(), symbol, include_tests)
+    hits_by_kind = found.hits
 
     typed_total = 0
     print(f'# refs: {symbol}')
     # The census, before the hits: a scan narrowed to nothing must not read as
     # a symbol with no references. `census()` is the only way to get the number,
     # and it carries what the number left out.
-    print(f'# {gd_walk.merge(scene_walk).census("file(s) searched")}')
+    print(f'# {found.searched.census("file(s) searched")}')
     for title, kind in SECTION_TITLES:
         hits = hits_by_kind[kind]
         if kind != DYNAMIC_KIND:
