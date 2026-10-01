@@ -12,7 +12,7 @@ changelog:
 
 # a stats verb counts code by role
 
-Issues: #18. The issue body is the brief; plan it when 1.6.0 opens.
+Issues: #18. The issue body is the brief; plan it when 1.7.0 opens.
 
 ## Ship criterion
 
