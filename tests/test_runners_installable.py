@@ -276,6 +276,10 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     assert done.returncode == 0, done.stdout + done.stderr
     assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout.splitlines()[-1], done.stdout
     assert _rows(ledger) == [('unit', 'PASS', '2')], done.stderr
+    # The transcript opens with the bound the run was judged under, not only
+    # the console: a HARD_TIMEOUT read from the log alone names its number.
+    transcript = (root / '.gate-reports' / 'unit.log').read_text(encoding='utf-8')
+    assert transcript.startswith('[UNIT] timeout '), transcript[:200]
 
     (tier / 'test_2.gd').write_text('', encoding='utf-8')
     done = unit()
