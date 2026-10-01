@@ -13,9 +13,13 @@ through verbatim, its own line endings included.
 
 Refusals (exit 1, nothing written, the reason named): a name that is not an
 identifier, or that the editor refuses because it is an engine class or a
-project script's `class_name`; a path that is not `res://`, escapes the project,
+project script's `class_name` — a script the editor sees, so not one under a
+dot-prefixed directory or a directory holding `.gdignore`, and `addons/`
+included; a path that is not `res://`, escapes the project,
 is not in its canonical spelling (`//`, `/./`, `/../`, a trailing `/` — the
-refusal names the canonical one), or names no file on disk; a name already
+refusal names the canonical one), differs from the file's on-disk spelling only
+by case (a case-insensitive filesystem finds it, a case-sensitive export does
+not — the refusal names the on-disk one), or names no file on disk; a name already
 declared with a DIFFERENT path (the line names it), or with the same path but
 DISABLED (no `*`, so no singleton exists to be `unchanged`); a name or an
 `[autoload]` section declared more than once. The same `add` twice
@@ -47,6 +51,8 @@ HEADER = f'[{SECTION_KIND}]'
 RES_PREFIX = 'res://'
 ENABLED = '*'
 GD_SUFFIX = '.gd'
+HIDDEN = '.'
+GDIGNORE = '.gdignore'
 PARENT = '..'
 # ASCII on purpose: a narrower rule than the editor's never writes a name the
 # editor would refuse, and the refusal says what was expected.
@@ -74,6 +80,19 @@ def _declared_path(value: str) -> str:
     return strip_quotes(value).lstrip(ENABLED)
 
 
+def _editor_sees(root: Path, path: Path) -> bool:
+    """Godot's own scan rule: a directory whose name starts with `.` (`.git/`,
+    `.godot/`, a `.claude/` worktree) or that holds a `.gdignore` hides
+    everything below it. Nothing else does — an addon's class_name is one the
+    editor knows."""
+    folder = root
+    for part in path.relative_to(root).parts[:-1]:
+        folder = folder / part
+        if part.startswith(HIDDEN) or file_exists(folder / GDIGNORE):
+            return False
+    return True
+
+
 def _check_name(root: Path, name: str) -> None:
     """The editor's refusals, as far as this package can know them: an
     identifier, and not a name a script already resolves to something else."""
@@ -84,12 +103,31 @@ def _check_name(root: Path, name: str) -> None:
         raise Refused(f'{name} is an engine class — the editor refuses an '
                       f'autoload that shadows it; pick another name')
     scripts = walk.descendants(root, walk.Kind.FILE, suffix=GD_SUFFIX,
-                               pattern=f'*{GD_SUFFIX}')
+                               pattern=f'*{GD_SUFFIX}').filter(
+        lambda path: _editor_sees(root, path), walk.SkipReason.EXCLUDED_PATH)
     index = ScriptIndex(root, [path.relative_to(root).as_posix() for path in scripts])
     owner = index.by_class.get(name)
     if owner is not None:
         raise Refused(f'{name} is the class_name of {owner} — the editor refuses '
                       f'an autoload that shadows it; pick another name')
+
+
+def _case_mismatch(root: Path, rel: str) -> str | None:
+    """The on-disk spelling of `rel` when one differs from it only by case.
+
+    Read off the tree's own listing, never `stat`: a case-insensitive
+    filesystem answers `stat` for any spelling, so the listing is the only
+    place the real one is written down. An exact match wins — a case-sensitive
+    tree may hold both spellings."""
+    want = rel.casefold()
+    other = None
+    for path in walk.descendants(root):
+        found = path.relative_to(root).as_posix()
+        if found == rel:
+            return None
+        if other is None and found.casefold() == want:
+            other = found
+    return other
 
 
 def _check_path(root: Path, res_path: str) -> None:
@@ -108,6 +146,13 @@ def _check_path(root: Path, res_path: str) -> None:
     if any(char in res_path for char in UNQUOTABLE):
         raise Refused(f'{res_path!r} holds a character this verb cannot '
                       f'write unescaped (one of {" ".join(map(repr, UNQUOTABLE))})')
+    # Before the existence check, so a case-sensitive filesystem names the
+    # on-disk spelling too, rather than calling the file missing.
+    spelled = _case_mismatch(root, rel)
+    if spelled is not None:
+        raise Refused(f'{res_path} is spelled {RES_PREFIX}{spelled} on disk — '
+                      f'a case-sensitive export would not find it; '
+                      f'write {RES_PREFIX}{spelled}')
     if not file_exists(root / rel):
         raise Refused(f'{res_path} does not exist on disk ({root / rel})')
 

@@ -107,6 +107,10 @@ class AutoloadsEdit(unittest.TestCase):
             # Names the editor refuses: an engine class, a project class_name.
             (('add', 'Input', SPAWNER), 1, 'engine class'),
             (('add', 'Player', PLAYER), 1, f'class_name of {PLAYER}'),
+            # A wrong-case path: a case-insensitive filesystem finds the file,
+            # a case-sensitive export does not. Refused on either, naming the
+            # on-disk spelling.
+            (('add', 'Spawner', 'res://Systems/Spawner.gd'), 1, SPAWNER),
         ]
         self.project.write_bytes(self.bytes_() + f'Dormant="{SPAWNER}"\n'.encode())
         before = self.bytes_()
@@ -127,6 +131,25 @@ class AutoloadsEdit(unittest.TestCase):
                 self.assertEqual(got, 2, err)
                 self.assertIn('project.godot', err)
                 self.assertEqual(self.project.read_bytes() if content else None, content)
+
+    def test_the_class_name_scan_sees_what_the_editor_sees(self) -> None:
+        # Godot's own rule: a dot-prefixed directory and one holding a
+        # `.gdignore` are invisible to the editor; `addons/` is not.
+        for where, gdignore, code in (('.claude/worktrees/x', False, 0),
+                                      ('addons/foo', False, 1),
+                                      ('vendor/raw', True, 0)):
+            with self.subTest(where):
+                name = f'Ghost{code}{int(gdignore)}{len(where)}'
+                script = self.root / where / 'ghost.gd'
+                script.parent.mkdir(parents=True)
+                script.write_text(f'class_name {name}\nextends Node\n',
+                                  encoding='utf-8')
+                if gdignore:
+                    (self.root / where.split('/')[0] / '.gdignore').write_text('')
+                got, out, _ = self.run_verb('add', name, SPAWNER, '--dry-run')
+                self.assertEqual(got, code, out)
+                if code:
+                    self.assertIn(f'class_name of res://{where}/ghost.gd', out)
 
     def test_the_same_add_or_rm_twice_is_a_no_op(self) -> None:
         for argv in (('add', NAME, PLAYER), ('rm', NAME)):
