@@ -7,7 +7,7 @@ name: the python and release findings
 status: done
 owner:
 depends_on: []
-changelog:
+changelog: none
 ---
 
 # the python and release findings

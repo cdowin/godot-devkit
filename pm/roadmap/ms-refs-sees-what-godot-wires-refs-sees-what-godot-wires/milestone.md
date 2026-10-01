@@ -7,7 +7,7 @@ depends_on: []
 branch: milestone/2.1.0-refs-sees-what-godot-wires
 mode:
 version: 2.1.0
-changelog:
+changelog: Refs sees what Godot wires: refs finds scene connections and bare autoload and class_name uses, refs --rename renames a symbol as one plan, autoloads add/rm edit project.godot, and a new stats verb counts code by role.
 order:
   - "ft-refs-reads-scene-connections"
   - "ft-a-stats-verb-counts-code-by-role"

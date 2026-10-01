@@ -7,7 +7,7 @@ name: the import and scenario runner findings
 status: done
 owner:
 depends_on: []
-changelog:
+changelog: none
 ---
 
 # the import and scenario runner findings

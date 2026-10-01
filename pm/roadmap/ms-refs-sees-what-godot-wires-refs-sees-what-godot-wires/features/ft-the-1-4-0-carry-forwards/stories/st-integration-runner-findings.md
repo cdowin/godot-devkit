@@ -7,7 +7,7 @@ name: the integration runner findings
 status: done
 owner:
 depends_on: []
-changelog:
+changelog: none
 ---
 
 # the integration runner findings

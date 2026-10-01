@@ -7,7 +7,7 @@ name: refs indexes what Godot wires
 status: done
 owner:
 depends_on: []
-changelog:
+changelog: none
 ---
 
 # refs indexes what Godot wires

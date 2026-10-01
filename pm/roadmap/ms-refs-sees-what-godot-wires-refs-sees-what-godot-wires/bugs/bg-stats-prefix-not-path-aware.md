@@ -3,9 +3,9 @@ id: bg-stats-prefix-not-path-aware
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: MINOR stats prefixes match by string so tests matches testsuite
-status: fixed
+status: closed
 caused_by: ft-a-stats-verb-counts-code-by-role
-changelog:
+changelog: none
 ---
 
 # stats-prefix-not-path-aware

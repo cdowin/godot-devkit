@@ -3,9 +3,9 @@ id: bg-refs-autoload-bare-uses-missed
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: MAJOR refs on an autoload name misses bare and /root uses and reads definition-only
-status: open
+status: closed
 caused_by: ft-refs-reads-scene-connections
-changelog:
+changelog: none
 ---
 
 # refs-autoload-bare-uses-missed

@@ -44,14 +44,14 @@ include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
 
 ```sh
 uv add --dev agentic-sdlc==2.0.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
-uv add --dev godot-devkit==2.0.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+uv add --dev godot-devkit==2.1.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
 # then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
 uv run agentic-sdlc install-gates     # Makefile.devkit
 uv run godot-devkit install-runners   # Makefile.tiers + runners
 ```
 
-The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v1.5.0` above the include and
-`uvx --from "git+https://github.com/cdowin/godot-devkit@v1.5.0" godot-devkit install-runners`.
+The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v2.1.0` above the include and
+`uvx --from "git+https://github.com/cdowin/godot-devkit@v2.1.0" godot-devkit install-runners`.
 Then join the gates to `make check`:
 
 ```toml

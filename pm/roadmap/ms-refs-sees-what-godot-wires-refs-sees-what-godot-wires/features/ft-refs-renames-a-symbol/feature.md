@@ -3,11 +3,11 @@ id: ft-refs-renames-a-symbol
 kind: feature
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs renames a symbol
-status: building
+status: done
 reviewed:
 depends_on: ["ft-refs-reads-scene-connections"]
 consumed_by: []
-changelog:
+changelog: New refs --rename renames a class_name, method, signal or autoload across scripts, scenes and project.godot as one plan, or refuses the whole rename naming every blocking site.
 ---
 
 # refs renames a symbol

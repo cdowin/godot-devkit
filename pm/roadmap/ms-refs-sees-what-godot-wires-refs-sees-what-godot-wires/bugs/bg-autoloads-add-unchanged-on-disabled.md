@@ -3,9 +3,9 @@ id: bg-autoloads-add-unchanged-on-disabled
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: MINOR autoloads add reports unchanged over a disabled entry and accepts names the editor refuses
-status: open
+status: closed
 caused_by: ft-project-verb-edits-autoloads
-changelog:
+changelog: none
 ---
 
 # autoloads-add-unchanged-on-disabled

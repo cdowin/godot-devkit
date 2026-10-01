@@ -3,11 +3,11 @@ id: ft-refs-reads-scene-connections
 kind: feature
 milestone: ms-refs-sees-what-godot-wires
 name: refs sees what Godot wires
-status: building
+status: done
 reviewed:
 depends_on: []
 consumed_by: []
-changelog:
+changelog: refs finds what Godot wires: scene connections, autoload and class_name names used bare, and signals or handlers named as arguments.
 ---
 
 # refs sees what Godot wires

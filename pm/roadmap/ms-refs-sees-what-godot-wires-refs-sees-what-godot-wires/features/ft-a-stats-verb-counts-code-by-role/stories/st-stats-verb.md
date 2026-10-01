@@ -7,7 +7,7 @@ name: the stats verb
 status: done
 owner:
 depends_on: []
-changelog:
+changelog: none
 ---
 
 # the stats verb

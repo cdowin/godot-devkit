@@ -7,7 +7,7 @@ name: autoloads add and rm
 status: done
 owner:
 depends_on: []
-changelog:
+changelog: none
 ---
 
 # autoloads add and rm

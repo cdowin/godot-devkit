@@ -3,9 +3,9 @@ id: bg-rng-scope-closed-by-continuation
 kind: bug
 milestone: "ms-refs-sees-what-godot-wires"
 name: MINOR rng shadow scope closes on a column-0 bracket continuation and hides a draw
-status: open
+status: closed
 caused_by: ft-the-1-4-0-carry-forwards
-changelog:
+changelog: none
 ---
 
 # rng-scope-closed-by-continuation

@@ -5,18 +5,28 @@
 - `refs <symbol>` finds what Godot wires: a scene `[connection]` naming it as `signal=` or
   `method=` (new bucket `scene connections`), an autoload name declared in `project.godot`
   (indexed like a `class_name`), and a signal or handler named as an argument (`is_connected`,
-  `has_signal`, `has_user_signal`, `Signal(obj, "sig")`). None of these reads as unreferenced
-  any more.
+  `has_signal`, `has_user_signal`, `Signal(obj, "sig")`). A bare autoload or `class_name` in
+  code (`var g = GameState`, `if Bus:`, `Player.new()`, `Player.CONST`) is a typed reference,
+  and `"/root/Name"` is a dynamic one. None of these reads as unreferenced any more.
+- New `refs --rename <old> <new> [--dry-run]` renames a `class_name`, method, signal or
+  autoload across `.gd`, `.tscn`, `.tres` and `project.godot` as one plan, or refuses the whole
+  rename with every blocking site named (exit 1): a dynamic hit, the name inside a string, an
+  occurrence `refs` cannot prove, a `<new>` already defined or an `<old>` defined nowhere.
+  `tests/` is always in scope; a matching `res://` path is listed as a `PATH` line, never
+  rewritten; a repeat prints `already renamed` and exits 0.
 - New `autoloads add <Name> <res://path>` and `autoloads rm <Name>` declare or remove one
   `project.godot` autoload (`Name="*res://path"`), editing only that line. `--dry-run` prints
-  the diff, a repeat is a no-op, add then rm restores the file byte for byte; a bad name, a
-  missing file or a name already pointing elsewhere exits 1, a missing or non-UTF-8
-  `project.godot` exits 2.
+  the diff, a repeat is a no-op, add then rm restores the file byte for byte. A missing file, a
+  non-canonical `res://` path, a name that is not an identifier, an engine class or a project
+  `class_name`, and a name already pointing elsewhere or declared disabled each exit 1; a
+  missing or non-UTF-8 `project.godot` exits 2.
 - New `stats [<dir>...] [--by dir] [--json]` counts files, lines and code lines per role
-  (`.gd` as game, tests, tools or vendored, from the new `[stats]` section) and for `.gdshader`,
+  (`.gd` as game, tests, tools or vendored, from the new `[stats]` section, each prefix a
+  directory with or without its slash) and for `.gdshader`,
   `.tscn` and `.tres`, with a `func test_` count per tests subdir. Zero files scanned exits 1.
 - `check rng` scopes a declared draw's shadow to its own class body, so a `func randf()` in
-  one class no longer hides a bare `randf()` in another.
+  one class no longer hides a bare `randf()` in another, and a continuation line (an open
+  bracket, a multi-line string, a trailing `\`) never closes a class body early.
 - `integration.sh` passes a cache repair's exit 2 through as 2, compares the import cache's age
   to the nanosecond across tracked and untracked-not-ignored sidecars, summarises a scenario
   still red after its rerun from that rerun, says why a warm worker handed back, and refuses a

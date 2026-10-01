@@ -3,11 +3,11 @@ id: ft-the-1-4-0-carry-forwards
 kind: feature
 milestone: ms-refs-sees-what-godot-wires
 name: the 1.4.0 carry forwards
-status: building
+status: done
 reviewed:
 depends_on: []
 consumed_by: []
-changelog:
+changelog: The 1.4.0 review carry-forwards: runner exit codes, cache-age precision, near-miss refusals, check rng scoping and release index fixes.
 ---
 
 # the 1.4.0 carry forwards

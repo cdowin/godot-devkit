@@ -3,11 +3,11 @@ id: ft-project-verb-edits-autoloads
 kind: feature
 milestone: "ms-refs-sees-what-godot-wires"
 name: the project verb edits autoloads
-status: building
+status: done
 reviewed:
 depends_on: []
 consumed_by: []
-changelog:
+changelog: New autoloads add and autoloads rm declare or remove one project.godot autoload, editing only that line.
 ---
 
 # the project verb edits autoloads

@@ -4,10 +4,10 @@ kind: story
 feature: ft-refs-renames-a-symbol
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs --rename
-status: building
+status: done
 owner:
 depends_on: ["st-refs-indexes-godot-wiring"]
-changelog:
+changelog: none
 ---
 
 # refs --rename
