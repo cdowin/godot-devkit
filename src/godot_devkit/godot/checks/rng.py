@@ -25,7 +25,9 @@ under the engine's names (`func randf() -> float:`) is the thing the gate asks
 for, so the `func <name>` head of a line is never matched (#30). And inside a
 script that DECLARES one of those names, an unqualified call to it is a call to
 the script's OWN method, not the global generator — so that is not a hit
-either. A script that declares none of them is judged exactly as before.
+either. The shadow is scoped per class body: a script's own `func randf()`
+does not reach into a `class Inner:` block, nor an inner class's out of it. A
+script that declares none of them is judged exactly as before.
 
 HONEST SCOPE: matching is per line, after quoted strings and a trailing `#`
 comment are stripped, with `##` doc-comment lines skipped whole — a call NAMED
@@ -79,6 +81,10 @@ SHADOWABLE = frozenset((*DRAW_NAMES, 'randomize'))
 # The `func <name>` head of a declaration line — blanked before matching, so a
 # one-line body after it (`func f(): return randf()`) is still judged.
 FUNC_HEAD_RE = re.compile(r'^\s*(?:static\s+)?func\s+[A-Za-z_]\w*')
+# A `class <Name>:` header whose body is the indented block below it. The
+# trailing `:` with nothing after it is what makes a body; `class_name` is not
+# a match (`class` must be followed by whitespace).
+CLASS_RE = re.compile(r'^(\s*)class\s+[A-Za-z_]\w*\b[^:]*:\s*$')
 
 
 class Hit:
@@ -98,16 +104,65 @@ class Hit:
         return f'{self.path}:{self.lineno}:{self.func}:{self.code.strip()}'
 
 
+def _indent(code: str) -> int:
+    return len(code) - len(code.lstrip())
+
+
+def _scopes(lines: list[str]) -> list[int]:
+    """The class body each line sits in: 0 is the script, n the n-th `class`.
+
+    A body is the indented block under a `class <Name>:` header, closed by the
+    first code line at or left of the header's indentation; a blank or
+    comment-only line closes nothing. The header itself sits in the outer scope.
+    """
+    scope_of: list[int] = []
+    stack = [(-1, 0)]  # (header indent, scope id)
+    opened = 0
+    for raw in lines:
+        code = code_only(raw)
+        if code.strip():
+            while len(stack) > 1 and _indent(code) <= stack[-1][0]:
+                stack.pop()
+        scope_of.append(stack[-1][1])
+        header = CLASS_RE.match(code)
+        if header:
+            opened += 1
+            stack.append((len(header.group(1)), opened))
+    return scope_of
+
+
+def _own_calls(lines: list[str], scope_of: list[int]) -> dict[int, re.Pattern]:
+    """Per scope, the pattern of unqualified calls to that scope's OWN methods.
+
+    A `func randf()` shadows the global only inside the body that declares it,
+    at that body's member indentation: a script's column-0 `func` does not
+    reach into `class Inner:`, and an inner class's `func` does not reach out.
+    """
+    member: dict[int, int] = {0: 0}
+    names: dict[int, set[str]] = {}
+    for raw, scope in zip(lines, scope_of):
+        code = code_only(raw)
+        if not code.strip():
+            continue
+        indent = member.setdefault(scope, _indent(code))
+        declaration = FUNC_RE.match(code)
+        if declaration and _indent(code) == indent:
+            names.setdefault(scope, set()).add(declaration.group(1))
+    out: dict[int, re.Pattern] = {}
+    for scope, declared in names.items():
+        own = sorted(declared & SHADOWABLE)
+        if own:
+            out[scope] = re.compile(rf'(?<![.\w])(?:{"|".join(own)})\s*\(')
+    return out
+
+
 def scan_text(text: str, path: str) -> list[Hit]:
     """Every bare-RNG / `randomize()` call in one GDScript source."""
     hits: list[Hit] = []
     func = FILE_SCOPE
     lines = text.split('\n')
-    # Only a column-0 `func` shadows the global for the whole script; an inner
-    # class's `func randi()` does not, and the outer `randi()` stays a draw.
-    own = sorted({m.group(1) for line in lines if not line[:1].isspace()
-                  for m in [FUNC_RE.match(line)] if m} & SHADOWABLE)
-    own_call = (re.compile(rf'(?<![.\w])(?:{"|".join(own)})\s*\(') if own else None)
+    scope_of = _scopes(lines)
+    own_call = _own_calls(lines, scope_of)
     for lineno, raw in enumerate(lines, start=1):
         declaration = FUNC_RE.match(raw)
         if declaration:
@@ -117,8 +172,9 @@ def scan_text(text: str, path: str) -> list[Hit]:
         code = code_only(raw)
         if declaration:
             code = FUNC_HEAD_RE.sub('', code, count=1)
-        if own_call:
-            code = own_call.sub('', code)
+        shadow = own_call.get(scope_of[lineno - 1])
+        if shadow:
+            code = shadow.sub('', code)
         # One line is one hit however many spellings it holds: `rng.randomize()`
         # matches CHECK 2 and not CHECK 1, and reporting a line twice would
         # inflate the count a consumer reads as "how much is broken".
