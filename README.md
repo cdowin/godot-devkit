@@ -142,6 +142,7 @@ same command twice is a no-op the second time.
 | `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind; signal hits on a receiver the index cannot type (`x.sig.connect(`, `emit_signal(&"sig"`, `connect("sig"`) print under `dynamic (untyped receiver)`, and `(no references found)` prints only when that bucket is empty too |
 | `orphans [--tests]` | tracked files nothing references |
 | `autoloads` | the `project.godot` autoload census, grouped by suffix, layout flagged |
+| `stats [<dir>...] [--by dir] [--json]` | files, lines and code lines (non-blank, non-comment, docstrings are comment) per bucket: `.gd` by role (game, tests, tools, vendored, from `[stats]`), `.gdshader`, `.tscn`, `.tres`; one row per tests subdir with a `func test_` count; `--by dir` splits game `.gd` by top-level dir; zero files scanned exits 1 |
 | `tiles <file> [--layer NAME] [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]` | a `TileMapLayer`'s grid: cell count, bounds, tile-kind histogram, per-column/row counts |
 
 **Scene surgery** (edits only the lines it was asked to, or refuses and says why):
@@ -276,6 +277,10 @@ vendored_prefixes = ["addons/"]
 entry_point_prefixes = ["tools/"]
 auto_discovered_prefixes = ["tests/", "data/"]
 convention_files = ["default_bus_layout.tres"]
+[stats]
+tests = ["tests/"]
+tools = ["tools/"]
+vendored = ["addons/"]                # list only the vendored addons; your own addon is game code
 ```
 
 ## Parallel engine work

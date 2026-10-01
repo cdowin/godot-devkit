@@ -6,6 +6,10 @@ Introspection (pure parse, never boots Godot):
     godot-devkit refs <symbol> [--tests]
     godot-devkit orphans [--tests]
     godot-devkit autoloads
+    godot-devkit stats [<dir>...] [--by dir] [--json]
+                                    # files, lines and code lines per role
+                                    # bucket (game/tests/tools/vendored .gd,
+                                    # .gdshader, .tscn, .tres)
     godot-devkit tiles <file.tscn> [--layer NAME]
                        [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]
                                     # a TileMapLayer's grid: cell count, bounds,
@@ -260,6 +264,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'autoloads':
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
+    if cmd == 'stats':
+        from godot_devkit.godot.read import stats
+        return stats.main(rest)
     if cmd == 'install-runners':
         from godot_devkit.godot import install
         return install.main(rest)
