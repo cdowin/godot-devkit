@@ -60,9 +60,11 @@ milestone = "make milestone"
 # 18) and shellcheck over a 1,000-line-larger integration.sh. Every new case
 # gates a rule-4 hole a 1.4.0 lane review found. 31 s x 1.34 is about 42 s
 # idle, so the ceiling is 46.
+# Raised at 1.6.0: +2 cases (234). One proves the engine gate queues (#41);
+# one proves a receipt keys on content and is shared by worktrees (#42).
 [tests]
 budget = { pyunit = 2, test = 46 }
-cases  = { pyunit = 57, test = 232 }
+cases  = { pyunit = 57, test = 234 }
 
 # Caps raised above stock, each to cover a record written before this gate
 # existed and measured at adoption (0.25.0): six bugs at 54-191 body lines

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.6.0 — 2026-09-30
+
 - A second engine run waits for the lease instead of exiting 75 (#41). `GDK_ENGINE_GATE_WAIT` bounds the wait in seconds (default 1800); 0 keeps the fail-fast exit.
 - unit, parse and lint file a proof receipt on PASS (#42). The key is the tier, its arguments, the engine binary and the tree's content minus prose and the PM tree; never HEAD. Receipts live in the git common dir, so every worktree of a clone shares them. A run over the same inputs prints the recorded verdict marked `reused` and boots nothing. `GDK_RECEIPTS=0` turns it off.
 
