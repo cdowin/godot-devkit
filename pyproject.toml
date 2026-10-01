@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "godot-devkit"
 version = "2.0.0"
-description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection (summary/diff/refs/orphans/autoloads/tiles) + surgical scene and TileMapLayer edits + static repo gates (uid, tres-format, props, defaults, doc, shell, repo-hygiene) + a PM-tree tracker with its own drift gate."
+description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection, surgical scene, TileMapLayer and autoload edits, the eight Godot gates, and the test-tier runners."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
