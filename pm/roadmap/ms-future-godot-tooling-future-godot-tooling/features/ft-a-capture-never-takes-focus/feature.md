@@ -14,6 +14,11 @@ changelog:
 
 The rest of #37. 1.4.0 PLACES the capture window off screen (`--position`), but macOS and Windows may clamp it back to the edge, and Godot 4 has no command-line flag to stop it taking focus: the documented mechanism is the project setting `display/window/size/no_focus`. Decide how the kit applies that without writing the consumer's project files (for example a documented `override.cfg` contract, or a macOS background launch), and prove it on a real display.
 
+Moved out of 2.1.0 on 2026-10-01: the proof needs a real display. Bring along the 1.4.0 capture
+review's N1–N5 (`docs/reviews/2026-09-29-1.4.0-a-capture-keeps-its-before-frame-off-screen.md`,
+deferred to ft-the-1-4-0-carry-forwards): all five edit `capture.sh` beside this feature's lines,
+so they ship in this lane, not the carry-forwards one.
+
 ## Ship criterion
 
 <!-- What "done" means for this feature. -->

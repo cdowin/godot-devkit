@@ -6,6 +6,10 @@ Introspection (pure parse, never boots Godot):
     godot-devkit refs <symbol> [--tests]
     godot-devkit orphans [--tests]
     godot-devkit autoloads
+    godot-devkit stats [<dir>...] [--by dir] [--json]
+                                    # files, lines and code lines per role
+                                    # bucket (game/tests/tools/vendored .gd,
+                                    # .gdshader, .tscn, .tres)
     godot-devkit tiles <file.tscn> [--layer NAME]
                        [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]
                                     # a TileMapLayer's grid: cell count, bounds,
@@ -34,6 +38,12 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # path attr + exact preload/load literal that
                                     # names old; anything unprovable is SKIPPED
                                     # with a reason, and skips exit 1
+    godot-devkit refs --rename <old> <new> [--dry-run]
+                                    # rename a class_name / method / signal /
+                                    # autoload across .gd, .tscn, .tres and
+                                    # project.godot as one plan; any dynamic,
+                                    # string or unproven site refuses it whole;
+                                    # tests/ is always in scope
     godot-devkit scene canonicalize <file>... [--elide-defaults]
                                     [--respell] [--order]
                                     # restore what PackedScene.pack() drops:
@@ -50,6 +60,8 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # fill / clear a rectangle of one
                                     # TileMapLayer; only that one property's
                                     # base64 is regenerated
+    godot-devkit autoloads add <Name> <res://path>  |  autoloads rm <Name>
+                                    # declare / remove one project.godot autoload
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 The installer (writes each file once; after that it is the repo's):
@@ -93,12 +105,12 @@ import sys
 
 from godot_devkit import __version__
 from godot_devkit.core.config import ConfigError
-# Re-exported: `cli.KNOWN_GATES` is how the suite names the eight.
 from godot_devkit.godot.checks.roster import KNOWN_GATES, OPT_IN_GATES, all_roster
 
 FIX_FLAG = '--fix'
 HELP_FLAGS = ('-h', '--help')
 RETARGET_FLAG = '--retarget'
+RENAME_FLAG = '--rename'
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
@@ -252,14 +264,23 @@ def main(argv: list[str] | None = None) -> int:
         if RETARGET_FLAG in rest:
             from godot_devkit.godot.write import refs_retarget
             return refs_retarget.main(rest)
+        if RENAME_FLAG in rest:
+            from godot_devkit.godot.write import refs_rename
+            return refs_rename.main(rest)
         from godot_devkit.godot.read import refs
         return refs.main(rest)
     if cmd == 'orphans':
         from godot_devkit.godot.read import orphans
         return orphans.main(rest)
     if cmd == 'autoloads':
+        from godot_devkit.godot.write import autoloads_edit
+        if rest and rest[0] in autoloads_edit.VERBS:
+            return autoloads_edit.main(rest)
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
+    if cmd == 'stats':
+        from godot_devkit.godot.read import stats
+        return stats.main(rest)
     if cmd == 'install-runners':
         from godot_devkit.godot import install
         return install.main(rest)

@@ -21,8 +21,8 @@ without re-reading the file.
 ## Install — two pins
 
 A consumer pins two kits and includes one file. `agentic-sdlc` is the gate framework and the SDLC
-(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts); this kit is the
-Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
+(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts; its overview is
+[on DeepWiki](https://deepwiki.com/cdowin/agentic-sdlc)); this kit is the Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
 
 | shape | the pin | what `make` runs |
 |---|---|---|
@@ -43,15 +43,15 @@ include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
 ```
 
 ```sh
-uv add --dev agentic-sdlc==1.0.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
-uv add --dev godot-devkit==1.5.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+uv add --dev agentic-sdlc==2.2.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
+uv add --dev godot-devkit==2.1.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
 # then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
 uv run agentic-sdlc install-gates     # Makefile.devkit
 uv run godot-devkit install-runners   # Makefile.tiers + runners
 ```
 
-The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v1.5.0` above the include and
-`uvx --from "git+https://github.com/cdowin/godot-devkit@v1.5.0" godot-devkit install-runners`.
+The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v2.1.0` above the include and
+`uvx --from "git+https://github.com/cdowin/godot-devkit@v2.1.0" godot-devkit install-runners`.
 Then join the gates to `make check`:
 
 ```toml
@@ -139,9 +139,10 @@ same command twice is a no-op the second time.
 |---|---|
 | `scene <file> [--props] [--paths]` | a `.tscn`/`.tres`'s node tree and resources; `--props` every `[resource]`/`[sub_resource]` property value, packed data elided, each id verbatim — the address the write verbs take |
 | `scene-diff <file> [--git <ref>]` · `scene-diff <old> <new>` | a structural diff — nodes, properties, resources, reparents — keyed the way the write verbs address them |
-| `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind; signal hits on a receiver the index cannot type (`x.sig.connect(`, `emit_signal(&"sig"`, `connect("sig"`) print under `dynamic (untyped receiver)`, and `(no references found)` prints only when that bucket is empty too |
+| `refs <symbol> [--tests]` | every reference to a symbol, grouped by kind — including what Godot wires: a scene `[connection]` naming it as `signal=` or `method=` prints under `scene connections`, and an autoload name is indexed like a `class_name` (its `project.godot` entry the definition, `Name.` / `Name)` / `Name,` a typed ref); a bare handler in `is_connected(…, h)` / `disconnect(…, h)` is a call site; signal hits on a receiver the index cannot type (`x.sig.connect(`, `emit_signal(&"sig"`, `connect("sig"`, `is_connected("sig"`, `has_signal("sig"`, `has_user_signal("sig"`, `Signal(obj, "sig"`) print under `dynamic (untyped receiver)`, and `(no references found)` prints only when that bucket is empty too |
 | `orphans [--tests]` | tracked files nothing references |
 | `autoloads` | the `project.godot` autoload census, grouped by suffix, layout flagged |
+| `stats [<dir>...] [--by dir] [--json]` | files, lines and code lines (non-blank, non-comment, docstrings are comment) per bucket: `.gd` by role (game, tests, tools, vendored, from `[stats]`), `.gdshader`, `.tscn`, `.tres`; one row per tests subdir with a `func test_` count; `--by dir` splits game `.gd` by top-level dir; zero files scanned exits 1 |
 | `tiles <file> [--layer NAME] [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]` | a `TileMapLayer`'s grid: cell count, bounds, tile-kind histogram, per-column/row counts |
 
 **Scene surgery** (edits only the lines it was asked to, or refuses and says why):
@@ -158,6 +159,8 @@ same command twice is a no-op the second time.
 | `scene connect <file> <signal> <from> <to> <method> [--flags N]` · `scene disconnect …` | author or remove one `[connection]`; ambiguous matches are refused, `--flags` names one |
 | `scene canonicalize <file>... [--elide-defaults] [--respell] [--order]` | restore what `PackedScene.pack()` drops — uid-in-refs, the header uid, `index=` on instance children; `--elide-defaults` also removes assignments equal to the script's `@export` default; `--respell` re-spells floats in the saver's shortest form and wraps a bare list on an `Array[T]` export as `Array[T]([...])`; `--order` puts a scripted section's properties in declaration order — line edits only, anything unprovable named and left alone | <!-- doc-scan:allow -->
 | `refs --retarget <old-res-path> <new-res-path> [--dry-run]` | after a `git mv`: rewrite every `ext_resource` path and exact `preload`/`load` literal naming the old path; anything unprovable is SKIPPED with a reason, and skips exit 1 |
+| `refs --rename <old> <new> [--dry-run]` | rename a `class_name`, method, signal or autoload across `.gd`, `.tscn`, `.tres` and `project.godot` as one plan — only the identifier token at each typed hit, a `[connection]`'s `signal=`/`method=` value, an autoload's key; all or nothing: an `<old>` or `<new>` the engine also names (a method or signal on any class — `play`, `pressed`, `_ready`), any dynamic hit, string or unproven occurrence, a defined `<new>` or an undefined `<old>` refuses the whole rename with every site named (exit 1), and a repeat prints `already renamed`; a res:// path that matches is never rewritten, only listed as a `PATH` line; `tests/` is always in scope |
+| `autoloads add <Name> <res://path> [--dry-run]` · `autoloads rm <Name>` | declare or remove one `project.godot` autoload as an enabled singleton (`Name="*res://path"`); a missing file, a non-canonical path, a bad name (not an identifier, an engine class or a project `class_name`), a name already pointing elsewhere or declared disabled is refused, and a repeat is a no-op |
 | `tiles paint <file> --layer NAME --region X0,Y0,X1,Y1 --tile SRC/AX,AY[/ALT]` · `tiles erase …` | fill or clear a rectangle of one `TileMapLayer`; only that property's base64 is regenerated |
 
 **The installer:** `install-runners [--force] [--diff]` — see [below](#what-install-runners-writes).
@@ -276,6 +279,10 @@ vendored_prefixes = ["addons/"]
 entry_point_prefixes = ["tools/"]
 auto_discovered_prefixes = ["tests/", "data/"]
 convention_files = ["default_bus_layout.tres"]
+[stats]
+tests = ["tests/"]
+tools = ["tools/"]
+vendored = ["addons/"]                # list only the vendored addons; your own addon is game code
 ```
 
 ## Parallel engine work
@@ -360,8 +367,9 @@ failed scenario once, alone. One that passes alone counts green and prints `  FL
 failed in the sweep, passed alone`, and the summary reads `N passed (K flaky)`. `--no-rerun` or
 `GDK_INTEGRATION_RERUN=0` turns the rerun off; `--all` and named runs never rerun. Before a
 `--diff`/`--all` sweep boots anything, a stale import cache (`.godot/uid_cache.bin` missing, or
-older than a tracked `*.uid`, `*.import` or `project.godot`) is repaired once by `import_cache.sh`.
-If the repair fails, the sweep does not start (exit 1).
+older than a tracked or untracked-not-ignored `*.uid`, `*.import` or `project.godot`, compared to
+the nanosecond) is repaired once by `import_cache.sh`. If the repair fails, the sweep does not start
+(exit 1; the repair's own usage or config error passes through as exit 2).
 
 **Warm mode (opt-in).** Every scenario is one cold engine boot, 13-15 s of CPU before its first
 assertion. With `GDK_INTEGRATION_WARM=1`, `integration.sh --all|--diff|--system` splits the roster
@@ -395,7 +403,8 @@ slice that carries the cold-import-cache warning is handed back too, so the cold
 ladder gets it. Every handed-back scenario then runs cold.
 
 A scenario whose header carries `## Isolated because: <reason>` never runs warm. An empty reason
-exits 2 and names the file. With `--diff`, a warm failure is rerun cold and alone. One that passes
+exits 2 and names the file; so does a near-miss spelling (`# Isolated because:`, `## isolated
+because:`), naming its line, rather than running the scenario warm in silence. With `--diff`, a warm failure is rerun cold and alone. One that passes
 prints `  WARM-ONLY  <name> — failed warm, passed cold: it leans on process state; mark it "##
 Isolated because:" or fix its reset`, and counts green. `--no-rerun` leaves it red. The summary
 reads `N passed (K flaky, W warm-only), F failed (of T); warm A, cold B, handed back C`. A, B and C
@@ -427,8 +436,8 @@ run files no cost row: the `gdk_gate`-wrapped targets export `GDK_GATE_UNMEASURE
 creates that file. `GDK_RECEIPTS=0` runs every tier.
 
 **Several lanes on one machine.** `unit.sh` bounds its run at 180 s times `ceil(1-minute load /
-cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (load
-1.4x)`); an explicit `GDK_UNIT_TIMEOUT` is used as given, and a `HARD_TIMEOUT` names the value to
+cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (2x,
+load 4.04 on 4 cpu(s))`); an explicit `GDK_UNIT_TIMEOUT` is used as given, and a `HARD_TIMEOUT` names the value to
 rerun with. Sourcing `gdk_runners.sh` exports `GIT_OPTIONAL_LOCKS=0`, so a gate killed mid-`git
 status` leaves no `.git/index.lock`. A pid counts as dead only on positive evidence (`kill -0`
 says `No such process`, or a visible process table lacks it), so the HOME reaper never deletes a
@@ -456,11 +465,13 @@ data is vendored: `tests/fixtures/` holds purpose-built repos, a committed clean
 gates run over, and a scrubbed real-world scene corpus every write verb round-trips byte for byte.
 
 `check props` compares against a snapshot of Godot's ClassDB in `src/godot_devkit/data/classdb.json`;
-reading it boots nothing. Regenerate when the engine minor moves:
+reading it boots nothing. The same file carries the engine's method and signal names, which
+`refs --rename` refuses. Regenerate when the engine minor moves:
 
 ```sh
 godot --headless --dump-extension-api      # writes ./extension_api.json
 python3 tools/gen_classdb.py extension_api.json
+python3 tools/gen_classdb.py --names-only extension_api.json   # refresh only the names
 ```
 
 ## Requirements

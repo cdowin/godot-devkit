@@ -6,13 +6,10 @@ status: planning
 depends_on: []
 branch:
 mode:
-version: 1.7.0
+version:
 changelog:
 order:
   - "ft-a-capture-never-takes-focus"
-  - "ft-a-stats-verb-counts-code-by-role"
-  - "ft-refs-reads-scene-connections"
-  - "ft-the-1-4-0-carry-forwards"
 ---
 
 # ms-future-godot-tooling — Future Godot tooling

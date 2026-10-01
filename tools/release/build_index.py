@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """build_index.py — the static PEP 503 index this repo's GitHub Pages serves.
 
-    python3 tools/release/build_index.py <assets.json> <out-dir> [--project NAME]
+    python3 tools/release/build_index.py <assets.json> <out-dir>
 
 `<assets.json>` is a JSON list, one object per release asset:
 
@@ -11,13 +11,18 @@
 
 and the two files written are `<out-dir>/simple/index.html` and
 `<out-dir>/simple/<normalised project>/index.html`, every link carrying
-`#sha256=<hex>`. The whole index is regenerated from ALL releases on every run
+`#sha256=<hex>`, and the files of the tag being released (this checkout's
+pyproject.toml `version`) carrying its `data-requires-python`. An older
+release carries none: the current floor is not ITS floor, and a raised floor
+stamped on an old wheel would hide it from an interpreter it supports. The
+whole index is regenerated from ALL releases on every run
 (.github/workflows/release.yml), so the output is a pure function of the list:
 sorted, byte-stable, and a run that lost a release is repaired by the next.
 
 Refuses (exit 2, nothing written) rather than publish a link an installer
 cannot verify: an empty list, an asset with no 64-hex sha256, a file that is
-neither a wheel nor an sdist, a duplicate name. Not part of the package and
+neither a wheel nor an sdist, a file that is not this project's, a duplicate
+name. Not part of the package and
 never installed; stdlib only.
 """
 from __future__ import annotations
@@ -26,12 +31,14 @@ import html
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 PROJECT = 'godot-devkit'
 SUFFIXES = ('.whl', '.tar.gz')
 SHA256 = re.compile(r'^[0-9a-f]{64}$')
-USAGE = 'usage: build_index.py <assets.json> <out-dir> [--project NAME]'
+USAGE = 'usage: build_index.py <assets.json> <out-dir>'
+PYPROJECT = Path(__file__).resolve().parents[2] / 'pyproject.toml'
 
 
 class Refused(ValueError):
@@ -41,6 +48,40 @@ class Refused(ValueError):
 def normalise(name: str) -> str:
     """PEP 503: runs of `-`, `_`, `.` collapse to one `-`, lowercased."""
     return re.sub(r'[-_.]+', '-', name).lower()
+
+
+def distribution(filename: str) -> str:
+    """The distribution a wheel or sdist filename names, PEP 503-normalised.
+
+    A wheel's and a modern sdist's name field escapes `-` to `_`, so the name
+    is everything before the first `-` of a wheel, before the last of an sdist.
+    """
+    if filename.endswith('.whl'):
+        return normalise(filename.split('-', 1)[0])
+    return normalise(filename[:-len('.tar.gz')].rsplit('-', 1)[0])
+
+
+def _project_key(key: str, pyproject: Path) -> str | None:
+    with pyproject.open('rb') as handle:
+        value = tomllib.load(handle).get('project', {}).get(key)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def requires_python(pyproject: Path = PYPROJECT) -> str | None:
+    """`[project] requires-python` from `pyproject`, or None when undeclared."""
+    return _project_key('requires-python', pyproject)
+
+
+def project_version(pyproject: Path = PYPROJECT) -> str | None:
+    """`[project] version` from `pyproject` — the tag being released."""
+    return _project_key('version', pyproject)
+
+
+def file_version(filename: str) -> str:
+    """The version field of a wheel or sdist filename."""
+    if filename.endswith('.whl'):
+        return filename.split('-')[1]
+    return filename[:-len('.tar.gz')].rsplit('-', 1)[1]
 
 
 def _page(title: str, links: list[str]) -> str:
@@ -57,8 +98,15 @@ def _page(title: str, links: list[str]) -> str:
             '</html>\n')
 
 
-def render(assets: list[dict], project: str = PROJECT) -> dict[str, str]:
-    """{relative path: text} for the two index files. Raises Refused."""
+def render(assets: list[dict], project: str = PROJECT,
+           python: str | None = None,
+           version: str | None = None) -> dict[str, str]:
+    """{relative path: text} for the two index files. Raises Refused.
+
+    `python` is the `requires-python` specifier a link carries as
+    `data-requires-python` — only the links of `version` when one is named,
+    every link when None; `python` None omits the attribute.
+    """
     if not isinstance(assets, list) or not assets:
         raise Refused('the asset list is empty — an index of nothing is '
                           'refused, not published')
@@ -71,6 +119,9 @@ def render(assets: list[dict], project: str = PROJECT) -> dict[str, str]:
                           asset.get('sha256'))
         if not isinstance(name, str) or not name.endswith(SUFFIXES):
             raise Refused(f'{name!r} is neither a wheel nor an sdist')
+        if distribution(name) != normalise(project):
+            raise Refused(f'{name} is not a {normalise(project)} file — an '
+                          f'index lists only its own project')
         if not isinstance(url, str) or not url.startswith('https://'):
             raise Refused(f'{name}: url {url!r} is not https')
         if not isinstance(sha, str) or not SHA256.match(sha):
@@ -85,37 +136,32 @@ def render(assets: list[dict], project: str = PROJECT) -> dict[str, str]:
     norm = normalise(project)
     root = _page('Simple index',
                  [f'<a href="{norm}/">{html.escape(norm)}</a>'])
-    links = [f'<a href="{html.escape(url, quote=True)}#sha256={sha}">'
+    floor = ('' if python is None else
+             f' data-requires-python="{html.escape(python, quote=True)}"')
+    links = [f'<a href="{html.escape(url, quote=True)}#sha256={sha}"'
+             f'{floor if version in (None, file_version(name)) else ""}>'
              f'{html.escape(name)}</a>' for name, url, sha in rows]
     return {'simple/index.html': root,
             f'simple/{norm}/index.html': _page(f'Links for {norm}', links)}
 
 
 def main(argv: list[str]) -> int:
-    project = PROJECT
-    args = list(argv)
-    if '--project' in args:
-        at = args.index('--project')
-        if at + 1 >= len(args):
-            print(USAGE, file=sys.stderr)
-            return 2
-        project = args[at + 1]
-        del args[at:at + 2]
-    if len(args) != 2:
+    if len(argv) != 2:
         print(USAGE, file=sys.stderr)
         return 2
-    source, out = Path(args[0]), Path(args[1])
+    source, out = Path(argv[0]), Path(argv[1])
     try:
         assets = json.loads(source.read_text(encoding='utf-8'))
-        files = render(assets, project)
-    except (OSError, json.JSONDecodeError, Refused) as err:
+        files = render(assets, PROJECT, requires_python(), project_version())
+    except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError,
+            Refused) as err:
         print(f'build_index: {err} — nothing was written', file=sys.stderr)
         return 2
     for rel, text in files.items():
         target = out / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding='utf-8', newline='\n')
-    print(f'[index] {len(assets)} file(s) for {normalise(project)} -> '
+    print(f'[index] {len(assets)} file(s) for {normalise(PROJECT)} -> '
           + ', '.join(str(out / rel) for rel in files))
     return 0
 

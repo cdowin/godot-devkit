@@ -1,13 +1,13 @@
 ---
 id: ft-a-stats-verb-counts-code-by-role
 kind: feature
-milestone: ms-future-godot-tooling
+milestone: ms-refs-sees-what-godot-wires
 name: a stats verb counts code by role
-status: planning
+status: done
 reviewed:
 depends_on: []
 consumed_by: []
-changelog:
+changelog: New stats verb counts files, lines and code lines by role, configured by a new [stats] section.
 ---
 
 # a stats verb counts code by role

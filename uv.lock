@@ -4,16 +4,16 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "agentic-sdlc"
-version = "2.0.0"
+version = "2.2.0"
 source = { registry = "https://cdowin.github.io/agentic-sdlc/simple/" }
-sdist = { url = "https://cdowin.github.io/agentic-sdlc/simple/agentic-sdlc/agentic_sdlc-2.0.0.tar.gz", hash = "sha256:1cff65553fcaeae0f3135f446ff3ac912802457922a90288da52a2bcc131e623" }
+sdist = { url = "https://cdowin.github.io/agentic-sdlc/simple/agentic-sdlc/agentic_sdlc-2.2.0.tar.gz", hash = "sha256:96a30616d4a4376be028e6bb951f8ea43fe9c1132213d7ec5105f63980ad93f8" }
 wheels = [
-    { url = "https://cdowin.github.io/agentic-sdlc/simple/agentic-sdlc/agentic_sdlc-2.0.0-py3-none-any.whl", hash = "sha256:f173e812ea810201377f8bfdffac5890b779f2543ba06790c0a8209d932db87a" },
+    { url = "https://cdowin.github.io/agentic-sdlc/simple/agentic-sdlc/agentic_sdlc-2.2.0-py3-none-any.whl", hash = "sha256:33cba1ae4813626a7e47b852557d2cf1b905a3ef379fa6f453e4011bc7fa162a" },
 ]
 
 [[package]]
 name = "godot-devkit"
-version = "2.0.0"
+version = "2.1.0"
 source = { editable = "." }
 
 [package.dev-dependencies]
@@ -24,4 +24,4 @@ dev = [
 [package.metadata]
 
 [package.metadata.requires-dev]
-dev = [{ name = "agentic-sdlc", specifier = "==2.0.0", index = "https://cdowin.github.io/agentic-sdlc/simple/" }]
+dev = [{ name = "agentic-sdlc", specifier = "==2.2.0", index = "https://cdowin.github.io/agentic-sdlc/simple/" }]

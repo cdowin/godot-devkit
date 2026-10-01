@@ -1,18 +1,25 @@
 ---
 id: ft-the-1-4-0-carry-forwards
 kind: feature
-milestone: ms-future-godot-tooling
+milestone: ms-refs-sees-what-godot-wires
 name: the 1.4.0 carry forwards
-status: planning
+status: done
 reviewed:
 depends_on: []
 consumed_by: []
-changelog:
+changelog: The 1.4.0 review carry-forwards: runner exit codes, cache-age precision, near-miss refusals, check rng scoping and release index fixes.
 ---
 
 # the 1.4.0 carry forwards
 
 The MINOR/NIT findings the 1.4.0 lane reviews deferred, each named with its record in the disposition table of docs/reviews/2026-09-29-1.4.0-*.md (`deferred: 1.6.0`). Sweep them in one lane.
+
+Two amendments since the reviews:
+
+- **Moved out:** the read-verbs review's N3 (the `refs` dynamic-bucket spellings) is part of
+  ft-refs-reads-scene-connections now.
+- **Added:** `pyproject.toml`'s `description` still advertises `doc`, `shell`, `repo-hygiene` and the
+  PM tracker, which left in 0.25.0. It is the package's PyPI-facing summary; make it say what ships.
 
 ## Ship criterion
 

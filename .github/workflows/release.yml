@@ -10,12 +10,15 @@
 #   release  check out the tag; refuse unless the tag, pyproject.toml's
 #            `version` and `__version__` agree; `uv build`; attach the wheel
 #            and sdist to the GitHub Release. A wheel the LIVE index already
-#            lists, or a release that already carries one, is REFUSED by name,
-#            never overwritten: a published wheel is immutable, and uv.lock
-#            hashes it — even after its Release is deleted and the tag moved.
+#            lists, or a release that already carries one, is REFUSED unless
+#            it is this build byte for byte (same name, same sha256), never
+#            overwritten: a published wheel is immutable, and uv.lock hashes
+#            it — even after its Release is deleted and the tag moved. The
+#            identical wheel is not attached again; the run goes on to `index`.
 #   index    regenerate the WHOLE index from every release's assets, each
 #            downloaded and hashed (tools/release/build_index.py), so a lost
-#            run is repaired by the next one.
+#            run is repaired by the next one — a new tag's, or this tag's
+#            re-dispatched.
 #   deploy   publish it to Pages: https://cdowin.github.io/godot-devkit/simple/
 #
 # Concurrency is two groups, so no tag's run is ever dropped: `release` is
@@ -39,10 +42,7 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
-  pages: write
-  id-token: write
+permissions: {}
 
 defaults:
   run:
@@ -56,6 +56,8 @@ jobs:
   release:
     name: Build and attach the wheel
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     concurrency:
       group: release-${{ inputs.tag || github.ref_name }}
       cancel-in-progress: false
@@ -101,9 +103,10 @@ jobs:
           echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
           echo "wheel_sha256=$(sha256sum "dist/$wheel" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: The live index does not list this wheel yet
+      - name: The live index lists this wheel at most at this hash
         env:
           WHEEL: ${{ steps.build.outputs.wheel }}
+          WHEEL_SHA256: ${{ steps.build.outputs.wheel_sha256 }}
         run: |
           set -euo pipefail
           # A 404 is an index not published yet; any other failure to read it
@@ -112,11 +115,20 @@ jobs:
           case "$code" in
             404) echo "no live index at $INDEX_URL yet — nothing to collide with." ;;
             200)
-              if grep -qF ">$WHEEL</a>" live-index.html; then
-                echo "::error::$INDEX_URL already lists $WHEEL — a published wheel is never replaced (every consumer's uv.lock hashes it), even after its Release is deleted or its tag moved. Cut a new version instead."
+              listed=$(grep -F ">$WHEEL</a>" live-index.html | sed -n -E 's/.*#sha256=([0-9a-f]{64}).*/\1/p' | head -1 || true)
+              if [ -z "$listed" ] && grep -qF ">$WHEEL</a>" live-index.html; then
+                echo "::error::$INDEX_URL lists $WHEEL with no readable sha256 — cannot prove it is this build; nothing was attached."
                 exit 1
               fi
-              echo "$INDEX_URL does not list $WHEEL." ;;
+              if [ -n "$listed" ] && [ "$listed" != "$WHEEL_SHA256" ]; then
+                echo "::error::$INDEX_URL already lists $WHEEL at sha256 $listed, and this build is $WHEEL_SHA256 — a published wheel is never replaced (every consumer's uv.lock hashes it), even after its Release is deleted or its tag moved. Cut a new version instead."
+                exit 1
+              fi
+              if [ -n "$listed" ]; then
+                echo "$INDEX_URL already lists $WHEEL at this build's sha256 — identical, not a re-tag."
+              else
+                echo "$INDEX_URL does not list $WHEEL."
+              fi ;;
             *) echo "::error::reading $INDEX_URL returned HTTP $code — cannot prove $WHEEL is unpublished; nothing was attached."
                exit 1 ;;
           esac
@@ -124,10 +136,24 @@ jobs:
       - name: Attach to the GitHub Release (a re-tag is refused)
         env:
           GH_TOKEN: ${{ github.token }}
+          WHEEL: ${{ steps.build.outputs.wheel }}
+          WHEEL_SHA256: ${{ steps.build.outputs.wheel_sha256 }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             existing=$(gh release view "$TAG" --json assets --jq '.assets[].name | select(endswith(".whl"))')
+            if [ "$existing" = "$WHEEL" ]; then
+              # A re-dispatch of a tag whose index or deploy was lost: the
+              # wheel it carries is this build, byte for byte, or the run stops.
+              gh release download "$TAG" --pattern "$WHEEL" --dir attached
+              have=$(sha256sum "attached/$WHEEL" | cut -d' ' -f1)
+              if [ "$have" != "$WHEEL_SHA256" ]; then
+                echo "::error::release $TAG already carries $WHEEL at sha256 $have, and this build is $WHEEL_SHA256 — a published wheel is never overwritten (uv.lock hashes it). Cut a new version instead."
+                exit 1
+              fi
+              echo "release $TAG already carries $WHEEL at this build's sha256 — nothing to attach; the index is rebuilt next."
+              exit 0
+            fi
             if [ -n "$existing" ]; then
               echo "::error::release $TAG already carries $existing — a published wheel is never overwritten (uv.lock hashes it). Cut a new version instead."
               exit 1
@@ -142,6 +168,8 @@ jobs:
     name: Regenerate the index from every release
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     concurrency:
       group: pages
       cancel-in-progress: false
@@ -189,6 +217,9 @@ jobs:
     name: Publish to GitHub Pages
     needs: index
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     concurrency:
       group: pages
       cancel-in-progress: false

@@ -52,6 +52,7 @@ CONFIG_IMPORT_ALLOWLIST = frozenset((
     'godot/checks/uid.py', 'godot/checks/unit_disk.py',
     'godot/install.py',
     'godot/read/autoloads.py', 'godot/read/orphans.py', 'godot/read/refs.py',
+    'godot/read/stats.py',
 ))
 
 

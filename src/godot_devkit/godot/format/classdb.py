@@ -12,6 +12,12 @@ Two things a caller can ask:
 `is_known` is the honesty valve: an unknown class means the gate must report the
 node as UNVERIFIED rather than guess (a false PASS is survivable, a false FAIL
 gets the gate switched off).
+
+And the engine's NAMES, from the same file: `engine_methods()` (every method on
+any class or builtin type, and every utility function) and `engine_signals()`
+(every class signal), stamped `engine_names_from()` — possibly a newer dump than
+the props, which only ever adds a refusal. `refs --rename` refuses a name in
+either set: without types, `x.play()` may be the engine's.
 """
 from __future__ import annotations
 
@@ -35,14 +41,36 @@ SYNTHESIZED_PROPERTIES = frozenset((
 
 
 @lru_cache(maxsize=1)
+def _payload() -> dict:
+    return json.loads(DATA.read_text(encoding='utf-8'))
+
+
+@lru_cache(maxsize=1)
 def _table() -> dict[str, dict]:
-    payload = json.loads(DATA.read_text(encoding='utf-8'))
-    return payload['classes']
+    return _payload()['classes']
 
 
 @lru_cache(maxsize=1)
 def godot_version() -> str:
-    return json.loads(DATA.read_text(encoding='utf-8'))['godot_version']
+    return _payload()['godot_version']
+
+
+@lru_cache(maxsize=1)
+def engine_methods() -> frozenset[str]:
+    """Every method name the engine owns: any class, any builtin type, any utility function."""
+    return frozenset(_payload()['engine_methods'])
+
+
+@lru_cache(maxsize=1)
+def engine_signals() -> frozenset[str]:
+    """Every signal name any engine class declares."""
+    return frozenset(_payload()['engine_signals'])
+
+
+@lru_cache(maxsize=1)
+def engine_names_from() -> str:
+    """The dump the engine names came from (`Godot Engine v4.7.2.stable.official`)."""
+    return _payload()['names_from']
 
 
 @lru_cache(maxsize=512)

@@ -44,7 +44,9 @@
 #   2. `.uid` / `.import` sidecars the pass created that the tree does NOT
 #      have — the point of the exercise. Commit them.
 # Everything else the pass rewrote is DROPPED with the copy and reported as a
-# count; the tree's own files are never written. (That is also why this file
+# count; the tree's own files are never written. An EXISTING sidecar the pass
+# rewrote is not applied either, but it gets its own line: the new cache was
+# built against the pass's version of it. (That is also why this file
 # no longer restores project.godot: the tree's copy is never touched. The
 # library's gdk_sandbox_home still arms its restore; here it is a no-op.)
 #
@@ -190,6 +192,20 @@ dropped_line() {
 	echo "$TAG dropped $count re-serialised files (import churn): $first"
 }
 
+# rewritten_sidecars_line <newline-separated paths> — the one line naming the
+# EXISTING sidecars the pass rewrote (a duplicate uid re-minted, say). Not
+# churn: the swapped-in cache was built against the pass's versions, so the
+# tree and the cache now disagree, and the reader has to know which files.
+# Silent on empty input.
+rewritten_sidecars_line() {
+	local paths="$1" count first
+	[ -n "$paths" ] || return 0
+	count="$(printf '%s\n' "$paths" | grep -c . || true)"
+	first="$(printf '%s\n' "$paths" | head -n "$DROPPED_LIST_MAX" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+	[ "$count" -gt "$DROPPED_LIST_MAX" ] && first="$first, … (+$((count - DROPPED_LIST_MAX)) more)"
+	echo "$TAG $count existing sidecars rewritten by the pass, NOT applied; the new cache expects them: $first"
+}
+
 # is_sidecar <path> — a `.uid`/`.import` sidecar, anchored (see SIDECAR_RE).
 is_sidecar() {
 	[[ "$1" =~ $SIDECAR_RE ]]
@@ -203,7 +219,7 @@ is_sidecar() {
 pick_clone_flag() {
 	local flag probe="$2/.gdk-clone-probe"
 	for flag in --reflink=auto -c; do
-		if cp "$flag" -p "$1" "$probe" 2>/dev/null; then
+		if cp "$flag" -p -- "$1" "$probe" 2>/dev/null; then
 			rm -f "$probe"
 			printf '%s\n' "$flag"
 			return 0
@@ -211,6 +227,28 @@ pick_clone_flag() {
 		rm -f "$probe"
 	done
 	return 0
+}
+
+# copy_label <clone flag> — what a cp with that flag ran, said honestly. The
+# probe above proves the flag is ACCEPTED, not that it cloned: GNU
+# `--reflink=auto` falls back to a full copy, silently, on a filesystem that
+# cannot clone (ext4). So a flag reads "clone or copy", never "clone".
+copy_label() {
+	if [ -n "${1-}" ]; then printf 'cp %s (clone or copy)\n' "$1"; else printf 'cp\n'; fi
+}
+
+# copy_size <dir> — how much the scratch copy holds, from `du -sk` (POSIX).
+# du counts a clone's shared blocks as its own, so this is what the copy
+# would have cost uncloned: the number a multi-GB project needs to see.
+copy_size() {
+	local kib
+	kib="$(du -sk "$1" 2>/dev/null | awk '{ print $1 }')"
+	case "$kib" in ''|*[!0-9]*) printf 'size unknown\n'; return 0 ;; esac
+	awk -v k="$kib" 'BEGIN {
+		if (k >= 1048576) printf "%.1f GiB\n", k / 1048576
+		else if (k >= 1024) printf "%.1f MiB\n", k / 1024
+		else printf "%d KiB\n", k
+	}'
 }
 
 # project_file_list — every file under the project root, NUL-separated and
@@ -282,7 +320,8 @@ project_file_list() {
 _copy_batch() {
 	local dest="$1" dir="$2"; shift 2
 	[ "$#" -gt 0 ] || return 0
-	mkdir -p "$dest/$dir" && cp -R -p ${CP_CLONE:+"$CP_CLONE"} "$@" "$dest/$dir/"
+	# `--`: a tracked root-level `-x.gd` is a path, not a flag.
+	mkdir -p "$dest/$dir" && cp -R -p ${CP_CLONE:+"$CP_CLONE"} -- "$@" "$dest/$dir/"
 }
 
 # copy_listed <dest> — copy the NUL-separated paths on stdin into <dest>,
@@ -366,19 +405,36 @@ kill_tree() {
 # editor-launched game runs as whatever GDK_GODOT says), and one argument IS
 # the root (or its project.godot). A path merely UNDER the root — this run's
 # own scratch copy — does not count. Pure, so the self-test feeds it text.
+#
+# `ps` joins argv with spaces, so the arguments cannot be split back apart: a
+# root holding a space never equalled any one field. The root is matched as
+# TEXT instead — preceded by a blank, followed by the end, a blank, trailing
+# slashes, or `/project.godot` — so `/r/my proj` matches whole and its scratch
+# copy (`/r/my proj/.headless-userdata/…`) still does not.
 live_project_processes() {
 	local engine="${1:?usage: live_project_processes <engine> <root> [<root>]}"
 	engine="$(basename "$engine" | tr '[:upper:]' '[:lower:]')"
 	awk -v engine="$engine" -v r1="${2:?}" -v r2="${3:-$2}" '
 		function base(p) { sub(/.*\//, "", p); return tolower(p) }
-		function isroot(t) {
-			sub(/\/+$/, "", t)
-			return t == r1 || t == r2 || t == r1 "/project.godot" || t == r2 "/project.godot"
+		function holds(s, r,   pos, p, before, after) {
+			pos = 0
+			while ((p = index(substr(s, pos + 1), r)) > 0) {
+				p += pos; pos = p
+				before = (p == 1) ? " " : substr(s, p - 1, 1)
+				if (before != " " && before != "\t") continue
+				after = substr(s, p + length(r))
+				if (index(after, "/project.godot") == 1) after = substr(after, 15)
+				else sub(/^\/+/, "", after)
+				if (after == "" || after ~ /^[ \t]/) return 1
+			}
+			return 0
 		}
 		NF >= 2 {
 			b = base($2)
 			if (b != engine && index(b, "godot") != 1) next
-			for (i = 3; i <= NF; i++) if (isroot($i)) { sub(/^[ \t]+/, ""); print; next }
+			line = $0; sub(/^[ \t]+/, "", line)
+			args = line; sub(/^[^ \t]+[ \t]+/, "", args)
+			if (holds(args, r1) || holds(args, r2)) print line
 		}
 	'
 }
@@ -552,6 +608,28 @@ PS_EOF
 	[ "$out" = "101 105 106 " ] \
 		|| { echo "  MISS — live_project_processes named the wrong pids, got '$out'" >&2; failures=$((failures + 1)); }
 
+	# ...and a root holding a SPACE: ps joins argv with blanks, so a match on
+	# split fields never saw it. Its scratch copy and a longer sibling's name
+	# still do not count.
+	cases=$((cases + 1))
+	out="$(live_project_processes godot '/r/my proj' <<'PS_EOF' | awk '{ print $1 }' | tr '\n' ' '
+  201 godot --path /r/my proj --headless
+  202 godot --path /r/my proj/.headless-userdata/runs/run-1-import-x --headless --editor --quit
+  203 godot -e /r/my proj/project.godot
+  204 godot --path /r/my project
+  205 godot --path /r/my proj/
+PS_EOF
+)"
+	[ "$out" = "201 203 205 " ] \
+		|| { echo "  MISS — a root holding a space was not matched whole, got '$out'" >&2; failures=$((failures + 1)); }
+
+	# the copy label says what ran: a clone flag is ACCEPTED by the probe, not
+	# proven to clone (GNU --reflink=auto copies in full on ext4).
+	cases=$((cases + 1))
+	out="$(copy_label --reflink=auto)|$(copy_label -c)|$(copy_label '')"
+	[ "$out" = "cp --reflink=auto (clone or copy)|cp -c (clone or copy)|cp" ] \
+		|| { echo "  MISS — the copy label claimed more than ran, got '$out'" >&2; failures=$((failures + 1)); }
+
 	# --- end to end, against a stub engine -------------------------------
 	# The stub does to the copy what an editor pass does to a tree: rewrites
 	# a tracked .tres, writes a new script sidecar, writes the cache. With
@@ -562,6 +640,9 @@ PS_EOF
 #!/bin/sh
 printf 'normalised = true\n' >> data/thing.tres
 printf 'uid://stubnew\n' > scripts/new.gd.uid
+printf 'uid://dash\n' > ./-dash.gd.uid
+# A duplicate uid re-minted: an EXISTING sidecar rewritten.
+printf 'uid://reminted\n' > scripts/old.gd.uid
 mkdir -p .godot
 printf 'stub-uid-cache\n' > .godot/uid_cache.bin
 printf 'stub-classes\n' > .godot/global_script_class_cache.cfg
@@ -604,6 +685,9 @@ SHIM_EOF
 	printf '[gd_resource type="Resource"]\nvalue = 1.0\n' > "$proj/data/thing.tres"
 	ln -s thing.tres "$proj/data/thing-link.tres"
 	printf 'extends Node\nclass_name New\n' > "$proj/scripts/new.gd"
+	printf 'extends Node\nclass_name Old\n' > "$proj/scripts/old.gd"
+	printf 'uid://dupe\n' > "$proj/scripts/old.gd.uid"
+	printf 'extends Node\n' > "$proj/-dash.gd"
 	printf 'extends Node\nclass_name VendoredThing\n' > "$proj/addons/vendored/thing.gd"
 	printf '.godot/\n.headless-userdata/\naddons/vendored/\nvendor/nested-checkout/\nvendor/worktree/\nvendor/engine-ignored/\n' > "$proj/.gitignore"
 	: > "$proj/vendor/engine-ignored/.gdignore"
@@ -647,6 +731,16 @@ SHIM_EOF
 		< <(printf 'data/thing-link.tres\0'))" || rc=$?
 	[ "$rc" -eq 0 ] && [ "$out" = 1 ] && [ -L "$fallback_dest/data/thing-link.tres" ] \
 		|| { echo "  MISS — no-rsync fallback did not copy one symlink path (rc=$rc, census='$out')" >&2; failures=$((failures + 1)); }
+	# ...and a root-level file whose name starts with a dash is a PATH to cp,
+	# never a flag.
+	cases=$((cases + 1))
+	rc=0
+	out="$(cd "$proj" && GDK_SANDBOX_DIRNAME=.headless-userdata PATH="$scratch/no-rsync" CP_CLONE='' copy_listed "$fallback_dest" \
+		< <(printf -- '-dash.gd\0') 2>&1)" || rc=$?
+	if [ "$rc" -ne 0 ] || [ "$out" != 1 ] || ! cmp -s "$proj/-dash.gd" "$fallback_dest/-dash.gd"; then
+		echo "  MISS — no-rsync fallback read a root-level '-dash.gd' as a flag (rc=$rc, out='$out')" >&2
+		failures=$((failures + 1))
+	fi
 	cp "$proj/data/thing.tres" "$scratch/thing.tres.orig"
 
 	# killed mid-pass (#20): SIGTERM while the engine hangs leaves the tree
@@ -679,6 +773,7 @@ SHIM_EOF
 	[ "$rc" -eq 0 ] || i="$i exit $rc;"
 	cmp -s "$scratch/thing.tres.orig" "$proj/data/thing.tres" || i="$i the tracked .tres was written;"
 	[ "$(cat "$proj/scripts/new.gd.uid" 2>/dev/null)" = 'uid://stubnew' ] || i="$i the new sidecar did not come back;"
+	[ "$(cat "$proj/-dash.gd.uid" 2>/dev/null)" = 'uid://dash' ] || i="$i the new root-level '-dash.gd.uid' did not come back;"
 	[ "$(cat "$proj/.godot/uid_cache.bin" 2>/dev/null)" = 'stub-uid-cache' ] || i="$i .godot/ is not the pass's;"
 	[ -f "$proj/.godot/imported/a.ctex" ] || i="$i the existing cache was not carried into the copy;"
 	printf '%s\n' "$out" | grep -qF "$TAG scratch copy: $census_after paths" \
@@ -691,6 +786,23 @@ SHIM_EOF
 	[ -z "$(cd "$proj" && ls -d "$IMPORT_DIR".old* 2>/dev/null)" ] || i="$i the old .godot/ was left behind;"
 	[ -z "$i" ] \
 		|| { echo "  MISS — a full run:$i output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
+
+	# the same run: an EXISTING sidecar the pass rewrote is named on its own
+	# line, left as the tree had it, and never counted as import churn.
+	cases=$((cases + 1))
+	i=''
+	[ "$(cat "$proj/scripts/old.gd.uid" 2>/dev/null)" = 'uid://dupe' ] || i="$i the rewritten sidecar was applied;"
+	printf '%s\n' "$out" | grep -qxF "$TAG 1 existing sidecars rewritten by the pass, NOT applied; the new cache expects them: scripts/old.gd.uid" \
+		|| i="$i no line of its own naming scripts/old.gd.uid;"
+	printf '%s\n' "$out" | grep 'import churn' | grep -qF 'old.gd.uid' && i="$i it was counted as import churn;"
+	[ -z "$i" ] \
+		|| { echo "  MISS — a rewritten existing sidecar:$i output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
+
+	# the same run: the census line says what copied the tree and the cache,
+	# and how much — never a bare flag that reads as "cloned".
+	cases=$((cases + 1))
+	printf '%s\n' "$out" | grep -qE "^\\$TAG scratch copy: $census_after paths by (rsync|cp( [^ ]+ \\(clone or copy\\))?) \\+ \\.godot/ by cp( [^ ]+ \\(clone or copy\\))?, [0-9.]+ (KiB|MiB|GiB) at " \
+		|| { echo "  MISS — the copy census line does not say what ran and how much; output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
 
 	# GITIGNORED runtime inputs survive: an addon with its own .git metadata
 	# remains importable, and ordinary nested checkout source remains present,
@@ -846,12 +958,13 @@ echo "$TAG project: $REPO_ROOT"
 echo "$TAG sandbox HOME: $HOME"
 
 CP_CLONE="$(pick_clone_flag "$GDK_PROJECT_FILE" "$COPY")"
-if command -v rsync >/dev/null 2>&1; then COPY_METHOD=rsync; else COPY_METHOD="${CP_CLONE:-plain copy}"; fi
+CACHE_METHOD="$(copy_label "$CP_CLONE")"
+if command -v rsync >/dev/null 2>&1; then COPY_METHOD=rsync; else COPY_METHOD="$CACHE_METHOD"; fi
 copied="$(project_file_list | copy_listed "$COPY")" || {
 	echo "${C_BAD}$TAG could not build the scratch copy at $COPY${C_OFF}" >&2
 	exit 2
 }
-if [ -d "$IMPORT_DIR" ] && ! cp -R -p ${CP_CLONE:+"$CP_CLONE"} "$IMPORT_DIR" "$COPY/"; then
+if [ -d "$IMPORT_DIR" ] && ! cp -R -p ${CP_CLONE:+"$CP_CLONE"} -- "$IMPORT_DIR" "$COPY/"; then
 	echo "${C_BAD}$TAG could not copy $IMPORT_DIR/ into the scratch copy${C_OFF}" >&2
 	exit 2
 fi
@@ -860,7 +973,7 @@ if [ ! -f "$COPY/$GDK_PROJECT_FILE" ]; then
 	echo "${C_BAD}$TAG the scratch copy holds no $GDK_PROJECT_FILE ($copied paths copied)${C_OFF}" >&2
 	exit 2
 fi
-echo "$TAG scratch copy: $copied paths ($COPY_METHOD) + ${IMPORT_DIR}/ at $COPY"
+echo "$TAG scratch copy: $copied paths by $COPY_METHOD + ${IMPORT_DIR}/ by $CACHE_METHOD, $(copy_size "$COPY") at $COPY"
 echo "$TAG regenerating $IMPORT_DIR/ (uid map + class_name registry), up to ${TIMEOUT_SECONDS}s…"
 
 # mtime reference for the outcome check AND for what the pass wrote, taken
@@ -894,14 +1007,22 @@ fi
 # --- what the pass wrote, sorted into brought-back and dropped ---------------
 # Every file in the copy the pass wrote after the stamp: a NEW sidecar comes
 # back; anything else that differs from the tree (a rewrite, or a new file
-# such as an extracted sub-resource) is churn, dropped with the copy.
+# such as an extracted sub-resource) is churn, dropped with the copy — except
+# a rewritten EXISTING sidecar. That is not churn: the cache swapped in below
+# was built against the pass's version, so it is not applied, and it is named
+# on its own line rather than counted as churn.
 sidecars=''
 dropped=''
+rewritten=''
 while IFS= read -r rel; do
 	[ -n "$rel" ] || continue
 	if [ -e "$rel" ] || [ -L "$rel" ]; then
 		cmp -s "$COPY/$rel" "$rel" && continue
-		dropped="$dropped$rel"$'\n'
+		if is_sidecar "$rel"; then
+			rewritten="$rewritten$rel"$'\n'
+		else
+			dropped="$dropped$rel"$'\n'
+		fi
 	elif is_sidecar "$rel"; then
 		sidecars="$sidecars$rel"$'\n'
 	else
@@ -912,6 +1033,7 @@ $(cd "$COPY" && find . -path "./$IMPORT_DIR" -prune -o -type f -newer "$STAMP" -
 WRITTEN_EOF
 sidecars="${sidecars%$'\n'}"
 dropped="${dropped%$'\n'}"
+rewritten="${rewritten%$'\n'}"
 
 # #23: a game or editor on this project keeps running across the swap — its
 # open files are the old inodes — but it will not see the new imports.
@@ -941,6 +1063,15 @@ fi
 trap '' INT TERM
 swap_rc=0
 restored=1
+# A KNOWN RACE, recorded and not locked. Two runs whose renames interleave —
+# A sets the old cache aside, B finds no $IMPORT_DIR/ to set aside, A swaps
+# its new one in, B's second `mv` then lands B's INSIDE A's
+# ($IMPORT_DIR/$IMPORT_DIR). The engine lease does not cover it: the library
+# holds the lease for the editor pass alone (gdk_engine_gate_run wraps the
+# boot and releases on its exit), so two runs whose passes queued one behind
+# the other still reach these renames unleased. The window is the two renames
+# — microseconds — and holding the lease across them would make the swap wait
+# on every other engine gate on the machine.
 if [ -e "$IMPORT_DIR" ] && ! mv "$IMPORT_DIR" "$old"; then
 	swap_rc=1
 elif ! mv "$COPY/$IMPORT_DIR" "$IMPORT_DIR"; then
@@ -964,7 +1095,7 @@ fi
 
 while IFS= read -r rel; do
 	[ -n "$rel" ] || continue
-	if ! { mkdir -p "$(dirname "$rel")" && cp -p "$COPY/$rel" "$rel"; }; then
+	if ! { mkdir -p -- "$(dirname -- "$rel")" && cp -p -- "$COPY/$rel" "$rel"; }; then
 		echo "${C_BAD}$TAG could not bring back $rel${C_OFF}" >&2
 		exit 2
 	fi
@@ -974,11 +1105,12 @@ SIDECARS_EOF
 
 echo "${C_OK}$TAG PASS — $IMPORT_DIR/ refreshed in ${elapsed}s${C_OFF}"
 
-if [ -z "$sidecars" ] && [ -z "$dropped" ]; then
+if [ -z "$sidecars" ] && [ -z "$dropped" ] && [ -z "$rewritten" ]; then
 	echo "$TAG the tree is unchanged — nothing to commit, nothing to revert."
 	exit 0
 fi
 print_churn "new sidecars brought back into the tree — COMMIT these (they are why you ran this)" "$sidecars"
+rewritten_sidecars_line "$rewritten"
 dropped_line "$dropped"
 [ -z "$dropped" ] || echo "  (left in the scratch copy and removed with it — the tree's files were never written)"
 exit 0

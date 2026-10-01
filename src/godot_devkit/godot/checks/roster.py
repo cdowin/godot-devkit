@@ -39,6 +39,7 @@ OPT_IN_GATES = ('canonical',)
 # neither can accept. Two kits, two keys.
 ROSTER_KEY = 'godot'
 
+
 def all_roster() -> tuple[str, ...]:
     """Which gates `check all` runs HERE — `[checks] godot`, else all eight.
 

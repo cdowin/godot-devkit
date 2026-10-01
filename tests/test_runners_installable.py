@@ -276,6 +276,10 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     assert done.returncode == 0, done.stdout + done.stderr
     assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout.splitlines()[-1], done.stdout
     assert _rows(ledger) == [('unit', 'PASS', '2')], done.stderr
+    # The transcript opens with the bound the run was judged under, not only
+    # the console: a HARD_TIMEOUT read from the log alone names its number.
+    transcript = (root / '.gate-reports' / 'unit.log').read_text(encoding='utf-8')
+    assert transcript.startswith('[UNIT] timeout '), transcript[:200]
 
     (tier / 'test_2.gd').write_text('', encoding='utf-8')
     done = unit()
@@ -416,14 +420,17 @@ def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
     """integration.sh runs N scenarios in ONE tree. Removing `.godot/` under
     peers that are mid-boot turns one cache defect into a scatter of failures
     that look like real ones — the read-side cardinal sin, manufactured by the
-    recovery itself. Inside a sweep the run names the repair instead of
-    performing it, and the tree it would not touch is still there."""
+    recovery itself. Rung 1 is no better there: an editor pass IN THE TREE,
+    from every job that hits the cold cache at once. Inside a sweep the run
+    names the repair instead of performing either rung, and the tree it would
+    not touch is still there."""
     root, env, log = _scenario_fixture(tmp_path, WARN_WHILE_STALE)
     done = _run_scenario(root, dict(env, GDK_SCENARIO_IN_SWEEP='1'))
     assert done.returncode == 1, done.stdout + done.stderr
-    assert _engine_runs(log) == (2, 1), done.stdout + done.stderr
+    assert _engine_runs(log) == (1, 0), done.stdout + done.stderr
     assert (root / STALE_MARKER).exists(), 'a sweep removed a shared cache'
     assert REMOVAL_NOTICE not in done.stderr, done.stderr
+    assert 'make import-cache' in done.stderr, done.stderr
     assert 'rm -rf .godot' in done.stderr, done.stderr
 
 

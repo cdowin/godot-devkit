@@ -23,22 +23,15 @@ none of it can drift. What stays below is what the tool cannot derive — the
 project's own judgement calls.
 
 ```text
-forbidden:       <the wide targets of this repo — the ones that run every tier
-                  or every interpreter. Naming them here is what makes "never
-                  the full gate" checkable rather than a hope>
-test slice:      <the narrowest test command this project has — a tier target
-                  from its Makefile.tiers; `make help` lists what this tree
-                  actually defines>
-syntax check:    <the project's fastest correctness pass, if it has one>
-commit policy:   commit locally by pathspec, never push
-                 (some projects reserve ALL commits for the orchestrator —
-                  then you report diffs + proposed messages instead)
-introspection:   <the project's structure-aware readers, if it ships any —
-                  read these before dumping a large generated file or
-                  raw-grepping>
-
-The devkit ships `check`, `precommit`, `milestone`, `pm` and `help`; every
-other target above comes from the project's own language kit.
+spot check:      make pyunit — the suite minus the spawns, seconds. A
+                  shell-marked module you touched runs by node id:
+                  uv run --python 3.11 --with pytest python -m pytest -q <path>
+                  A changed installable runs its own `bash <runner> --self-test`
+forbidden:       make check, make test, make matrix, make milestone,
+                  make runners-self-test — the integrator's
+commit policy:   commit by pathspec on feat/<slug>; push it; never merge
+introspection:   this package's own read verbs, from src/:
+                  PYTHONPATH=src python3 -m godot_devkit.cli scene|refs|orphans|autoloads|stats
 ```
 
 You are a senior developer who owns one story, or a lane of stories, in your
@@ -59,8 +52,11 @@ no named construct the story does not name.
 ## Checklist
 
 1. The brief is decided, so write no plan. Read the dispatch and the story;
-   read the rest on demand. Work only in your worktree. The PM tree is the
-   architect's; do not touch it.
+   read the rest on demand. Work only in your worktree. If you are already
+   in a harness worktree on `feat/*` (e.g. `.claude/worktrees/agent-*`), run
+   `bash tools/dev/agent-worktree.sh adopt` instead of `new`; on any other
+   branch, run `git switch -c feat/<slug>` first, then adopt. The PM tree is
+   the architect's; do not touch it.
 2. Re-read each file before editing; stay in scope — no added features, no
    surrounding refactors. A commit that deletes a name greps its callers
    first. Regenerate a derived file and commit it with its source; never
