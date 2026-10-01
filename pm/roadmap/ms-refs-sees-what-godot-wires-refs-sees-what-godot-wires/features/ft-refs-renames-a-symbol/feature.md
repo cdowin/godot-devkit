@@ -1,7 +1,7 @@
 ---
 id: ft-refs-renames-a-symbol
 kind: feature
-milestone: "ms-future-godot-tooling"
+milestone: "ms-refs-sees-what-godot-wires"
 name: refs renames a symbol
 status: planning
 reviewed:

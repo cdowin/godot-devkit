@@ -1,7 +1,7 @@
 ---
 id: ft-refs-reads-scene-connections
 kind: feature
-milestone: ms-future-godot-tooling
+milestone: ms-refs-sees-what-godot-wires
 name: refs sees what Godot wires
 status: planning
 reviewed:

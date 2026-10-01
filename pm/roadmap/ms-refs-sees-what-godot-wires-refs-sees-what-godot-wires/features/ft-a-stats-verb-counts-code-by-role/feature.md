@@ -1,7 +1,7 @@
 ---
 id: ft-a-stats-verb-counts-code-by-role
 kind: feature
-milestone: ms-future-godot-tooling
+milestone: ms-refs-sees-what-godot-wires
 name: a stats verb counts code by role
 status: planning
 reviewed:

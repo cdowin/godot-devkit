@@ -1,10 +1,10 @@
 ---
-id: "ms-future-godot-tooling"
+id: "ms-refs-sees-what-godot-wires"
 kind: milestone
-name: Future Godot tooling
+name: Refs sees what Godot wires
 status: planning
 depends_on: []
-branch: milestone/2.1.0-future-godot-tooling
+branch: milestone/2.1.0-refs-sees-what-godot-wires
 mode:
 version: 2.1.0
 changelog:
@@ -17,7 +17,7 @@ order:
   - "ft-project-verb-edits-autoloads"
 ---
 
-# ms-future-godot-tooling — Future Godot tooling
+# ms-refs-sees-what-godot-wires — Refs sees what Godot wires
 
 <!-- Theme: one paragraph. What can a user DO or SEE when this ships? -->
 

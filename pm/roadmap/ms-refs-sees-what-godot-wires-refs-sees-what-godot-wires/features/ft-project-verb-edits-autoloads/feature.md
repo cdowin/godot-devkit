@@ -1,7 +1,7 @@
 ---
 id: ft-project-verb-edits-autoloads
 kind: feature
-milestone: "ms-future-godot-tooling"
+milestone: "ms-refs-sees-what-godot-wires"
 name: the project verb edits autoloads
 status: planning
 reviewed:

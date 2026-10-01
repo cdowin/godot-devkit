@@ -1,7 +1,7 @@
 ---
 id: ft-the-1-4-0-carry-forwards
 kind: feature
-milestone: ms-future-godot-tooling
+milestone: ms-refs-sees-what-godot-wires
 name: the 1.4.0 carry forwards
 status: planning
 reviewed:
