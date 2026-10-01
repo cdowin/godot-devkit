@@ -5,3 +5,7 @@
 {"ts":"2026-10-01T18:41:36Z","kind":"status","grain":"st-stats-verb","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T18:41:36Z","kind":"status","grain":"st-refs-indexes-godot-wiring","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T18:41:36Z","kind":"status","grain":"st-autoloads-add-and-rm","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:44:35Z","kind":"status","grain":"st-integration-runner-findings","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:44:35Z","kind":"status","grain":"st-import-and-scenario-findings","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:44:35Z","kind":"status","grain":"st-python-and-release-findings","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:44:35Z","kind":"status","grain":"ft-the-1-4-0-carry-forwards","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}

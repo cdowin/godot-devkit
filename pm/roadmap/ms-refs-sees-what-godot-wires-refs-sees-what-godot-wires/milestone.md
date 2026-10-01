@@ -10,7 +10,6 @@ version: 2.1.0
 changelog:
 order:
   - "ft-refs-reads-scene-connections"
-  - "ft-a-capture-never-takes-focus"
   - "ft-a-stats-verb-counts-code-by-role"
   - "ft-the-1-4-0-carry-forwards"
   - "ft-refs-renames-a-symbol"
