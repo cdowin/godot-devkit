@@ -11,8 +11,13 @@ extends SceneTree
 ## assumed; a consumer shipped a broken integration scenario through a green
 ## parse gate for exactly this reason.
 ##
-## Run by parse.sh (stage 2) — never invoke godot directly, the wrapper owns
-## the user:// sandbox.
+## Run by parse.sh (stage 2) and warnings.sh over the whole project, and by
+## spot.sh over a LIST — never invoke godot directly, the wrapper owns the
+## user:// sandbox.
+##
+## With user arguments (`-- res://a.gd res://b.gd`) it compiles exactly those
+## and walks nothing. Each argument is one script: one that is not a
+## `res://….gd` path is a SWEEP_FAIL, never a reason to widen to the project.
 ##
 ## Output contract (the wrapper greps these; the exit code is advisory):
 ##   SWEEP_FAIL <res://path.gd>      one per script that would not compile
@@ -34,12 +39,14 @@ const SKIPPED_DIRS: PackedStringArray = ["assets", "locale"]
 
 
 func _initialize() -> void:
-	var script_paths := _collect_script_paths(ROOT_DIR)
+	var script_paths := PackedStringArray(OS.get_cmdline_user_args())
+	if script_paths.is_empty():
+		script_paths = _collect_script_paths(ROOT_DIR)
 	script_paths.sort()
 
 	var failures := PackedStringArray()
 	for path in script_paths:
-		if not _compiles(path):
+		if not _is_script_path(path) or not _compiles(path):
 			failures.append(path)
 
 	for path in failures:
@@ -47,6 +54,11 @@ func _initialize() -> void:
 	print(RESULT_PREFIX, script_paths.size() - failures.size(), " ", script_paths.size())
 
 	quit(EXIT_FAIL if not failures.is_empty() else 0)
+
+
+## True when [param path] names a script under the project root.
+func _is_script_path(path: String) -> bool:
+	return path.begins_with(ROOT_DIR) and path.ends_with(SCRIPT_SUFFIX)
 
 
 ## True when the engine can fully compile the script at [param path].

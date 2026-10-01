@@ -1026,6 +1026,25 @@ if [ "$SUITE" -eq 1 ]; then
 	exit "$suite_rc"
 fi
 
+# A receipt over these exact inputs is the proof already bought (gdk_runners.sh,
+# proof receipts) — on a DIRECT run only. A sweep's job is integration.sh's
+# receipt to give, and `-v` is someone asking to watch the engine. The key is
+# the name, how the runner is told it, the scenario file and every path its
+# header covers.
+RECEIPT_KEY=""
+if [ "$VERBOSE_STREAM" -eq 0 ] && [ -z "${GDK_SCENARIO_IN_SWEEP:-}" ]; then
+	scenario_files=()
+	while IFS= read -r f; do [ -n "$f" ] && scenario_files+=("$f"); done \
+		< <(find "$GDK_SCENARIO_SOURCE_DIR" -type f -name "$SCENARIO_NAME.gd" 2>/dev/null | sort)
+	# shellcheck disable=SC2034  # read by gdk_receipt_key, in the sourced library
+	GDK_RECEIPT_PATHS="$(gdk_receipt_covers ${scenario_files[@]+"${scenario_files[@]}"} | tr '\n' ' ')"
+	RECEIPT_KEY="$(gdk_receipt_key scenario "$SCENARIO_NAME" "$GDK_SCENARIO_USER_ARG" \
+		"$GDK_SCENARIO_RESULT_RE" "$GDK_SCENARIO_NOISE_ALLOWLIST")" || RECEIPT_KEY=""
+	if gdk_receipt_hit scenario "$RECEIPT_KEY"; then
+		exit 0
+	fi
+fi
+
 REPORT_FILE="$GDK_SCENARIO_REPORT_DIR/$SCENARIO_NAME.log"
 mkdir -p "$GDK_SCENARIO_REPORT_DIR"
 reap_stale_scenario_reports "$GDK_SCENARIO_REPORT_DIR"
@@ -1196,4 +1215,8 @@ if [ "$VERBOSE_STREAM" -eq 0 ]; then
 	fi
 fi
 
+if [ "$godot_exit" -eq 0 ] && [ -n "$RECEIPT_KEY" ] && [ -n "$result_line" ]; then
+	gdk_receipt_write scenario "$RECEIPT_KEY" "$result_line" "$SCENARIO_NAME" "$GDK_SCENARIO_USER_ARG" \
+		"$GDK_SCENARIO_RESULT_RE" "$GDK_SCENARIO_NOISE_ALLOWLIST"
+fi
 exit "$godot_exit"
