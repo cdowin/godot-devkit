@@ -950,10 +950,11 @@ _gdk_st_true() {
 # other than the one `-C` names. Under a git hook GIT_DIR / GIT_INDEX_FILE are
 # exported, and a scratch fixture's bare `git init .` then re-initialised the
 # HOST repo instead (#24). Call it in a subshell: `env -u` is not on every
-# platform, and the caller's own git must keep its environment.
+# platform, and the caller's own git must keep its environment. The names are
+# git's own list, `git rev-parse --local-env-vars`, which keeps itself current.
 _gdk_st_git_env_clear() {
-	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
-		GIT_COMMON_DIR GIT_ALTERNATE_OBJECT_DIRECTORIES
+	# shellcheck disable=SC2046
+	unset $(git rev-parse --local-env-vars 2>/dev/null)
 }
 
 # _gdk_st_tracked_dir_case <dir> — the report-dir guard against a scratch git
@@ -1300,6 +1301,12 @@ second line' "$(cat "$log")"
 		status=$?
 		cmp -s "$scratch/hook-host.config.before" "$scratch/hook-host/.git/config" || status=1
 		_gdk_st_true 'a git fixture under a hook-exported GIT_DIR leaves that repo untouched' "$status"
+		# git's own list (`--local-env-vars`), not a hand-kept six: a hook
+		# under `git -c k=v commit` exports GIT_CONFIG_PARAMETERS (N5).
+		log="$( export GIT_CONFIG_PARAMETERS="'gdk.leak=host'"
+			_gdk_st_git_env_clear; git -C "$scratch" config --get gdk.leak )"
+		status=0; [ -z "$log" ] || status=1
+		_gdk_st_true "the git-env clear drops every --local-env-vars name (GIT_CONFIG_PARAMETERS read '$log')" "$status"
 	fi
 
 	# --- the compile-sweep transcript readers --------------------------------
