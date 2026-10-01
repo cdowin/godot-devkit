@@ -360,8 +360,9 @@ failed scenario once, alone. One that passes alone counts green and prints `  FL
 failed in the sweep, passed alone`, and the summary reads `N passed (K flaky)`. `--no-rerun` or
 `GDK_INTEGRATION_RERUN=0` turns the rerun off; `--all` and named runs never rerun. Before a
 `--diff`/`--all` sweep boots anything, a stale import cache (`.godot/uid_cache.bin` missing, or
-older than a tracked `*.uid`, `*.import` or `project.godot`) is repaired once by `import_cache.sh`.
-If the repair fails, the sweep does not start (exit 1).
+older than a tracked or untracked-not-ignored `*.uid`, `*.import` or `project.godot`, compared to
+the nanosecond) is repaired once by `import_cache.sh`. If the repair fails, the sweep does not start
+(exit 1; the repair's own usage or config error passes through as exit 2).
 
 **Warm mode (opt-in).** Every scenario is one cold engine boot, 13-15 s of CPU before its first
 assertion. With `GDK_INTEGRATION_WARM=1`, `integration.sh --all|--diff|--system` splits the roster
@@ -395,7 +396,8 @@ slice that carries the cold-import-cache warning is handed back too, so the cold
 ladder gets it. Every handed-back scenario then runs cold.
 
 A scenario whose header carries `## Isolated because: <reason>` never runs warm. An empty reason
-exits 2 and names the file. With `--diff`, a warm failure is rerun cold and alone. One that passes
+exits 2 and names the file; so does a near-miss spelling (`# Isolated because:`, `## isolated
+because:`), naming its line, rather than running the scenario warm in silence. With `--diff`, a warm failure is rerun cold and alone. One that passes
 prints `  WARM-ONLY  <name> — failed warm, passed cold: it leans on process state; mark it "##
 Isolated because:" or fix its reset`, and counts green. `--no-rerun` leaves it red. The summary
 reads `N passed (K flaky, W warm-only), F failed (of T); warm A, cold B, handed back C`. A, B and C

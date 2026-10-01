@@ -161,7 +161,8 @@ convention.
                    alone: passing alone, it counts green and prints
                    `  FLAKE  <name> — failed in the sweep, passed alone`
   --no-rerun       with --diff: report a sweep failure red at once
-  --cold           with GDK_INTEGRATION_WARM=1: run this one cold
+  --cold           with GDK_INTEGRATION_WARM=1: run this one cold. Accepted
+                   without it too, as a no-op: the run is cold already
   <name>...        an explicit list, discovery bypassed
   --self-test      prove the argument handling, the discovery filter, the
                    header reader, the slicing, the rerun and the cache
@@ -173,7 +174,8 @@ A scenario header (the leading comment block) declares, one `##` line each:
   ## Boots because: tests/unit/<path> cannot <what only a boot can assert>
   ## covers: systems/<x>, resources/<y>.gd     repo-relative path prefixes
   ## Isolated because: <reason>                never run warm (the reason is
-                                               required: an empty one exits 2)
+                                               required: an empty one exits 2,
+                                               and so does a near-miss spelling)
 
 Warm mode (GDK_INTEGRATION_WARM=1, --all/--diff/--system only): the roster is
 split into GDK_JOBS slices, each run by ONE `scenario.sh --suite` (one boot
@@ -202,9 +204,10 @@ Sets: GDK_SCENARIO_IN_SWEEP=1 on every job, the rerun alone included — the
      runner's import-cache recovery must not remove a .godot its peers, or a
      playing session, are using. So before a --diff/--all sweep boots
      anything, a stale cache (.godot/uid_cache.bin missing, or older than a
-     tracked *.uid, *.import or project.godot) is repaired ONCE by
-     import_cache.sh beside this file; if that fails, the sweep does not
-     start (exit 1).
+     tracked or untracked-not-ignored *.uid, *.import or project.godot, to
+     the nanosecond) is repaired ONCE by import_cache.sh beside this file; if
+     that fails, the sweep does not start (exit 1, or 2 when the repair
+     exited 2).
 Cost: every scenario FILE is one cold engine boot, whatever its length, so a
      run ends with `[INTEGRATION] BOOTS: <n> scenario(s) booted, <cpu>` above
      its SUMMARY — the census Makefile.tiers files on the gate's cost row.
@@ -343,11 +346,14 @@ scenario_covers() {
 
 # scenario_isolation <file> — the reason the header gives on its first
 # `## Isolated because:` line, printed (EMPTY when the line gives none) and 0;
-# silent and 1 when the header declares no isolation. The header is the same
-# leading block scenario_covers reads.
+# silent and 1 when the header declares no isolation. A NEAR-MISS spelling
+# (`# Isolated because:`, `## isolated because:` — any hash count, any case)
+# is printed as `<line>: <text>` and 2: read as no declaration it would run
+# warm in silence. The header is the same leading block scenario_covers reads.
 scenario_isolation() {
 	local found
 	found="$(awk -v key="$ISOLATED_KEY" '
+		BEGIN { near = tolower(key); gsub(/[[:space:]]+/, "[[:space:]]+", near) }
 		/^[[:space:]]*$/ || /^#/ || /^extends[[:space:]]/ || /^class_name[[:space:]]/ || /^@/ {
 			if ($0 ~ ("^##[[:space:]]*" key)) {
 				sub("^##[[:space:]]*" key "[[:space:]]*", "")
@@ -355,11 +361,13 @@ scenario_isolation() {
 				print "D" $0
 				exit
 			}
+			if (tolower($0) ~ ("^#+[[:space:]]*" near)) { print "N" NR ": " $0; exit }
 			next
 		}
 		{ exit }
 	' "$1")"
 	[ -n "$found" ] || return 1
+	case "$found" in N*) printf '%s\n' "${found#N}"; return 2 ;; esac
 	printf '%s\n' "${found#D}"
 }
 
@@ -615,27 +623,54 @@ fixture_root() {
 IMPORT_CACHE_STAMP=".godot/uid_cache.bin"
 IMPORT_CACHE_RUNNER="import_cache.sh"
 
-# import_inputs — the tracked files an import pass reads the cache from,
-# NUL-separated: project.godot, every *.uid and *.import. Outside a git work
-# tree, the same set by find (minus .godot/).
+# import_inputs — the files an import pass reads the cache from, NUL-separated:
+# project.godot, every *.uid and *.import, tracked or untracked-not-ignored —
+# the set --diff counts as touched, so an uncommitted new fixture's sidecar is
+# repaired here rather than falling through to rung 1 inside the sweep. Outside
+# a git work tree, the same set by find (minus .godot/).
 import_inputs() {
 	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-		git ls-files -z -- 'project.godot' '*.uid' '*.import' 2>/dev/null
+		git ls-files -z --cached --others --exclude-standard -- 'project.godot' '*.uid' '*.import' 2>/dev/null
 	else
 		find . -path ./.godot -prune -o -type f \
 			\( -name project.godot -o -name '*.uid' -o -name '*.import' \) -print0 2>/dev/null
 	fi
 }
 
+# mtime_ns <path> — the file's modification time as an integer count of
+# nanoseconds, on GNU (`stat -c`) and BSD/macOS (`stat -f`) alike. Empty when
+# neither stat answers, so the caller can fall back rather than misread.
+# The same body as import_cache.sh's: installables do not source each other.
+mtime_ns() {
+	local raw ns
+	raw="$(stat -c '%.9Y' "$1" 2>/dev/null)" || raw="$(stat -f '%Fm' "$1" 2>/dev/null)" || raw=''
+	case "$raw" in
+		*.*) ns="${raw%%.*}$(printf '%-9s' "${raw#*.}" | tr ' ' 0)" ;;
+		*)   ns="${raw}000000000" ;;
+	esac
+	# A stat that echoed its format string, or anything else non-numeric,
+	# answers nothing rather than a number the caller would compare.
+	case "$ns" in *[!0-9]*|"") ns='' ;; esac
+	printf '%s\n' "$ns"
+}
+
 # import_cache_stale — prints why the import cache is stale and returns 0;
-# silent and 1 when it is current. The cwd is the project root.
+# silent and 1 when it is current. The cwd is the project root. Compared at
+# nanosecond resolution, not `[ -nt ]`: bash 3.2 compares whole seconds, and a
+# .uid written 0.8 s after the cache, inside one second, read as current. When
+# stat cannot answer, `[ -nt ]` is the fallback.
 import_cache_stale() {
-	local f
+	local f stamp_ns f_ns
 	if [ ! -f "$IMPORT_CACHE_STAMP" ]; then echo "$IMPORT_CACHE_STAMP is missing"; return 0; fi
+	stamp_ns="$(mtime_ns "$IMPORT_CACHE_STAMP")"
 	while IFS= read -r -d '' f; do
-		if [ "$f" -nt "$IMPORT_CACHE_STAMP" ]; then
-			echo "${f#./} is newer than $IMPORT_CACHE_STAMP"; return 0
+		f_ns="$(mtime_ns "$f")"
+		if [ -n "$stamp_ns" ] && [ -n "$f_ns" ]; then
+			[ "$f_ns" -gt "$stamp_ns" ] || continue
+		elif [ ! "$f" -nt "$IMPORT_CACHE_STAMP" ]; then
+			continue
 		fi
+		echo "${f#./} is newer than $IMPORT_CACHE_STAMP"; return 0
 	done < <(import_inputs)
 	return 1
 }
@@ -643,13 +678,15 @@ import_cache_stale() {
 # --- git on a SCRATCH repo ----------------------------------------------------
 # A hook exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE, and a bare `git init`
 # under them re-initialises the HOST repo rather than the scratch one. Every git
-# call the self-test makes on a fixture goes through one of these.
+# call the self-test makes on a fixture goes through one of these. The names
+# are git's own list, `git rev-parse --local-env-vars` — the one that keeps
+# itself current (GIT_CONFIG_PARAMETERS, GIT_SHALLOW_FILE, … beyond the six a
+# hand-kept list held).
 unset_git_env() {
 	# Repeated until gone: each `unset` pops one scope, and a prefix
 	# assignment over an exported variable is two.
 	local v
-	for v in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR \
-		GIT_ALTERNATE_OBJECT_DIRECTORIES; do
+	for v in $(git rev-parse --local-env-vars 2>/dev/null); do
 		while [ -n "${!v+x}" ]; do unset "$v" 2>/dev/null || break; done
 	done
 }
@@ -658,8 +695,9 @@ unset_git_env() {
 # bash's `unset` pops only that temporary binding, and a hook's exported
 # GIT_DIR underneath comes back — the host repo gets the commit.
 scratch_git() {
-	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
-		-u GIT_COMMON_DIR -u GIT_ALTERNATE_OBJECT_DIRECTORIES git -C "$@"
+	local v drop=()
+	for v in $(git rev-parse --local-env-vars 2>/dev/null); do drop+=(-u "$v"); done
+	env ${drop[@]+"${drop[@]}"} git -C "$@"
 }
 
 # detect_jobs — cores minus two, floor one. Two are left for the shell, the
@@ -781,10 +819,31 @@ cache_cases() {
 	out="$(unset_git_env; cd "$dir" && import_cache_stale)"
 	[ "$out" = "project.godot is newer than $IMPORT_CACHE_STAMP" ] \
 		|| miss "a project.godot newer than the cache is stale, got '$out'"
-	touch -t 202001010000 "$dir/project.godot"; touch -t 202201010000 "$dir/a/untracked.gd.uid"
+	# Inside ONE second: bash 3.2's `[ -nt ]` compares whole seconds, so a .uid
+	# written 0.5 s after the cache read as current (m4).
+	touch -t 202001010000 "$dir/project.godot"
+	cases=$((cases + 1))
+	if touch -d 2021-06-01T00:00:00.2 "$dir/$IMPORT_CACHE_STAMP" 2>/dev/null \
+		&& touch -d 2021-06-01T00:00:00.7 "$dir/a/x.gd.uid" 2>/dev/null; then
+		out="$(unset_git_env; cd "$dir" && import_cache_stale)"
+		[ "$out" = "a/x.gd.uid is newer than $IMPORT_CACHE_STAMP" ] \
+			|| miss "a .uid 0.5 s newer than the cache, inside one second, is stale, got '$out'"
+	else
+		miss "touch -d could not stamp a sub-second mtime"
+	fi
+	touch -t 202001010000 "$dir/a/x.gd.uid"; touch -t 202101010000 "$dir/$IMPORT_CACHE_STAMP"
+	# Untracked-not-ignored is what --diff counts as touched, so it is what the
+	# precheck reads too (m5); an IGNORED one is neither.
+	printf 'ignored/\n' > "$dir/.gitignore"; mkdir -p "$dir/ignored"
+	touch -t 202201010000 "$dir/ignored/x.gd.uid"
 	cases=$((cases + 1))
 	rc=0; (unset_git_env; cd "$dir" && import_cache_stale >/dev/null) || rc=$?
-	[ "$rc" -eq 1 ] || miss "an UNTRACKED newer .uid is not a stale cache, got $rc"
+	[ "$rc" -eq 1 ] || miss "an IGNORED newer .uid is not a stale cache, got $rc"
+	touch -t 202201010000 "$dir/a/untracked.gd.uid"
+	cases=$((cases + 1))
+	out="$(unset_git_env; cd "$dir" && import_cache_stale)"
+	[ "$out" = "a/untracked.gd.uid is newer than $IMPORT_CACHE_STAMP" ] \
+		|| miss "an untracked-not-ignored newer .uid (a new fixture --diff sees) is stale, got '$out'"
 }
 
 # sweep_cases <proj> — self_test's end-to-end cases: THIS file installed at the
@@ -808,7 +867,7 @@ echo "$name ${GDK_SCENARIO_IN_SWEEP:-unset}" >> "$state/env"
 n=$(( $(cat "$state/$name.n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$state/$name.n"
 case "$name" in
 	flaky) [ "$n" -ge 2 ] || { echo "[SCENARIO] $name FAIL — load flake"; exit 1; } ;;
-	red*) echo "[SCENARIO] $name FAIL — real"; exit 1 ;;
+	red*) echo "[SCENARIO] $name FAIL — real, boot $n"; exit 1 ;;
 esac
 echo "[SCENARIO] $name PASS"
 STUB_EOF
@@ -869,6 +928,11 @@ STUB_EOF
 		&& grep -qF 'SUMMARY: 2 passed (1 flaky), 1 failed (of 3)' <<<"$out" \
 		&& [ "$(cat "$state/red.n")" = 2 ] \
 		|| miss "a scenario that fails in the sweep AND alone stays red, after exactly one rerun (rc $rc): $out"
+	# Still red alone, its FAILURES entry is the ALONE transcript: the sweep's
+	# is the one the rerun already explained away (N7).
+	cases=$((cases + 1))
+	grep -qxF '      [SCENARIO] red FAIL — real, boot 2' <<<"$out" && ! grep -qF 'real, boot 1' <<<"$out" \
+		|| miss "a scenario still red after its rerun is summarised from its alone transcript: $out"
 	cases=$((cases + 1))
 	out="$(sweep --diff HEAD --no-rerun)"; rc=$?
 	[ "$rc" -eq 1 ] && ! grep -qF 'FLAKE' <<<"$out" && [ "$(cat "$state/flaky.n")" = 1 ] \
@@ -926,6 +990,13 @@ STUB_EOF
 	[ "$rc" -eq 1 ] && [ "$(tr '\n' ' ' < "$state/order")" = "import " ] \
 		&& grep -qF "$IMPORT_CACHE_RUNNER" <<<"$out" \
 		|| miss "a failed repair must stop the sweep (exit 1, naming it) before any boot (rc $rc): $out"
+	# A repair's usage/config error (exit 2: not a project, no library) is the
+	# sweep's too — rule 6, never folded into a finding (m3).
+	cases=$((cases + 1))
+	out="$(GDK_STUB_IMPORT_RC=2 sweep --diff HEAD)"; rc=$?
+	[ "$rc" -eq 2 ] && [ "$(tr '\n' ' ' < "$state/order")" = "import " ] \
+		&& grep -qF "$IMPORT_CACHE_RUNNER" <<<"$out" \
+		|| miss "a repair that exits 2 stops the sweep with exit 2, naming it, before any boot (rc $rc): $out"
 	rm -rf "$state"
 }
 
@@ -938,7 +1009,7 @@ STUB_EOF
 # `cases` and `miss`.
 # shellcheck disable=SC2015
 warm_cases() {
-	local proj="$1" state="$1.state" runners out rc n
+	local proj="$1" state="$1.state" runners out rc n out2 rc2
 	runners="$proj/tools/dev/runners"
 	mkdir -p "$runners" "$proj/tests/integration" "$proj/.godot"
 	cp "$0" "$runners/integration.sh"
@@ -958,7 +1029,8 @@ if [ "$1" = --suite ]; then
 			*) printf '%s\t0\n' "$name" >> "$out/results"; echo "[SCENARIO] $name PASS" > "$out/$name.log" ;;
 		esac
 	done
-	[ "$gone" -eq 0 ] || { echo "  WARM-ABORT  after a — n scenario(s) handed back"; exit 4; }
+	[ "$gone" -eq 0 ] || { echo "[SCENARIO] $GDK_STUB_CRASH HARD_TIMEOUT — the stub stalled"
+		echo "  WARM-ABORT  after a — n scenario(s) handed back"; exit 4; }
 	exit 0
 fi
 echo "[SCENARIO] $1 PASS"
@@ -1004,6 +1076,11 @@ STUB_EOF
 		&& grep -qxF '  WARM-ABORT  after a — n scenario(s) handed back' <<<"$out" \
 		&& ! grep -qF 'FLAKE' <<<"$out" \
 		|| miss "a warm failure that passes cold prints WARM-ONLY, not FLAKE, and counts green: $out"
+	# The worker's REASON for handing back survives its transcript (m1): a
+	# stall that recurs on every run must leave a diagnosis.
+	cases=$((cases + 1))
+	grep -qxF '    [SCENARIO] beta HARD_TIMEOUT — the stub stalled' <<<"$out" \
+		|| miss "a worker that hands back prints why, from its own transcript: $out"
 	cases=$((cases + 1))
 	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD --no-rerun)"; rc=$?
 	[ "$rc" -eq 1 ] && ! grep -qF 'WARM-ONLY' <<<"$out" \
@@ -1030,6 +1107,16 @@ STUB_EOF
 	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD)"; rc=$?
 	[ "$rc" -eq 2 ] && grep -qF 'tests/integration/iso.gd' <<<"$out" && [ ! -s "$state/argv" ] \
 		|| miss "an '## Isolated because:' with no reason exits 2 naming the file, before any boot (rc $rc): $out"
+	# A near-miss spelling is a declaration the reader would not see: it is
+	# refused naming its line, never run warm in silence (N3).
+	cases=$((cases + 1))
+	printf 'extends Node\n# Isolated because: it reads the process clock\n' > "$proj/tests/integration/iso.gd"
+	out="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD)"; rc=$?
+	printf 'extends Node\n## isolated because: it reads the process clock\n' > "$proj/tests/integration/iso.gd"
+	out2="$(GDK_INTEGRATION_WARM=1 warm --diff HEAD)"; rc2=$?
+	[ "$rc" -eq 2 ] && grep -qF 'tests/integration/iso.gd:2' <<<"$out" \
+		&& [ "$rc2" -eq 2 ] && grep -qF 'tests/integration/iso.gd:2' <<<"$out2" && [ ! -s "$state/argv" ] \
+		|| miss "a near-miss '# Isolated because:' / '## isolated because:' exits 2 naming the line, before any boot (rc $rc/$rc2): $out $out2"
 	rm -rf "$state"
 }
 
@@ -1377,6 +1464,13 @@ FIXTURE_EOF
 	host_after="$(scratch_git "$host" rev-parse HEAD 2>&1) $(cksum < "$host/.git/config")"
 	[ "$host_after" = "$host_before" ] && [ -z "$(scratch_git "$host" config --get core.quotePath)" ] \
 		|| miss "the mono fixture wrote into a GIT_DIR-exported host repo (before '$host_before', after '$host_after')"
+	# The list is git's own (`git rev-parse --local-env-vars`), not a hand-kept
+	# six: a hook under `git -c k=v commit` exports GIT_CONFIG_PARAMETERS, and a
+	# scratch repo must not read the host's overrides (N5). Both escapes.
+	cases=$((cases + 1))
+	out="$(export GIT_CONFIG_PARAMETERS="'gdk.leak=host'"
+	  scratch_git "$host" config --get gdk.leak; (unset_git_env; git -C "$host" config --get gdk.leak))"
+	[ -z "$out" ] || miss "scratch_git and unset_git_env drop every --local-env-vars name, GIT_CONFIG_PARAMETERS read '$out'"
 	: > "$mono/game/systems/alpha/x.gd"
 	: > "$mono/game/systems/alpha/café.gd"
 	echo change >> "$mono/README.md"
@@ -1680,7 +1774,12 @@ if [ "$WARM" -eq 1 ]; then
 	while IFS= read -r f; do
 		n="${f##*/}"; n="${n%.gd}"
 		case $'\n'"$ROSTER_NL"$'\n' in *$'\n'"$n"$'\n'*) ;; *) continue ;; esac
-		if reason="$(scenario_isolation "$f")"; then
+		iso_rc=0; reason="$(scenario_isolation "$f")" || iso_rc=$?
+		if [ "$iso_rc" -eq 2 ]; then
+			echo "[$GATE_TAG] $f:$reason — not the spelling '## $ISOLATED_KEY', so it declares nothing; spell it exactly, or remove the line" >&2
+			exit 2
+		fi
+		if [ "$iso_rc" -eq 0 ]; then
 			if [ -z "$reason" ]; then
 				echo "[$GATE_TAG] $f: '## $ISOLATED_KEY' gives no reason — say what process state it needs, or remove the line" >&2
 				exit 2
@@ -1705,6 +1804,12 @@ if { [ "$MODE" = "--diff" ] || [ "$MODE" = "--all" ]; } && [ -f project.godot ] 
 	fi
 	echo "[$GATE_TAG] import cache is stale ($stale) — running $IMPORT_CACHE_RUNNER once, before the sweep"
 	repair_rc=0; bash "$repair" || repair_rc=$?
+	# Its usage/config error (not a project, no library, a copy that failed)
+	# is this run's too: exit 2 passes through (rule 6); any other is a FAIL.
+	if [ "$repair_rc" -eq 2 ]; then
+		echo "[$GATE_TAG] the import-cache repair ($IMPORT_CACHE_RUNNER) exited 2, a usage or config error; the sweep did not start. Run it alone (make import-cache) and read its report." >&2
+		exit 2
+	fi
 	if [ "$repair_rc" -ne 0 ]; then
 		echo "[$GATE_TAG] FAIL — the import-cache repair ($IMPORT_CACHE_RUNNER) exited $repair_rc; the sweep did not start. Run it alone (make import-cache) and read its report."
 		exit 1
@@ -1785,7 +1890,12 @@ else
 	for ((w = 0; w < WORKERS; w++)); do
 		wrc=0; wait "${WORKER_PIDS[$w]}" || wrc=$?
 		case "$wrc" in
-			0|1|4) ;;
+			0|1) ;;
+			# Handed back: the WARM-ABORT lines are printed below, and the
+			# REASON (parse error, HARD_TIMEOUT, crash, cold cache) is the
+			# lines before them — kept here, or $TMP takes them with it.
+			4) echo "[$GATE_TAG] warm worker $w handed back — the end of its transcript:"
+			   sed '/^  WARM-ABORT  /,$d' "$TMP/warm-$w.out" | tail -"$((FAILURE_SUMMARY_LINES + 1))" | sed 's/^/    /' ;;
 			*) echo "[$GATE_TAG] warm worker $w exited $wrc — what it did not finish runs cold:"
 			   tail -"$FAILURE_SUMMARY_LINES" "$TMP/warm-$w.out" | sed 's/^/    /' ;;
 		esac
@@ -1880,13 +1990,15 @@ if [ "$UNREPORTED" -gt 0 ]; then
 	FAIL=$((FAIL + UNREPORTED))
 fi
 
-# Warm mode's census (rule 4): warm + cold + handed back is the roster, and
-# every name on it has a result. Anything else is a FAIL naming the missing.
+# Warm mode's census (rule 4): every name on the roster has a result. (warm +
+# cold + handed back sums to the roster by construction — WARM_NAMES splits
+# into the warm-ran and the handed back — so the name check is the one that
+# can fire.) Anything else is a FAIL naming the missing.
 CENSUS_NOTE=''
 if [ "$WARM" -eq 1 ]; then
 	CENSUS_NOTE="; warm $WARM_RAN, cold ${#ISO_NAMES[@]}, handed back ${#HANDED[@]}"
 	missing="$(printf '%s\n' "${NAMES[@]}" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1] = 1; next } !($0 in seen)' "$TMP/results" -)"
-	if [ $((WARM_RAN + ${#ISO_NAMES[@]} + ${#HANDED[@]})) -ne "${#NAMES[@]}" ] || [ -n "$missing" ]; then
+	if [ -n "$missing" ]; then
 		echo "[$GATE_TAG] FAIL — census: warm $WARM_RAN + cold ${#ISO_NAMES[@]} + handed back ${#HANDED[@]} is not the roster of ${#NAMES[@]}; no result for: $(printf '%s' "$missing" | tr '\n' ' ')"
 		[ "$UNREPORTED" -gt 0 ] || FAIL=$((FAIL + 1))
 	fi
@@ -1901,11 +2013,15 @@ if [ "$FAIL" -gt 0 ]; then
 		# the summary patterns describe how a scenario reports its own
 		# failure, and the failures that matter most are the ones that never
 		# got that far. The tail is the fallback, never nothing.
-		if grep -qE "$FAILURE_SUMMARY_RE" "$TMP/$n.log" 2>/dev/null; then
-			grep -hE "$FAILURE_SUMMARY_RE" "$TMP/$n.log" 2>/dev/null \
+		# Still red after its rerun, the ALONE transcript is the one that says
+		# why: the sweep's is what the rerun was there to rule out.
+		log="$TMP/$n.log"
+		[ ! -f "$TMP/$n.alone.log" ] || log="$TMP/$n.alone.log"
+		if grep -qE "$FAILURE_SUMMARY_RE" "$log" 2>/dev/null; then
+			grep -hE "$FAILURE_SUMMARY_RE" "$log" 2>/dev/null \
 				| head -"$FAILURE_SUMMARY_LINES" | sed 's/^/      /'
 		else
-			tail -"$FAILURE_SUMMARY_LINES" "$TMP/$n.log" 2>/dev/null \
+			tail -"$FAILURE_SUMMARY_LINES" "$log" 2>/dev/null \
 				| sed 's/^/      /'
 		fi
 	done
