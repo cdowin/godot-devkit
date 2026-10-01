@@ -3,7 +3,7 @@ id: ft-refs-renames-a-symbol
 kind: feature
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs renames a symbol
-status: planning
+status: building
 reviewed:
 depends_on: ["ft-refs-reads-scene-connections"]
 consumed_by: []

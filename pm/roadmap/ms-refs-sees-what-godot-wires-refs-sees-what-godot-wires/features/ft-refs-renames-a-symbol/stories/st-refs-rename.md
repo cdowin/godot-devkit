@@ -4,7 +4,7 @@ kind: story
 feature: ft-refs-renames-a-symbol
 milestone: "ms-refs-sees-what-godot-wires"
 name: refs --rename
-status: planning
+status: building
 owner:
 depends_on: ["st-refs-indexes-godot-wiring"]
 changelog:
