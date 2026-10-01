@@ -43,7 +43,7 @@ include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
 ```
 
 ```sh
-uv add --dev agentic-sdlc==2.0.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
+uv add --dev agentic-sdlc==2.2.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
 uv add --dev godot-devkit==2.1.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
 # then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
 uv run agentic-sdlc install-gates     # Makefile.devkit

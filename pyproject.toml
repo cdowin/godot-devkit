@@ -33,7 +33,7 @@ explicit = true
 
 [dependency-groups]
 dev = [
-    "agentic-sdlc==2.0.0",
+    "agentic-sdlc==2.2.0",
 ]
 
 # A repo with no pytest config is a repo where every agent invents its own

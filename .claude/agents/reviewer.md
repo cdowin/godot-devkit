@@ -42,7 +42,7 @@ none of it can drift. What stays below is what the tool cannot derive — the
 project's own judgement calls.
 
 ```text
-findings dir:    docs/reviews/    (create -> resolve -> delete lifecycle)
+findings:        bugs in the tree — `make pm ARGS='new bug <milestone> <slug> … --caused-by <feature>'`
 invariants:      <where the project's architecture invariants live — usually
                   CLAUDE.md plus a constitution/design doc>
 refs tool:       <a reference-aware symbol search, if the project ships one;

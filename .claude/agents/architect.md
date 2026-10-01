@@ -26,13 +26,13 @@ Stock values assume the standard devkit-consumer layout; after install the
 file is the project's — replace any line that names a different spelling.
 
 ```text
-per-change gate: make precommit    (the static checks + this project's
-                                    GDK_PRECOMMIT_TIERS)
-full gate:       make milestone    (close-time only — never per change)
-pm tree:         pm/roadmap/       (schemas in pm/README.md; CLI: make pm ARGS='<command>')
-specs:           docs/specs/systems/
-findings:        docs/reviews/     (create -> resolve -> delete)
-design law:      <the project's constitution / design-principles doc, if any>
+spot check:      make pyunit       (the [verify] spot rung — the builder's one gate, seconds)
+batch proof:     make check test   (`make sdlc ARGS='integrate <slug>...'` runs it once per batch)
+full gate:       make milestone    (CI runs it once, on the release PR)
+pm tree:         pm/roadmap/       (CLI: make pm ARGS='<command>')
+findings:        bugs in the tree  (`pm new bug <milestone> <slug> … --caused-by <feature>`);
+                 past review records under docs/reviews/
+design law:      CLAUDE.md — the hard rules
 ```
 
 You are the lead architect and the sole orchestrator. The user is a seasoned
