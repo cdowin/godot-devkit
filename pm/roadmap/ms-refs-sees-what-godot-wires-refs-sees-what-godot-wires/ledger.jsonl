@@ -36,3 +36,4 @@
 {"ts":"2026-10-01T19:47:36Z","kind":"status","grain":"bg-rename-rewrites-engine-names","from":"open","to":"closed","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T20:00:59Z","kind":"status","grain":"ms-refs-sees-what-godot-wires","from":"reviewing","to":"accepted","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
 {"ts":"2026-10-01T20:02:19Z","kind":"status","grain":"ms-refs-sees-what-godot-wires","from":"accepted","to":"packaging","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T20:02:26Z","kind":"status","grain":"ms-refs-sees-what-godot-wires","from":"packaging","to":"done","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
