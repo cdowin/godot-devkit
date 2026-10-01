@@ -65,7 +65,9 @@ TIMEOUT_STUB = '#!/usr/bin/env bash\nshift 2\nexec "$@"\n'
 @pytest.fixture(autouse=True)
 def isolated_engine_admission(tmp_path, monkeypatch):
     """Stub runners share a host within one case, never another case's host."""
-    home = str(tmp_path / 'engine-admission-home')
+    # Keep generated lease files outside fixtures that use tmp_path as a Git
+    # root; otherwise --diff treats the test lease itself as a changed path.
+    home = str(tmp_path.parent / f'{tmp_path.name}-engine-admission-home')
     monkeypatch.setenv('GDK_ENGINE_GATE_HOME', home)
     monkeypatch.setitem(FANOUT_ENV, 'GDK_ENGINE_GATE_HOME', home)
 
@@ -263,6 +265,7 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     ledger = tmp_path / 'ledger.txt'
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'),
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME'],
            'GDK_LEDGER_CMD': f'bash {_recorder(tmp_path, ledger)}'}
 
     def unit(*argv: str) -> subprocess.CompletedProcess:
@@ -353,7 +356,8 @@ def _scenario_fixture(tmp_path: Path, warn: str,
     log = tmp_path / 'stub.log'
     log.write_text('', encoding='utf-8')
     env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
-           'GDK_STUB_LOG': str(log)}
+           'GDK_STUB_LOG': str(log),
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
     return root, env, log
 
 
@@ -523,7 +527,8 @@ def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp
         ['bash', '-c', 'source "$1"; GDK_TIMEOUT="$2"; GDK_GODOT="$3"; export GDK_TIMEOUT GDK_GODOT; '
          'gdk_run_bounded 20 -- env GDK_GODOT="$GDK_GODOT" "$GDK_GODOT"; echo "$?" > "$4"',
          '_', str(LIBRARY), str(timeout), str(godot), str(ready)],
-        cwd=tmp_path, env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+        cwd=tmp_path, start_new_session=True,
+        env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
     try:
         deadline = time.monotonic() + 5
         while not (tmp_path / 'boots').exists() and time.monotonic() < deadline:
