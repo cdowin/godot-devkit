@@ -86,7 +86,8 @@ that is not a target gets a target first.
 |---|---|---|
 | a PM-tree or doc edit | `make check` | the pinned kit's `check all`, then `godot-check` through `[gates] extra`: `godot-devkit check all` from `src/` over `tests/fixtures/godot_project/`, the committed clean Godot project, staged by `tools/dev/godot_devkit_on_fixture.sh` — this tree holds no scene outside its fixtures |
 | the inner loop | `make pyunit` | the story rung: the suite minus the spawns (`-m "not shell"`), seconds |
-| before a commit | `make precommit` | `check` + `test` |
+| a builder's whole proof | `make pyunit` | this tree has no Godot project, so its spot check is `pyunit`; a consumer's is `make spot SYS=<slice>` |
+| a batch of lanes | `make check` + `make test` | the integrator's one proof over the merged batch |
 | closing a story | `agentic-sdlc close story <id>` | the belt: its checks, then `done` |
 | closing a feature | scoped builder proof, `make check`, then `agentic-sdlc close feature <id>` | the declared feature rung is `[verify] feature = "make check"` |
 | closing a milestone | `make milestone`, then `agentic-sdlc release <version>` | `check` + `matrix`: every interpreter, the floor runs everything and the rest `-m "not shell"`; it runs LAST, after the review |
