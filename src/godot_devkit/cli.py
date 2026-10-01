@@ -99,7 +99,6 @@ import sys
 
 from godot_devkit import __version__
 from godot_devkit.core.config import ConfigError
-# Re-exported: `cli.KNOWN_GATES` is how the suite names the eight.
 from godot_devkit.godot.checks.roster import KNOWN_GATES, OPT_IN_GATES, all_roster
 
 FIX_FLAG = '--fix'

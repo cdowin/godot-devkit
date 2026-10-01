@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from support import REPO_ROOT, run_check, temp_repo
 
 from godot_devkit import cli
-from godot_devkit.godot.checks import tres, uid
+from godot_devkit.godot.checks import roster, tres, uid
 
 CLEAN = ['project.godot', 'systems/rule.gd', 'systems/rule.gd.uid', 'scenes/clean.tscn']
 DRIFTED = [*CLEAN, 'scenes/drifted.tscn', 'data/drifted.tres']
@@ -371,7 +371,7 @@ class CliRouting(unittest.TestCase):
         # every known gate dispatching is the same run. Then a roster naming
         # one gate runs that gate only — and `[checks] all`, agentic-sdlc's
         # key naming gates this package has never heard of, is not read.
-        self.assertEqual(cli.KNOWN_GATES, self.THE_EIGHT)
+        self.assertEqual(roster.KNOWN_GATES, self.THE_EIGHT)
         with temp_repo('godot_project') as root:
             stock_code, stock = self._check_all(root)
             (root / 'devkit.toml').write_text(

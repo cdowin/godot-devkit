@@ -72,14 +72,25 @@ class Spares(unittest.TestCase):
         caller = 'func coin() -> bool:\n\treturn randf() < 0.5\n'
         self.assertEqual([str(h) for h in rng.scan_text(caller, 'caller.gd')],
                          ['caller.gd:2:coin:return randf() < 0.5'])
-        # An inner class's `func randi()` shadows nothing outside it.
-        inner = ('class Inner:\n'
+        # Shadowing is scoped per class body, both directions: an inner
+        # class's `func randi()` shadows nothing outside it, and the script's
+        # own `func randf()` shadows nothing inside `class Inner:` — while each
+        # body's own call to its own method stays spared.
+        inner = ('func randf() -> float:\n'
+                 '\treturn 0.5\n'
+                 'class Inner:\n'
                  '\tfunc randi() -> int:\n'
                  '\t\treturn 4\n'
+                 '\tfunc mine() -> int:\n'
+                 '\t\treturn randi()\n'
+                 '\tfunc theirs() -> float:\n'
+                 '\t\treturn randf()\n'
+                 '\n'
                  'func roll() -> int:\n'
-                 '\treturn randi()\n')
+                 '\treturn randi() if randf() else 0\n')
         self.assertEqual([str(h) for h in rng.scan_text(inner, 'inner.gd')],
-                         ['inner.gd:5:roll:return randi()'])
+                         ['inner.gd:9:theirs:return randf()',
+                          'inner.gd:12:roll:return randi() if randf() else 0'])
 
 
 class TheAllowlist(unittest.TestCase):

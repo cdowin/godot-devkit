@@ -164,14 +164,16 @@ unit_timeout_factor() {
 
 # unit_timeout <explicit> <load_1min> <ncpu> — "<seconds> <why>" on stdout. An
 # explicit value is the caller's decision and is never scaled; an unreadable
-# load falls back to the base.
+# load falls back to the base. The why names the factor APPLIED and the two
+# readings it came from, never a rounded ratio: load 4.04 on 4 cpu(s) is 1.0x
+# rounded, yet a ceiling of 2.
 unit_timeout() {
 	local factor
 	if [ -n "${1-}" ]; then
 		printf '%s GDK_UNIT_TIMEOUT\n' "$1"
 	elif factor="$(unit_timeout_factor "${2-}" "${3-}")"; then
-		printf '%s load %sx\n' "$((UNIT_TIMEOUT_BASE * factor))" \
-			"$(LC_ALL=C awk -v l="$2" -v n="$3" 'BEGIN { printf "%.1f", l / n }')"
+		printf '%s %sx, load %s on %s cpu(s)\n' "$((UNIT_TIMEOUT_BASE * factor))" \
+			"$factor" "$2" "$3"
 	else
 		printf '%s load unreadable\n' "$UNIT_TIMEOUT_BASE"
 	fi
@@ -321,8 +323,9 @@ self_test() {
 
 	# --- the timeout: the scaling arithmetic, and what is never scaled -------
 	local row expect got
-	for row in '0.80 8|180 load 0.1x' '4.00 4|180 load 1.0x' '5.00 4|360 load 1.2x' \
-		'2.10 1|540 load 2.1x' '40.00 4|540 load 10.0x' ' 8|180 load unreadable' \
+	for row in '0.80 8|180 1x, load 0.80 on 8 cpu(s)' '4.00 4|180 1x, load 4.00 on 4 cpu(s)' \
+		'4.04 4|360 2x, load 4.04 on 4 cpu(s)' '2.10 1|540 3x, load 2.10 on 1 cpu(s)' \
+		'40.00 4|540 3x, load 40.00 on 4 cpu(s)' ' 8|180 load unreadable' \
 		'2.1 0|180 load unreadable' 'n/a 8|180 load unreadable'; do
 		expect="${row#*|}"; row="${row%%|*}"
 		cases=$((cases + 1))
@@ -414,13 +417,15 @@ fi
 # user:// sandbox — GUT boots the engine, and the engine writes to user://.
 gdk_sandbox_home
 
+LOG="$(gdk_gate_log "$GATE_SLOT")"
+
 # The bound, and why it is that — printed first, so a HARD_TIMEOUT below reads
-# against a number the run already said out loud.
+# against a number the run already said out loud, and opening the transcript,
+# so the log records the bound the run was judged under.
 read -r TIMEOUT_SECONDS TIMEOUT_WHY \
 	<<< "$(unit_timeout "${GDK_UNIT_TIMEOUT:-}" "$(machine_load)" "$(machine_cpus)")"
-echo "[$GATE_TAG] timeout ${TIMEOUT_SECONDS}s (${TIMEOUT_WHY})"
-
-LOG="$(gdk_gate_log "$GATE_SLOT")"
+TIMEOUT_LINE="[$GATE_TAG] timeout ${TIMEOUT_SECONDS}s (${TIMEOUT_WHY})"
+echo "$TIMEOUT_LINE"
 # The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
 # one PASS below says otherwise, so a verdict path that forgets to set it files
 # a FAIL — never the PASS its exit code might imply.
@@ -446,7 +451,7 @@ RAW="$(gdk_run_bounded "$TIMEOUT_SECONDS" -- \
 GODOT_EXIT=$?
 
 PLAIN="$(printf '%s\n' "$RAW" | strip_ansi)"
-gdk_gate_publish "$LOG" "$RAW"
+gdk_gate_publish "$LOG" "$TIMEOUT_LINE"$'\n'"$RAW"
 # The census on the row: the tests GUT counted.
 # Empty (no totals block) leaves the row without one, never with a 0.
 GDK_GATE_CENSUS="$(printf '%s\n' "$PLAIN" | gut_total Tests)"

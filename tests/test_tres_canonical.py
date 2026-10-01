@@ -17,7 +17,7 @@ import unittest
 from support import FIXTURES
 
 from godot_devkit import cli
-from godot_devkit.godot.checks import canonical
+from godot_devkit.godot.checks import canonical, roster
 from godot_devkit.godot.format.tscn_document import TscnDocument
 from godot_devkit.godot.format.value_spelling import (
     COMPONENT_CONTEXT,
@@ -180,7 +180,7 @@ class Gate(unittest.TestCase):
         self.assertEqual(code, canonical.EXIT_FINDINGS, out)
         self.assertIn('scanned 0 files', out)
         # Opt-in: dispatchable and nameable, never in the stock `check all`.
-        self.assertNotIn('canonical', cli.KNOWN_GATES)
+        self.assertNotIn('canonical', roster.KNOWN_GATES)
         self.assertIs(cli._check_module('canonical'), canonical)
 
 
