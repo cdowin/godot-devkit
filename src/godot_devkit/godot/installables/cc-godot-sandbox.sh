@@ -83,9 +83,9 @@ fi
 # --- --self-test — the payload corpus, PROVEN rather than claimed ------------
 # `bash tools/hooks/cc-godot-sandbox.sh --self-test` replays every payload
 # through the real hook and checks the verdict; exit 0 means every case landed
-# where it should. Wire it into your static gate (in the stock consumer
-# Makefile: a `hooks-self-test` target listed in `check`) — a corpus that is
-# re-run is the only reason to trust "every case verified" six months later.
+# where it should. godot-devkit's own tests replay it before every release, so
+# do not add it to your `check` (a `[gates] extra` name) — that proves nothing
+# new on every run. Run it by hand after you edit the header above.
 # The stock roster's cases are always in the corpus; the two extra
 # SANDBOX_FUNCTION cases in each list appear only when you have set that
 # variable, so the corpus always tests the guard you actually run.

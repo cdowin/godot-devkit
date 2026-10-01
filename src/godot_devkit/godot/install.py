@@ -91,6 +91,10 @@ PLAN: tuple[tuple[str, str], ...] = (
     # — which is what keeps the install idempotent and the gate quiet.
     ('compile_sweep.gd.uid', 'tools/dev/runners/compile_sweep.gd.uid'),
     ('lint.sh', 'tools/dev/runners/lint.sh'),
+    # The builder's spot check: lint.sh and parse.sh's sweep, narrowed to the
+    # .gd files the change touched. It reaches compile_sweep.gd the way
+    # parse.sh does, so it sits in the same directory.
+    ('spot.sh', 'tools/dev/runners/spot.sh'),
     ('warnings.sh', 'tools/dev/runners/warnings.sh'),
     ('unit.sh', 'tools/dev/runners/unit.sh'),
     # scenario.sh is the single-scenario entry point; integration.sh fans it
@@ -133,7 +137,8 @@ Godot-booting make targets source (one verdict line per gate naming
 sandbox, a bounded-run contract, a project.godot restore) — and under
 tools/dev/runners/ the runners that source it: import_cache.sh, parse.sh (+
 its compile_sweep.gd and the .uid sidecar the engine would otherwise mint),
-lint.sh, warnings.sh, unit.sh (GUT, sliced, with the coverage gate that fails
+lint.sh, spot.sh (lint and a compile of only the .gd a change touched),
+warnings.sh, unit.sh (GUT, sliced, with the coverage gate that fails
 a test script GUT refused to load), scenario.sh, integration.sh (the same
 scenarios, one process each, N in parallel), capture.sh (headed, because
 headless is blind to render), and hermetic_run_scan.sh — the gate proving a
@@ -150,8 +155,8 @@ copy is left in place and named as retired: safe to delete when `[gates]
 extra` names `godot-check` and `[checks] godot` keeps `uid` (then `check uid`
 runs in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
-runners (parse lint warnings unit integration scenario capture import-cache
-hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
+runners (parse lint spot warnings unit integration scenario capture
+import-cache hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
 GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS lists the include's compositions
 run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
 (the run prints the pyproject.toml block that locks it), or — the legacy

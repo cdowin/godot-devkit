@@ -230,6 +230,14 @@ if [ -z "${GDK_WARNING_CATEGORIES// /}" ]; then
 	exit 2
 fi
 
+# A receipt over these exact inputs is the proof already bought (gdk_runners.sh,
+# proof receipts): say so, boot nothing. The categories are an input — a wider
+# promotion is a new question about the same tree.
+RECEIPT_KEY="$(gdk_receipt_key warnings "$GDK_WARNING_CATEGORIES")" || RECEIPT_KEY=""
+if gdk_receipt_hit warnings "$RECEIPT_KEY"; then
+	exit 0
+fi
+
 # user:// sandbox — the editor import boot must never touch real player data.
 gdk_sandbox_home
 
@@ -329,4 +337,6 @@ TOTAL="$(gdk_sweep_result_field "$RESULT_LINE" 2)"
 GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (promoted: ${GDK_WARNING_CATEGORIES}; ${ANALYZED}/${TOTAL} scripts analyzed)" "$LOG"
+gdk_receipt_write warnings "$RECEIPT_KEY" \
+	"[$GATE_TAG] PASS (promoted: ${GDK_WARNING_CATEGORIES}; ${ANALYZED}/${TOTAL} scripts analyzed)" "$GDK_WARNING_CATEGORIES"
 exit 0

@@ -427,6 +427,98 @@ def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
     assert 'rm -rf .godot' in done.stderr, done.stderr
 
 
+# What a run writes into the tree, ignored as the install's next step says, so
+# a receipt's key holds still across the run that files it.
+RUN_OUTPUT_IGNORES = '.gate-reports/\n.scenario-reports/\n.headless-userdata/\n.godot/\nran.txt\n'
+
+
+def _commit_all(root: Path) -> None:
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=root, check=True)
+    (root / '.gitignore').write_text(RUN_OUTPUT_IGNORES, encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
+    subprocess.run([*GIT, 'commit', '-q', '-m', 'fixture'], cwd=root, check=True)
+
+
+def test_a_direct_scenario_run_reuses_its_receipt_and_a_sweep_job_never_does(tmp_path):
+    """gdk#44. A direct `scenario.sh <name>` that passed files a receipt; the
+    same tree again boots nothing. A job inside a sweep is integration.sh's to
+    receipt, so it boots every time and files none."""
+    root, env, log = _scenario_fixture(tmp_path, warn='')
+    _commit_all(root)
+    for boots in (1, 1):
+        done = _run_scenario(root, env)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert _engine_runs(log) == (boots, 0), done.stdout + done.stderr
+    assert '[SCENARIO] alpha PASS steps=1 errors=0; reused — receipt' in done.stdout, done.stdout
+    done = _run_scenario(root, dict(env, GDK_SCENARIO_IN_SWEEP='1', GDK_RECEIPTS='1'))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert _engine_runs(log) == (2, 0), 'a sweep job reused a receipt'
+
+
+SPOT = INSTALLABLES / 'spot.sh'
+# gdlint and the engine, each recording what it was asked. The engine prints
+# the sweep's result line over exactly the scripts after `--`.
+GDLINT_STUB = ('#!/usr/bin/env bash\necho "lint $*" >> "$GDK_STUB_LOG"\n'
+               'for f; do case "$f" in *bad*) echo "$f:1: Error: bad name"; exit 1 ;; esac; done\n'
+               'echo "Success: no problems found"\n')
+SWEEP_STUB = ('#!/usr/bin/env bash\necho "boot $*" >> "$GDK_STUB_LOG"\n'
+              'n=0; after=0; for a; do [ "$after" = 1 ] && n=$((n + 1)); [ "$a" = -- ] && after=1; done\n'
+              'echo "SWEEP_RESULT $n $n"\n')
+
+
+def test_spot_checks_only_the_changed_scripts_and_a_scene_only_change_passes_census_0(tmp_path):
+    """gdk#45. The builder's check reads the .gd files that differ from the
+    merge base with BASE — committed on the branch and untracked alike — and
+    nothing else. No changed .gd is a PASS that says `census 0` and names the
+    base. The same change again is a receipt; a lint finding is exit 1."""
+    root = tmp_path / 'repo'
+    _project(root, SPOT)
+    (root / 'systems').mkdir()
+    (root / 'systems' / 'old.gd').write_text('extends Node\n', encoding='utf-8')
+    _commit_all(root)
+    stub = _stub_engine(tmp_path, SWEEP_STUB)
+    (stub / 'gdlint').write_text(GDLINT_STUB, encoding='utf-8')
+    (stub / 'gdlint').chmod(0o755)
+    log = tmp_path / 'stub.log'
+    env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
+           'GDK_STUB_LOG': str(log)}
+
+    def spot(**extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(['bash', 'tools/dev/runners/spot.sh'], cwd=root, text=True,
+                              capture_output=True, env={**env, **extra})
+
+    subprocess.run(['git', 'checkout', '-q', '-b', 'feat/x'], cwd=root, check=True)
+    (root / 'scenes').mkdir()
+    (root / 'scenes' / 'main.tscn').write_text('[gd_scene format=3]\n', encoding='utf-8')
+    done = spot()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[SPOT] PASS — census 0: no .gd changed vs merge-base ' in done.stdout, done.stdout
+    assert 'with main' in done.stdout, done.stdout
+    assert not log.exists(), 'a scene-only change ran the linter or the engine'
+
+    (root / 'systems' / 'a.gd').write_text('extends Node\n', encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
+    subprocess.run([*GIT, 'commit', '-q', '-m', 'a'], cwd=root, check=True)
+    (root / 'systems' / 'b.gd').write_text('extends Node\n', encoding='utf-8')
+    done = spot()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[SPOT] PASS (2 changed .gd vs merge-base ' in done.stdout, done.stdout
+    assert log.read_text(encoding='utf-8').splitlines() == [
+        'lint systems/a.gd systems/b.gd',
+        'boot --path . --headless -s res://tools/dev/runners/compile_sweep.gd -- '
+        'res://systems/a.gd res://systems/b.gd']
+    done = spot()
+    assert done.returncode == 0 and '; reused — receipt' in done.stdout, done.stdout + done.stderr
+    assert len(log.read_text(encoding='utf-8').splitlines()) == 2, 'a reused run linted or booted'
+
+    (root / 'systems' / 'bad.gd').write_text('extends Node\n', encoding='utf-8')
+    done = spot()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert '[SPOT] FAIL (lint)' in done.stdout, done.stdout
+    done = spot(GDK_SPOT_BASE='no-such-branch')
+    assert done.returncode == 2 and 'no merge base' in done.stderr, done.stdout + done.stderr
+
+
 def test_a_parse_error_fails_fast_and_names_itself_instead_of_waiting_for_the_bound(tmp_path):
     """GitHub #12. A runner whose load() came back null over a broken script
     never quits, so the run sat out the whole hard timeout and blamed a hang
@@ -772,6 +864,35 @@ def test_system_selects_the_directory_and_a_prefix_or_a_bad_ref_is_a_usage_error
     assert _ran(done) == set()
 
 
+def test_an_integration_receipt_boots_nothing_until_a_covered_path_moves(tmp_path):
+    """gdk#44. A passing `--smoke` files a receipt, asked before the engine
+    lease; the second run boots nothing and creates the file
+    GDK_GATE_UNMEASURED names, so its wrapper files no cost row. A path the
+    scenario's header covers is an input even inside an excluded directory:
+    editing it re-runs, and editing prose nothing covers does not."""
+    runner = _slice_fixture(tmp_path)
+    (tmp_path / 'tests' / 'integration' / 'smoke.gd').write_text(
+        'extends Node\n## covers: docs/smoke\n\nfunc run() -> void:\n\tpass\n', encoding='utf-8')
+    _touch(tmp_path / 'docs' / 'smoke' / 'route.md', 'a\n')
+    _touch(tmp_path / 'docs' / 'other.md', 'a\n')
+    (tmp_path / '.gitignore').write_text(RUN_OUTPUT_IGNORES, encoding='utf-8')
+    unmeasured = tmp_path / '.gate-reports' / '.smoke.unmeasured'
+    unmeasured.parent.mkdir()
+    env = {'GDK_GATE_UNMEASURED': str(unmeasured)}
+
+    done = _slice(runner, '--smoke', env=env)
+    assert done.returncode == 0 and _ran(done) == {'smoke'}, done.stdout + done.stderr
+    assert not unmeasured.exists(), 'a measured run said it measured nothing'
+    done = _slice(runner, '--smoke', env=env)
+    assert done.returncode == 0 and _ran(done) == set(), done.stdout + done.stderr
+    assert '[INTEGRATION] SUMMARY: 1 passed, 0 failed (of 1); reused — receipt' in done.stdout
+    assert unmeasured.exists(), 'a reused run left its wrapper to file a cost row'
+    _touch(tmp_path / 'docs' / 'other.md', 'b\n')
+    assert _ran(_slice(runner, '--smoke', env=env)) == set(), 'uncovered prose re-ran smoke'
+    _touch(tmp_path / 'docs' / 'smoke' / 'route.md', 'b\n')
+    assert _ran(_slice(runner, '--smoke', env=env)) == {'smoke'}, 'a covered path moved no key'
+
+
 def test_a_directory_holding_no_gate_is_a_FAIL_not_a_green_run_over_nothing(tmp_path):
     runner = _slice_fixture(tmp_path)
     done = _slice(runner, '--system', 'tools_only')
@@ -931,7 +1052,8 @@ DESTINATIONS = {
     'tools/dev/gdk_runners.sh',
     'tools/dev/runners/import_cache.sh', 'tools/dev/runners/parse.sh',
     'tools/dev/runners/compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd.uid',
-    'tools/dev/runners/lint.sh', 'tools/dev/runners/warnings.sh',
+    'tools/dev/runners/lint.sh', 'tools/dev/runners/spot.sh',
+    'tools/dev/runners/warnings.sh',
     'tools/dev/runners/unit.sh', 'tools/dev/runners/scenario.sh',
     'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
     'tools/dev/runners/hermetic_run_scan.sh',
@@ -944,8 +1066,9 @@ TOOLCHAIN = '.github/actions/godot-toolchain/action.yml'
 TOOLCHAIN_STEP = '- uses: ./.github/actions/godot-toolchain'
 # Retired in 1.3.0: no longer written, never deleted, named on every run.
 UID_GUARD = '.github/workflows/uid-guard.yml'
-# The nine Godot targets the story names, plus the one `[gates] extra` names.
-GODOT_TARGETS = ('parse', 'lint', 'warnings', 'unit', 'integration', 'scenario',
+# The Godot targets the story names, the builder's `spot`, and the one
+# `[gates] extra` names.
+GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'scenario',
                  'capture', 'import-cache', 'hermetic-scan', 'godot-check')
 
 
@@ -1181,6 +1304,8 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
             # The sub-make is spelled `${MAKE:-make}` so `-n` runs nothing;
             # the goals after it are the composition.
             assert f'{{MAKE:-make}} check {" ".join(tiers)}' in done.stdout, done.stdout
+            # 2.0.0: `precommit` is check + spot and says it is retired, once.
+            assert done.stdout.count('[PRECOMMIT] retired') == (composition == 'precommit'), done.stdout
         # Every declared tier and every named Godot target is a goal make
         # resolves — `integration-diff` / `integration-all` are the slices
         # the compositions run, `integration` the one a hand takes ARGS to.
@@ -1275,10 +1400,22 @@ def test_receipt_keys_on_inputs_not_prose_and_is_shared_by_worktrees(tmp_path):
     assert lib(f'gdk_receipt_hit unit {key}').returncode == 1
     wrote = lib(f'gdk_receipt_write unit {key} "[UNIT] PASS (1/1)" world')
     assert wrote.returncode == 0, wrote.stderr
+    # A hit tells a gate wrapper it measured nothing: the file
+    # GDK_GATE_UNMEASURED names exists afterwards (gdk#44).
+    unmeasured = tmp_path / 'unmeasured'
+    env['GDK_GATE_UNMEASURED'] = str(unmeasured)
     hit = lib(f'gdk_receipt_hit unit {key}')
     assert hit.returncode == 0 and '[UNIT] PASS (1/1); reused — receipt' in hit.stdout
-    # Prose and a commit move no input.
+    assert unmeasured.exists(), 'a hit left the wrapper to file a cost row'
+    del env['GDK_GATE_UNMEASURED']
+    # A path a runner names joins the key, even inside an excluded directory.
+    env['GDK_RECEIPT_PATHS'] = 'docs/a.md'
+    covered = lib('gdk_receipt_key unit world').stdout.strip()
+    assert len(covered) == 40 and covered != key
     (repo / 'docs' / 'a.md').write_text('b\n', encoding='utf-8')
+    assert lib('gdk_receipt_key unit world').stdout.strip() != covered, 'a covered path moved no key'
+    del env['GDK_RECEIPT_PATHS']
+    # Prose and a commit move no input.
     subprocess.run([*git, 'add', '-A'], check=True)
     subprocess.run([*git, 'commit', '-qm', 'x'], check=True)
     assert lib('gdk_receipt_key unit world').stdout.strip() == key

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+**Upgrading (major).** Re-install the runners (`install-runners --force`) and edit two things.
+Drop `hooks-self-test` from `[gates] extra` and from any recipe: the target is gone, with no
+alias. A builder's command is now `make spot SYS=<slice>`, not `make precommit`.
+
+- New `spot` tier, the builder's spot check (gdk#45). `spot.sh` runs gdlint and a compile of only
+  the `.gd` files changed vs the merge base of `HEAD` and `BASE` (default `main`), untracked files
+  included; `make spot` then runs `unit.sh $(SYS)` and exits with the worse code. No changed `.gd`
+  is `[SPOT] PASS — census 0: …`, naming the base. `compile_sweep.gd` takes user arguments
+  (`-- res://a.gd …`) and compiles exactly those. `GDK_PRECOMMIT_TIERS` is now `spot`, and
+  `make precommit` prints one line that says it is retired.
+- Receipts for `warnings`, `integration` (smoke, `--diff`, `--all`, named) and a direct `scenario`
+  run (gdk#44). The integration receipt is asked before the engine lease. `GDK_RECEIPT_PATHS` joins
+  more paths to a key, so a `## covers:` path in an excluded directory counts. A hit creates the
+  file `GDK_GATE_UNMEASURED` names, and `Makefile.tiers` exports it for the `gdk_gate`-wrapped
+  scenario targets, so a reused run files no cost row.
+- `hooks-self-test` is deleted (agentic-sdlc#122). The guard's corpus is replayed by this kit's
+  tests; the hook's comment no longer tells you to wire it into `check`.
+
 ## v1.6.0 — 2026-09-30
 
 - A second engine run waits for the lease instead of exiting 75 (#41). `GDK_ENGINE_GATE_WAIT` bounds the wait in seconds (default 1800); 0 keeps the fail-fast exit.

@@ -34,10 +34,11 @@ OWN_MAKEFILES = (MAKEFILE, REPO_ROOT / 'Makefile.tiers')
 RUNNERS = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
 GODOT_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk', 'test-shape')
-# Two targets this repo's files define are NOT gates: `integration-list`
-# prints the roster — the list IS the output — and `import-cache` rebuilds the
-# engine's import cache, a tool with an outcome rather than a gate with a verdict.
-NOT_A_GATE = {'integration-list', 'import-cache'}
+# Three targets this repo's files define are NOT gates: `integration-list`
+# prints the roster — the list IS the output — `import-cache` rebuilds the
+# engine's import cache, a tool with an outcome rather than a gate with a
+# verdict, and `gdk-precommit-retired` is the one notice line `precommit` prints.
+NOT_A_GATE = {'integration-list', 'import-cache', 'gdk-precommit-retired'}
 
 
 def make(*args: str, **env_extra: str) -> subprocess.CompletedProcess:
@@ -110,11 +111,13 @@ def test_every_gate_routes_through_the_shipped_helper_and_the_compositions_stay_
     loud = sorted(name for name, body in gates.items() if not publishes_a_verdict(body))
     assert not loud, (f'{loud} print whatever their tool prints instead of one verdict line; '
                       'route them through $(call gdk_gate,...) or gdk_gate_verdict')
-    # A same-named target, or a local `define gate`, in a file this repo owns
-    # would be the fork of the include that `[gates] extra` exists to make
-    # unnecessary — one under which the shipped helpers could regress unseen.
+    # A same-named target WITH A RECIPE, or a local `define gate`, in a file
+    # this repo owns would be the fork of the include that `[gates] extra`
+    # exists to make unnecessary — one under which the shipped helpers could
+    # regress unseen. A prerequisite-only rule (`precommit:
+    # gdk-precommit-retired`) adds to the include's target and replaces nothing.
     forked = sorted(name for name in ('check', 'precommit', 'milestone', 'pm', 'help')
-                    if name in bodies)
+                    if bodies.get(name, '').strip())
     assert not forked, f'{forked} redefined outside Makefile.devkit'
     assert 'include Makefile.devkit' in MAKEFILE.read_text(encoding='utf-8')
     assert (REPO_ROOT / 'tools/dev/gdk_gate.sh').exists()

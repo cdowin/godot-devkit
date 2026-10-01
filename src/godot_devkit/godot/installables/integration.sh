@@ -1040,6 +1040,8 @@ STUB_EOF
 self_test() {
 	local scratch rc out failures=0 cases=0 name bad fx mono host host_before host_after
 	local GDK_RUNNERS_LIB="${GDK_RUNNERS_LIB:-}"
+	# Every case runs: a receipt one case files must not answer the next.
+	export GDK_RECEIPTS=0
 	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-integration-selftest.XXXXXX")" || return 1
 	if [ -f "$GDK_RUNNERS_LIB" ]; then
 		GDK_RUNNERS_LIB="$(cd "$(dirname "$GDK_RUNNERS_LIB")" && pwd)/$(basename "$GDK_RUNNERS_LIB")"
@@ -1514,6 +1516,33 @@ ORIGINAL_ARGS=("$@")
 [ -f "$GDK_RUNNERS_LIB" ] || { echo "[$GATE_TAG] engine-gate library not found: $GDK_RUNNERS_LIB" >&2; exit 2; }
 # shellcheck source=/dev/null
 . "$GDK_RUNNERS_LIB"
+
+# A receipt over these exact inputs is the proof already bought (gdk_runners.sh,
+# proof receipts), and it is asked BEFORE the engine lease: a reused run waits
+# for no peer and boots nothing. The key is the arguments, the rerun and warm
+# modes, the env that decides the roster and the slice, the tree of the
+# --diff ref, and the roster files with every path their headers cover.
+RECEIPT_KEY=""
+RECEIPT_ARGS=()
+if [ -n "${1:-}" ]; then
+	receipt_ref_tree=""
+	if [ "$1" = "--diff" ] && [ "$#" -eq 2 ] && ! ref_defect "$2" >/dev/null; then
+		receipt_ref_tree="$(git rev-parse --verify --quiet "$2^{tree}" 2>/dev/null || true)"
+	fi
+	roster_files=()
+	while IFS= read -r f; do [ -n "$f" ] && roster_files+=("$f"); done < <(discover_gate_files)
+	# shellcheck disable=SC2034  # read by gdk_receipt_key, in the sourced library
+	GDK_RECEIPT_PATHS="$(gdk_receipt_covers ${roster_files[@]+"${roster_files[@]}"} | tr '\n' ' ')"
+	RECEIPT_ARGS=("$@" "ref-tree=$receipt_ref_tree" "rerun=$RERUN" "warm=$WARM"
+		"$GDK_SCENARIO_SOURCE_DIR" "$GDK_INTEGRATION_INFRA_RE" "$GDK_CAPTURE_SUFFIX_RE"
+		"$GDK_CAPTURE_GATE_RE" "$GDK_SMOKE_SCENARIO" "$GDK_SCENARIO_SUBSTRATE_RE"
+		"$GDK_SCENARIO_FIXTURE_DIR")
+	RECEIPT_KEY="$(gdk_receipt_key integration "${RECEIPT_ARGS[@]}")" || RECEIPT_KEY=""
+	if gdk_receipt_hit integration "$RECEIPT_KEY"; then
+		exit 0
+	fi
+fi
+
 held_rc=0; gdk_engine_gate_held || held_rc=$?
 if [ "$held_rc" -eq 2 ]; then exit 2; fi
 if [ "$held_rc" -eq 1 ]; then
@@ -1888,6 +1917,8 @@ boots_line "$BOOTS" "$BOOT_CPU_MS"
 FLAKY_NOTE=''
 [ "$FLAKY" -eq 0 ] || FLAKY_NOTE=" ($FLAKY flaky)"
 [ "$WARM_ONLY" -eq 0 ] || FLAKY_NOTE=" ($FLAKY flaky, $WARM_ONLY warm-only)"
-echo "[$GATE_TAG] SUMMARY: $PASS passed$FLAKY_NOTE, $FAIL failed (of ${#NAMES[@]})$CENSUS_NOTE$SLICE_NOTE"
+SAID="[$GATE_TAG] SUMMARY: $PASS passed$FLAKY_NOTE, $FAIL failed (of ${#NAMES[@]})$CENSUS_NOTE$SLICE_NOTE"
+echo "$SAID"
 [ "$FAIL" -eq 0 ] || exit 1
+[ -z "$RECEIPT_KEY" ] || gdk_receipt_write integration "$RECEIPT_KEY" "$SAID" "${RECEIPT_ARGS[@]}"
 exit 0
