@@ -42,11 +42,11 @@ ephemeral = ["docs/reviews/"]
 
 # The verification ladder `agentic-sdlc verify` runs, one make target per rung.
 # story is the inner loop (the suite minus the spawns, seconds); feature is the
-# close of a feature (the whole suite on the floor, minutes); milestone is the
+# close of a feature (static checks after its scoped builder proof); milestone is the
 # full gate and what CI runs (check + the matrix). Makefile.tiers defines them.
 [verify]
 story = "make pyunit"
-feature = "make test"
+feature = "make check"
 milestone = "make milestone"
 
 # The ceilings `check budget` grades, keyed by tier as the ledger records them

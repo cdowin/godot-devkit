@@ -296,7 +296,8 @@ self_test() {
 
 	cases=$((cases + 1))
 	rc=0; (cd "$repo" && env -u CAPTURE_VISIBLE -u GDK_CAPTURE_POSITION -u GDK_RUNNERS_LIB \
-		PATH="$stub:$PATH" GDK_GODOT=godot bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
+		GDK_ENGINE_GATE_HOME="$repo" PATH="$stub:$PATH" GDK_GODOT=godot \
+		bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
 	out="$(tr '\n' ' ' < "$scratch/argv" 2>/dev/null)"
 	[ "$rc" -eq 0 ] && [ "${out#*--position 100000,100000 --}" != "$out" ] \
 		|| { echo "  MISS — the default boot should carry --position 100000,100000 (rc $rc, argv: $out)" >&2; failures=$((failures + 1)); }
@@ -304,7 +305,8 @@ self_test() {
 	cases=$((cases + 1))
 	rm -f "$scratch/argv"
 	rc=0; (cd "$repo" && env -u GDK_CAPTURE_POSITION -u GDK_RUNNERS_LIB CAPTURE_VISIBLE=1 \
-		PATH="$stub:$PATH" GDK_GODOT=godot bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
+		GDK_ENGINE_GATE_HOME="$repo" PATH="$stub:$PATH" GDK_GODOT=godot \
+		bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
 	out="$(tr '\n' ' ' < "$scratch/argv" 2>/dev/null)"
 	[ "$rc" -eq 0 ] && [ -n "$out" ] && [ "${out#*--position}" = "$out" ] \
 		&& [ -f "$repo/$GDK_CAPTURE_REPORT_DIR/$PREVIOUS_SUBDIR/eyes$PNG_SUFFIX" ] \
@@ -313,7 +315,8 @@ self_test() {
 	# A report dir the wrapper may not own is still refused, before anything moves.
 	cases=$((cases + 1))
 	rc=0; (cd "$repo" && env -u CAPTURE_VISIBLE -u GDK_RUNNERS_LIB GDK_CAPTURE_REPORT_DIR=. \
-		PATH="$stub:$PATH" GDK_GODOT=godot bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
+		GDK_ENGINE_GATE_HOME="$repo" PATH="$stub:$PATH" GDK_GODOT=godot \
+		bash tools/dev/runners/capture.sh eyes) >/dev/null 2>&1 || rc=$?
 	[ "$rc" -eq 2 ] && [ -f "$repo/$GDK_CAPTURE_REPORT_DIR/eyes$PNG_SUFFIX" ] && [ ! -e "$repo/$PREVIOUS_SUBDIR" ] \
 		|| { echo "  MISS — a report dir the wrapper does not own should exit 2 and move nothing, got $rc" >&2; failures=$((failures + 1)); }
 

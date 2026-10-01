@@ -4,6 +4,8 @@
 
 ## v1.5.0 — 2026-09-30
 
+- Runner self-tests copy their shared library and isolate stub engine leases. Integration preserves cold and no-rerun options through admission.
+
 - Engine runners share a nonblocking per-user OS lease. Integration holds it across fanout; standalone engine boots refuse competing work with owner context. Read-only verbs remain available. `GDK_ENGINE_GATE_HOME` explicitly selects an isolated admission domain for test fixtures; production defaults to the account home.
 
 - Import scratch copies prune explicit Godot-ignored directories and registered nested worktrees before descent. Ignored runtime addons remain inputs.

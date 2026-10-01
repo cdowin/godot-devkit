@@ -230,22 +230,22 @@ project_file_list() {
 		LC_ALL=C
 		export LC_ALL
 		local sandbox="${GDK_SANDBOX_DIRNAME:-.headless-userdata}"
-		local root worktree record current entry name candidate registered
+		local project_root worktree record current entry name candidate registered
 		local -a dirs=(.) entries=() worktrees=()
 		local next=0
-		root="$(pwd -P)" || return 1
-		if command -v git >/dev/null 2>&1 && git -C "$root" rev-parse --git-common-dir >/dev/null 2>&1; then
+		project_root="$(pwd -P)" || return 1
+		if command -v git >/dev/null 2>&1 && git -C "$project_root" rev-parse --git-common-dir >/dev/null 2>&1; then
 			while IFS= read -r -d '' record; do
 				case "$record" in
 					'worktree '*)
 						worktree="${record#worktree }"
-						[ "$worktree" = "$root" ] && continue
+						[ "$worktree" = "$project_root" ] && continue
 						case "$worktree/" in
-							"$root/"*) worktrees+=("$worktree") ;;
+							"$project_root/"*) worktrees+=("$worktree") ;;
 						esac
 						;;
 				esac
-			done < <(git -C "$root" worktree list --porcelain -z 2>/dev/null)
+			done < <(git -C "$project_root" worktree list --porcelain -z 2>/dev/null)
 		fi
 		while [ "$next" -lt "${#dirs[@]}" ]; do
 			current="${dirs[$next]}"
@@ -432,7 +432,8 @@ _st_run() {
 	local script="$1" stub="$2"; shift 2
 	exec env -u GDK_HEADLESS_HOME -u GDK_SANDBOX_DIRNAME -u GDK_PROJECT_FILE \
 		-u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u STUB_MARKER \
-		GDK_RUNNERS_LIB="$GDK_RUNNERS_LIB" GDK_GODOT="$stub" GDK_IMPORT_CACHE_TIMEOUT=60 \
+		GDK_ENGINE_GATE_HOME="$scratch" GDK_RUNNERS_LIB="$GDK_RUNNERS_LIB" \
+		GDK_GODOT="$stub" GDK_IMPORT_CACHE_TIMEOUT=60 \
 		"$@" bash "$script"
 }
 

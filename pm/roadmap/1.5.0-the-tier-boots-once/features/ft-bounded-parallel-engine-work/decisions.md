@@ -24,3 +24,7 @@ copy fallback. The UID change reads only an existing target `.tscn` or `.tres`
 header and returns no UID for a headerless target.
 
 Focused review reported four passing stub cases. No real-engine boot was run.
+
+Consumer check repair: scoped shellcheck passes. Integration, capture and import self-tests pass 150, 17 and 20 cases.
+Temporary wrappers carry the shared library; stub leases use isolated fixture domains.
+Feature close re-asks static checks after scoped builder proof; the full suite belongs to milestone close.
