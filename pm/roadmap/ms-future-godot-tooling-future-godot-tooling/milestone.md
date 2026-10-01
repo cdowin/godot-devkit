@@ -6,7 +6,7 @@ status: planning
 depends_on: []
 branch:
 mode:
-version: 1.7.0
+version: 2.1.0
 changelog:
 order:
   - "ft-refs-reads-scene-connections"
