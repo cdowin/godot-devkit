@@ -13,7 +13,8 @@ through verbatim, its own line endings included.
 
 Refusals (exit 1, nothing written, the reason named): a name that is not an
 identifier, or that the editor refuses because it is an engine class or a
-project script's `class_name`; a path that is not `res://`, escapes the project,
+project script's `class_name` (a script inside `[refs] exclude_prefixes` — a
+stale worktree, the import cache — is not one); a path that is not `res://`, escapes the project,
 is not in its canonical spelling (`//`, `/./`, `/../`, a trailing `/` — the
 refusal names the canonical one), or names no file on disk; a name already
 declared with a DIFFERENT path (the line names it), or with the same path but
@@ -21,7 +22,8 @@ DISABLED (no `*`, so no singleton exists to be `unchanged`); a name or an
 `[autoload]` section declared more than once. The same `add` twice
 is a no-op that says `unchanged`, and so is `rm` of a name nobody declares —
 exit 0, because models retry. A `project.godot` that is missing or is not
-UTF-8 is exit 2: there is no project here to edit.
+UTF-8 is exit 2: there is no project here to edit; so is a bad
+`[refs] exclude_prefixes`.
 """
 from __future__ import annotations
 
@@ -32,12 +34,14 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from godot_devkit.core import apply, walk
+from godot_devkit.core.config import ConfigError
 from godot_devkit.core.project import repo_root
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.format.tscn import parse_lines, strip_quotes
 from godot_devkit.godot.format.tscn_document import read_scene_text
 from godot_devkit.godot.index.gdscript import ScriptIndex
 from godot_devkit.godot.read.autoloads import PROJECT_GODOT
+from godot_devkit.godot.read.refs import exclude_prefixes
 from godot_devkit.godot.write import file_exists, render_diff, utf8_refusal_reason
 
 VERBS = ('add', 'rm')
@@ -83,8 +87,11 @@ def _check_name(root: Path, name: str) -> None:
     if classdb.is_known(name):
         raise Refused(f'{name} is an engine class — the editor refuses an '
                       f'autoload that shadows it; pick another name')
+    excluded = exclude_prefixes()
     scripts = walk.descendants(root, walk.Kind.FILE, suffix=GD_SUFFIX,
-                               pattern=f'*{GD_SUFFIX}')
+                               pattern=f'*{GD_SUFFIX}').filter(
+        lambda path: not path.relative_to(root).as_posix().startswith(excluded),
+        walk.SkipReason.EXCLUDED_PATH)
     index = ScriptIndex(root, [path.relative_to(root).as_posix() for path in scripts])
     owner = index.by_class.get(name)
     if owner is not None:
@@ -241,6 +248,9 @@ def main(argv: list[str]) -> int:
     except Refused as err:
         print(f'REFUSED  {PROJECT_GODOT}: {err}')
         return EXIT_REFUSED
+    except ConfigError as err:
+        print(f'godot-devkit autoloads {args.verb}: {err}', file=sys.stderr)
+        return EXIT_USAGE
 
     label = f'{args.verb}  {PROJECT_GODOT}  {args.name}'
     if after == before:

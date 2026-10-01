@@ -22,6 +22,7 @@ from pathlib import Path
 
 from support import FIXTURES
 
+from godot_devkit.core import project
 from godot_devkit.godot.read import autoloads
 from godot_devkit.godot.write import autoloads_edit
 
@@ -43,6 +44,10 @@ class AutoloadsEdit(unittest.TestCase):
         patch = unittest.mock.patch.object(autoloads_edit, 'repo_root', lambda: self.root)
         patch.start()
         self.addCleanup(patch.stop)
+        # `devkit.toml` (the `[refs]` scope) is read from the copy too.
+        config = unittest.mock.patch.object(project, 'repo_root', lambda: self.root)
+        config.start()
+        self.addCleanup(config.stop)
 
     def run_verb(self, *argv: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -127,6 +132,15 @@ class AutoloadsEdit(unittest.TestCase):
                 self.assertEqual(got, 2, err)
                 self.assertIn('project.godot', err)
                 self.assertEqual(self.project.read_bytes() if content else None, content)
+
+    def test_a_class_name_outside_the_refs_scope_does_not_refuse(self) -> None:
+        # `.claude/worktrees/` is in the default `[refs] exclude_prefixes`: a
+        # stale worktree's copy of a script is not a class the editor knows.
+        stale = self.root / '.claude' / 'worktrees' / 'old' / 'ghost.gd'
+        stale.parent.mkdir(parents=True)
+        stale.write_text('class_name Ghost\nextends Node\n', encoding='utf-8')
+        code, out, _ = self.run_verb('add', 'Ghost', SPAWNER)
+        self.assertEqual(code, 0, out)
 
     def test_the_same_add_or_rm_twice_is_a_no_op(self) -> None:
         for argv in (('add', NAME, PLAYER), ('rm', NAME)):
