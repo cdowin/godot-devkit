@@ -8,3 +8,7 @@ func _ready() -> void:
 	if GameManager:
 		pass
 	get_node("/root/GameManager")
+	var made := Player.new()
+	var cap = Player.MAX_HP
+	var kind := Player
+	var node = $Player

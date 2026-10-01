@@ -200,8 +200,14 @@ class RefsScope(unittest.TestCase):
     # named as an argument. Each read as unreferenced before, the verdict
     # that gets a handler, an autoload or a signal deleted.
     BY_KIND = (
-        ('Player', ('systems/player.gd:1  class_name Player',
-                    'systems/spawner.gd:3', '## scene resource refs'), ()),
+        # A class_name is a global like an autoload: its bare identifier is a
+        # typed ref (`.new()`, a constant, a value); `$Player` is a node and
+        # the declaration line is the definition, never a typed ref too.
+        ('Player', ('systems/player.gd:1  class_name Player', '## typed refs (4)',
+                    'systems/spawner.gd:3', 'systems/spawner.gd:11  var made := Player.new()',
+                    'systems/spawner.gd:12  var cap = Player.MAX_HP',
+                    'systems/spawner.gd:13  var kind := Player', '## scene resource refs'),
+         ('spawner.gd:14',)),
         ('pressed', ('## scene connections (1)',
                      'scenes/main.tscn:12  [connection] signal=pressed from=Button '
                      'to=Player method=_on_button_pressed'),

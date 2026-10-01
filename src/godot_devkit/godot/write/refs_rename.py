@@ -193,7 +193,7 @@ def _is_node_path(line: str, at: int) -> bool:
     return index >= 0 and line[index] in NODE_PATH_SIGILS
 
 
-def _plan_gd(plan: FilePlan, old: str, new: str, autoload: bool,
+def _plan_gd(plan: FilePlan, old: str, new: str, global_name: bool,
              dynamic: set[int], paths: set[int]) -> None:
     token, new_token = _token(old), _token(new)
     regions = _gd_regions(plan.contents)
@@ -208,7 +208,7 @@ def _plan_gd(plan: FilePlan, old: str, new: str, autoload: bool,
         if old not in content:
             continue
         strings, comment_at = regions[index]
-        claimed = refs.typed_spans(old, refs.strip_comment(content), autoload)
+        claimed = refs.typed_spans(old, refs.strip_comment(content), global_name)
         spans, reasons = [], []
         for match in token.finditer(content):
             span = (match.start(), match.end())
@@ -314,7 +314,7 @@ def _plan(root: Path, found: refs.Scan, old: str, new: str) -> tuple[list[FilePl
         rel = str(path.relative_to(root))
         plan = load(path, rel in dynamic or rel in paths)
         if plan is not None:
-            _plan_gd(plan, old, new, found.autoload,
+            _plan_gd(plan, old, new, found.global_name,
                      dynamic.get(rel, set()), paths.get(rel, set()))
             plans.append(plan)
     for path in found.scene_files:
