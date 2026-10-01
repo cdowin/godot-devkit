@@ -3,7 +3,7 @@ id: ft-project-verb-edits-autoloads
 kind: feature
 milestone: "ms-refs-sees-what-godot-wires"
 name: the project verb edits autoloads
-status: planning
+status: building
 reviewed:
 depends_on: []
 consumed_by: []
@@ -14,7 +14,7 @@ changelog:
 
 `project.godot` is the third text file a Godot developer edits by hand, and the only one with no
 write verb. `autoloads` reads it (`read/autoloads.py`), nothing writes it. Start with the edit
-agents make most: `project autoload add <Name> <res://path>` and `project autoload remove <Name>`,
+agents make most: `autoloads add <Name> <res://path>` and `autoloads rm <Name>` (the read noun, as `scene` and `tiles` do),
 through `core/apply`, same `--dry-run` diff contract as `scene`. Other sections wait for a real ask.
 
 Proposed in a DeepWiki design review of the repo (suggestion 2):

@@ -1,0 +1,7 @@
+{"ts":"2026-10-01T18:40:39Z","kind":"status","grain":"ms-refs-sees-what-godot-wires","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:41:29Z","kind":"status","grain":"ft-refs-reads-scene-connections","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:41:29Z","kind":"status","grain":"ft-project-verb-edits-autoloads","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:41:29Z","kind":"status","grain":"ft-a-stats-verb-counts-code-by-role","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:41:36Z","kind":"status","grain":"st-stats-verb","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:41:36Z","kind":"status","grain":"st-refs-indexes-godot-wiring","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}
+{"ts":"2026-10-01T18:41:36Z","kind":"status","grain":"st-autoloads-add-and-rm","from":"planning","to":"building","branch":"milestone/2.1.0-refs-sees-what-godot-wires"}

@@ -2,7 +2,7 @@
 id: "ms-refs-sees-what-godot-wires"
 kind: milestone
 name: Refs sees what Godot wires
-status: planning
+status: building
 depends_on: []
 branch: milestone/2.1.0-refs-sees-what-godot-wires
 mode:

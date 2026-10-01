@@ -3,7 +3,7 @@ id: ft-a-stats-verb-counts-code-by-role
 kind: feature
 milestone: ms-refs-sees-what-godot-wires
 name: a stats verb counts code by role
-status: planning
+status: building
 reviewed:
 depends_on: []
 consumed_by: []

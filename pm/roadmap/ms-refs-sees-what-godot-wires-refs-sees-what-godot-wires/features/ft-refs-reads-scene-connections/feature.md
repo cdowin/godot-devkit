@@ -3,7 +3,7 @@ id: ft-refs-reads-scene-connections
 kind: feature
 milestone: ms-refs-sees-what-godot-wires
 name: refs sees what Godot wires
-status: planning
+status: building
 reviewed:
 depends_on: []
 consumed_by: []
