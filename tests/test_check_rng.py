@@ -91,6 +91,27 @@ class Spares(unittest.TestCase):
         self.assertEqual([str(h) for h in rng.scan_text(inner, 'inner.gd')],
                          ['inner.gd:9:theirs:return randf()',
                           'inner.gd:12:roll:return randi() if randf() else 0'])
+        # A continuation line at column 0 — inside an open bracket, a `"""`
+        # string or after a trailing `\` — is still the class body, so the
+        # inner draw stays the GLOBAL one; and a bracket inside that string
+        # opens nothing, so the column-0 `func own` does close the body.
+        continued = ('func randf() -> float:\n'
+                     '\treturn 0.5\n'
+                     'class Inner:\n'
+                     '\tvar table = [\n'
+                     '1, 2,\n'
+                     ']\n'
+                     '\tconst DOC = """\n'
+                     'note (unclosed\n'
+                     '"""\n'
+                     '\tvar total = 1 + \\\n'
+                     '2\n'
+                     '\tfunc draw() -> float:\n'
+                     '\t\treturn randf()\n'
+                     'func own() -> float:\n'
+                     '\treturn randf()\n')
+        self.assertEqual([str(h) for h in rng.scan_text(continued, 'c.gd')],
+                         ['c.gd:13:draw:return randf()'])
 
 
 class TheAllowlist(unittest.TestCase):
