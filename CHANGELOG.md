@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.1.0 — 2026-10-01
+
 - Built and gated with agentic-sdlc 2.2.0; the README's install example pins it.
 - `refs <symbol>` finds what Godot wires: a scene `[connection]` naming it as `signal=` or
   `method=` (new bucket `scene connections`), an autoload name declared in `project.godot`
