@@ -1034,7 +1034,19 @@ STUB_EOF
 # a directory and a list.
 self_test() {
 	local scratch rc out failures=0 cases=0 name bad fx mono host host_before host_after
+	local GDK_RUNNERS_LIB="${GDK_RUNNERS_LIB:-}"
 	scratch="$(mktemp -d "${TMPDIR:-/tmp}/gdk-integration-selftest.XXXXXX")" || return 1
+	if [ -f "$GDK_RUNNERS_LIB" ]; then
+		GDK_RUNNERS_LIB="$(cd "$(dirname "$GDK_RUNNERS_LIB")" && pwd)/$(basename "$GDK_RUNNERS_LIB")"
+	else
+		GDK_RUNNERS_LIB="$(cd "$(dirname "$0")" && pwd)/gdk_runners.sh"
+	fi
+	[ -f "$GDK_RUNNERS_LIB" ] || {
+		echo "  MISS — engine-gate library not found for self-test: $GDK_RUNNERS_LIB" >&2
+		rm -rf "$scratch"
+		return 1
+	}
+	export GDK_RUNNERS_LIB
 	export GDK_ENGINE_GATE_HOME="$scratch"
 
 	miss() { echo "  MISS — $1" >&2; failures=$((failures + 1)); }
