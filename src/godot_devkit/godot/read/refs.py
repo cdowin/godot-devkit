@@ -10,6 +10,13 @@ untyped `entity`, `emit_signal(&"died")`, `connect("died", …)`). Those are
 not proven references, and they are not nothing either: a zero verdict prints
 only when BOTH buckets are empty, because zero is the answer that gets a
 signal deleted (#19). `refs --retarget` never acts on a dynamic hit.
+It also indexes what Godot itself wires, which no `.gd` line spells: a
+`[connection signal=… method=…]` in a scene (typed, `scene connections`), and
+an autoload NAME from `project.godot [autoload]`, indexed like a `class_name`
+(its `project.godot` entry the definition, `Name.` / `Name)` / `Name,` a typed
+ref). A signal or handler named as an argument — `is_connected("sig"`,
+`has_signal("sig"`, `Signal(obj, "sig"` — is a dynamic hit; a bare handler
+in `is_connected(…, h)` / `disconnect(…, h)` is a call site.
 Comment-stripped (the capability-scan
 doctrine: everything after the first `#` on a line is dropped before
 matching — pragmatic, not string-literal-aware). Pure parse — never writes,
@@ -30,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from godot_devkit.godot.format.tscn import parse, basename
+from godot_devkit.godot.read.autoloads import PROJECT_GODOT, Refusal, list_autoloads
 from godot_devkit.core.project import repo_root
 from godot_devkit.core import walk
 from godot_devkit.core.walk import Kind, SkipReason
@@ -43,6 +51,15 @@ SCENE_GLOBS = ('*.tscn', '*.tres')
 
 # --- Typed-ref grammar (word-boundary, comment-stripped) ---------------------
 TYPED_REF_KEYWORDS = ('extends', 'is', 'as')
+
+# --- Bucket kinds: a Hit's `kind`, one per report section ---------------------
+DEFINITION_KIND = 'definition'
+TYPED_REF_KIND = 'typed_ref'
+CALL_EMIT_KIND = 'call_emit'
+PRELOAD_LOAD_KIND = 'preload_load'
+SCENE_REF_KIND = 'scene_ref'
+SCENE_CONNECTION_KIND = 'scene_connection'
+DYNAMIC_KIND = 'dynamic'
 
 
 class EmptySymbol(Exception):
@@ -93,7 +110,11 @@ def strip_comment(line: str) -> str:
     return line.split('#', 1)[0]
 
 
-def _typed_ref_pattern(symbol: str) -> re.Pattern:
+def _typed_ref_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
+    """`autoload`: the symbol is a `project.godot [autoload]` NAME, which a
+    script reaches as a global — `Name.method(`, `f(Name)`, `[Name, …]` — with
+    no type annotation to anchor on. Only an autoload gets those arms: on any
+    other symbol a bare `name.` is far more often a variable than a type."""
     word = re.escape(symbol)
     alternatives = [
         rf':\s*{word}\b',            # : Sym  (typed var/param/return)
@@ -102,6 +123,8 @@ def _typed_ref_pattern(symbol: str) -> re.Pattern:
         rf'\bDictionary\[.*{word}.*\]',  # Dictionary[..., Sym]
     ]
     alternatives += [rf'\b{kw}\s+{word}\b' for kw in TYPED_REF_KEYWORDS]
+    if autoload:
+        alternatives.append(rf'(?<![\w.]){word}\s*[.),]')  # Name.  Name)  Name,
     return re.compile('|'.join(alternatives))
 
 
@@ -112,6 +135,9 @@ def _call_emit_pattern(symbol: str) -> re.Pattern:
         rf'\b{word}\.emit\(',        # name.emit(
         rf'(?<![\w.]){word}\.(?:connect|disconnect)\(',  # name.connect( — receiverless (self); a dotted receiver is the dynamic bucket's
         rf'\.connect\(\s*{word}\b',  # .connect(name
+        # is_connected(…, name) / disconnect(…, name) — the handler, bare, as
+        # the callable argument (Object's two-argument form, or Signal's one)
+        rf'\b(?:is_connected|disconnect)\(\s*(?:[^,()]*,\s*)?{word}\b(?!\s*\()',
     ]
     return re.compile('|'.join(alternatives))
 
@@ -153,6 +179,8 @@ def _dynamic_pattern(symbol: str) -> re.Pattern:
         rf'\.{word}\.(?:connect|disconnect|emit)\(',       # expr.name.connect(
         rf'\bemit_signal\(\s*&?["\']{word}["\']',          # emit_signal(&"name"
         rf'\b(?:dis)?connect\(\s*&?["\']{word}["\']',       # connect("name" / disconnect("name"
+        rf'\b(?:is_connected|has_signal|has_user_signal)\(\s*&?["\']{word}["\']',  # has_signal("name"
+        rf'\bSignal\(.*?,\s*&?["\']{word}["\']',          # Signal(obj, "name"
     ]
     return re.compile('|'.join(alternatives))
 
@@ -160,21 +188,23 @@ def _dynamic_pattern(symbol: str) -> re.Pattern:
 PRELOAD_LOAD = re.compile(r'(?:preload|load)\(\s*"([^"]+)"\s*\)')
 
 
-def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[Hit]]:
+def scan_gd_files(root: Path, symbol: str, files: list[Path],
+                  autoload: bool = False) -> dict[str, list[Hit]]:
     """One pass per `.gd` file, feeding all four line-based scan kinds at
     once (definitions / typed refs / call-emit / preload-load) — the four
     kinds used to each re-read + re-split every file independently, a 4x
     redundant-I/O cost with no benefit (they all want the same comment-
-    stripped lines)."""
+    stripped lines). `autoload`: the symbol is an autoload NAME — see
+    `_typed_ref_pattern`."""
     definition_pattern = _definition_pattern(symbol)
-    typed_ref_pattern = _typed_ref_pattern(symbol)
+    typed_ref_pattern = _typed_ref_pattern(symbol, autoload)
     call_emit_pattern = _call_emit_pattern(symbol)
     bare_call_pattern = _bare_call_pattern(symbol)
     dynamic_pattern = _dynamic_pattern(symbol)
     needle = symbol.lower()
 
-    hits: dict[str, list[Hit]] = {'definition': [], 'typed_ref': [], 'call_emit': [],
-                                  'preload_load': [], 'dynamic': []}
+    hits: dict[str, list[Hit]] = {DEFINITION_KIND: [], TYPED_REF_KIND: [], CALL_EMIT_KIND: [],
+                                  PRELOAD_LOAD_KIND: [], DYNAMIC_KIND: []}
     for path in files:
         rel = _relpath(root, path)
         for lineno, raw in enumerate(path.read_text(encoding='utf-8', errors='replace').split('\n'), 1):
@@ -185,10 +215,10 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
             defines = definition_pattern.search(stripped) is not None
             typed = defines
             if defines:
-                hits['definition'].append(Hit('definition', rel, lineno, text))
+                hits[DEFINITION_KIND].append(Hit(DEFINITION_KIND, rel, lineno, text))
             if typed_ref_pattern.search(stripped):
                 typed = True
-                hits['typed_ref'].append(Hit('typed_ref', rel, lineno, text))
+                hits[TYPED_REF_KIND].append(Hit(TYPED_REF_KIND, rel, lineno, text))
             # A receiverless `name(` is a call unless this line is where the
             # name is DECLARED — `func name(` and `signal name(` are the
             # declaration, counted once, in `definitions`. A dotted/emit/
@@ -198,51 +228,79 @@ def scan_gd_files(root: Path, symbol: str, files: list[Path]) -> dict[str, list[
             if call_emit_pattern.search(stripped) or (
                     not defines and bare_call_pattern.search(stripped)):
                 typed = True
-                hits['call_emit'].append(Hit('call_emit', rel, lineno, text))
+                hits[CALL_EMIT_KIND].append(Hit(CALL_EMIT_KIND, rel, lineno, text))
             for match in PRELOAD_LOAD.finditer(stripped):
                 target = match.group(1)
                 if needle in basename(target).lower() or symbol == target:
                     typed = True
-                    hits['preload_load'].append(Hit('preload_load', rel, lineno, text))
+                    hits[PRELOAD_LOAD_KIND].append(Hit(PRELOAD_LOAD_KIND, rel, lineno, text))
             # A line a typed bucket already counts is not counted again here:
             # one line is one reference, and the dynamic count must not
             # inflate a total a reader weighs a delete against.
             if not typed and dynamic_pattern.search(stripped):
-                hits['dynamic'].append(Hit('dynamic', rel, lineno, text))
+                hits[DYNAMIC_KIND].append(Hit(DYNAMIC_KIND, rel, lineno, text))
     return hits
 
 
-def scan_scene_refs(root: Path, symbol: str, files: list[Path]) -> list[Hit]:
+def scan_scene_refs(root: Path, symbol: str, files: list[Path]) -> dict[str, list[Hit]]:
+    """Resource refs (`ext_resource` path/uid, `sub_resource` type) and the
+    `[connection]` sections naming the symbol as their `signal=` or `method=`.
+    A connection is the editor's wiring — no `.gd` line spells it — so a
+    handler connected only there read as unreferenced, the verdict that gets
+    it deleted and the connection broken at runtime. Read from the parsed
+    sections, never a regex over the text."""
     needle = symbol.lower()
-    hits: list[Hit] = []
+    hits: dict[str, list[Hit]] = {SCENE_REF_KIND: [], SCENE_CONNECTION_KIND: []}
     for path in files:
         try:
             sections = parse(str(path))
         except OSError:
             continue
+        rel = _relpath(root, path)
         for section in sections:
             if section.kind == 'ext_resource':
                 target = section.attrs.get('path') or ''
                 uid = section.attrs.get('uid') or ''
                 if needle in basename(target).lower() or symbol == uid:
                     kind = section.attrs.get('type', '?')
-                    hits.append(Hit('scene_ref', _relpath(root, path), 0,
-                                    f'ext_resource[{section.attrs.get("id", "?")}] {kind}  {target or uid}'))
+                    hits[SCENE_REF_KIND].append(Hit(
+                        SCENE_REF_KIND, rel, 0,
+                        f'ext_resource[{section.attrs.get("id", "?")}] {kind}  {target or uid}'))
             elif section.kind == 'sub_resource' and section.attrs.get('type', '').lower() == needle:
-                hits.append(Hit('scene_ref', _relpath(root, path), 0,
-                                f'sub_resource[{section.attrs.get("id", "?")}] {section.attrs.get("type")}'))
+                hits[SCENE_REF_KIND].append(Hit(
+                    SCENE_REF_KIND, rel, 0,
+                    f'sub_resource[{section.attrs.get("id", "?")}] {section.attrs.get("type")}'))
+            elif section.kind == 'connection' and symbol in (
+                    section.attrs.get('signal'), section.attrs.get('method')):
+                wiring = ' '.join(f'{key}={section.attrs.get(key, "?")}'
+                                  for key in ('signal', 'from', 'to', 'method'))
+                hits[SCENE_CONNECTION_KIND].append(Hit(
+                    SCENE_CONNECTION_KIND, rel, section.header_line + 1, f'[connection] {wiring}'))
     return hits
 
 
+def scan_autoloads(root: Path, symbol: str) -> list[Hit]:
+    """The `project.godot [autoload]` entry declaring `symbol`, as its
+    definition — an autoload's name is declared there, not by `class_name`.
+    No readable `project.godot` is no autoload, never an error: `refs` works
+    in a tree that is not a Godot project."""
+    try:
+        entries = list_autoloads(root)
+    except Refusal:
+        return []
+    return [Hit(DEFINITION_KIND, PROJECT_GODOT, 0, f'[autoload] {name}  res://{res_path}')
+            for name, res_path in entries if name == symbol]
+
+
 SECTION_TITLES = (
-    ('definitions', 'definition'),
-    ('typed refs', 'typed_ref'),
-    ('call / emit sites', 'call_emit'),
-    ('preload / load', 'preload_load'),
-    ('scene resource refs (.tscn/.tres)', 'scene_ref'),
-    ('dynamic (untyped receiver)', 'dynamic'),
+    ('definitions', DEFINITION_KIND),
+    ('typed refs', TYPED_REF_KIND),
+    ('call / emit sites', CALL_EMIT_KIND),
+    ('preload / load', PRELOAD_LOAD_KIND),
+    ('scene resource refs (.tscn/.tres)', SCENE_REF_KIND),
+    ('scene connections', SCENE_CONNECTION_KIND),
+    ('dynamic (untyped receiver)', DYNAMIC_KIND),
 )
-DYNAMIC_KIND = 'dynamic'
 
 
 def run(symbol: str, include_tests: bool) -> int:
@@ -263,8 +321,10 @@ def run(symbol: str, include_tests: bool) -> int:
     gd_files = list(gd_walk)
     scene_files = sorted(scene_walk)
 
-    hits_by_kind = scan_gd_files(root, symbol, gd_files)
-    hits_by_kind['scene_ref'] = scan_scene_refs(root, symbol, scene_files)
+    autoload_hits = scan_autoloads(root, symbol)
+    hits_by_kind = scan_gd_files(root, symbol, gd_files, autoload=bool(autoload_hits))
+    hits_by_kind[DEFINITION_KIND][:0] = autoload_hits
+    hits_by_kind.update(scan_scene_refs(root, symbol, scene_files))
 
     typed_total = 0
     print(f'# refs: {symbol}')
