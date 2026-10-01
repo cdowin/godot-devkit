@@ -45,14 +45,16 @@ class RenameRewrites(unittest.TestCase):
     # definition; an autoload's `project.godot` key plus a use; a class_name
     # with its bare uses, whose scene's `[node name="Player"]`, `$Player` and
     # `res://systems/player.gd` are a node and a path, not the class — and a
-    # use under tests/, which a rename never leaves behind.
+    # use under tests/, which a rename never leaves behind (`10%Player` is
+    # modulo, not a unique-node sigil).
     RENAMES = (
         ('_on_button_pressed', '_on_button_clicked', 'scenes/main.tscn', (), (), {}),
         ('DataRegistry', 'Registry', 'project.godot', (), (), {}),
         ('Player', 'Hero', 'systems/spawner.gd', ('scenes/main.tscn',),
          ('  PATH  scenes/main.tscn  res://systems/player.gd — left as is; '
           'git mv + refs --retarget if the file should follow',),
-         {'tests/unit/test_player.gd': 'extends Node\n\nvar made := Player.new()\n'}),
+         {'tests/unit/test_player.gd': 'extends Node\n\nvar made := Player.new()\n'
+                                       'var cap := 10%Player.MAX\n'}),
     )
 
     def test_every_typed_hit_is_rewritten_once_and_a_retry_is_a_no_op(self) -> None:
@@ -111,6 +113,20 @@ class RenameRefuses(unittest.TestCase):
                 '\tvar cb := hurt\n'              # 6: a callable reference, unproven
                 '\tself.hurt(wound)\n')           # 7: the line carries <new>
     EXTRA_TRES = '[gd_resource type="Resource" format=3]\n\n[resource]\nmethod = &"hurt"\n'
+    # A built-in script and a /root NodePath: neither is a [connection] attr,
+    # both name the autoload — a rename that skipped them strands it.
+    BUILTIN_TSCN = ('[gd_scene load_steps=2 format=3]\n'
+                    '\n'
+                    '[sub_resource type="GDScript" id="GDScript_1"]\n'
+                    'script/source = "extends Node\n'
+                    '\n'
+                    'func _ready():\n'
+                    '\tDataRegistry.load_all()\n'      # 7: inside script/source
+                    '"\n'
+                    '\n'
+                    '[node name="Hud" type="Node"]\n'
+                    'script = SubResource("GDScript_1")\n'
+                    'registry = NodePath("/root/DataRegistry")\n')  # 12
 
     # (extra files, old, new, every phrase the refusal must name)
     REFUSALS = (
@@ -123,6 +139,9 @@ class RenameRefuses(unittest.TestCase):
           'systems/extra.gd:6  an occurrence no typed arm proves',
           'systems/extra.gd:7  the line already carries wound',
           'data/anim.tres:4  a StringName', '5 blocked')),
+        ({'scenes/hud.tscn': BUILTIN_TSCN}, 'DataRegistry', 'Registry',
+         ('scenes/hud.tscn:7  an occurrence in a scene', 'scenes/hud.tscn:12  an occurrence '
+          'in a scene', '2 blocked')),
         ({}, 'hurt', 'watch', ('systems/player.gd:20  watch is already defined',)),
         ({}, 'pressed', 'clicked', ('scenes/main.tscn:12  a reference to pressed, which '
                                     'nothing here defines',)),
@@ -145,8 +164,9 @@ class RenameRefuses(unittest.TestCase):
     def test_a_bad_name_or_a_tests_flag_is_a_usage_error(self) -> None:
         with temp_repo('read_repo'):
             # `--tests` too: a rename always covers tests/, so the flag names nothing.
+            # A keyword <new> (`var`, `self`) is no name a symbol can take.
             for argv in (('hurt', '1bad'), ('hurt', 'hurt'), ('res://x.gd', 'y'),
-                         ('hurt', 'wound', '--tests')):
+                         ('hurt', 'wound', '--tests'), ('hurt', 'var'), ('hurt', 'self')):
                 with self.subTest(argv=argv), self.assertRaises(SystemExit) as raised:
                     run_cli('refs', '--rename', *argv)
                 self.assertEqual(raised.exception.code, 2)
