@@ -38,6 +38,12 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # path attr + exact preload/load literal that
                                     # names old; anything unprovable is SKIPPED
                                     # with a reason, and skips exit 1
+    godot-devkit refs --rename <old> <new> [--dry-run]
+                                    # rename a class_name / method / signal /
+                                    # autoload across .gd, .tscn, .tres and
+                                    # project.godot as one plan; any dynamic,
+                                    # string or unproven site refuses it whole;
+                                    # tests/ is always in scope
     godot-devkit scene canonicalize <file>... [--elide-defaults]
                                     [--respell] [--order]
                                     # restore what PackedScene.pack() drops:
@@ -104,6 +110,7 @@ from godot_devkit.godot.checks.roster import KNOWN_GATES, OPT_IN_GATES, all_rost
 FIX_FLAG = '--fix'
 HELP_FLAGS = ('-h', '--help')
 RETARGET_FLAG = '--retarget'
+RENAME_FLAG = '--rename'
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
@@ -257,6 +264,9 @@ def main(argv: list[str] | None = None) -> int:
         if RETARGET_FLAG in rest:
             from godot_devkit.godot.write import refs_retarget
             return refs_retarget.main(rest)
+        if RENAME_FLAG in rest:
+            from godot_devkit.godot.write import refs_rename
+            return refs_rename.main(rest)
         from godot_devkit.godot.read import refs
         return refs.main(rest)
     if cmd == 'orphans':

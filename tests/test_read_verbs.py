@@ -200,8 +200,14 @@ class RefsScope(unittest.TestCase):
     # named as an argument. Each read as unreferenced before, the verdict
     # that gets a handler, an autoload or a signal deleted.
     BY_KIND = (
-        ('Player', ('systems/player.gd:1  class_name Player',
-                    'systems/spawner.gd:3', '## scene resource refs'), ()),
+        # A class_name is a global like an autoload: its bare identifier is a
+        # typed ref (`.new()`, a constant, a value); `$Player` is a node and
+        # the declaration line is the definition, never a typed ref too.
+        ('Player', ('systems/player.gd:1  class_name Player', '## typed refs (4)',
+                    'systems/spawner.gd:3', 'systems/spawner.gd:11  var made := Player.new()',
+                    'systems/spawner.gd:12  var cap = Player.MAX_HP',
+                    'systems/spawner.gd:13  var kind := Player', '## scene resource refs'),
+         ('spawner.gd:14',)),
         ('pressed', ('## scene connections (1)',
                      'scenes/main.tscn:12  [connection] signal=pressed from=Button '
                      'to=Player method=_on_button_pressed'),
@@ -211,7 +217,14 @@ class RefsScope(unittest.TestCase):
                           'project.godot  [autoload] DataRegistry  res://autoloads/data_registry.gd',
                           '## typed refs (1)', 'systems/player.gd:13  DataRegistry.lookup("hp")'),
          ('(no references found)',)),
-        ('died', ('## dynamic (untyped receiver) (4)', 'is_connected("died", _on_died)',
+        # A bare autoload value is a typed ref wherever it stands; its
+        # `/root/` node path is a string, so dynamic — never "definition only".
+        ('GameManager', ('## typed refs (2)', 'systems/spawner.gd:7  var manager = GameManager',
+                         'systems/spawner.gd:8  if GameManager:',
+                         '## dynamic (untyped receiver) (1)',
+                         'systems/spawner.gd:10  get_node("/root/GameManager")'),
+         ('(no references found)',)),
+        ('died',('## dynamic (untyped receiver) (4)', 'is_connected("died", _on_died)',
                   'has_signal("died")', 'has_user_signal("died")', 'Signal(self, "died")'), ()),
         ('_on_died', ('## call / emit sites (2)', 'is_connected("died", _on_died)',
                       'died.disconnect(_on_died)'), ('## dynamic',)),
