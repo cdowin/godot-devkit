@@ -29,10 +29,11 @@ name (`pressed`, `_ready`) is not this project's to rename.
 A res:// path or uid that `refs` matches (a preload, an ext_resource) is
 neither rewritten nor a block — a rename changes identifiers, not files. Each
 prints as a PATH line after the plan, and leaves the exit code alone.
-A comment and a node path (`$Name`, `%Name`) are not references and are left
-alone. The same rename twice is a no-op: zero hits of <old> with <new> defined
+A comment and a node path (`$Name`, `%Name` where an expression starts — after
+an operand `%` is modulo) are not references and are left alone. The same rename twice is a no-op: zero hits of <old> with <new> defined
 prints `already renamed`, exit 0. Zero hits with <new> undefined is exit 1 —
-nothing to rename. <new> not an identifier, or equal to <old>, is exit 2.
+nothing to rename. <new> not an identifier, a GDScript keyword, or equal to
+<old>, is exit 2.
 tests/ is ALWAYS in scope — a rename that skips the tests strands their
 references — so there is no `--tests` (passing one is a usage error); the
 `[refs] exclude_prefixes` scope applies. `--dry-run` prints the diff and
@@ -65,7 +66,17 @@ CONNECTION_ATTRS = ('signal', 'method')
 AUTOLOAD_KIND = 'autoload'
 GD_SUFFIX = '.gd'
 QUOTES = ('"', "'")
-NODE_PATH_SIGILS = ('$', '%')
+NODE_PATH_SIGIL = '$'
+UNIQUE_NODE_SIGIL = '%'
+OPERAND_END = re.compile(refs.OPERAND_END)
+# GDScript's reserved words (Godot 4): a <new> spelled like one is not a name.
+GDSCRIPT_KEYWORDS = frozenset((
+    'if', 'elif', 'else', 'for', 'while', 'match', 'when', 'break', 'continue',
+    'pass', 'return', 'class', 'class_name', 'extends', 'is', 'in', 'as', 'self',
+    'super', 'signal', 'func', 'static', 'const', 'enum', 'var', 'breakpoint',
+    'preload', 'await', 'yield', 'assert', 'void', 'and', 'or', 'not', 'true',
+    'false', 'null', 'PI', 'TAU', 'INF', 'NAN', 'namespace', 'trait',
+))
 
 BLOCK_DYNAMIC = 'a dynamic hit — a receiver the index cannot type'
 PATH_LINE = ('  PATH  {location}  {path} — left as is; git mv + refs --retarget '
@@ -198,11 +209,16 @@ def _gd_regions(lines: list[str]) -> list[tuple[list[tuple[int, int]], int]]:
 
 
 def _is_node_path(line: str, at: int) -> bool:
-    """`$Name`, `%Name`, `$Parent/Name` — a node in the tree, not the symbol."""
+    """`$Name`, `%Name`, `$Parent/Name` — a node in the tree, not the symbol.
+    A `%` after an operand is modulo (`10%Name`), not a sigil."""
     index = at - 1
     while index >= 0 and (line[index].isalnum() or line[index] in '_/'):
         index -= 1
-    return index >= 0 and line[index] in NODE_PATH_SIGILS
+    if index < 0:
+        return False
+    if line[index] == UNIQUE_NODE_SIGIL:
+        return not (index > 0 and OPERAND_END.match(line[index - 1]))
+    return line[index] == NODE_PATH_SIGIL
 
 
 def _plan_gd(plan: FilePlan, old: str, new: str, global_name: bool,
@@ -459,6 +475,8 @@ def main(argv: list[str]) -> int:
     for name in (old, new):
         if not IDENTIFIER.match(name):
             parser.error(f'{name!r} is not an identifier ([A-Za-z_][A-Za-z0-9_]*)')
+    if new in GDSCRIPT_KEYWORDS:
+        parser.error(f'{new!r} is a GDScript keyword — not a name a symbol can take')
     if old == new:
         parser.error(f'old and new are the same name ({old}) — nothing to rename')
     try:

@@ -53,6 +53,12 @@ SCENE_GLOBS = ('*.tscn', '*.tres')
 
 # --- Typed-ref grammar (word-boundary, comment-stripped) ---------------------
 TYPED_REF_KEYWORDS = ('extends', 'is', 'as')
+# `%` is a unique-node sigil (`%Name`) only where an expression STARTS; after
+# an operand (a word, `)`, `]`) it is the modulo operator, and `10%Name.MAX`
+# names the symbol. A quote is not an operand here: `get_node("%Name")` is the
+# sigil. A lookbehind fragment: matches unless the position follows a sigil `%`.
+OPERAND_END = r'[\w)\]]'
+NOT_AFTER_SIGIL = rf'(?:(?<!%)|(?<={OPERAND_END}%))'
 
 # --- Bucket kinds: a Hit's `kind`, one per report section ---------------------
 DEFINITION_KIND = 'definition'
@@ -129,10 +135,11 @@ def _global_pattern(symbol: str) -> re.Pattern:
     which a script reaches with no type annotation to anchor on: `Name.method(`,
     `Name.new()`, `Name.CONST`, `var g = Name`, `if Name:`. The bare identifier
     anywhere in code is the reference. Not after `.` (a member), nor after `/`,
-    `$` or `%` (a node path — `"/root/Name"` is the dynamic bucket's). Only a
+    `$` or a sigil `%` (a node path — `"/root/Name"` is the dynamic bucket's);
+    a `%` after an operand is modulo, so `10%Name` is a use. Only a
     global gets this arm: on any other symbol a bare `name` is far more often
     a variable than a type."""
-    return re.compile(rf'(?<![\w./$%]){re.escape(symbol)}\b')
+    return re.compile(rf'(?<![\w./$]){NOT_AFTER_SIGIL}{re.escape(symbol)}\b')
 
 
 def _class_name_pattern(symbol: str) -> re.Pattern:

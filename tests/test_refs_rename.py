@@ -45,14 +45,16 @@ class RenameRewrites(unittest.TestCase):
     # definition; an autoload's `project.godot` key plus a use; a class_name
     # with its bare uses, whose scene's `[node name="Player"]`, `$Player` and
     # `res://systems/player.gd` are a node and a path, not the class — and a
-    # use under tests/, which a rename never leaves behind.
+    # use under tests/, which a rename never leaves behind (`10%Player` is
+    # modulo, not a unique-node sigil).
     RENAMES = (
         ('_on_button_pressed', '_on_button_clicked', 'scenes/main.tscn', (), (), {}),
         ('DataRegistry', 'Registry', 'project.godot', (), (), {}),
         ('Player', 'Hero', 'systems/spawner.gd', ('scenes/main.tscn',),
          ('  PATH  scenes/main.tscn  res://systems/player.gd — left as is; '
           'git mv + refs --retarget if the file should follow',),
-         {'tests/unit/test_player.gd': 'extends Node\n\nvar made := Player.new()\n'}),
+         {'tests/unit/test_player.gd': 'extends Node\n\nvar made := Player.new()\n'
+                                       'var cap := 10%Player.MAX\n'}),
     )
 
     def test_every_typed_hit_is_rewritten_once_and_a_retry_is_a_no_op(self) -> None:
@@ -162,8 +164,9 @@ class RenameRefuses(unittest.TestCase):
     def test_a_bad_name_or_a_tests_flag_is_a_usage_error(self) -> None:
         with temp_repo('read_repo'):
             # `--tests` too: a rename always covers tests/, so the flag names nothing.
+            # A keyword <new> (`var`, `self`) is no name a symbol can take.
             for argv in (('hurt', '1bad'), ('hurt', 'hurt'), ('res://x.gd', 'y'),
-                         ('hurt', 'wound', '--tests')):
+                         ('hurt', 'wound', '--tests'), ('hurt', 'var'), ('hurt', 'self')):
                 with self.subTest(argv=argv), self.assertRaises(SystemExit) as raised:
                     run_cli('refs', '--rename', *argv)
                 self.assertEqual(raised.exception.code, 2)
