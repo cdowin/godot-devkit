@@ -22,7 +22,6 @@ from pathlib import Path
 
 from support import FIXTURES
 
-from godot_devkit.core import project
 from godot_devkit.godot.read import autoloads
 from godot_devkit.godot.write import autoloads_edit
 
@@ -44,10 +43,6 @@ class AutoloadsEdit(unittest.TestCase):
         patch = unittest.mock.patch.object(autoloads_edit, 'repo_root', lambda: self.root)
         patch.start()
         self.addCleanup(patch.stop)
-        # `devkit.toml` (the `[refs]` scope) is read from the copy too.
-        config = unittest.mock.patch.object(project, 'repo_root', lambda: self.root)
-        config.start()
-        self.addCleanup(config.stop)
 
     def run_verb(self, *argv: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -137,14 +132,24 @@ class AutoloadsEdit(unittest.TestCase):
                 self.assertIn('project.godot', err)
                 self.assertEqual(self.project.read_bytes() if content else None, content)
 
-    def test_a_class_name_outside_the_refs_scope_does_not_refuse(self) -> None:
-        # `.claude/worktrees/` is in the default `[refs] exclude_prefixes`: a
-        # stale worktree's copy of a script is not a class the editor knows.
-        stale = self.root / '.claude' / 'worktrees' / 'old' / 'ghost.gd'
-        stale.parent.mkdir(parents=True)
-        stale.write_text('class_name Ghost\nextends Node\n', encoding='utf-8')
-        code, out, _ = self.run_verb('add', 'Ghost', SPAWNER)
-        self.assertEqual(code, 0, out)
+    def test_the_class_name_scan_sees_what_the_editor_sees(self) -> None:
+        # Godot's own rule: a dot-prefixed directory and one holding a
+        # `.gdignore` are invisible to the editor; `addons/` is not.
+        for where, gdignore, code in (('.claude/worktrees/x', False, 0),
+                                      ('addons/foo', False, 1),
+                                      ('vendor/raw', True, 0)):
+            with self.subTest(where):
+                name = f'Ghost{code}{int(gdignore)}{len(where)}'
+                script = self.root / where / 'ghost.gd'
+                script.parent.mkdir(parents=True)
+                script.write_text(f'class_name {name}\nextends Node\n',
+                                  encoding='utf-8')
+                if gdignore:
+                    (self.root / where.split('/')[0] / '.gdignore').write_text('')
+                got, out, _ = self.run_verb('add', name, SPAWNER, '--dry-run')
+                self.assertEqual(got, code, out)
+                if code:
+                    self.assertIn(f'class_name of res://{where}/ghost.gd', out)
 
     def test_the_same_add_or_rm_twice_is_a_no_op(self) -> None:
         for argv in (('add', NAME, PLAYER), ('rm', NAME)):
