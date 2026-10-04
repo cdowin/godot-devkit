@@ -1,0 +1,22 @@
+# The 3 agentic-sdlc 3.0 checks. None is a required check; each warns or reports on its own.
+# This file does not touch the required check `verify`.
+name: agentic-sdlc-checks
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentic-sdlc-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context-budget:
+    uses: cdowin/agentic-sdlc/.github/workflows/context-budget.yml@v3.0.0
+  test-budget:
+    uses: cdowin/agentic-sdlc/.github/workflows/test-budget.yml@v3.0.0
+  issue-link:
+    uses: cdowin/agentic-sdlc/.github/workflows/issue-link.yml@v3.0.0
