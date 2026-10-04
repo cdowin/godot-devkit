@@ -686,14 +686,14 @@ def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_s
          '"source \\\"$1\\\"; HOME=/tmp/sandbox; '
          'gdk_engine_gate_held || exit 41; echo ready; sleep 20"', '_', str(lib)],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-        env=dict(os.environ, HOME=str(home)))
+        env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home)))
     try:
         assert owner.stdout is not None
         assert owner.stdout.readline().strip() == 'ready'
         competing = subprocess.run(
             ['bash', '-c', 'source "$1"; gdk_engine_gate_run parse -- true', '_', str(lib)],
             text=True, capture_output=True,
-            env=dict(os.environ, HOME=str(home), GDK_ENGINE_GATE_WAIT='0'))
+            env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home), GDK_ENGINE_GATE_WAIT='0'))
         assert competing.returncode == 75, competing.stdout + competing.stderr
         assert 'engine gate busy' in competing.stderr, competing.stderr
         assert 'integration' in competing.stderr, competing.stderr
@@ -702,8 +702,56 @@ def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_s
         owner.wait(timeout=5)
     released = subprocess.run(
         ['bash', '-c', 'source "$1"; gdk_engine_gate_run after-crash -- true', '_', str(lib)],
-        text=True, capture_output=True, env=dict(os.environ, HOME=str(home)))
+        text=True, capture_output=True, env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home)))
     assert released.returncode == 0, released.stdout + released.stderr
+
+
+def test_engine_gate_is_a_counted_lease_weighted_per_run(tmp_path):
+    """#47: one exclusive lock made a 0.4 s unit slice wait 17-191 s behind a
+    peer lane. With 3 slots, a run of weight 2 leaves room for a weight-1 run
+    beside it, which starts at once; a third run finds no slot and names both
+    owners; `all` asks for every slot. A weight above the count is the count,
+    and a bad count or weight is exit 2 before anything runs."""
+    home = tmp_path / 'counted-home'
+    env = dict(os.environ, HOME=str(home), GDK_ENGINE_GATE_SLOTS='3')
+
+    def gate(check: str, weight: str, cmd: str, **extra: str):
+        return ['bash', '-c', f'source "$1"; gdk_engine_gate_run {check} -- bash -c "{cmd}"',
+                '_', str(LIBRARY)], dict(env, GDK_ENGINE_GATE_WEIGHT=weight, **extra)
+
+    argv, owner_env = gate('integration', '2', 'echo ready; sleep 20')
+    owner = subprocess.Popen(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             start_new_session=True, env=owner_env)
+    second = None
+    try:
+        assert owner.stdout is not None
+        assert owner.stdout.readline().strip() == 'ready'
+        argv, second_env = gate('unit', '1', 'echo ready; sleep 20', GDK_ENGINE_GATE_WAIT='0')
+        second = subprocess.Popen(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  start_new_session=True, env=second_env)
+        assert second.stdout is not None
+        assert second.stdout.readline().strip() == 'ready', 'a weight-1 run waited beside weight 2 of 3'
+        argv, third_env = gate('parse', '1', 'true', GDK_ENGINE_GATE_WAIT='0')
+        third = subprocess.run(argv, text=True, capture_output=True, env=third_env)
+        assert third.returncode == 75, third.stdout + third.stderr
+        assert 'engine gate busy' in third.stderr, third.stderr
+        assert 'holds check integration (2 slots)' in third.stderr, third.stderr
+        assert 'holds check unit' in third.stderr, third.stderr
+    finally:
+        for proc in (owner, second):
+            if proc is not None and proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGTERM)
+            if proc is not None:
+                proc.wait(timeout=5)
+    for weight in ('all', '9'):
+        argv, solo_env = gate('integration', weight, 'true', GDK_ENGINE_GATE_WAIT='0')
+        done = subprocess.run(argv, text=True, capture_output=True, env=solo_env)
+        assert done.returncode == 0, f'{weight}: {done.stdout}{done.stderr}'
+    for name, value in (('GDK_ENGINE_GATE_SLOTS', '0'), ('GDK_ENGINE_GATE_WEIGHT', 'two')):
+        argv, bad_env = gate('parse', '1', 'touch ran', **{name: value})
+        done = subprocess.run(argv, cwd=tmp_path, text=True, capture_output=True, env=bad_env)
+        assert done.returncode == 2 and name in done.stderr, done.stdout + done.stderr
+        assert not (tmp_path / 'ran').exists(), f'a bad {name} still ran the command'
 
 
 def test_engine_gate_queues_until_the_owner_releases(tmp_path):
@@ -714,14 +762,14 @@ def test_engine_gate_queues_until_the_owner_releases(tmp_path):
         ['bash', '-c', 'source "$1"; gdk_engine_gate_run integration -- '
          'bash -c "echo ready; sleep 1"', '_', str(LIBRARY)],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-        env=dict(os.environ, HOME=str(home)))
+        env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home)))
     try:
         assert owner.stdout is not None
         assert owner.stdout.readline().strip() == 'ready'
         queued = subprocess.run(
             ['bash', '-c', 'source "$1"; gdk_engine_gate_run parse -- true', '_', str(LIBRARY)],
             text=True, capture_output=True, timeout=30,
-            env=dict(os.environ, HOME=str(home), GDK_ENGINE_GATE_WAIT='20'))
+            env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home), GDK_ENGINE_GATE_WAIT='20'))
         assert queued.returncode == 0, queued.stdout + queued.stderr
         assert 'waits up to 20 s' in queued.stderr, queued.stderr
         assert 'admitted parse' in queued.stderr, queued.stderr
@@ -747,7 +795,7 @@ def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp
          'gdk_run_bounded 20 -- env GDK_GODOT="$GDK_GODOT" "$GDK_GODOT"; echo "$?" > "$4"',
          '_', str(LIBRARY), str(timeout), str(godot), str(ready)],
         cwd=tmp_path, start_new_session=True,
-        env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+        env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
     try:
         deadline = time.monotonic() + 5
         while not (tmp_path / 'boots').exists() and time.monotonic() < deadline:
@@ -757,7 +805,7 @@ def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp
              'gdk_run_bounded 20 -- env GDK_GODOT="$GDK_GODOT" "$GDK_GODOT"',
              '_', str(LIBRARY), str(timeout), str(godot)], cwd=tmp_path,
             text=True, capture_output=True,
-            env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots'),
+            env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots'),
                      GDK_ENGINE_GATE_WAIT='0'))
         assert competing.returncode == 75, competing.stdout + competing.stderr
         assert 'engine gate busy' in competing.stderr, competing.stderr
@@ -770,7 +818,7 @@ def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp
          'GDK_ENGINE_GATE_FD=999999 GDK_ENGINE_GATE_OWNER_PID=1 gdk_rebuild_import_cache 2; '
          'echo "$?" > "$4"', '_', str(LIBRARY), str(timeout), str(godot), str(marker)],
         cwd=tmp_path, text=True, capture_output=True,
-        env=dict(os.environ, HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
+        env=dict(os.environ, GDK_ENGINE_GATE_SLOTS='1', HOME=str(home), GDK_BOOT_LOG=str(tmp_path / 'boots')))
     assert 'invalid inherited engine lease' in refused.stderr, refused.stderr
     assert marker.read_text(encoding='utf-8').strip() == '2'
 
