@@ -42,7 +42,7 @@ both, the legacy pin runs, as it did before the lock existed, and `make` warns y
 time. `GODOT_DEVKIT` set to a command overrides both.
 
 ```sh
-uv add --dev godot-devkit==3.0.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+uv add --dev godot-devkit==3.1.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
 # then add `explicit = true` to the [[tool.uv.index]] table `uv add` wrote
 uv run godot-devkit install-gates     # Makefile.gates + tools/dev/gdk_gate.sh
 uv run godot-devkit install-runners   # Makefile.tiers + the runners
