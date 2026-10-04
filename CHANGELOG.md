@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The engine gate is a counted lease, not one mutex per user (#47). The host has `GDK_ENGINE_GATE_SLOTS` slots (default: cores / 2, at least 1). A run holds `GDK_ENGINE_GATE_WEIGHT` of them (default 1; `all` is every slot; a weight above the count is the count). `integration.sh` `--all`, `--system` and `--diff` weigh `GDK_JOBS`; `--smoke` and a named scenario weigh 1; unit, parse, warnings, spot and scenario weigh 1; an in-place import-cache rebuild weighs `all`. A bad count or weight exits 2. `GDK_ENGINE_GATE_SLOTS=1` is the 3.0 behavior. Still `fcntl.flock` from python3, so no `flock(1)` is needed on macOS. Four concurrent 1 s runs on 8 cores: 4.2 s before, 1.6 s after.
+
 - `lint.sh` runs one gdlint per scan dir, in parallel (#50). `GDK_LINT_JOBS` sets how many at once (default: the core count); a value that is not a whole number above 0 exits 2. The transcript keeps scan-dir order. On a 485-script consumer tree with 8 scan dirs on 8 cores: 8.6 s before, 4.8 s after.
 - The lint receipt keys on every `*.gd`, `gdlintrc` / `.gdlintrc` at the root, and the lint settings (#50). A `.tres` or `.tscn` edit reuses it. New library variable `GDK_RECEIPT_MATCH`: an ERE that narrows a receipt key to the paths it matches.
 - `parse.sh` starts the engine once, not twice (#49). `compile_sweep.gd` boots the main scene after its result line when `GDK_SWEEP_MAIN_SCENE=1`, which only `parse.sh` sets; autoloads already boot under `-s`. A script that will not compile is `FAIL (compile sweep)`; a boot error in the same transcript is `FAIL (boot)`. `GDK_PARSE_BOOT_TIMEOUT` is retired and ignored; `GDK_PARSE_SWEEP_TIMEOUT` bounds the run. About 0.3 s less per cold parse on a 3-script probe project.
