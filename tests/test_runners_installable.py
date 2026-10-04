@@ -1636,3 +1636,79 @@ def test_the_cli_routes_install_gates_and_no_longer_calls_the_old_verbs_agentic_
             with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
                 assert cli.main([verb]) == 2
             assert f'unknown command {verb!r}' in err.getvalue(), err.getvalue()
+
+
+# --- --shard i/n: one slice of the roster for a CI matrix (#67) --------------
+def _shard_fixture(tmp_path: Path, count: int) -> Path:
+    """The stub fan-out, plus a roster of `count` scenarios s01.gd, s02.gd, ...
+    The stand-in runner records each name it is asked to boot in ran.txt."""
+    runner = _fanout_fixture(
+        tmp_path, f'echo "$1" >> "{tmp_path / "ran.txt"}"\necho "[SCENARIO] $1 PASS"\n')
+    tier = tmp_path / 'tests' / 'integration'
+    for k in range(1, count + 1):
+        _touch(tier / ('sub' if k % 2 else '') / f's{k:02d}.gd', 'extends Node\n')
+    return runner
+
+
+def _booted(done: subprocess.CompletedProcess) -> list[str]:
+    record = Path(done.args[1]).parents[3] / 'ran.txt'
+    return record.read_text(encoding='utf-8').split() if record.exists() else []
+
+
+def test_shard_runs_a_stable_count_balanced_slice_and_the_slices_cover_the_roster_once(tmp_path):
+    """Every n in 1, 4, 6: the n slices are disjoint, together they are the
+    whole roster, they differ in size by at most 1, scenario k (from 1, sorted
+    by name) is in shard k mod n, and the same run twice gives the same slice.
+    The verdict line names the shard, and GDK_JOBS=2 still fans out inside it."""
+    total = 13
+    runner = _shard_fixture(tmp_path, total)
+    roster = [f's{k:02d}' for k in range(1, total + 1)]
+    for n in (1, 4, 6):
+        seen: list[str] = []
+        sizes = []
+        for i in range(1, n + 1):
+            done = _slice(runner, '--all', '--shard', f'{i}/{n}')
+            assert done.returncode == 0, done.stdout + done.stderr
+            slice_ = _booted(done)
+            assert sorted(slice_) == roster[i - 1::n], (i, n, slice_)
+            assert f'[INTEGRATION] shard {i}/{n}: {len(slice_)} scenario(s) of {total}' in done.stdout, done.stdout
+            assert f'(of {len(slice_)}); shard {i}/{n} of {total}' in done.stdout, done.stdout
+            assert '2-way parallel' in done.stdout, done.stdout
+            seen += slice_
+            sizes.append(len(slice_))
+        assert sorted(seen) == roster, (n, seen)
+        assert max(sizes) - min(sizes) <= 1, (n, sizes)
+    again = _slice(runner, '--all', '--shard', '2/4')
+    assert sorted(_booted(again)) == roster[1::4]
+    # The env spelling, and the =form, name the same slice; the flag wins.
+    done = _slice(runner, '--all', env={'GDK_SHARD': '3/6'})
+    assert sorted(_booted(done)) == roster[2::6] and 'shard 3/6' in done.stdout, done.stdout
+    done = _slice(runner, '--all', '--shard=1/6', env={'GDK_SHARD': '3/6'})
+    assert sorted(_booted(done)) == roster[0::6], done.stdout
+    # A rerun of the same slice is not answered by another slice's receipt.
+    done = _slice(runner, '--all')
+    assert sorted(_booted(done)) == roster, done.stdout
+
+
+def test_a_shard_past_the_end_of_a_short_roster_passes_with_a_0_scenarios_line(tmp_path):
+    runner = _shard_fixture(tmp_path, 3)
+    done = _slice(runner, '--all', '--shard', '5/6')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[INTEGRATION] shard 5/6: 0 scenario(s) of 3' in done.stdout, done.stdout
+    assert _booted(done) == [], done.stdout
+
+
+def test_a_malformed_shard_or_one_beside_another_mode_exits_2_with_a_reason(tmp_path):
+    runner = _shard_fixture(tmp_path, 3)
+    for bad in ('x', '1', '2/', '/3', '0/4', '5/4', '1/0', '-1/3', '1/2/3', 'a/b', '1.5/3', '1/9999999'):
+        done = _slice(runner, '--all', '--shard', bad)
+        assert done.returncode == 2, (bad, done.stdout, done.stderr)
+        assert 'shard' in done.stderr and _booted(done) == [], (bad, done.stderr)
+    done = _slice(runner, '--all', '--shard')
+    assert done.returncode == 2 and '--shard takes' in done.stderr, done.stderr
+    done = _slice(runner, '--all', env={'GDK_SHARD': '9/4'})
+    assert done.returncode == 2 and 'need 1 <= i <= n' in done.stderr, done.stderr
+    for other in (['--diff', 'HEAD'], ['--system', 'sub'], ['s01'], ['--smoke'], ['--list']):
+        done = _slice(runner, *other, '--shard', '1/2')
+        assert done.returncode == 2, (other, done.stdout, done.stderr)
+        assert 'slices --all only' in done.stderr and _booted(done) == [], (other, done.stderr)

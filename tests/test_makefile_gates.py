@@ -284,3 +284,15 @@ def test_the_gate_library_corpus_passes():
                           text=True, capture_output=True, env={**os.environ, 'GDK_ST_SKIP_TIMING': '1'})
     assert done.returncode == 0, done.stdout + done.stderr
     assert 'SELF-TEST OK' in done.stdout, done.stdout
+
+
+def test_integration_all_passes_gdk_shard_to_the_runner(game):
+    """`make integration-all GDK_SHARD=i/n` is `integration.sh --all --shard i/n`;
+    without it the recipe is the plain `--all` (`make -n`: no engine boots)."""
+    (game / 'Makefile').write_text(GAME_MAKEFILE.split('GDK_PRECOMMIT_TIERS := tier-a')[0],
+                                   encoding='utf-8')
+    done = game_make(game, 'integration-all', '-n', GDK_SHARD='2/6')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert re.search(r'integration\.sh --all --shard 2/6\b', done.stdout), done.stdout
+    done = game_make(game, 'integration-all', '-n')
+    assert re.search(r'integration\.sh --all(?! --shard)', done.stdout), done.stdout
