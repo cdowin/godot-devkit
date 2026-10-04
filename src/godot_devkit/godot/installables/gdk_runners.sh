@@ -290,8 +290,16 @@ gdk_sandbox_home() {
 # entries `git ls-tree -r` lists for those paths (whitespace separated,
 # relative to the cwd). A scenario's `## covers:` path inside an excluded
 # directory is an input all the same, and this is how it counts.
+#
+# GDK_RECEIPT_MATCH, set by a runner, NARROWS the key instead: an ERE over
+# repo-relative paths, and only the tracked and untracked files it matches are
+# the content (GDK_RECEIPT_EXCLUDE does not apply; the match is the whole
+# claim). A tier that reads only some files says which, so an edit to any
+# other file reuses its receipt: lint.sh keys on `*.gd` and the gdlint config
+# alone (#50), where a `.tres` edit once re-linted every script.
 GDK_RECEIPT_EXCLUDE="${GDK_RECEIPT_EXCLUDE-docs pm product .claude .github}"
 GDK_RECEIPT_PATHS="${GDK_RECEIPT_PATHS:-}"
+GDK_RECEIPT_MATCH="${GDK_RECEIPT_MATCH:-}"
 
 # gdk_receipt_key <tier> [args...] — print the key for this tier, these args
 # and the tree as it stands. Status 1, nothing printed, when it cannot key
@@ -310,8 +318,13 @@ gdk_receipt_key() {
 		return 1
 	fi
 	rm -f "$idx"
-	listing="$(git -C "$top" ls-tree "$tree" 2>/dev/null \
-		| awk -F'\t' -v ex=" $GDK_RECEIPT_EXCLUDE " 'index(ex, " " $2 " ") == 0')" || return 1
+	if [ -n "$GDK_RECEIPT_MATCH" ]; then
+		listing="$(git -C "$top" ls-tree -r "$tree" 2>/dev/null \
+			| awk -F'\t' -v re="$GDK_RECEIPT_MATCH" '$2 ~ re')" || return 1
+	else
+		listing="$(git -C "$top" ls-tree "$tree" 2>/dev/null \
+			| awk -F'\t' -v ex=" $GDK_RECEIPT_EXCLUDE " 'index(ex, " " $2 " ") == 0')" || return 1
+	fi
 	if [ -n "${GDK_RECEIPT_PATHS// /}" ]; then
 		local paths=()
 		read -r -a paths <<< "$(printf '%s' "$GDK_RECEIPT_PATHS" | tr '\n\t' '  ')"

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `lint.sh` runs one gdlint per scan dir, in parallel (#50). `GDK_LINT_JOBS` sets how many at once (default: the core count); a value that is not a whole number above 0 exits 2. The transcript keeps scan-dir order. On a 485-script consumer tree with 8 scan dirs on 8 cores: 8.6 s before, 4.8 s after.
+- The lint receipt keys on every `*.gd`, `gdlintrc` / `.gdlintrc` at the root, and the lint settings (#50). A `.tres` or `.tscn` edit reuses it. New library variable `GDK_RECEIPT_MATCH`: an ERE that narrows a receipt key to the paths it matches.
 - `parse.sh` starts the engine once, not twice (#49). `compile_sweep.gd` boots the main scene after its result line when `GDK_SWEEP_MAIN_SCENE=1`, which only `parse.sh` sets; autoloads already boot under `-s`. A script that will not compile is `FAIL (compile sweep)`; a boot error in the same transcript is `FAIL (boot)`. `GDK_PARSE_BOOT_TIMEOUT` is retired and ignored; `GDK_PARSE_SWEEP_TIMEOUT` bounds the run. About 0.3 s less per cold parse on a 3-script probe project.
 
 ## v3.0.2 — 2026-10-04

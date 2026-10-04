@@ -506,6 +506,68 @@ SWEEP_STUB = ('#!/usr/bin/env bash\necho "boot $*" >> "$GDK_STUB_LOG"\n'
               'echo "SWEEP_RESULT $n $n"\n')
 
 
+def test_lint_runs_one_gdlint_per_dir_and_its_receipt_ignores_a_resource_edit(tmp_path):
+    """#50. The lint receipt keyed on the whole tree, so a .tres edit re-linted
+    every script; it keys on *.gd and the gdlint config now. gdlint is
+    single-threaded, so each scan dir is its own gdlint, run in parallel; the
+    transcript keeps scan-dir order, and one dir's finding fails the gate."""
+    root = tmp_path / 'repo'
+    _project(root, INSTALLABLES / 'lint.sh')
+    for name in ('autoloads', 'systems'):
+        (root / name).mkdir()
+        (root / name / 'a.gd').write_text('extends Node\n', encoding='utf-8')
+    (root / 'data').mkdir()
+    (root / 'data' / 'x.tres').write_text('[gd_resource format=3]\n', encoding='utf-8')
+    _commit_all(root)
+    stub = tmp_path / 'bin'
+    stub.mkdir()
+    (stub / 'gdlint').write_text(GDLINT_STUB, encoding='utf-8')
+    (stub / 'gdlint').chmod(0o755)
+    log = tmp_path / 'stub.log'
+    env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
+           'GDK_STUB_LOG': str(log)}
+
+    def lint() -> subprocess.CompletedProcess:
+        return subprocess.run(['bash', 'tools/dev/runners/lint.sh'], cwd=root, text=True,
+                              capture_output=True, env=env)
+
+    def calls() -> list[str]:
+        return sorted(log.read_text(encoding='utf-8').splitlines()) if log.exists() else []
+
+    done = lint()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[LINT] PASS (2 source dir(s): autoloads systems)' in done.stdout, done.stdout
+    assert calls() == ['lint autoloads', 'lint systems'], calls()
+
+    (root / 'data' / 'x.tres').write_text('[gd_resource format=3]\n; edited\n', encoding='utf-8')
+    done = lint()
+    assert done.returncode == 0 and '; reused — receipt' in done.stdout, done.stdout + done.stderr
+    assert len(calls()) == 2, f'a .tres edit re-linted: {calls()}'
+
+    for config in ('gdlintrc', '.gdlintrc'):
+        (root / config).write_text('max-line-length: 100\n', encoding='utf-8')
+        before = len(calls())
+        done = lint()
+        assert done.returncode == 0 and 'reused' not in done.stdout, done.stdout
+        assert len(calls()) == before + 2, f'a {config} edit reused the receipt: {calls()}'
+
+    (root / 'systems' / 'bad.gd').write_text('extends Node\n', encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
+    (stub / 'gdlint').write_text(GDLINT_STUB.replace(
+        'for f; do', 'for f; do case "$f" in systems) echo "$f/bad.gd:1: Error: bad name"; '
+        'echo "Failure: 1 problem found"; exit 1 ;; esac; done\nfor f; do'), encoding='utf-8')
+    done = lint()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'systems/bad.gd:1: Error: bad name' in done.stdout, done.stdout
+    assert '[LINT] FAIL (exit 1) — 2 source dir(s): autoloads systems' in done.stdout, done.stdout
+    transcript = (root / '.gate-reports' / 'lint.log').read_text(encoding='utf-8')
+    assert transcript.index('Success: no problems found') < transcript.index('systems/bad.gd'), \
+        transcript
+    env['GDK_LINT_JOBS'] = 'many'
+    done = lint()
+    assert done.returncode == 2 and 'GDK_LINT_JOBS' in done.stderr, done.stdout + done.stderr
+
+
 def test_spot_checks_only_the_changed_scripts_and_a_scene_only_change_passes_census_0(tmp_path):
     """gdk#45. The builder's check reads the .gd files that differ from the
     merge base with BASE — committed on the branch and untracked alike — and

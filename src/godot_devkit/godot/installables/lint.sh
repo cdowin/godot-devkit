@@ -18,6 +18,16 @@
 # lands. A gate that derives an EMPTY set says so and fails (it cannot tell a
 # clean tree from a broken exclude).
 #
+# ONE gdlint PER SCAN DIR, IN PARALLEL. gdlint is single-threaded, and one
+# process over every dir linted a consumer's 419 scripts in 7.7 s on one core.
+# Each dir is its own gdlint (`xargs -P`, GDK_LINT_JOBS at once); each writes
+# its own file, and the transcript joins them in scan-dir order, so the log
+# reads the same at any job count (#50).
+#
+# THE RECEIPT KEYS ON WHAT gdlint READS: every *.gd and the config
+# (`gdlintrc` / `.gdlintrc` at the root), plus the settings below. A .tres or
+# .tscn edit reuses the receipt; it once re-linted every script (#50).
+#
 # OUTPUT: one verdict line naming .gate-reports/lint.log; on a failure the
 # findings are printed verbatim as well. VERBOSE=1 streams the whole run.
 #
@@ -41,6 +51,8 @@ GDK_LINT_EXCLUDE_RE="${GDK_LINT_EXCLUDE_RE:-^addons/(gut)/}"
 # Top-level dirs whose CHILDREN are scanned individually rather than as one
 # root, so a vendored sibling can be excluded while your own is linted.
 GDK_LINT_NESTED_ROOT="${GDK_LINT_NESTED_ROOT:-addons}"
+# How many gdlint processes run at once. Default: the core count.
+GDK_LINT_JOBS="${GDK_LINT_JOBS:-}"
 # -----------------------------------------------------------------------------
 
 GATE_TAG="LINT"
@@ -49,6 +61,9 @@ SCRIPT_GLOB='*.gd'
 # What a reader came for on a failure: gdlint's per-finding lines and its
 # closing count.
 FINDING_PATTERN='Error:|^Failure:'
+# The files gdlint reads, as an ERE for the receipt key (GDK_RECEIPT_MATCH in
+# gdk_runners.sh): every script, and gdlint's config at the repo root.
+LINT_INPUT_RE='[.]gd$|^[.]?gdlintrc$'
 
 usage() {
 	cat <<'USAGE_EOF'
@@ -65,6 +80,7 @@ derived from git's index rather than from a list somebody maintains.
 Env: GDK_LINT_CMD          the linter to run (default `gdlint`)
      GDK_LINT_EXCLUDE_RE   ERE of tracked paths to leave alone
      GDK_LINT_NESTED_ROOT  top-level dir whose children scan individually
+     GDK_LINT_JOBS         gdlint processes at once (default: core count)
      GDK_RUNNERS_LIB       path to gdk_runners.sh, relative to this file
      VERBOSE=1             stream the transcript to the console too
 Exit: 0 clean | 1 findings | 2 harness/usage error
@@ -84,6 +100,34 @@ lint_scan_dirs() {
 			{ print $1 }
 		' \
 		| sort -u
+}
+
+# --- one gdlint per dir, in parallel ------------------------------------------
+# lint_dirs <dir>... — run "$GDK_LINT_CMD" once per dir, GDK_LINT_JOBS (set
+# and checked by the main flow) at a time. Prints each dir's output in argument order and returns the first
+# non-zero gdlint exit in that order (0 when every dir is clean). xargs is
+# POSIX; -0 and -P are in both the BSD (macOS) and GNU builds.
+# shellcheck disable=SC2329  # invoked through gdk_gate_capture
+lint_dirs() {
+	local out i rc=0 one
+	out="$(mktemp -d "${TMPDIR:-/tmp}/gdk-lint.XXXXXX")" || return 2
+	# One dir: $0 the linter, $1 its index, $2 the dir. The inner sh expands.
+	# shellcheck disable=SC2016
+	local per_dir='"$0" "$2" > "$GDK_LINT_OUT/$1.log" 2>&1; echo "$?" > "$GDK_LINT_OUT/$1.rc"'
+	i=0
+	for one in "$@"; do
+		printf '%s\0%s\0' "$i" "$one"
+		i=$((i + 1))
+	done | GDK_LINT_OUT="$out" xargs -0 -n 2 -P "$GDK_LINT_JOBS" sh -c "$per_dir" "$GDK_LINT_CMD"
+	i=0
+	for one in "$@"; do
+		cat "$out/$i.log" 2>/dev/null
+		one="$(cat "$out/$i.rc" 2>/dev/null || echo 2)"
+		[ "$rc" -ne 0 ] || rc="$one"
+		i=$((i + 1))
+	done
+	rm -rf "$out"
+	return "$rc"
 }
 
 # --- --self-test -------------------------------------------------------------
@@ -199,9 +243,23 @@ if [ "${#SCAN_DIRS[@]}" -eq 0 ]; then
 	exit 2
 fi
 
+if [ -z "$GDK_LINT_JOBS" ]; then
+	GDK_LINT_JOBS="$( (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) )"
+fi
+case "$GDK_LINT_JOBS" in
+	''|*[!0-9]*|0)
+		echo "[$GATE_TAG] GDK_LINT_JOBS must be a whole number above 0, got '$GDK_LINT_JOBS'" >&2
+		exit 2 ;;
+esac
+
 # A receipt over these exact inputs is the proof already bought (gdk_runners.sh,
 # proof receipts).
-RECEIPT_KEY="$(gdk_receipt_key lint "$GDK_LINT_CMD")" || RECEIPT_KEY=""
+# The key reads only what gdlint reads (LINT_INPUT_RE), plus the settings
+# that choose what it lints.
+# shellcheck disable=SC2034  # read by gdk_receipt_key, in the sourced library
+GDK_RECEIPT_MATCH="$LINT_INPUT_RE"
+RECEIPT_ARGS=("$GDK_LINT_CMD" "$GDK_LINT_EXCLUDE_RE" "$GDK_LINT_NESTED_ROOT")
+RECEIPT_KEY="$(gdk_receipt_key lint "${RECEIPT_ARGS[@]}")" || RECEIPT_KEY=""
 if gdk_receipt_hit lint "$RECEIPT_KEY"; then
 	exit 0
 fi
@@ -210,7 +268,7 @@ LOG="$(gdk_gate_log "$GATE_SLOT")"
 # The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
 # one PASS below says otherwise.
 export GDK_GATE_VERDICT=FAIL
-gdk_gate_capture "$LOG" -- "$GDK_LINT_CMD" "${SCAN_DIRS[@]}"
+gdk_gate_capture "$LOG" -- lint_dirs "${SCAN_DIRS[@]}"
 LINT_EXIT="$GDK_GATE_EXIT"
 
 if [ "$LINT_EXIT" -ne 0 ]; then
@@ -223,5 +281,5 @@ fi
 GDK_GATE_VERDICT=PASS
 gdk_gate_verdict "$GATE_TAG" \
 	"PASS (${#SCAN_DIRS[@]} source dir(s): ${SCAN_DIRS[*]})" "$LOG"
-gdk_receipt_write lint "$RECEIPT_KEY" "[$GATE_TAG] PASS (${#SCAN_DIRS[@]} source dir(s): ${SCAN_DIRS[*]})" "$GDK_LINT_CMD"
+gdk_receipt_write lint "$RECEIPT_KEY" "[$GATE_TAG] PASS (${#SCAN_DIRS[@]} source dir(s): ${SCAN_DIRS[*]})" "${RECEIPT_ARGS[@]}"
 exit 0
