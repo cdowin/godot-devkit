@@ -301,7 +301,7 @@ class ConfigValuesCrossTheGuards(unittest.TestCase):
 
     def test_an_absent_key_takes_the_fallback_rather_than_refusing(self):
         # The other direction, and the reason the guards cannot simply refuse
-        # everything: rule 5 — a repo with no devkit.toml behaves identically
+        # everything: rule 5 — a repo with no godot-devkit.toml behaves identically
         # to one declaring the defaults.
         from godot_devkit.core import config
         self.assertEqual(('d',), config.str_tuple({}, 's', 'k', ('d',)))
@@ -310,7 +310,7 @@ class ConfigValuesCrossTheGuards(unittest.TestCase):
         self.assertEqual(1, config.number({}, 's', 'k', 1))
 
 
-# --- the README's `devkit.toml` block against the keys the readers accept.
+# --- the README's `godot-devkit.toml` block against the keys the readers accept.
 # A consumer copies that block before writing config; a key absent from it is
 # guessed at, and `[unit_disk] forbidden_literals` — a TABLE beside a LIST-shaped
 # `exclude_prefixes` — was guessed as a list by the first consumer to need it.

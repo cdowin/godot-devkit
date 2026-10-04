@@ -9,7 +9,7 @@
 # `make check`'s `godot-check` member (Makefile.tiers, `$(GODOT_DEVKIT) check
 # all`) reaches the package through THIS command: the fixture project staged
 # into a throwaway git repo — the way the test suite stages every fixture —
-# with no devkit.toml, so the roster it runs is the STOCK one, and the tree
+# with no godot-devkit.toml, so the roster it runs is the STOCK one, and the tree
 # under test is never this checkout edited in place.
 #
 # Any argv goes through: `bash tools/dev/godot_devkit_on_fixture.sh check uid`

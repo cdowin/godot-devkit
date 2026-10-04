@@ -3,7 +3,7 @@
 Two contracts, one per class of defect the 2026-08-30 audit found:
 
   * every config value goes through `core/config.py`'s guards, so a bad
-    `devkit.toml` value is ALWAYS exit 2 — never a traceback (the import-time
+    `godot-devkit.toml` value is ALWAYS exit 2 — never a traceback (the import-time
     read in autoloads.py), never silently ignored (the unwired `[refs]` /
     `[orphans]` sections), and never a bare string iterated characterwise;
   * an unusable tree (no `project.godot`, no git repo) is a REFUSAL with a
@@ -47,7 +47,7 @@ def run_in(module, argv=(), toml=None, only=None):
     """`run_main` in a throwaway repo, under `toml` if given."""
     with temp_repo('read_repo', only=only) as root:
         if toml:
-            (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
         return run_main(module, argv)
 
 
@@ -96,7 +96,7 @@ BAD_CONFIG = (
 
 class ConfigThroughCore(unittest.TestCase):
     def test_no_config_equals_declaring_the_defaults(self) -> None:
-        # Rule 5: a repo with NO devkit.toml behaves byte-identically to one
+        # Rule 5: a repo with NO godot-devkit.toml behaves byte-identically to one
         # declaring the stock defaults — for every verb that reads a section.
         for module, argv, declared_toml in DECLARED_DEFAULTS:
             self.assertEqual(run_in(module, argv)[1],
@@ -113,7 +113,7 @@ class ConfigThroughCore(unittest.TestCase):
         # ConfigError handler — a bad `[autoloads]` value stack-traced while
         # cli.py was still importing.
         with temp_repo('read_repo') as root:
-            (root / 'devkit.toml').write_text('autoloads = 5\n', encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text('autoloads = 5\n', encoding='utf-8')
             done = run_cli(root, 'autoloads')
         self.assertEqual(done.returncode, 2, done.stderr)
         self.assertIn('must be a table', done.stderr)

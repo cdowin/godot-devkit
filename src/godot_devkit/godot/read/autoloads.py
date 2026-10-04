@@ -7,7 +7,7 @@ lifecycle owner must NOT be a *Registry. This parses `project.godot
 [autoload]`, then for each autoload compares two independent signals:
 
   * the NAME suffix — the *declared* class (override the vocabulary via
-    `[autoloads] suffixes` in devkit.toml):
+    `[autoloads] suffixes` in godot-devkit.toml):
       Registry  read-only data lookup (no signals)
       Manager   stateful service that owns state + emits signals
       Tracker   passive observer: subscribes to signals, emits none of its own
@@ -19,13 +19,13 @@ lifecycle owner must NOT be a *Registry. This parses `project.godot
 
 When the two disagree (a *Service that emits, a *Manager with no signal) the
 row is flagged for review. Each script's path is also cross-checked against
-the expected layout (`[autoloads] expected_prefixes` in devkit.toml). Pure
+the expected layout (`[autoloads] expected_prefixes` in godot-devkit.toml). Pure
 parse — never writes, never boots Godot.
 
     make autoloads
     python3 tools/dev/introspect/autoloads.py
 
-devkit.toml: [autoloads] suffixes = { Manager = "emits", Store = ["inert"] }
+godot-devkit.toml: [autoloads] suffixes = { Manager = "emits", Store = ["inert"] }
                          expected_prefixes = ["autoloads/", ...]
              (each value replaces its default wholesale; a suffix maps to the
               bucket(s) — emits / relays / inert — consistent with its contract)
@@ -66,7 +66,7 @@ BUCKETS = (EMITS, RELAYS, INERT)
 
 # --- Declared classes (the name-suffix vocabulary) ---------------------------
 # Each suffix maps to the set of heuristic buckets consistent with its
-# contract; `[autoloads] suffixes` in devkit.toml replaces this wholesale.
+# contract; `[autoloads] suffixes` in godot-devkit.toml replaces this wholesale.
 DEFAULT_SUFFIXES: dict[str, tuple[str, ...]] = {
     'Manager': (EMITS,),
     'Tracker': (RELAYS,),
@@ -80,7 +80,7 @@ NO_SUFFIX = '(no recognized suffix)'
 @dataclass(frozen=True)
 class Settings:
     """The resolved `[autoloads]` config — loaded at CALL time, never at
-    import: a bad devkit.toml value must be exit 2, not a traceback while
+    import: a bad godot-devkit.toml value must be exit 2, not a traceback while
     `cli.py` is still importing modules."""
     suffix_expect: dict[str, set[str]]
     expected_prefixes: tuple[str, ...]

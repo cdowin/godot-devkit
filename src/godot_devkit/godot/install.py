@@ -1,18 +1,19 @@
-"""install.py — `install-runners`: the Godot kit's one installer.
+"""install.py — the Godot kit's two installers.
 
     install-runners  the sandboxed headless-run shell library, the runners
                      that source it, the compile sweep they boot (with the
                      `.uid` sidecar the engine would otherwise mint), the
-                     engine-boot guard for Claude Code, and the CI
-                     toolchain action. Every function is `gdk_*` — the per-project
-                     `<project>_*` forks this replaces are what drifted, so a
-                     consumer keeping its own prefix is a second name for the
-                     same fact and is not supported.
+                     engine-boot guard for Claude Code, the CI toolchain
+                     action, and Makefile.tiers. Every function is `gdk_*` —
+                     the per-project `<project>_*` forks this replaces are
+                     what drifted, so a consumer keeping its own prefix is a
+                     second name for the same fact and is not supported.
+    install-gates    the gate framework: Makefile.gates (`help`, `check`,
+                     `precommit`, `verify`, the capture define, the tier seam)
+                     and tools/dev/gdk_gate.sh, the capture library it sources.
 
-The gate FRAMEWORK — `check`, `precommit`, `milestone`, the capture helper,
-`[gates] extra` — is agentic-sdlc's, and a consumer gets it from that pin
-(`agentic-sdlc install-gates`). This verb writes what a Godot project adds on
-top of that framework, and nothing that framework already owns.
+A game needs these two verbs and nothing from agentic-sdlc to run `make
+check`, `make precommit` and `make verify`.
 
 The verb writes the file. Once. If the destination is already there and is not
 byte-for-byte what would be written, the command REFUSES, names the path, and
@@ -112,22 +113,54 @@ PLAN: tuple[tuple[str, str], ...] = (
     # the guard and the door it points at are one install.
     ('cc-godot-sandbox.sh', 'tools/hooks/cc-godot-sandbox.sh'),
     # The Godot TOOLCHAIN for CI: a composite action the consumer's verify.yml
-    # (agentic-sdlc's `install-ci`, which leaves its toolchain slot empty)
     # calls in one step — the engine line from project.godot, gdlint and
     # shellcheck at pinned versions, and an import pass. The workflow itself
-    # stays the agentic kit's; this is only what fills the slot. The old
+    # stays the consumer's; this is only what fills the slot. The old
     # uid-guard.yml is NOT here: `check uid` reaches `make check` (and so
-    # `make milestone`) through `godot-check`, when `[gates] extra` names it
+    # `make verify`) through `godot-check`, when GDK_CHECKS names it
     # (see RETIRED).
     ('ci-godot-toolchain.yml', '.github/actions/godot-toolchain/action.yml'),
     # The CALLERS, at the repo root: the Godot target roster, on the seam
-    # agentic-sdlc's Makefile.devkit `-include`s, declaring which tiers
-    # `precommit` and `milestone` run. It ships with the runners rather than
+    # Makefile.gates `-include`s (`install-gates`), declaring which tiers
+    # `precommit` and `verify` run. It ships with the runners rather than
     # under a verb of its own because neither half is usable alone — the
     # runners are unreachable without targets pointing at them, and every
     # target here is dead without its runner. One verb, one working `make`.
     ('Makefile.tiers', 'Makefile.tiers'),
 )
+
+GATES_COMMAND = 'install-gates'
+
+# The gate framework, and the capture library its recipes (and every runner)
+# source. Both sit where Makefile.gates and gdk_runners.sh default to look.
+GATES_PLAN: tuple[tuple[str, str], ...] = (
+    ('Makefile.gates', 'Makefile.gates'),
+    ('gdk_gate.sh', 'tools/dev/gdk_gate.sh'),
+)
+
+GATES_USAGE = """usage: godot-devkit install-gates [--force] [--diff]
+
+Writes Makefile.gates at the repo root — the gate framework: `help`, `check`,
+`precommit` and `verify`, the `gdk_gate` capture define, and the tier seam it
+`-include`s (Makefile.tiers, from `install-runners`) — and tools/dev/gdk_gate.sh,
+the shell library it sources: quiet capture, one verdict line naming
+.gate-reports/<gate>.log, a bounded-run contract. `bash tools/dev/gdk_gate.sh
+--self-test` runs its corpus.
+
+Your Makefile sets what is yours, then includes the framework:
+
+    GDK_CHECKS := godot-check          # make targets that join `check`
+    include Makefile.gates
+
+`check` runs `shell` (shellcheck over every tracked *.sh) and then each target
+in GDK_CHECKS. `precommit` = `check` + GDK_PRECOMMIT_TIERS. `verify` = `check`
++ GDK_VERIFY_TIERS, less GDK_VERIFY_SKIP. The tier lists come from
+Makefile.tiers. `milestone` is a deprecated alias of `verify` (removed in 4.0).
+
+A destination that already exists and differs is REFUSED — that file, not the
+roster: the entries with nothing in their way are written, every collision is
+named, and the run exits 1 because a replacement was withheld. --force
+overwrites the whole file. --diff prints what would change and writes nothing."""
 
 USAGE = """usage: godot-devkit install-runners [--force] [--diff]
 
@@ -151,21 +184,20 @@ the toolchain slot of your .github/workflows/verify.yml: the engine (MAJOR.MINOR
 from project.godot, the patch from its `godot-patch` input), gdlint and
 shellcheck at pinned versions, and an import pass (the run prints the step to
 paste). .github/workflows/uid-guard.yml is no longer written. An existing
-copy is left in place and named as retired: safe to delete when `[gates]
-extra` names `godot-check` and `[checks] godot` keeps `uid` (then `check uid`
-runs in `make check`), and to keep otherwise.
+copy is left in place and named as retired: safe to delete when GDK_CHECKS
+names `godot-check` and `[roster] checks` keeps `uid` (then `check uid` runs
+in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint spot warnings unit integration scenario capture
-import-cache hermetic-scan …), `godot-check` (`check all`, for `[gates] extra`), and the
-GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS lists the include's compositions
-run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
+import-cache hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
+the GDK_PRECOMMIT_TIERS / GDK_VERIFY_TIERS lists the gate framework's
+compositions run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
 (the run prints the pyproject.toml block that locks it), or — the legacy
 pin, which wins with a warning when both are present — the tag
 GODOT_DEVKIT_VERSION names in your Makefile. Keep one.
 
-The gate framework (`check`, `precommit`, `milestone`, Makefile.devkit) is
-agentic-sdlc's: pin that package and run its `install-gates`; its include
-`-include`s Makefile.tiers.
+The gate framework (`check`, `precommit`, `verify`, Makefile.gates) comes from
+`godot-devkit install-gates`; its include `-include`s Makefile.tiers.
 
 A destination that already exists and differs is REFUSED — that file, not the
 roster: the entries with nothing in their way are written, every collision is
@@ -188,11 +220,11 @@ NEXT_STEP = (
     '`uv sync`, which writes the uv.lock Makefile.tiers reads: once it names '
     'the kit, make runs `uv run --frozen godot-devkit` (the legacy pin, '
     '`GODOT_DEVKIT_VERSION := <tag>` in your Makefile above `include '
-    'Makefile.devkit`, still works and wins with a warning; keep one) '
-    '— then `include Makefile.devkit` (agentic-sdlc\'s `install-gates`; it '
-    '`-include`s Makefile.tiers, where the Godot targets live) and join the '
-    'Godot checks to `make check` with `[gates] extra = ["godot-check"]` in '
-    'devkit.toml — never a fork of the include. Then gitignore .gate-reports/, '
+    'Makefile.gates`, still works and wins with a warning; keep one) '
+    '— then `godot-devkit install-gates`, set `GDK_CHECKS := godot-check` in '
+    'your Makefile and `include Makefile.gates` (it `-include`s '
+    'Makefile.tiers, where the Godot targets live) — never a fork of the '
+    'include. Then gitignore .gate-reports/, '
     '.scenario-reports/, .capture-reports/ and .headless-userdata/. Every '
     '`.sh` here is written EXECUTABLE, so a target may call it either way — '
     'the stock recipes say `bash tools/dev/runners/<x>.sh`, which also works '
@@ -222,8 +254,7 @@ godot-devkit = {{ index = "cdowin" }}'''
 
 # The step that calls the toolchain action, for the toolchain slot of the
 # consumer's `.github/workflows/verify.yml`. PRINTED, not written: that
-# workflow is agentic-sdlc's `install-ci` output and the consumer's after the
-# write, so this verb does not edit it. The patch is a placeholder because it
+# workflow is the consumer's, so this verb does not edit it. The patch is a placeholder because it
 # is the one thing project.godot does not carry.
 TOOLCHAIN_STEP = ('      - uses: ./.github/actions/godot-toolchain\n'
                   '        with: { godot-patch: "<n>" }')
@@ -240,30 +271,25 @@ RETIRED: tuple[str, ...] = (UID_GUARD,)
 def retired_line(rel: str) -> str:
     """The `[install] retired:` line for one retired destination.
 
-    CONDITIONAL on the consumer's devkit.toml. `uid-scan` is NOT a tier of
-    `make milestone` (GDK_MILESTONE_TIERS); `check uid` reaches `make check`,
-    and so `make milestone`, only through `godot-check` — and only when
-    `[gates] extra` names it and `[checks] godot` keeps `uid`. "Safe to
-    delete" said to any other repo removes its only CI uid gate, and nothing
-    would say so. The roster is `all_roster()`, the one `check all` reads: an
-    absent key is all eight, and a malformed value or an unknown gate raises
-    ConfigError (exit 2) here exactly as it does there (#28).
+    CONDITIONAL on the consumer's godot-devkit.toml. `check uid` reaches
+    `make check`, and so `make verify`, only through `godot-check` — and only
+    when GDK_CHECKS names it (a Makefile variable this verb cannot read) and
+    `[roster] checks` keeps `uid`. "Safe to delete" said to any other repo
+    removes its only CI uid gate, and nothing would say so. The roster is
+    `all_roster()`, the one `check all` reads: an absent key is all eight, and
+    a malformed value or an unknown gate raises ConfigError (exit 2) here
+    exactly as it does there (#28).
     """
     head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
-    extra = str_tuple(config_section('gates'), 'gates', 'extra', ())
     roster = all_roster()
-    if 'godot-check' not in extra:
-        return (head + '`check uid` is NOT in this repo\'s gate: `[gates] '
-                'extra` does not name `godot-check`; it was left in place — '
-                'keep it, or add "godot-check" to `[gates] extra` in '
-                'devkit.toml')
     if 'uid' not in roster:
-        return (head + '`check uid` is NOT in this repo\'s gate: `[checks] '
-                'godot` leaves `uid` out; it was left in place — keep it, or '
-                'add "uid" to `[checks] godot` in devkit.toml')
+        return (head + '`check uid` is NOT in this repo\'s gate: `[roster] '
+                'checks` leaves `uid` out; it was left in place — keep it, or '
+                'add "uid" to `[roster] checks` in godot-devkit.toml')
     return (head + '`check uid` runs in `make check` through `godot-check`, '
-            'which `[gates] extra` names; it was left in place and is safe '
-            'to delete')
+            'when GDK_CHECKS in your Makefile names it; it was left in place '
+            'and is safe to delete once it does')
+
 
 # The `.claude/settings.json` entry that FIRES the engine-boot guard. PRINTED,
 # not written: `.claude/settings.json` is a hand-maintained file with
@@ -484,17 +510,30 @@ def print_diff(rel: str, target: Path, body: str) -> None:
         fromfile=f'a/{rel}', tofile=f'b/{rel}'))
 
 
-def _defect_refusal(defects: list[str], wrote: list[str]) -> str:
+def _defect_refusal(defects: list[str], wrote: list[str],
+                    command: str = COMMAND) -> str:
     listed = '\n'.join(f'    {d}' for d in defects)
     what = ('nothing was written' if not wrote else
             'ALREADY WRITTEN before this was reached: ' + ', '.join(wrote))
-    return (f'godot-devkit {COMMAND}: {len(defects)} destination(s) cannot be '
+    return (f'godot-devkit {command}: {len(defects)} destination(s) cannot be '
             f'written:\n{listed}\n'
-            f'godot-devkit {COMMAND}: {what}. Fix the path(s) and re-run — the '
+            f'godot-devkit {command}: {what}. Fix the path(s) and re-run — the '
             f'command is idempotent.')
 
 
 def main(argv: list[str]) -> int:
+    """`install-runners`."""
+    return _install(argv, COMMAND, PLAN, USAGE, runners=True)
+
+
+def main_gates(argv: list[str]) -> int:
+    """`install-gates`."""
+    return _install(argv, GATES_COMMAND, GATES_PLAN, GATES_USAGE, runners=False)
+
+
+def _install(argv: list[str], command: str,
+             plan_spec: tuple[tuple[str, str], ...], usage: str,
+             runners: bool) -> int:
     force = False
     diff = False
     for arg in argv:
@@ -503,16 +542,16 @@ def main(argv: list[str]) -> int:
         elif arg == '--diff':
             diff = True
         elif arg in ('-h', '--help', 'help'):
-            print(USAGE)
+            print(usage)
             return 0
         else:
-            print(f'godot-devkit {COMMAND}: unknown flag {arg!r}',
+            print(f'godot-devkit {command}: unknown flag {arg!r}',
                   file=sys.stderr)
-            print(USAGE, file=sys.stderr)
+            print(usage, file=sys.stderr)
             return 2
 
     root = repo_root()
-    entries = [(root / rel, rel, body_of(name)) for name, rel in PLAN]
+    entries = [(root / rel, rel, body_of(name)) for name, rel in plan_spec]
 
     # --diff reads and prints. It is never combined with a write, so it is
     # answered before the plan is decided rather than inside it.
@@ -521,14 +560,14 @@ def main(argv: list[str]) -> int:
             print_diff(rel, target, body)
         return 0
 
-    # The retired lines read devkit.toml, so they are decided BEFORE any
+    # The retired lines read godot-devkit.toml, so they are decided BEFORE any
     # write: a malformed value is exit 2 with nothing written, never a crash
     # after the files landed.
     try:
-        retired = [retired_line(rel) for rel in RETIRED
-                   if (root / rel).exists()]
+        retired = ([retired_line(rel) for rel in RETIRED
+                    if (root / rel).exists()] if runners else [])
     except ConfigError as err:
-        print(f'godot-devkit {COMMAND}: {err} — nothing was written',
+        print(f'godot-devkit {command}: {err} — nothing was written',
               file=sys.stderr)
         return 2
 
@@ -577,9 +616,9 @@ def main(argv: list[str]) -> int:
         if collisions:
             head, tail = collision_refusal(collisions,
                                            header_only=header_only)
-            print(f'godot-devkit {COMMAND}: {head}\n'
-                  f'godot-devkit {COMMAND}: {tail}', file=sys.stderr)
-        print(_defect_refusal(defects, []), file=sys.stderr)
+            print(f'godot-devkit {command}: {head}\n'
+                  f'godot-devkit {command}: {tail}', file=sys.stderr)
+        print(_defect_refusal(defects, [], command), file=sys.stderr)
         return 1
 
     # ONE plan, decided above and applied here. `core.apply` returns what
@@ -603,7 +642,7 @@ def main(argv: list[str]) -> int:
             break
     if result.failed is not None:
         print(_defect_refusal([f'{result.failed.label} could not be written '
-                               f'({result.error})'], written),
+                               f'({result.error})'], written, command),
               file=sys.stderr)
         return 1
     # After the writes, and named against what actually landed. Before the
@@ -612,11 +651,16 @@ def main(argv: list[str]) -> int:
     if collisions:
         head, tail = collision_refusal(collisions, wrote=written,
                                        header_only=header_only)
-        print(f'godot-devkit {COMMAND}: {head}\n'
-              f'godot-devkit {COMMAND}: {tail}', file=sys.stderr)
+        print(f'godot-devkit {command}: {head}\n'
+              f'godot-devkit {command}: {tail}', file=sys.stderr)
     for line in retired:
         print(line)
-    if written:
+    if written and not runners:
+        print(f'[install] next: in your Makefile, set `GDK_CHECKS := '
+              f'<make targets that join check>` and `include Makefile.gates` '
+              f'(it `-include`s Makefile.tiers from install-runners); '
+              f'gitignore .gate-reports/')
+    elif written:
         print(f'[install] {NEXT_STEP}')
         # Raw, unprefixed, so it pastes whole into pyproject.toml.
         print(f'\npyproject.toml — godot-devkit, locked (then `uv sync`; '

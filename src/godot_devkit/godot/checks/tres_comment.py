@@ -19,7 +19,7 @@ and packed data as one-line base64, so a real newline followed by a column-0
 `;` cannot occur inside a value the engine wrote. `addons/` is excluded by
 default: vendored plugin resources are not ours to rewrite.
 
-devkit.toml:
+godot-devkit.toml:
 
     [tres_comment]
     exclude_prefixes = ["addons/", "tests/fixtures/"]

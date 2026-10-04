@@ -43,11 +43,10 @@
 #                             (a parallel scenario runner giving each job one).
 #                             Honored verbatim: not reaped, not destroyed.
 #   VERBOSE=1                 stream every captured gate to the console too.
-#   GDK_GATE_LIB              agentic-sdlc's gdk_gate.sh — the gate framework's
-#                             library, which owns the ledger's cost row. Stock:
-#                             beside this file, where `install-gates` puts it;
-#                             Makefile.tiers exports the include's value.
-#   GDK_LEDGER_CMD            set by the include; empty files no cost row.
+#   GDK_GATE_LIB              gdk_gate.sh — the gate framework's capture library
+#                             (`godot-devkit install-gates`). Stock: beside this
+#                             file, where `install-gates` puts it; Makefile.tiers
+#                             exports the include's value.
 # -----------------------------------------------------------------------------
 
 # Guard against double-sourcing: a wrapper may source us once, and some chains
@@ -75,7 +74,6 @@ GDK_TIMEOUT_KILL_AFTER="${GDK_TIMEOUT_KILL_AFTER:-5s}"
 GDK_SANDBOX_DIRNAME="${GDK_SANDBOX_DIRNAME:-.headless-userdata}"
 GDK_GODOT="${GDK_GODOT:-godot}"
 GDK_GATE_LIB="${GDK_GATE_LIB:-$(dirname "${BASH_SOURCE[0]}")/gdk_gate.sh}"
-GDK_LEDGER_CMD="${GDK_LEDGER_CMD:-}"
 
 # THE INDEX LOCK. A read-only `git status` / `git diff` still refreshes the
 # index when it can, and takes .git/index.lock to do it; a gate killed
@@ -283,10 +281,9 @@ gdk_sandbox_home() {
 # Receipts live in the git COMMON dir (`<common>/godot-devkit/receipts/`), so
 # every worktree of one clone shares them: a builder's green unit run covers the
 # lead's checkout after a merge whose content is byte-identical. A FAIL is never
-# recorded. A run whose inputs moved while it ran records nothing. A reused run
-# files no cost row: it measured nothing. An unwrapped runner opens no slot; a
-# runner a Makefile wraps in `gdk_gate` is told the file GDK_GATE_UNMEASURED
-# names, and a hit creates it, so the wrapper files no row either.
+# recorded. A run whose inputs moved while it ran records nothing. A hit
+# creates the file GDK_GATE_UNMEASURED names, when one is named (nothing in
+# 3.0 reads it; 2.x filed a cost row from it).
 # GDK_RECEIPTS=0 runs every tier.
 #
 # GDK_RECEIPT_PATHS, set by a runner, joins more content to the key: the
@@ -746,52 +743,12 @@ gdk_run_bounded() {
 # handful of gate names — so the directory is bounded BY CONSTRUCTION and there
 # is no reaper anyone can forget to call.
 #
-# THE COST ROW. A runner that publishes its own verdict (parse, lint, warnings,
-# unit) is not wrapped in the include's `gdk_gate` — a gate wrapped twice
-# reports the wrapper's summary — so the ledger row the wrapper would have
-# filed is filed from here: gdk_gate_log starts the row's clock and
-# gdk_gate_verdict closes it, each by handing the same call to agentic-sdlc's
-# gdk_gate.sh (GDK_GATE_LIB) in a subshell whose stdout is discarded. `$$` is
-# this shell's in every subshell, so the open and the close agree on the slot.
-# The runner names the outcome in GDK_GATE_VERDICT (PASS|FAIL|HANG) and may
-# name a count in GDK_GATE_CENSUS; a runner that names no outcome files no row
-# (the library says so on stderr), and nothing is filed without
-# GDK_LEDGER_CMD. A runner the Makefile DOES wrap never calls these two: its
-# wrapper files the row.
-
-# _gdk_cost_row <gdk_gate.sh function> <arg...> — the call, for the row alone.
-# Never a gate failure: a missing library is one note on stderr, at the close.
-_gdk_cost_row() {
-	[ -n "$GDK_LEDGER_CMD" ] || return 0
-	if [ ! -f "$GDK_GATE_LIB" ]; then
-		[ "$1" != gdk_gate_verdict ] || printf '%s: no gate library at %s (set GDK_GATE_LIB) — no cost row for this gate\n' \
-			"$GDK_LIB_TAG" "$GDK_GATE_LIB" >&2
-		return 0
-	fi
-	# The library must define the call itself: with this file's own wrapper
-	# still in scope, a library that lacks it would re-enter here forever. Its
-	# double-source guard is cleared too, or a wrapper that sourced it first
-	# would get an early return and no row.
-	# shellcheck source=/dev/null
-	( unset -f gdk_gate_log gdk_gate_verdict; unset _GDK_GATE_SOURCED
-	  . "$GDK_GATE_LIB" || exit 0
-	  if declare -F "$1" >/dev/null; then
-		"$@"
-	  elif [ "$1" = gdk_gate_verdict ]; then
-		printf '%s: %s defines no %s — no cost row for this gate\n' \
-			"$GDK_LIB_TAG" "$GDK_GATE_LIB" "$1" >&2
-	  fi ) >/dev/null || true
-	return 0
-}
-
-# gdk_gate_log <gate> — echo this run's transcript path, cleared and ready;
-# the cost row's clock starts here.
+# gdk_gate_log <gate> — echo this run's transcript path, cleared and ready.
 gdk_gate_log() {
 	local gate="${1:?usage: gdk_gate_log <gate>}"
 	mkdir -p "$GDK_GATE_REPORT_DIR"
 	local path="$GDK_GATE_REPORT_DIR/$gate.log"
 	: > "$path"
-	_gdk_cost_row gdk_gate_log "$gate"
 	printf '%s\n' "$path"
 }
 
@@ -841,12 +798,9 @@ gdk_gate_publish() {
 # The ONE shape a gate's result line takes, so the transcript is always named
 # in the same place and a failing run is one `sed -n` away:
 #   [TAG] <message> — full log: <path>
-# The cost row is closed AFTER the line, so nothing the ledger says can land
-# ahead of the verdict.
 gdk_gate_verdict() {
 	printf '[%s] %s — full log: %s\n' \
 		"${1:?usage: gdk_gate_verdict <TAG> <message> <log>}" "${2-}" "${3-}"
-	_gdk_cost_row gdk_gate_verdict "$1" "${2-}" "${3-}"
 }
 
 # --- the compile-sweep transcript --------------------------------------------
@@ -985,10 +939,6 @@ _gdk_self_test() {
 	# the whole run — streamed the cap case's eight bytes straight into this
 	# corpus's own verdict line (`01234567[gdk-runners] SELF-TEST OK …`).
 	VERBOSE=0
-	# Same reason, and worse: `make runners-self-test` exports the include's
-	# GDK_LEDGER_CMD, and every gdk_gate_log/verdict below would file a cost
-	# row for a gate that never ran.
-	GDK_LEDGER_CMD=''
 	# Re-read it from the shell: a TMPDIR with a trailing slash yields `//` in
 	# the mktemp path, and every prefix comparison below would silently miss.
 	scratch="$PWD"

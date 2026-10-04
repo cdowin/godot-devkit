@@ -55,13 +55,12 @@ RUNNER_REL = 'tools/dev/runners/integration.sh'
 CAPTURE = 'tests/integration/thing_capture.gd'
 SUPPORT_STUB = 'tests/integration/support/stub.gd'
 KEEP_LIST = {'GDK_CAPTURE_GATE_RE': '^(thing_capture)$'}
-# The consumer's Makefile: the two pins and the include. The include is
-# agentic-sdlc's (its v0.2.0 `install-gates` output, vendored under
-# tests/fixtures/ — rule 8) and it `-include`s the tier file `install-runners`
-# writes, which is where `integration-list` lives.
-CONSUMER_MAKEFILE = ('DEVKIT_VERSION := v0.0.0\nGODOT_DEVKIT_VERSION := v0.0.0\n'
-                     'include Makefile.devkit\n')
-INCLUDE = REPO_ROOT / 'tests' / 'fixtures' / 'agentic_sdlc' / 'Makefile.devkit'
+# The consumer's Makefile: the pin and the include. The include is this
+# package's own `install-gates` output (Makefile.gates), and it `-include`s the
+# tier file `install-runners` writes, which is where `integration-list` lives.
+CONSUMER_MAKEFILE = 'GODOT_DEVKIT_VERSION := v0.0.0\ninclude Makefile.gates\n'
+INCLUDE = INSTALLABLES / 'Makefile.gates'
+GATE_LIB = INSTALLABLES / 'gdk_gate.sh'
 TIERS = INSTALLABLES / 'Makefile.tiers'
 ROSTER_REPO = [*BASE, 'systems/alpha/thing.gd', 'tests/unit/contract_test.gd']
 STUB = 'extends Node\n'
@@ -71,7 +70,9 @@ def _makefile(root, extra: str = '') -> None:
     """The consumer's Makefile: the pins, the include, and whatever it exports
     to its runners — which is where a keep-list lives, and why the roster is
     asked through `make integration-list` rather than `bash … --list`."""
-    shutil.copy2(INCLUDE, root / 'Makefile.devkit')
+    shutil.copy2(INCLUDE, root / 'Makefile.gates')
+    (root / 'tools' / 'dev').mkdir(parents=True, exist_ok=True)
+    shutil.copy2(GATE_LIB, root / 'tools' / 'dev' / 'gdk_gate.sh')
     shutil.copy2(TIERS, root / 'Makefile.tiers')
     (root / 'Makefile').write_text(extra + CONSUMER_MAKEFILE, encoding='utf-8')
 
@@ -107,7 +108,7 @@ def _gate(only=SCENARIOS, config=CAP_5, scenarios=(), runner=None, exports='',
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(body, encoding='utf-8')
             subprocess.run(['git', 'add', rel], cwd=root, check=True)
-        (root / 'devkit.toml').write_text(config, encoding='utf-8')
+        (root / 'godot-devkit.toml').write_text(config, encoding='utf-8')
         if runner:
             _runner(root, runner, exports)
         if prepare:

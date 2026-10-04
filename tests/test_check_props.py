@@ -20,7 +20,7 @@ VIRTUAL_CHILD = CLEAN + ['systems/contract_child.gd', 'scenes/virtual_child.tscn
 
 def _run(only: list[str], toml: str) -> tuple[int, str]:
     with temp_repo('props_repo', only=only) as root:
-        (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+        (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
         return run_check(props)
 
 

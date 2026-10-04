@@ -1,33 +1,29 @@
-# Makefile.tiers — the Godot tier roster, on the seam Makefile.devkit `-include`s.
+# Makefile.tiers — the Godot tier roster, on the seam Makefile.gates `-include`s.
 #
 # `godot-devkit install-runners` writes this file; `--force` overwrites it and
 # `--diff` shows what a re-install would change. The gate FRAMEWORK — `check`,
-# `precommit`, `milestone`, `help`, the `gdk_gate` capture define — is
-# agentic-sdlc's Makefile.devkit, which your Makefile `include`s; that include
-# `-include`s THIS file and reads the two tier lists it declares. Your
-# Makefile is two lines plus whatever is yours:
+# `precommit`, `verify`, `help`, the `gdk_gate` capture define — is
+# Makefile.gates (`godot-devkit install-gates`), which your Makefile
+# `include`s; that include `-include`s THIS file and reads the two tier lists
+# it declares. Your Makefile is two lines plus whatever is yours:
 #
-#     DEVKIT_VERSION       := v0.2.0     # agentic-sdlc — the gate framework
-#     include Makefile.devkit
+#     GDK_CHECKS := godot-check
+#     include Makefile.gates
 #
 # and godot-devkit itself is LOCKED by uv: a `godot-devkit==X.Y.Z` dev
 # dependency in pyproject.toml, from this kit's index, hash-pinned in uv.lock
 # and run as `uv run --frozen godot-devkit` (`install-runners` prints the
 # pyproject block). The legacy pin, `GODOT_DEVKIT_VERSION := vX.Y.Z` above the
-# include, still works and wins over the lock, with a warning — keep one. The
-# Godot CHECKS join `check` by config, never by a fork of the include — seed
-# this in devkit.toml:
+# include, still works and wins over the lock, with a warning — keep one.
 #
-#     [gates]
-#     extra = ["godot-check"]
-#
-# and `make check` runs agentic-sdlc's roster, then `godot-check`, which is
-# `godot-devkit check all` — the eight Godot gates, narrowed by `[checks] all`
-# in the same file. The static gates below that boot no engine
-# (`hermetic-scan`, `runners-self-test`, `uid-scan`) are one more name each in
-# that list, when the tree has decided to pay them. The engine-boot guard's
-# own corpus is NOT one of them: this kit's tests replay it before a release,
-# and a consumer gate that replays it again proves nothing new.
+# The Godot CHECKS join `check` by name in GDK_CHECKS, never by a fork of the
+# include: `godot-check` is `godot-devkit check all` — the eight Godot gates,
+# narrowed by `[roster] checks` in godot-devkit.toml. The static gates below
+# that boot no engine (`hermetic-scan`, `runners-self-test`, `uid-scan`) are
+# one more name each in GDK_CHECKS, when the tree has decided to pay them. The
+# engine-boot guard's own corpus is NOT one of them: this kit's tests replay
+# it before a release, and a consumer gate that replays it again proves
+# nothing new.
 #
 # A BUILDER RUNS `make spot SYS=<slice>`: gdlint and a compile of only the .gd
 # files changed vs BASE, then the unit slice — under 30 s on a quiet machine.
@@ -41,13 +37,6 @@
 # in a log nobody opens); the rest go through the include's `gdk_gate`.
 # `import-cache` and `integration-list` are tools, not gates: the first has an
 # outcome, the second's output IS the list. GNU make 3.81 is the floor.
-#
-# EVERY TIER FILES A COST ROW. The four unwrapped runners name their outcome in
-# GDK_GATE_VERDICT (and `unit` its GUT test count in GDK_GATE_CENSUS), and
-# gdk_runners.sh hands both to the include's library (GDK_GATE_LIB, exported
-# below) — the row a wrapper would file, without the second wrapper. The
-# scenario tiers pass `gdk_gate` a census of BOOTS: a scenario file is one cold
-# engine whatever its length, so their boot count is what they cost (`pm ledger report`).
 
 # The godot-devkit command, resolved in this order:
 #   1. GODOT_DEVKIT set by the caller — used as is, nothing to resolve (the
@@ -71,7 +60,7 @@ GODOT_DEVKIT := uvx --from "git+https://github.com/cdowin/godot-devkit@$(GODOT_D
 else ifneq ($(GDK_LOCKED),)
 GODOT_DEVKIT := uv run --frozen godot-devkit
 else
-$(error godot-devkit is not pinned — lock it: add `godot-devkit==X.Y.Z` to the dev dependency group in pyproject.toml, with the index block `godot-devkit install-runners` prints, and run `uv sync` (it writes uv.lock, which names the kit; make then runs `uv run --frozen godot-devkit`). The legacy pin, `GODOT_DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.devkit`, still works; or set GODOT_DEVKIT to the command that runs the package)
+$(error godot-devkit is not pinned — lock it: add `godot-devkit==X.Y.Z` to the dev dependency group in pyproject.toml, with the index block `godot-devkit install-runners` prints, and run `uv sync` (it writes uv.lock, which names the kit; make then runs `uv run --frozen godot-devkit`). The legacy pin, `GODOT_DEVKIT_VERSION := vX.Y.Z` in your Makefile ABOVE `include Makefile.gates`, still works; or set GODOT_DEVKIT to the command that runs the package)
 endif
 endif
 
@@ -93,19 +82,15 @@ GDK_GODOT          ?=
 GDK_SMOKE_SCENARIO ?=
 GDK_GUT_CMDLN      ?=
 export GDK_GODOT GDK_SMOKE_SCENARIO GDK_GUT_CMDLN
-# The include's library, where the unwrapped runners file their cost row.
+# The include's library, which the unwrapped runners source for their verdict line.
 export GDK_GATE_LIB
-
-# The census the scenario tiers file: the count on integration.sh's
-# `[INTEGRATION] BOOTS: <n> …` line. No such line leaves the row without one.
-GDK_CENSUS_BOOTS := sed -n 's/^\[INTEGRATION\] BOOTS: \([0-9][0-9]*\) .*/\1/p' "$$log" | tail -1
 
 # Arguments, overridden on the command line (ARGS is the include's):
 #   SYS  — unit slice(s)            make unit SYS="input protocol"
 #   ARGS — passthrough              make integration ARGS="--system input"
 #   NAME — scenario / capture       make scenario NAME=boot_to_hub
 #   REF  — the diff base            make integration-diff REF=origin/main
-#   BASE — the spot check's base    make spot BASE=milestone/1.2.0-x SYS=input
+#   BASE — the spot check's base    make spot BASE=origin/main SYS=input
 SYS  ?=
 NAME ?=
 REF  ?= HEAD
@@ -114,9 +99,10 @@ BASE ?= main
 # What the include's compositions run AFTER `check`. `precommit` is `spot`
 # alone: a builder's proof is the spot check, and the batch's is the
 # integrator's (`integration-diff` is smoke plus whatever the change's
-# declared coverage selects). `milestone` is the full gate.
+# declared coverage selects). `verify` is the full gate. (3.x reads the old
+# name GDK_MILESTONE_TIERS as an alias; remove in 4.0.)
 GDK_PRECOMMIT_TIERS := spot
-GDK_MILESTONE_TIERS := parse lint warnings unit integration-all
+GDK_VERIFY_TIERS := parse lint warnings unit integration-all
 
 .PHONY: parse lint spot warnings unit integration integration-all integration-diff \
         integration-list scenario smoke capture import-cache \
@@ -150,9 +136,9 @@ warnings: ## GDScript analyzer-warnings gate (the editor-only ones)
 	@bash $(GDK_RUNNERS_DIR)/warnings.sh
 
 # The eight Godot checks, as ONE member of `make check` — name it in
-# `[gates] extra`. Their roster is `[checks] all` in devkit.toml; an unknown
+# GDK_CHECKS. Their roster is `[roster] checks` in godot-devkit.toml; an unknown
 # name there is refused, never skipped.
-godot-check: ## The Godot gates (`godot-devkit check all`) — name it in [gates] extra
+godot-check: ## The Godot gates (`godot-devkit check all`) — name it in GDK_CHECKS
 	$(call gdk_gate,godot-check,GODOT,$(GDK_SUM_CHECKS),$(GODOT_DEVKIT) check all)
 
 uid-scan: ## .uid drift guard (script-ref <-> .gd.uid, sidecar presence, canonicality)
@@ -197,18 +183,18 @@ unit: ## Unit tier (GUT, no boot). Slice with SYS="input ..."
 # hand-run flag for the ENGINE transcript, which lands in .scenario-reports/
 # and is named in the runner's own output.)
 #
-# A run its receipt covers boots nothing and measured nothing: the runner
-# creates the file GDK_GATE_UNMEASURED names, and `gdk_gate` files no cost row.
-# Each recipe clears it first, so a marker left by an earlier run cannot drop
-# the next row.
+# A run its receipt covers boots nothing: the runner creates the file
+# GDK_GATE_UNMEASURED names. Nothing in 3.0 reads it (it marked a run that
+# filed no cost row); each recipe still clears it, so a marker left by an
+# earlier run cannot be mistaken for this one's.
 integration integration-all integration-diff scenario smoke: export GDK_GATE_UNMEASURED = $(CURDIR)/.gate-reports/.$@.unmeasured
 integration: ## Integration tier. Pass ARGS="--all|--system <dir>|--diff <ref>|<names>"
 	@rm -f -- "$$GDK_GATE_UNMEASURED"
-	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all),$(GDK_CENSUS_BOOTS))
+	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
 
 integration-all: ## Every integration scenario, one process each, N in parallel
 	@rm -f -- "$$GDK_GATE_UNMEASURED"
-	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all,$(GDK_CENSUS_BOOTS))
+	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
 
 # The per-change slice: every scenario whose header declares it covers a path
 # the diff against REF touched, plus the smoke scenario. A touched scenario runs;
@@ -217,7 +203,7 @@ integration-all: ## Every integration scenario, one process each, N in parallel
 # uncommitted change — so a clean tree runs exactly what `smoke` runs.
 integration-diff: ## The scenarios covering what the diff against REF touched, plus smoke
 	@rm -f -- "$$GDK_GATE_UNMEASURED"
-	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF),$(GDK_CENSUS_BOOTS))
+	$(call gdk_gate,integration-diff,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --diff $(REF))
 
 # The roster `--all` boots, one repo-relative path per line, booting nothing.
 # Not a gate — the list IS the output — and it lives here rather than as a
@@ -235,7 +221,7 @@ scenario: ## One scenario, cold:  make scenario NAME=<scenario>
 
 smoke: ## The smoke scenario (GDK_SMOKE_SCENARIO) — the shortest proof the game boots
 	@rm -f -- "$$GDK_GATE_UNMEASURED"
-	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke,$(GDK_CENSUS_BOOTS))
+	$(call gdk_gate,smoke,SMOKE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --smoke)
 
 capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<scenario>
 	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }

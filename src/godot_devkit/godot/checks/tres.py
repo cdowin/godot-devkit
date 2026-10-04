@@ -11,7 +11,7 @@ nothing left to rewrite.
 CHECK (HARD): every ext_resource ref in a tracked non-excluded .tres/.tscn
               carries a uid= (no path-only refs remain).
 
-devkit.toml: [tres] exclude_prefixes = ["addons/", ...]
+godot-devkit.toml: [tres] exclude_prefixes = ["addons/", ...]
              [tres] baseline = { "scenes/legacy/hub.tscn" = 7 }
              (existing debt, per file at its CURRENT count of path-only refs:
               held and counted on a BASELINED line; a file past its entry

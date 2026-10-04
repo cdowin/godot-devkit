@@ -91,7 +91,7 @@ Read-only, like every gate but `check uid --fix`: a file over the cap prints
 the ledger line to paste, rather than the gate editing the config that governs
 it.
 
-devkit.toml:
+godot-devkit.toml:
 
     [test_shape]
     scenario_root = "tests/integration"

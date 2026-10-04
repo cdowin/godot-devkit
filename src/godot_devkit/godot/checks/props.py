@@ -27,7 +27,7 @@ UNVERIFIED and printed as a census line, never as a finding:
                                      reported unverified when not
   * scripts with `_get_property_list` / `_set`, or an unresolvable `extends`
 
-devkit.toml: [props] exclude_prefixes = ["addons/"]
+godot-devkit.toml: [props] exclude_prefixes = ["addons/"]
              [props] extra_properties = { MyClass = ["virtual_prop"] }
              (the key names the script's `class_name` — or an ancestor's — or
               the node's engine type; the carve-out applies ONLY to sections of

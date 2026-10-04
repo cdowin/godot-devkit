@@ -27,7 +27,7 @@ never boots Godot.
     make refs NAME=<symbol>
     python3 tools/dev/introspect/refs.py <symbol> [--tests]
 
-devkit.toml: [refs] exclude_prefixes = [".git/", ".godot/", "addons/", ...]
+godot-devkit.toml: [refs] exclude_prefixes = [".git/", ".godot/", "addons/", ...]
              (replaces the stock exclusion list wholesale)
 """
 from __future__ import annotations
@@ -445,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run(args.symbol, args.tests)
     except (ConfigError, EmptySymbol) as err:
-        # A devkit.toml mistake, or an argument that names nothing, is exit 2 —
+        # A godot-devkit.toml mistake, or an argument that names nothing, is exit 2 —
         # never a traceback, never ignored, and never a scan run anyway.
         print(f'godot-devkit: {err}', file=sys.stderr)
         return 2

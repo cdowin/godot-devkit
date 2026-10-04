@@ -51,7 +51,7 @@ here would be invention, not repair. Godot's ResourceUID.create_id() owns
 that, and a fabricated uid is exactly the plausible-looking wrong answer
 this package refuses to write.
 
-devkit.toml: [uid] exclude_prefixes = ["addons/"]
+godot-devkit.toml: [uid] exclude_prefixes = ["addons/"]
 """
 from __future__ import annotations
 

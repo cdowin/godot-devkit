@@ -73,6 +73,12 @@ The installer (writes each file once; after that it is the repo's):
                                     # --force overwrites a differing
                                     # destination; --diff prints what would
                                     # change and writes nothing
+    godot-devkit install-gates [--force] [--diff]
+                                    # the gate framework: Makefile.gates (help,
+                                    # check, precommit, verify) and the capture
+                                    # library tools/dev/gdk_gate.sh. A game sets
+                                    # GDK_CHECKS and includes Makefile.gates;
+                                    # it needs nothing from agentic-sdlc
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | rng
@@ -84,20 +90,17 @@ Static gates (exit 1 on findings; run from anywhere inside the repo):
                                     # rewritten to the sidecar's, non-canonical
                                     # spellings canonicalized (same id), and
                                     # orphan .gd.uid sidecars deleted
-    godot-devkit check all          # the eight Godot gates, stock. `[checks]
-                                    # godot` in devkit.toml narrows the roster
-                                    # for THIS repo; an unknown name is
-                                    # refused, never skipped. (`[checks] all`
-                                    # is agentic-sdlc's roster in the same
-                                    # file — two kits, two keys.)
+    godot-devkit check all          # the eight Godot gates, stock. `[roster]
+                                    # checks` in godot-devkit.toml narrows the
+                                    # roster for THIS repo; an unknown name is
+                                    # refused, never skipped. (3.x still reads
+                                    # the old `[checks] godot`, with a warning.)
 
-Per-project config: devkit.toml at the consuming repo root (see each tool's
+Per-project config: godot-devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
 
-What is NOT here (0.25.0): the repo-discipline family — `pm`, `init`,
-`check doc|shell|pm|hooks|repo-hygiene`, `gates-extra` and every other
-`install-*` — is agentic-sdlc's, a second pin. Each of those verbs exits 2
-here naming it.
+What is NOT here: agent guardrails, PM trees and ledgers. godot-devkit has
+Godot tooling; agentic-sdlc has agent guardrails; neither imports the other.
 """
 from __future__ import annotations
 
@@ -116,18 +119,16 @@ RENAME_FLAG = '--rename'
 # new inline condition in `_run_check`.
 FIXABLE_CHECKS = frozenset({'uid'})
 
-# The verbs that LEFT with the repo-discipline family (0.25.0), each mapped to
-# the spelling that runs it now. Routed to one line and exit 2 rather than
-# falling through to `unknown command`: a consumer whose Makefile still says
-# `godot-devkit pm` should be told where the verb went, not that it never
-# existed. Exit 2 is the usage-error code (rule 6), and it is deliberately not
-# 0 — a retired verb that exits 0 is a gate that silently stopped gating.
-SECOND_PIN = 'agentic-sdlc'
-RETIRED_COMMANDS = frozenset({
-    'pm', 'init', 'gates-extra',
-    'install-ci', 'install-agents', 'install-hooks', 'install-gates',
-    'install-sdlc',
-})
+# The verbs that LEFT with the repo-discipline family (0.25.0). Routed to one
+# line and exit 2 rather than falling through to `unknown command`: a consumer
+# whose Makefile still says `godot-devkit pm` should be told where the verb
+# went, not that it never existed. Exit 2 is the usage-error code (rule 6), and
+# it is deliberately not 0 — a retired verb that exits 0 is a gate that
+# silently stopped gating. Since 3.0 agentic-sdlc has no CLI, so the line says
+# the verb is gone from both kits. (`install-gates` is a real verb again in
+# 3.0, and `install-ci`, `install-agents`, `install-hooks` and `install-sdlc`
+# are plain unknown commands.)
+RETIRED_COMMANDS = frozenset({'pm', 'init', 'gates-extra'})
 RETIRED_CHECKS = frozenset({'doc', 'shell', 'pm', 'hooks', 'repo-hygiene'})
 
 
@@ -137,10 +138,10 @@ def _usage() -> int:
 
 
 def _retired(verb: str) -> int:
-    """One line, exit 2: the verb is the second pin's now."""
-    print(f'godot-devkit: {verb!r} left this package in 0.25.0 — it is '
-          f'{SECOND_PIN}\'s: pin that package and run `{SECOND_PIN} {verb}`',
-          file=sys.stderr)
+    """One line, exit 2: the verb is gone from both kits."""
+    print(f'godot-devkit: {verb!r} left this package in 0.25.0 and is not in '
+          f'agentic-sdlc 3.0 either: godot-devkit has Godot tooling, '
+          f'agentic-sdlc has agent guardrails', file=sys.stderr)
     return 2
 
 
@@ -167,7 +168,7 @@ def _run_check(name: str, flags: list[str]) -> int:
     try:
         return _dispatch_check(name, fix=FIX_FLAG in flags)
     except ConfigError as err:
-        # A devkit.toml mistake is exit 2, never 1 (findings) and never 0.
+        # A godot-devkit.toml mistake is exit 2, never 1 (findings) and never 0.
         print(f'godot-devkit: {err}', file=sys.stderr)
         return 2
 
@@ -284,6 +285,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'install-runners':
         from godot_devkit.godot import install
         return install.main(rest)
+    if cmd == 'install-gates':
+        from godot_devkit.godot import install
+        return install.main_gates(rest)
     if cmd in RETIRED_COMMANDS:
         return _retired(cmd)
     if cmd == 'check':

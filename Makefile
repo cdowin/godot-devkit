@@ -7,12 +7,11 @@
 # cheapest possible fix: the work is written down, it is rerunnable, and nobody
 # has to be told the command.
 #
-# The gate FRAMEWORK is not this file's. `check`, `precommit`, `milestone`,
-# `pm`, `help` and the `gdk_gate` capture define arrive from Makefile.devkit,
-# which `agentic-sdlc install-gates` writes from the pinned tag below — this
-# repo is a CONSUMER of agentic-sdlc, the same way its own consumers pin it.
-# What is this repo's: the Python it runs (below the pin) and its tiers
-# (Makefile.tiers — the seam the include `-include`s).
+# The gate FRAMEWORK is this repo's own Makefile.gates, the file
+# `godot-devkit install-gates` writes: `check`, `precommit`, `verify`, `help`
+# and the `gdk_gate` capture define. This repo is a consumer of its own
+# installables, the same way a game is. What is this repo's: the Python it runs
+# (below) and its tiers (Makefile.tiers — the seam the include `-include`s).
 #
 # EVERY GATE PRINTS ONE LINE. The default output of a target here is its
 # verdict, naming the full transcript under .gate-reports/; `VERBOSE=1` streams
@@ -39,14 +38,15 @@ PYTEST_Q  ?= -q
 #
 # GODOT_DEVKIT is what Makefile.tiers' `godot-check` and `uid-scan` run (a
 # consumer resolves it from its uv.lock (`uv run --frozen`), or the legacy
-# GODOT_DEVKIT_VERSION pin; this tree sets it ahead of the include, so the tier file resolves nothing). It is the package from
-# src/ INSIDE a scratch copy of the committed clean Godot project — this tree
-# is not a Godot project, and the self-hosting proof is the eight gates over
-# something committed here, not a 0-file census over the repo itself.
+# GODOT_DEVKIT_VERSION pin; this tree sets it ahead of the include, so the tier
+# file resolves nothing). It is the package from src/ INSIDE a scratch copy of
+# the committed clean Godot project — this tree is not a Godot project, and the
+# self-hosting proof is the eight gates over something committed here, not a
+# 0-file census over the repo itself.
 PY          ?= python3
 GODOT_DEVKIT ?= bash tools/dev/godot_devkit_on_fixture.sh
 
-# agentic-sdlc is pinned in uv.lock (a dev dependency from its own index);
-# Makefile.devkit runs the locked kit. A bump is `uv add --dev
-# agentic-sdlc==X.Y.Z`, then `make sdlc ARGS='adopt X.Y.Z'`.
-include Makefile.devkit
+# What `make check` runs after `shell`: the eight Godot gates over the fixture.
+GDK_CHECKS := godot-check
+
+include Makefile.gates

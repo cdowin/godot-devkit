@@ -1,4 +1,4 @@
-"""config.py — typed `devkit.toml` reading.
+"""config.py — typed `godot-devkit.toml` reading.
 
 Separate from `project.py` because they answer different questions: project.py
 finds the repo and loads the file, this decides what a value is allowed to be.
@@ -16,7 +16,7 @@ from godot_devkit.core.project import load_config
 
 
 class ConfigError(Exception):
-    """A malformed `devkit.toml` value. Exit 2 — a typo is NOT a finding.
+    """A malformed `godot-devkit.toml` value. Exit 2 — a typo is NOT a finding.
 
     Exit 1 is reserved for findings, so CI must never read a config mistake as
     "drift found". Worse is the silent case this class exists to prevent: a
@@ -27,7 +27,7 @@ class ConfigError(Exception):
 
 
 def config_section(name: str) -> dict:
-    """One `devkit.toml` section, or {}. Refuses a non-table."""
+    """One `godot-devkit.toml` section, or {}. Refuses a non-table."""
     value = load_config().get(name, {})
     if not isinstance(value, dict):
         raise ConfigError(f'[{name}] must be a table, got {value!r}')
