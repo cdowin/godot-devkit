@@ -48,6 +48,7 @@ SCENARIO = INSTALLABLES / 'scenario.sh'
 CAPTURE = INSTALLABLES / 'capture.sh'
 UNIT = INSTALLABLES / 'unit.sh'
 INTEGRATION = INSTALLABLES / 'integration.sh'
+PARSE = INSTALLABLES / 'parse.sh'
 # Every shell RUNNER install-runners ships — the library and what lands under
 # tools/dev/. A runner added to the plan and not here would be a runner nothing
 # holds to the shape. The engine-boot guard ships on the same plan but is a
@@ -295,6 +296,51 @@ def test_unit_fails_when_the_gut_log_carries_a_script_parse_error_over_a_green_r
     assert 'PASS' not in done.stdout, done.stdout
     assert 'FAIL (script parse error in the run log)' in done.stdout, done.stdout
     assert 'Identifier "_x" not declared' in done.stdout, done.stdout
+
+
+# --- parse.sh: one engine run, driven through the RUNNER ---------------------
+def test_parse_boots_the_engine_once_and_a_boot_error_still_fails_it(tmp_path):
+    """#49: the gate was a `--quit` boot and then a `-s` sweep, two engine
+    starts on every cold parse. Autoloads boot under `-s`, and the sweep boots
+    the main scene when GDK_SWEEP_MAIN_SCENE=1, so ONE run proves both. A
+    stub engine records each start; a boot error in that one run (a main
+    scene naming a missing script) is still FAIL (boot), not a PASS."""
+    root = tmp_path / 'repo'
+    _project(root, PARSE)
+    shutil.copy2(INSTALLABLES / 'compile_sweep.gd', root / 'tools/dev/runners/compile_sweep.gd')
+    starts = tmp_path / 'starts.log'
+    stub = _stub_engine(tmp_path, '#!/usr/bin/env bash\n'
+                        'echo "$* main_scene=${GDK_SWEEP_MAIN_SCENE:-}" >> "$GDK_STUB_LOG"\n'
+                        'echo "SWEEP_RESULT 2 2"\n')
+    env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
+           'HOME': str(tmp_path / 'home'), 'GDK_RECEIPTS': '0',
+           'GDK_STUB_LOG': str(starts),
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
+
+    def parse() -> subprocess.CompletedProcess:
+        return subprocess.run(['bash', 'tools/dev/runners/parse.sh'], cwd=root,
+                              text=True, capture_output=True, env=env)
+
+    done = parse()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[PARSE] PASS (boot clean; 2/2 scripts compiled)' in done.stdout, done.stdout
+    assert starts.read_text(encoding='utf-8').splitlines() == [
+        '--path . --headless -s res://tools/dev/runners/compile_sweep.gd main_scene=1'
+    ], starts.read_text(encoding='utf-8')
+    # The sweep reads the variable parse.sh sets; a rename on one side only
+    # would boot no main scene and still print PASS.
+    sweep = (INSTALLABLES / 'compile_sweep.gd').read_text(encoding='utf-8')
+    assert 'MAIN_SCENE_ENV := "GDK_SWEEP_MAIN_SCENE"' in sweep
+    assert 'OS.get_environment(MAIN_SCENE_ENV) == "1"' in sweep
+
+    (stub / 'godot').write_text(
+        '#!/usr/bin/env bash\n'
+        'echo "ERROR: Failed loading resource: res://gone.gd."\n'
+        'echo "SWEEP_RESULT 2 2"\n', encoding='utf-8')
+    done = parse()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert '[PARSE] FAIL (boot)' in done.stdout, done.stdout
+    assert 'res://gone.gd' in done.stdout, done.stdout
 
 
 # --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
