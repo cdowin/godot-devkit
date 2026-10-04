@@ -19,7 +19,7 @@ WHAT IS SCANNED. Everything under the checkout, as a DENY list: the exclusions
 are enumerated with a reason each, and the default for a file type nobody
 thought of is SCANNED — an allowlist of suffixes once dropped 21 files in
 silence, including every fixture `project.godot`, which is exactly the
-artifact a fixture gets vendored FROM a consumer. `pm/`, `CHANGELOG.md` and
+artifact a fixture gets vendored FROM a consumer. `pm/` and
 `docs/reviews/` are the LOG, dated records of what was measured, and are
 excluded by path rather than rewritten. A file this gate cannot DECODE is a
 finding, not a skip: one stray non-UTF-8 byte used to remove a whole file from
@@ -49,7 +49,7 @@ PLANTED_PATTERN = (rf'(?i)\b{PLANTED}\b',)
 # line out of its own census — load-bearing, not a typo.
 OUTSIDE_READS = (r'~/[w]orkspace', r'Path\.home\(\)', r'os\.path\.expanduser\(\s*[\'"]~',
                  r'\$HOME/[w]orkspace', r'os\.environ\[[\'"]HOME[\'"]\]\s*\)?\s*/')
-LOG_PATHS = ('pm/', 'docs/reviews/', 'CHANGELOG.md')
+LOG_PATHS = ('pm/', 'docs/reviews/')
 # Tool output, not authored content: `.venv` is third-party code and `.git`
 # holds every byte the tree ever had. Adding a name here is a visible act.
 NOT_CONTENT = {'.git', '.gate-reports', '.pytest_cache', '.ruff_cache', '.venv',

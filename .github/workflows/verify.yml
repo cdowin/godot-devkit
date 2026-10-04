@@ -7,8 +7,10 @@
 # `verify` must always report, and a path filter would leave it missing on a
 # docs-only pull request, which could then never merge. Skipping is done by the
 # `changes` job instead, because a skipped job counts as passing. A pull
-# request that touches only *.md, docs/, .claude/ or the issue and PR templates
-# skips the build. Shipped code is never skipped, whatever its extension: the
+# request that touches only README.md, CLAUDE.md, AGENTS.md, .claude/ or the issue and
+# PR templates skips the build. Any other .md or a docs/ path runs it, so the docs
+# ratchet (tests/test_docs_ratchet.py) bites on the PR that adds one. Shipped code
+# is never skipped, whatever its extension: the
 # first case below names it.
 #
 # By design, nothing re-verifies the merge commit: the check ran on the pull
@@ -58,7 +60,7 @@ jobs:
                 # Shipped code, whatever its extension (an installable or a
                 # fixture that happens to be Markdown is still code).
                 src/*|tests/*|tools/*) code=true ;;
-                *.md|docs/*|.claude/*|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md) ;;
+                README.md|CLAUDE.md|AGENTS.md|.claude/*|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md) ;;
                 *) code=true ;;
               esac
             done <<< "$files"

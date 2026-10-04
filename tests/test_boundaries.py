@@ -310,13 +310,11 @@ class ConfigValuesCrossTheGuards(unittest.TestCase):
         self.assertEqual(1, config.number({}, 's', 'k', 1))
 
 
-# --- the README's `godot-devkit.toml` block against the keys the readers accept.
+# --- the example `godot-devkit.toml` against the keys the readers accept.
 # A consumer copies that block before writing config; a key absent from it is
 # guessed at, and `[unit_disk] forbidden_literals` — a TABLE beside a LIST-shaped
 # `exclude_prefixes` — was guessed as a list by the first consumer to need it.
-README = REPO_ROOT / 'README.md'
-CONFIG_HEADING = '## Configuration'
-CONFIG_FENCE = '```toml'
+EXAMPLE = REPO_ROOT / 'src' / 'godot_devkit' / 'data' / 'godot-devkit.example.toml'
 CONFIG_MODULE = 'core/config.py'
 # A keyed guard reads `(sect, name, key, fallback)`; `config_section(name)` is
 # the table read and has no key. Derived from the signature, so a new guard
@@ -453,20 +451,17 @@ def _keys_the_readers_accept() -> tuple[dict[tuple[str, str], str], list[str], i
     return keys, unresolved, len(readers)
 
 
-def _readme_config_block() -> dict:
+def _example_config() -> dict:
     import tomllib
-    text = README.read_text(encoding='utf-8')
-    section = text.split(f'\n{CONFIG_HEADING}', 1)[1]
-    block = section.split(CONFIG_FENCE + '\n', 1)[1].split('\n```', 1)[0]
-    return tomllib.loads(block)
+    return tomllib.loads(EXAMPLE.read_text(encoding='utf-8'))
 
 
 class EveryConfigKeyShowsItsShape(unittest.TestCase):
-    # The README block is the only place a consumer looks before writing
+    # The example file is the only place a consumer looks before writing
     # config. Walk the readers — every guard call in src/, its section and key
     # resolved from the code — and require one example per key, fed back
     # through the SAME guard so the example is of the shape the reader accepts.
-    def test_every_key_a_reader_accepts_has_an_example_of_its_shape_in_the_readme(self):
+    def test_every_key_a_reader_accepts_has_an_example_of_its_shape_in_the_example_config(self):
         from godot_devkit.core import config
         keys, unresolved, readers = _keys_the_readers_accept()
         self.assertGreaterEqual(readers, MIN_READERS, 'config guard census collapsed')
@@ -475,7 +470,7 @@ class EveryConfigKeyShowsItsShape(unittest.TestCase):
             'a config read whose section or key is not a literal, a module constant '
             'or a parameter bound by one — the census cannot say what it reads:\n  '
             + '\n  '.join(unresolved)))
-        doc = _readme_config_block()
+        doc = _example_config()
         missing, misshapen = [], []
         for (section, key), reader in sorted(keys.items()):
             value = doc.get(section, {})
@@ -487,10 +482,10 @@ class EveryConfigKeyShowsItsShape(unittest.TestCase):
             except config.ConfigError as err:
                 misshapen.append(f'[{section}] {key}: {err}')
         self.assertEqual([], missing, (
-            f'key(s) the readers accept with no example in README.md § {CONFIG_HEADING[3:]}'
+            f'key(s) the readers accept with no example in {EXAMPLE.relative_to(REPO_ROOT)}'
             " — a consumer guesses a key's shape when there is nothing to copy:\n  "
             + '\n  '.join(missing)))
-        self.assertEqual([], misshapen, 'README example(s) their own reader refuses:\n  '
+        self.assertEqual([], misshapen, 'example(s) their own reader refuses:\n  '
                          + '\n  '.join(misshapen))
 
 
