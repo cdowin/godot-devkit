@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `parse.sh` starts the engine once, not twice (#49). `compile_sweep.gd` boots the main scene after its result line when `GDK_SWEEP_MAIN_SCENE=1`, which only `parse.sh` sets; autoloads already boot under `-s`. A script that will not compile is `FAIL (compile sweep)`; a boot error in the same transcript is `FAIL (boot)`. `GDK_PARSE_BOOT_TIMEOUT` is retired and ignored; `GDK_PARSE_SWEEP_TIMEOUT` bounds the run. About 0.3 s less per cold parse on a 3-script probe project.
+
 ## v3.0.2 — 2026-10-04
 
 - Fix: `__version__` in `src/godot_devkit/__init__.py` now matches `pyproject.toml` and `uv.lock`. v3.0.1 was tagged but never released, because its Release run found `__version__` still at 3.0.0. 3.0.2 carries the 3.0.1 comment fix.
