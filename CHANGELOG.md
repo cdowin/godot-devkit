@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v3.0.2 — 2026-10-04
+
+- Fix: `__version__` in `src/godot_devkit/__init__.py` now matches `pyproject.toml` and `uv.lock`. v3.0.1 was tagged but never released, because its Release run found `__version__` still at 3.0.0. 3.0.2 carries the 3.0.1 comment fix.
+- New test `tests/test_version_sites.py` fails when `pyproject.toml`, `uv.lock` and `__version__` disagree. It runs in `verify`, so a mismatch fails the PR, not the release.
+
 ## v3.0.1 — 2026-10-04
 
 Text only, no behavior change. Two comments in the `integration.sh` installable named agentic-sdlc 2.x parts (`pm ledger report`, `Makefile.devkit`); they now describe godot-devkit 3.0 (`make verify`, `Makefile.gates`). No installable matches the games' zero-count grep.
