@@ -24,6 +24,10 @@
 # its own file, and the transcript joins them in scan-dir order, so the log
 # reads the same at any job count (#50).
 #
+# A SERIAL WARM-UP RUNS FIRST. gdtoolkit creates its cache dir on first use and
+# races with itself when several gdlints start together on a fresh machine, so
+# one gdlint over one script runs before the fan-out (#73).
+#
 # THE RECEIPT KEYS ON WHAT gdlint READS: every *.gd and the config
 # (`gdlintrc` / `.gdlintrc` at the root), plus the settings below. A .tres or
 # .tscn edit reuses the receipt; it once re-linted every script (#50).
@@ -262,6 +266,17 @@ RECEIPT_ARGS=("$GDK_LINT_CMD" "$GDK_LINT_EXCLUDE_RE" "$GDK_LINT_NESTED_ROOT")
 RECEIPT_KEY="$(gdk_receipt_key lint "${RECEIPT_ARGS[@]}")" || RECEIPT_KEY=""
 if gdk_receipt_hit lint "$RECEIPT_KEY"; then
 	exit 0
+fi
+
+# WARM gdtoolkit's CACHE BEFORE THE FAN-OUT (#73). gdlint checks for its
+# grammar-cache dir and then makedirs it; on a fresh machine (every CI runner)
+# the parallel runs below race, and the loser fails with "Cannot open file
+# '<first .gd>': File exists". One serial run over one tracked script creates
+# the cache first. Its result is ignored: a finding in that script is reported
+# by the real run.
+WARM_FILE="$(git ls-files "$SCRIPT_GLOB" 2>/dev/null | grep -Ev "$GDK_LINT_EXCLUDE_RE" | head -n 1)"
+if [ -n "$WARM_FILE" ]; then
+	"$GDK_LINT_CMD" "$WARM_FILE" >/dev/null 2>&1 || true
 fi
 
 LOG="$(gdk_gate_log "$GATE_SLOT")"

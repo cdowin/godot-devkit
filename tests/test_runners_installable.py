@@ -537,19 +537,19 @@ def test_lint_runs_one_gdlint_per_dir_and_its_receipt_ignores_a_resource_edit(tm
     done = lint()
     assert done.returncode == 0, done.stdout + done.stderr
     assert '[LINT] PASS (2 source dir(s): autoloads systems)' in done.stdout, done.stdout
-    assert calls() == ['lint autoloads', 'lint systems'], calls()
+    assert calls() == ['lint autoloads', 'lint autoloads/a.gd', 'lint systems'], calls()
 
     (root / 'data' / 'x.tres').write_text('[gd_resource format=3]\n; edited\n', encoding='utf-8')
     done = lint()
     assert done.returncode == 0 and '; reused — receipt' in done.stdout, done.stdout + done.stderr
-    assert len(calls()) == 2, f'a .tres edit re-linted: {calls()}'
+    assert len(calls()) == 3, f'a .tres edit re-linted: {calls()}'
 
     for config in ('gdlintrc', '.gdlintrc'):
         (root / config).write_text('max-line-length: 100\n', encoding='utf-8')
         before = len(calls())
         done = lint()
         assert done.returncode == 0 and 'reused' not in done.stdout, done.stdout
-        assert len(calls()) == before + 2, f'a {config} edit reused the receipt: {calls()}'
+        assert len(calls()) == before + 3, f'a {config} edit reused the receipt: {calls()}'
 
     (root / 'systems' / 'bad.gd').write_text('extends Node\n', encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
