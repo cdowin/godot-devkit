@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
-# parse.sh — the parse gate, in TWO stages, because either one alone is a
-# false claim:
+# parse.sh — the parse gate: ONE engine run that proves two things, because
+# either one alone is a false claim:
 #
-#   1. BOOT   — boot the project headless with --quit and read the stream for
-#               parse errors and autoload-boot crashes. Proves the BOOT GRAPH
-#               only: autoloads, the main scene, and whatever they transitively
-#               preload or name by class_name.
-#   2. SWEEP  — load every .gd in the project and fail on any the engine
-#               refuses to compile, reporting N/N.
+#   BOOT   — the autoloads and the main scene boot with no parse error and no
+#            engine error naming a .gd. Autoloads boot under `-s` on their
+#            own; compile_sweep.gd then loads the main scene and adds it to
+#            the tree (GDK_SWEEP_MAIN_SCENE=1), which is what a `--quit` boot
+#            did. Until #49 this was a separate `--quit` run: a second engine
+#            start of about 2 s on every cold parse, proving nothing the sweep
+#            run cannot.
+#   SWEEP  — load every .gd in the project and fail on any the engine
+#            refuses to compile, reporting N/N.
 #
-# Stage 2 exists because GDScript compiles LAZILY. Nothing preloads a test
+# The sweep exists because GDScript compiles LAZILY. Nothing preloads a test
 # tree, an @tool/editor script, a non-autoloaded addon, or anything only
-# load()ed by string path — so a parse error in ANY of them is absent from the
-# stream stage 1 reads. A consumer shipped a broken integration scenario
-# through a green stage-1 gate AND a green precommit for a day. The claim this
-# gate makes is "every .gd in the project compiles, and the boot is clean",
-# not "the scripts the boot happened to touch compiled".
+# load()ed by string path — so a parse error in ANY of them is absent from a
+# boot stream. A consumer shipped a broken integration scenario through a
+# green boot-only gate AND a green precommit for a day. The claim this gate
+# makes is "every .gd in the project compiles, and the boot is clean", not
+# "the scripts the boot happened to touch compiled".
 #
 # The sweep is deliberately NOT a list of the directories somebody remembered
 # to add: compile_sweep.gd walks the project, so a new unreached corner of the
 # tree is covered with no edit here.
 #
 # OUTPUT: the console gets one verdict line naming the transcript; the full
-# boot + sweep stream goes to .gate-reports/parse.log. On a failure the
+# engine stream goes to .gate-reports/parse.log. On a failure the
 # offending lines are printed verbatim as well. VERBOSE=1 streams everything.
 #
 # Usage: tools/dev/runners/parse.sh   (via `make parse`)
@@ -47,41 +50,43 @@ REPO_ROOT_FROM_HERE="../../.."
 # so the two spellings must agree: install-runners writes it beside this file,
 # and this is that path seen from the project root.
 GDK_PARSE_SWEEP_SCRIPT="${GDK_PARSE_SWEEP_SCRIPT:-res://tools/dev/runners/compile_sweep.gd}"
-# Env: GDK_PARSE_BOOT_TIMEOUT   seconds to bound stage 1 (default 120)
-#      GDK_PARSE_SWEEP_TIMEOUT  seconds to bound stage 2 (default 300)
+# Env: GDK_PARSE_SWEEP_TIMEOUT  seconds to bound the one engine run (default
+#                               300). GDK_PARSE_BOOT_TIMEOUT is retired with
+#                               the separate boot (#49) and is ignored.
 #      GDK_GODOT                the engine binary (default `godot`)
 # -----------------------------------------------------------------------------
 
 GATE_TAG="PARSE"
 GATE_SLOT="parse"
 
-# What stage 1 reads as a boot failure. Anchored on the engine's own two
-# shapes: a GDScript parse error, and an engine ERROR naming a .gd.
+# What reads as a boot failure. Anchored on the engine's own two shapes: a
+# GDScript parse error, and an engine ERROR naming a .gd. A script the sweep
+# could not compile prints these too, so the sweep's own verdict is read
+# FIRST: only a transcript with no failed path is a boot failure.
 BOOT_ERROR_PATTERN='SCRIPT ERROR: Parse Error|^ERROR: .*\.gd'
 
-# Stage 2's transcript is compile_sweep.gd's output contract, read through the
+# The transcript is compile_sweep.gd's output contract, read through the
 # library's gdk_sweep_* readers — shared with warnings.sh, which sweeps the
 # same script under the analyzer promotion. The engine lines that say WHY a
 # script would not compile — the actionable diagnosis behind each failed path:
 SWEEP_DIAGNOSTIC_PATTERN='SCRIPT ERROR: Parse Error|Failed to load script|Compile Error|at: GDScript::reload'
 
-BOOT_TIMEOUT_SECONDS="${GDK_PARSE_BOOT_TIMEOUT:-120}"
 SWEEP_TIMEOUT_SECONDS="${GDK_PARSE_SWEEP_TIMEOUT:-300}"
 
 usage() {
 	cat <<'USAGE_EOF'
 usage: parse.sh [--help] [--self-test]
 
-The parse gate: boot the project headless and read the stream for parse
-errors, then load EVERY .gd through compile_sweep.gd and report N/N.
+The parse gate, in one engine run: load EVERY .gd through compile_sweep.gd
+and report N/N, then boot the main scene, and read the stream for parse and
+boot errors.
 
-  (no argument)  run both stages
+  (no argument)  run the gate
   --self-test    prove the argument handling without booting anything (the
                  sweep-transcript readers are gdk_runners.sh's, proven there)
   --help         this message
 
-Env: GDK_PARSE_BOOT_TIMEOUT   seconds bounding stage 1 (default 120)
-     GDK_PARSE_SWEEP_TIMEOUT  seconds bounding stage 2 (default 300)
+Env: GDK_PARSE_SWEEP_TIMEOUT  seconds bounding the engine run (default 300)
      GDK_PARSE_SWEEP_SCRIPT   res:// path to compile_sweep.gd
      GDK_RUNNERS_LIB          path to gdk_runners.sh, relative to this file
      GDK_GODOT                the engine binary (default `godot`)
@@ -91,7 +96,7 @@ USAGE_EOF
 }
 
 # --- --self-test -------------------------------------------------------------
-# Two stages of this runner boot an engine, and this package never does (and a
+# This runner boots an engine, and this package never does (and a
 # consumer's CI may have none). So the corpus covers what the runner OWNS: how
 # it reads its arguments. How it reads a sweep transcript — including the
 # shape that must NOT be read as a pass — is the library's contract, and the
@@ -166,10 +171,10 @@ if gdk_receipt_hit parse "$RECEIPT_KEY"; then
 	exit 0
 fi
 
-# user:// sandbox — both stages boot the project's full autoload stack.
+# user:// sandbox — the run boots the project's full autoload stack.
 gdk_sandbox_home
 
-# ONE transcript for both stages, published where a reader can still open it
+# ONE transcript, published where a reader can still open it
 # after the run (the sandbox HOME self-destructs, so it cannot live there).
 LOG="$(gdk_gate_log "$GATE_SLOT")"
 # The outcome the cost row files (gdk_runners.sh, THE COST ROW). FAIL until the
@@ -177,32 +182,12 @@ LOG="$(gdk_gate_log "$GATE_SLOT")"
 # FAIL its exit code would have filed as PASS.
 export GDK_GATE_VERDICT=FAIL
 
-# --- Stage 1: boot -----------------------------------------------------------
-gdk_gate_capture "$LOG" -- gdk_run_bounded "$BOOT_TIMEOUT_SECONDS" -- \
-	"$GDK_GODOT" --path . --headless --quit
-BOOT_EXIT="$GDK_GATE_EXIT"
-
-if gdk_timeout_is_hang "$BOOT_EXIT"; then
-	GDK_GATE_VERDICT=HANG
-	gdk_gate_verdict "$GATE_TAG" \
-		"FAIL — the boot exceeded ${BOOT_TIMEOUT_SECONDS}s, killed" "$LOG"
-	exit 1
-fi
-
-if grep -qE "$BOOT_ERROR_PATTERN" "$LOG"; then
-	echo "[$GATE_TAG] FAIL — boot errors:"
-	grep -E "$BOOT_ERROR_PATTERN" "$LOG" | sed 's/^/    /'
-	gdk_gate_verdict "$GATE_TAG" "FAIL (boot)" "$LOG"
-	exit 1
-fi
-
-[ "${VERBOSE:-0}" = "0" ] \
-	|| echo "[$GATE_TAG] boot clean — sweeping every .gd for compile errors"
-
-# --- Stage 2: full-project compile sweep -------------------------------------
+# --- The one engine run: sweep, then the main scene --------------------------
 # `-s` runs the sweep as the MainLoop (autoloads still boot, hence the sandbox
-# above). A repo-wide load pass emits one engine error block per broken script;
+# above); GDK_SWEEP_MAIN_SCENE=1 has it boot the main scene after its result
+# line. A repo-wide load pass emits one engine error block per broken script;
 # the gate reports those, plus the N/N line, and the rest joins the transcript.
+export GDK_SWEEP_MAIN_SCENE=1
 gdk_gate_capture "$LOG" -- gdk_run_bounded "$SWEEP_TIMEOUT_SECONDS" -- \
 	"$GDK_GODOT" --path . --headless -s "$GDK_PARSE_SWEEP_SCRIPT"
 SWEEP_EXIT="$GDK_GATE_EXIT"
@@ -210,7 +195,7 @@ SWEEP_EXIT="$GDK_GATE_EXIT"
 if gdk_timeout_is_hang "$SWEEP_EXIT"; then
 	GDK_GATE_VERDICT=HANG
 	gdk_gate_verdict "$GATE_TAG" \
-		"FAIL — the compile sweep exceeded ${SWEEP_TIMEOUT_SECONDS}s, killed" "$LOG"
+		"FAIL — the parse run exceeded ${SWEEP_TIMEOUT_SECONDS}s, killed" "$LOG"
 	exit 1
 fi
 
@@ -233,6 +218,13 @@ if [ -n "$FAILED_PATHS" ]; then
 	echo "  why:"
 	grep -E "$SWEEP_DIAGNOSTIC_PATTERN" "$LOG" | sed 's/^/    /' || true
 	gdk_gate_verdict "$GATE_TAG" "FAIL (compile sweep)" "$LOG"
+	exit 1
+fi
+
+if grep -qE "$BOOT_ERROR_PATTERN" "$LOG"; then
+	echo "[$GATE_TAG] FAIL — boot errors:"
+	grep -E "$BOOT_ERROR_PATTERN" "$LOG" | sed 's/^/    /'
+	gdk_gate_verdict "$GATE_TAG" "FAIL (boot)" "$LOG"
 	exit 1
 fi
 
