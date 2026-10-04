@@ -568,6 +568,42 @@ def test_lint_runs_one_gdlint_per_dir_and_its_receipt_ignores_a_resource_edit(tm
     assert done.returncode == 2 and 'GDK_LINT_JOBS' in done.stderr, done.stdout + done.stderr
 
 
+# A gdlint that behaves like gdtoolkit on a fresh machine: it checks for its
+# grammar-cache dir, then creates it. The window between check and create is
+# widened so two concurrent first runs always collide, and the loser fails the
+# way the real one does ("File exists").
+CACHING_GDLINT_STUB = ('#!/usr/bin/env bash\n'
+                       'if [ ! -d "$GDK_STUB_CACHE" ]; then\n'
+                       '  sleep 0.5\n'
+                       '  mkdir "$GDK_STUB_CACHE" 2>/dev/null || { '
+                       'echo "Cannot open file \'$1\': File exists"; exit 1; }\n'
+                       'fi\n'
+                       'echo "Success: no problems found"\n')
+
+
+def test_lint_warms_the_gdlint_cache_once_before_the_parallel_fanout(tmp_path):
+    """#73. gdtoolkit checks for its cache dir and then makedirs it, so on a
+    fresh machine (every CI runner) two parallel gdlints race and the loser
+    fails with "File exists". lint.sh runs gdlint once, serially, before the
+    fan-out, so the cache exists by the time the parallel runs start."""
+    root = tmp_path / 'repo'
+    _project(root, INSTALLABLES / 'lint.sh')
+    for name in ('autoloads', 'systems'):
+        (root / name).mkdir()
+        (root / name / 'a.gd').write_text('extends Node\n', encoding='utf-8')
+    _commit_all(root)
+    stub = tmp_path / 'bin'
+    stub.mkdir()
+    (stub / 'gdlint').write_text(CACHING_GDLINT_STUB, encoding='utf-8')
+    (stub / 'gdlint').chmod(0o755)
+    env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
+           'GDK_STUB_CACHE': str(tmp_path / 'gdlint-cache'), 'GDK_LINT_JOBS': '2'}
+    done = subprocess.run(['bash', 'tools/dev/runners/lint.sh'], cwd=root, text=True,
+                          capture_output=True, env=env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[LINT] PASS (2 source dir(s): autoloads systems)' in done.stdout, done.stdout
+
+
 def test_spot_checks_only_the_changed_scripts_and_a_scene_only_change_passes_census_0(tmp_path):
     """gdk#45. The builder's check reads the .gd files that differ from the
     merge base with BASE — committed on the branch and untracked alike — and
