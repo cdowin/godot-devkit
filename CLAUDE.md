@@ -66,10 +66,12 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
   `read/`+`write/` → `checks/`, with the shipped files under `godot/installables/`. A layer imports
   downward, never up. Tool modules own their behaviour and expose `main(argv)` or `run()`; `cli.py`
   only routes.
-- **New check** = module in `godot/checks/` + a branch in `_dispatch_check` + a README row + a
-  CHANGELOG line, plus the probe below. **New read verb** = module + `cli.py` route + README row +
-  CHANGELOG line. **New write verb** = usually a scene subverb — a row in `scene_edit.py`'s `VERBS` +
-  `HANDLERS` plus `_build_parser`/`_check_usage`; a new top-level verb is module + route + row + line.
+- **New check** = module in `godot/checks/` + a branch in `_dispatch_check` + a Verb-reference or
+  The-eight-gates wiki row drafted in the PR body + a Release-notes section, plus the probe below.
+  **New read verb** = module + `cli.py` route + a Verb-reference wiki row drafted in the PR body + a
+  Release-notes section. **New write verb** = usually a scene subverb — a row in `scene_edit.py`'s
+  `VERBS` + `HANDLERS` plus `_build_parser`/`_check_usage`; a new top-level verb is module + route +
+  wiki row + Release-notes section.
   Either way: a round-trip fidelity case in the corpus, a refusal path with a test proving it declines
   rather than mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`), the way
   Godot does; read output must be valid write input.
@@ -106,8 +108,13 @@ incantation: `make help` lists every target, and a check that is not a target ge
   scratch copy of a fixture repo and confirm the gate FAILS; prove the config path too — a bad value
   for that section exits 2, and a zero-file census FAILS.
 - **Do not boot Godot here** (rule 2). CI runs the same `make verify`.
-- **`CHANGELOG.md` is hand-maintained.** A consumer-visible change lands as a bullet under
-  `## Unreleased` with the work; the release retitles the section.
+- **Release notes live in the version-bump PR.** There is no CHANGELOG. A consumer-visible PR says so in its
+  body under `## Release notes`: 1 sentence, the semver class, and an `Upgrade:` line for what a consumer must
+  edit. `release.yml` uses that section from the bump PR as the Release body, or falls back to `--generate-notes`.
+- **Docs for people live in the wiki**, https://github.com/cdowin/godot-devkit/wiki. You may read it. Only a local
+  session publishes there; a cloud session drafts the wiki text in its PR body and the issue is marked
+  blocked-by Chris (local session). This repo keeps no `docs/` and no `.md` outside `README.md`, `CLAUDE.md`,
+  `AGENTS.md` (`tests/test_docs_ratchet.py`); `README.md` stays under 80 lines.
 - **Release:** bump `version` in `pyproject.toml` and `__version__` together on `main`; `auto-tag.yml` tags it
   and `release.yml` publishes the wheel to the index. Never tag by hand.
 - Report in ASD-STE100: numbered NEEDS YOU list first, outcome first, one fact per sentence, numbers not adjectives.

@@ -15,6 +15,8 @@
 #            overwritten: a published wheel is immutable, and uv.lock hashes
 #            it — even after its Release is deleted and the tag moved. The
 #            identical wheel is not attached again; the run goes on to `index`.
+#            The Release body is the `## Release notes` section of the
+#            version-bump PR, or `--generate-notes` when there is none.
 #   index    regenerate the WHOLE index from every release's assets, each
 #            downloaded and hashed (tools/release/build_index.py), so a lost
 #            run is repaired by the next one — a new tag's, or this tag's
@@ -58,6 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     concurrency:
       group: release-${{ inputs.tag || github.ref_name }}
       cancel-in-progress: false
@@ -160,8 +163,27 @@ jobs:
             fi
             gh release upload "$TAG" dist/*.whl dist/*.tar.gz
           else
-            gh release create "$TAG" dist/*.whl dist/*.tar.gz --verify-tag \
-              --title "$TAG" --notes "godot-devkit $TAG. Install it locked: see the README's \"Consume it locked\"."
+            # Release notes come from the version-bump PR: its `## Release notes`
+            # section. No PR, or no such section (a tag a person pushed by hand),
+            # falls back to the generated list of merged PR titles.
+            install="Install: https://github.com/cdowin/godot-devkit/wiki/Installing-and-pinning"
+            sha=$(git rev-parse HEAD)
+            pr_body=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+              --jq '[.[] | select((.body // "") | contains("## Release notes"))] | .[0].body // ""' || true)
+            section=$(printf '%s\n' "$pr_body" | tr -d '\r' | awk '
+              /^## Release notes[[:space:]]*$/ { on = 1; next }
+              on && /^##?[[:space:]]/ { exit }
+              on { print }')
+            if [ -n "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
+              printf '%s\n\n%s\n' "$install" "$section" > release-notes.md
+              echo "Release notes: the '## Release notes' section of the version-bump PR."
+              gh release create "$TAG" dist/*.whl dist/*.tar.gz --verify-tag \
+                --title "$TAG" --notes-file release-notes.md
+            else
+              echo "Release notes: no '## Release notes' section found; using --generate-notes."
+              gh release create "$TAG" dist/*.whl dist/*.tar.gz --verify-tag \
+                --title "$TAG" --notes "$install" --generate-notes
+            fi
           fi
 
   index:
