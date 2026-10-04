@@ -173,7 +173,9 @@ jobs:
             section=$(printf '%s\n' "$pr_body" | tr -d '\r' | awk '
               /^## Release notes[[:space:]]*$/ { on = 1; next }
               on && /^##?[[:space:]]/ { exit }
-              on { print }')
+              on && /^🤖/ { exit }
+              on && !started && /^[[:space:]]*$/ { next }
+              on { started = 1; print }')
             if [ -n "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
               printf '%s\n\n%s\n' "$install" "$section" > release-notes.md
               echo "Release notes: the '## Release notes' section of the version-bump PR."
