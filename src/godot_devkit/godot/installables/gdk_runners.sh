@@ -402,20 +402,36 @@ gdk_receipt_write() {
 
 # --- host-wide engine gate lease --------------------------------------------
 # gdk_engine_gate_run <check> -- <command...> — run one engine gate while
-# holding a nonblocking, per-user advisory lease shared by every checkout.
-# Descendants inherit the real descriptor; an environment marker alone never
-# grants admission. The stable HOME was captured above, before sandboxing.
-gdk_engine_gate_run() {
-	local check="${1:?usage: gdk_engine_gate_run <check> -- <command...>}"; shift
-	[ "${1:-}" = "--" ] || { echo "$GDK_LIB_TAG: expected -- before engine-gate command" >&2; return 2; }
-	shift
-	[ "$#" -gt 0 ] || { echo "$GDK_LIB_TAG: engine-gate command is empty" >&2; return 2; }
-	python3 - "$_GDK_ENGINE_GATE_HOME" run "$check" "$@" <<'PY'
-import errno
+# holding a per-user lease shared by every checkout on the host. Descendants
+# inherit the real descriptor; an environment marker alone never grants
+# admission. The stable HOME was captured above, before sandboxing.
+#
+# THE LEASE IS COUNTED, NOT ONE MUTEX (#47). One exclusive lock for every
+# engine run made a 0.4 s unit slice wait 17-191 s behind a peer lane's run.
+# The host now has GDK_ENGINE_GATE_SLOTS slots (default: cores / 2, at least
+# 1), and a run holds GDK_ENGINE_GATE_WEIGHT of them (default 1; `all` is
+# every slot; a weight above the count is the count). integration.sh's
+# fan-out (--all, --system, --diff) weighs GDK_JOBS; a unit slice, a single
+# scenario, parse, warnings and spot weigh 1; an in-place import-cache rebuild
+# weighs `all`, because it rewrites the .godot/ a peer run in the same
+# checkout reads. GDK_ENGINE_GATE_SLOTS=1 is the old one-at-a-time lease.
+#
+# Mechanism, in the library's python3 (fcntl.flock: the flock(1) command is
+# not on macOS, and python3 is already a requirement here):
+#   ~/.cache/godot-devkit/engine-gates.lock     the DOOR: held only while a
+#                                               run collects its slots
+#   ~/.cache/godot-devkit/engine-gates.slot.N   one file per slot, locked by
+#                                               the run that holds it
+# Only the door holder takes slots, and a slot holder never waits for
+# anything, so two runs can never each hold half of what the other needs. A
+# heavy run that waits at the door holds it, so a stream of weight-1 runs
+# cannot starve it. Every caller on a host should see the same
+# GDK_ENGINE_GATE_SLOTS: the count is per process, the slot files are shared.
+_gdk_engine_gate_py() {
+	python3 - "$@" <<'PY'
 import fcntl
 import json
 import os
-import pwd
 import stat
 import subprocess
 import sys
@@ -424,12 +440,14 @@ import time
 TAG = "gdk-runners"
 FD_KEY = "GDK_ENGINE_GATE_FD"
 OWNER_KEY = "GDK_ENGINE_GATE_OWNER_PID"
+DOOR = "engine-gates.lock"
+SLOT = "engine-gates.slot."
 
 def fail(message, code=2):
-    print(f"{TAG}: {message}", file=sys.stderr)
+    print(f"{TAG}: {message}", file=sys.stderr, flush=True)
     raise SystemExit(code)
 
-def lock_path(home):
+def lease_dir(home):
     if not home:
         fail("HOME was empty before the headless sandbox; cannot locate the engine lease")
     uid = os.getuid()
@@ -446,17 +464,19 @@ def lock_path(home):
             os.chmod(directory, 0o700)
         except OSError as exc:
             fail(f"cannot secure engine lease directory {directory!r}: {exc}")
-    path = os.path.join(directory, "engine-gates.lock")
+    return directory
+
+def open_file(path):
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags, 0o600)
     except OSError as exc:
         fail(f"cannot open engine lease {path!r}: {exc}")
     fst = os.fstat(fd)
-    if not stat.S_ISREG(fst.st_mode) or fst.st_uid != uid:
+    if not stat.S_ISREG(fst.st_mode) or fst.st_uid != os.getuid():
         os.close(fd)
-        fail(f"engine lease {path!r} is not a regular file owned by uid {uid}")
-    return path, fd
+        fail(f"engine lease {path!r} is not a regular file owned by uid {os.getuid()}")
+    return fd
 
 def read_owner(fd):
     try:
@@ -466,38 +486,140 @@ def read_owner(fd):
     except (OSError, UnicodeError, ValueError):
         return {}
 
-def inherited(path):
+def write_owner(fd, owner):
+    payload = (json.dumps(owner, separators=(",", ":")) + "\n").encode("utf-8")
+    os.ftruncate(fd, 0)
+    offset = 0
+    while offset < len(payload):
+        offset += os.pwrite(fd, payload[offset:], offset)
+
+def whole_number(name, raw):
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        fail(f"{name} must be a whole number above 0, got {raw!r}")
+    return value
+
+def slot_count():
+    raw = os.environ.get("GDK_ENGINE_GATE_SLOTS", "")
+    if raw == "":
+        return max(1, (os.cpu_count() or 2) // 2)
+    return whole_number("GDK_ENGINE_GATE_SLOTS", raw)
+
+def weight_of(slots):
+    raw = os.environ.get("GDK_ENGINE_GATE_WEIGHT", "") or "1"
+    if raw == "all":
+        return slots
+    return min(whole_number("GDK_ENGINE_GATE_WEIGHT", raw), slots)
+
+def inherited(directory):
     raw_fd = os.environ.get(FD_KEY)
     raw_owner = os.environ.get(OWNER_KEY)
     if raw_fd is None and raw_owner is None:
         return None
     if raw_fd is None or raw_owner is None:
-        fail("invalid inherited engine lease markers")
+        fail("invalid inherited engine lease: one of its two markers is missing")
     try:
         fd = int(raw_fd)
         fst = os.fstat(fd)
-        pst = os.stat(path, follow_symlinks=False)
-        if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (pst.st_dev, pst.st_ino):
-            fail("inherited engine lease descriptor does not refer to the host lock file")
-        if fst.st_uid != os.getuid() or pst.st_uid != os.getuid():
-            fail("inherited engine lease file is owned by another uid")
-        # Re-locking this descriptor confirms it names the live lease file;
-        # inode and owner metadata bind it to the inherited owner record.
+        if not stat.S_ISREG(fst.st_mode) or fst.st_uid != os.getuid():
+            fail("invalid inherited engine lease: the descriptor is not a file this uid owns")
+        names = [n for n in os.listdir(directory) if n.startswith(SLOT)]
+        if not any((p.st_dev, p.st_ino, p.st_uid) == (fst.st_dev, fst.st_ino, os.getuid())
+                   for p in (os.stat(os.path.join(directory, n), follow_symlinks=False)
+                             for n in names)):
+            fail("invalid inherited engine lease: the descriptor is not a host lease slot")
+        # Re-locking this descriptor confirms it holds the live slot; the
+        # owner record binds it to the inherited owner marker.
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         owner = read_owner(fd)
         if str(owner.get("pid", "")) != raw_owner or not owner.get("check"):
-            fail("inherited engine lease metadata does not match its owner marker")
+            fail("invalid inherited engine lease: its owner record does not match the marker")
         return fd
     except (OSError, ValueError) as exc:
-        fail(f"invalid inherited engine lease descriptor: {exc}")
+        fail(f"invalid inherited engine lease: {exc}")
 
-def run(path, fd, check, command):
-    env = os.environ.copy()
-    env[FD_KEY] = str(fd)
-    env["GDK_ENGINE_GATE_HOME"] = os.path.dirname(os.path.dirname(os.path.dirname(path)))
-    env[OWNER_KEY] = str(os.getpid()) if env.get(OWNER_KEY) is None else env[OWNER_KEY]
+def holders(fds):
+    seen = {}
+    for fd in fds:
+        owner = read_owner(fd)
+        key = (owner.get("pid", "unknown"), owner.get("check", "unknown"))
+        seen[key] = seen.get(key, 0) + 1
+    return ", ".join(f"owner pid {pid} holds check {name}" + (f" ({n} slots)" if n > 1 else "")
+                     for (pid, name), n in seen.items())
+
+def acquire(directory, check, slots, weight):
     try:
-        child = subprocess.Popen(command, env=env, pass_fds=(fd,))
+        bound = float(os.environ.get("GDK_ENGINE_GATE_WAIT", "1800"))
+    except ValueError:
+        fail("GDK_ENGINE_GATE_WAIT is not a number of seconds")
+    door = open_file(os.path.join(directory, DOOR))
+    files = [open_file(os.path.join(directory, f"{SLOT}{i}")) for i in range(slots)]
+    started = time.monotonic()
+    said = []
+
+    def wait(why):
+        # #41: queue for the lease. GDK_ENGINE_GATE_WAIT bounds the wait in
+        # seconds (default 1800); 0 keeps the fail-fast exit 75.
+        if bound <= 0:
+            fail(f"engine gate busy; {why}", 75)
+        if not said:
+            print(f"{TAG}: engine gate busy; {why}; {check} waits up to {int(bound)} s",
+                  file=sys.stderr, flush=True)
+            said.append(why)
+        if time.monotonic() - started >= bound:
+            fail(f"engine gate still busy after {int(bound)} s; {why}", 75)
+        time.sleep(0.25)
+
+    while True:
+        try:
+            fcntl.flock(door, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            nxt = read_owner(door)
+            wait(f"pid {nxt.get('pid', 'unknown')} ({nxt.get('check', 'unknown')}) "
+                 f"is next in line")
+    write_owner(door, {"pid": os.getpid(), "check": check[:80], "weight": weight})
+    held = []
+    while True:
+        for fd in files:
+            if len(held) == weight:
+                break
+            if fd in held:
+                continue
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(fd)
+            except BlockingIOError:
+                pass
+        if len(held) == weight:
+            break
+        wait(f"{slots - len(held)} of {slots} slot(s) taken and {check} needs {weight}; "
+             + holders([fd for fd in files if fd not in held]))
+    owner = {"pid": os.getpid(), "check": check[:80], "weight": weight}
+    for fd in held:
+        write_owner(fd, owner)
+    fcntl.flock(door, fcntl.LOCK_UN)
+    os.close(door)
+    for fd in files:
+        if fd not in held:
+            os.close(fd)
+    if said:
+        print(f"{TAG}: engine gate admitted {check} after "
+              f"{time.monotonic() - started:.1f} s", file=sys.stderr, flush=True)
+    return held
+
+def run(home, fds, check, command):
+    env = os.environ.copy()
+    env[FD_KEY] = str(fds[0])
+    env["GDK_ENGINE_GATE_HOME"] = os.path.abspath(home)
+    env[OWNER_KEY] = str(os.getpid()) if env.get(OWNER_KEY) is None else env[OWNER_KEY]
+    # A descendant runs under this lease and takes no slots of its own.
+    env.pop("GDK_ENGINE_GATE_WEIGHT", None)
+    try:
+        child = subprocess.Popen(command, env=env, pass_fds=tuple(fds))
         code = child.wait()
     except OSError as exc:
         fail(f"cannot run {check}: {exc}")
@@ -507,90 +629,33 @@ def main():
     if len(sys.argv) < 4:
         fail("internal engine lease call is malformed")
     home, action, check, *command = sys.argv[1:]
-    path, fd = lock_path(home)
-    try:
-        held = inherited(path)
-        if action == "check":
-            raise SystemExit(0 if held is not None else 1)
-        if action != "run" or not command:
-            fail("internal engine lease action is invalid")
-        if held is not None:
-            run(path, held, check, command)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            owner = read_owner(fd)
-            pid = owner.get("pid", "unknown")
-            name = owner.get("check", "unknown")
-            # #41: queue for the lease. GDK_ENGINE_GATE_WAIT bounds the wait in
-            # seconds (default 1800); 0 keeps the fail-fast exit 75.
-            try:
-                bound = float(os.environ.get("GDK_ENGINE_GATE_WAIT", "1800"))
-            except ValueError:
-                fail("GDK_ENGINE_GATE_WAIT is not a number of seconds")
-            if bound <= 0:
-                fail(f"engine gate busy; owner pid {pid} holds check {name}", 75)
-            print(f"{TAG}: engine gate busy; owner pid {pid} holds check {name}; "
-                  f"{check} waits up to {int(bound)} s", file=sys.stderr, flush=True)
-            started = time.monotonic()
-            while True:
-                time.sleep(0.25)
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() - started >= bound:
-                        fail(f"engine gate still busy after {int(bound)} s; owner pid "
-                             f"{read_owner(fd).get('pid', 'unknown')}", 75)
-            print(f"{TAG}: engine gate admitted {check} after "
-                  f"{time.monotonic() - started:.1f} s", file=sys.stderr, flush=True)
-        owner = {"pid": os.getpid(), "check": check[:80]}
-        payload = (json.dumps(owner, separators=(",", ":")) + "\n").encode("utf-8")
-        os.ftruncate(fd, 0)
-        offset = 0
-        while offset < len(payload):
-            offset += os.write(fd, payload[offset:])
-        run(path, fd, check, command)
-    finally:
-        os.close(fd)
+    directory = lease_dir(home)
+    held = inherited(directory)
+    if action == "check":
+        raise SystemExit(0 if held is not None else 1)
+    if action != "run" or not command:
+        fail("internal engine lease action is invalid")
+    if held is not None:
+        run(home, [held], check, command)
+    slots = slot_count()
+    run(home, acquire(directory, check, slots, weight_of(slots)), check, command)
 
 main()
 PY
 }
 
+gdk_engine_gate_run() {
+	local check="${1:?usage: gdk_engine_gate_run <check> -- <command...>}"; shift
+	[ "${1:-}" = "--" ] || { echo "$GDK_LIB_TAG: expected -- before engine-gate command" >&2; return 2; }
+	shift
+	[ "$#" -gt 0 ] || { echo "$GDK_LIB_TAG: engine-gate command is empty" >&2; return 2; }
+	_gdk_engine_gate_py "$_GDK_ENGINE_GATE_HOME" run "$check" "$@"
+}
+
 # gdk_engine_gate_held — 0 when this process inherited a live lease, 1 when
 # no lease exists, and 2 when caller-supplied markers fail descriptor checks.
 gdk_engine_gate_held() {
-	python3 - "$_GDK_ENGINE_GATE_HOME" check unused <<'PY'
-import fcntl
-import json
-import os
-import pwd
-import stat
-import sys
-
-def main():
-    home, action, _unused = sys.argv[1:]
-    if not os.environ.get("GDK_ENGINE_GATE_FD") and not os.environ.get("GDK_ENGINE_GATE_OWNER_PID"):
-        raise SystemExit(1)
-    try:
-        path = os.path.join(os.path.abspath(home), ".cache", "godot-devkit", "engine-gates.lock")
-        fd = int(os.environ["GDK_ENGINE_GATE_FD"])
-        fst = os.fstat(fd)
-        pst = os.stat(path, follow_symlinks=False)
-        if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (pst.st_dev, pst.st_ino):
-            raise ValueError("descriptor does not match the host lock file")
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        owner = json.loads(os.pread(fd, 4096, 0).decode("utf-8"))
-        if str(owner.get("pid", "")) != os.environ.get("GDK_ENGINE_GATE_OWNER_PID") or not owner.get("check"):
-            raise ValueError("owner metadata does not match")
-    except (OSError, ValueError, KeyError, UnicodeError) as exc:
-        print(f"gdk-runners: invalid inherited engine lease: {exc}", file=sys.stderr)
-        raise SystemExit(2)
-    raise SystemExit(0)
-
-main()
-PY
+	_gdk_engine_gate_py "$_GDK_ENGINE_GATE_HOME" check unused
 }
 
 # gdk_sandbox_tmpfile <template> — a scratch file INSIDE the per-run HOME, so
@@ -855,13 +920,16 @@ gdk_sweep_failed_paths() {
 GDK_REBUILD_IMPORT_CACHE_TIMEOUT="${GDK_REBUILD_IMPORT_CACHE_TIMEOUT:-60}"
 
 # gdk_rebuild_import_cache [seconds]
+# With no inherited lease it takes EVERY engine slot (GDK_ENGINE_GATE_WEIGHT=all,
+# #47): the pass rewrites, in place, the .godot/ a peer run in this checkout
+# reads.
 gdk_rebuild_import_cache() {
 	local secs="${1:-$GDK_REBUILD_IMPORT_CACHE_TIMEOUT}"
 	if [ -n "$GDK_TIMEOUT" ]; then
 		gdk_engine_gate_held 2>/dev/null; local held=$?
 		[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
 		if [ "$held" -eq 1 ]; then
-			gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
+			GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
 				"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
 				"$GDK_GODOT" --path . --headless --editor --quit || return $?
 		else
@@ -878,7 +946,7 @@ gdk_rebuild_import_cache() {
 	gdk_engine_gate_held 2>/dev/null; local held=$?
 	[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
 	if [ "$held" -eq 1 ]; then
-		gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
+		GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
 			"$GDK_GODOT" --path . --headless --editor --quit
 	else
 		"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
@@ -1315,8 +1383,11 @@ gdk_sweep_failed_paths, gdk_rebuild_import_cache.
 
 Engine admission defaults to the account home across checkouts.
 GDK_ENGINE_GATE_HOME explicitly selects an isolated domain for test fixtures.
-Production callers must share one domain. Competing engine work waits for the lease
-(GDK_ENGINE_GATE_WAIT seconds, default 1800); GDK_ENGINE_GATE_WAIT=0 exits 75 at once.
+Production callers must share one domain. The lease is counted: the host has
+GDK_ENGINE_GATE_SLOTS slots (default cores / 2, at least 1) and a run holds
+GDK_ENGINE_GATE_WEIGHT of them (default 1; `all` is every slot). Work that finds
+too few free slots waits (GDK_ENGINE_GATE_WAIT seconds, default 1800);
+GDK_ENGINE_GATE_WAIT=0 exits 75 at once.
 USAGE_EOF
 }
 

@@ -717,7 +717,7 @@ def test_engine_gate_is_a_counted_lease_weighted_per_run(tmp_path):
 
     def gate(check: str, weight: str, cmd: str, **extra: str):
         return ['bash', '-c', f'source "$1"; gdk_engine_gate_run {check} -- bash -c "{cmd}"',
-                '_', str(LIBRARY)], dict(env, GDK_ENGINE_GATE_WEIGHT=weight, **extra)
+                '_', str(LIBRARY)], {**env, 'GDK_ENGINE_GATE_WEIGHT': weight, **extra}
 
     argv, owner_env = gate('integration', '2', 'echo ready; sleep 20')
     owner = subprocess.Popen(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

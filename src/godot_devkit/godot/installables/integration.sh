@@ -1640,7 +1640,14 @@ fi
 held_rc=0; gdk_engine_gate_held || held_rc=$?
 if [ "$held_rc" -eq 2 ]; then exit 2; fi
 if [ "$held_rc" -eq 1 ]; then
-	GDK_INTEGRATION_RERUN="$RERUN" GDK_INTEGRATION_WARM="$WARM" \
+	# The lease is counted (#47): a fan-out holds GDK_JOBS engine slots, one
+	# scenario (--smoke or a name) holds 1. The library caps it at the host's
+	# slot count.
+	case "${1:-}" in
+		--all|--system|--diff) GATE_WEIGHT="${GDK_JOBS:-$(detect_jobs)}" ;;
+		*) GATE_WEIGHT=1 ;;
+	esac
+	GDK_ENGINE_GATE_WEIGHT="$GATE_WEIGHT" GDK_INTEGRATION_RERUN="$RERUN" GDK_INTEGRATION_WARM="$WARM" \
 		gdk_engine_gate_run "$GATE_TAG" -- bash "$SCRIPT_DIR/$(basename "$0")" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
 	exit $?
 fi
