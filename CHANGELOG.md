@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## v3.0.0 — 2026-10-04
+
+Breaking for a consumer Makefile: the gate framework moves here from agentic-sdlc.
+
+- New verb `install-gates` writes `Makefile.gates` (the gate library `gdk_gate` / `gdk_gate_sh`,
+  verdict lines, `.gate-reports/` logs, and the targets `help`, `check`, `precommit`, `verify`) and
+  `tools/dev/gdk_gate.sh`. A game sets `GDK_CHECKS` in its `Makefile` and includes `Makefile.gates`;
+  it needs nothing from agentic-sdlc. `check` runs `shell` (shellcheck over tracked `*.sh`) then each
+  target in `GDK_CHECKS`; `precommit` is `check` + `GDK_PRECOMMIT_TIERS`; `verify` is `check` +
+  `GDK_VERIFY_TIERS` less `GDK_VERIFY_SKIP`. There is no `pm`, `sdlc`, `budget`, ledger code or
+  `GDK_LEDGER_CMD`.
+- `make milestone`, `GDK_MILESTONE_TIERS` and `GDK_MILESTONE_SKIP` still work as aliases of `verify`,
+  `GDK_VERIFY_TIERS` and `GDK_VERIFY_SKIP`. Remove in 4.0.
+- The config file is `godot-devkit.toml` (was `devkit.toml`), and the roster key is `[roster] checks`
+  (was `[checks] godot`). 3.x reads both old names and prints one deprecation line on stderr. Remove
+  in 4.0. Only godot-devkit sections belong in the file now.
+- `install-ci`, `install-agents`, `install-hooks` and `install-sdlc` are unknown commands (they were
+  routed to agentic-sdlc, which has no CLI since 3.0). `pm`, `init`, `gates-extra` and
+  `check doc|shell|pm|hooks|repo-hygiene` still exit 2.
+- `unit.sh` fails the tier when the GUT log carries a script parse error, even over a reconciled census
+  and a green exit (#51).
+- The runners no longer file a cost row: `gdk_runners.sh` drops its ledger shim.
+- This repo no longer depends on agentic-sdlc and has no PM tree. Its CI (`make verify`) skips the
+  build on a docs-only pull request.
+
 ## v2.1.0 — 2026-10-01
 
 - Built and gated with agentic-sdlc 2.2.0; the README's install example pins it.

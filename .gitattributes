@@ -1,3 +1,0 @@
-pm/roadmap/*/ledger.jsonl merge=union
-
-pm/roadmap/**/*.jsonl merge=union
