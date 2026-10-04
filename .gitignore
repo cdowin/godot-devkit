@@ -4,17 +4,7 @@ __pycache__/
 # Gate transcripts: one slot per gate, cleared per run, bounded by construction.
 .gate-reports/
 
-# Per-worktree scope marker tools/dev/agent-worktree.sh plants for the hooks to read.
-.agent-scope
-
-# Hook-local grants: absolute machine paths, never shared.
-tools/hooks/*.local
-
 # The consumer deny-list rule 8's guard sweeps for — maintainer configuration,
 # never committed: this tree is public and the names are the maintainer's own
 # repositories. See tests/support/consumers.py.
 .consumer-names
-
-# Lane checkouts planted by tools/dev/agent-worktree.sh.
-.claude/worktrees/
-pm/roadmap/ledger.local.jsonl

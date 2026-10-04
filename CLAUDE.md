@@ -7,10 +7,14 @@ line: *any change you can make to a scene by hand should be makeable through one
 command that touches nothing else — and provable without reading the file.* The why is
 [`README.md`](README.md); this file is the enforceable form of it, not a second copy.
 
-A consumer pins `GODOT_DEVKIT_VERSION` beside `DEVKIT_VERSION`, agentic-sdlc's: the gate framework,
-hooks, PM tree and release belts are that kit's, and this repo consumes them through the same pin
-its consumers do. Which repos consume this one is none of its business (rule 8). Public repo, MIT.
-**Every change here lands in other projects' commit gates — treat the CLI as a published API.**
+godot-devkit has Godot tooling and the gate framework games run (`Makefile.gates`, `Makefile.tiers`);
+agentic-sdlc has agent guardrails; neither imports the other. Agent hooks, agents and the model guide
+come from the agentic-sdlc plugin. Which repos consume this one is none of its business (rule 8).
+Public repo, MIT. **Every change here lands in other projects' commit gates — treat the CLI as a
+published API.**
+
+Process: cdowin/signalandecho (README, skills work-intake and branch-plan).
+Model guide: cdowin/agentic-sdlc (which agent, which model, when).
 
 ## Hard rules
 
@@ -29,13 +33,13 @@ its consumers do. Which repos consume this one is none of its business (rule 8).
    the signal a consumer relies on — an LLM recovers from an error and cannot recover from a lie. So
    every scope, glob and exclude proves its census (count what you scanned), and a gate that scanned
    nothing FAILS, loudly.
-5. **Config over forks.** Per-project variation lives in the consumer's `devkit.toml` section with a
-   stock default, never in an edit of the tool, and a repo with no `devkit.toml` behaves
+5. **Config over forks.** Per-project variation lives in the consumer's `godot-devkit.toml` section with a
+   stock default, never in an edit of the tool, and a repo with no `godot-devkit.toml` behaves
    byte-identically to one declaring the defaults — otherwise every consumer carries a fork to police.
 6. **Exit codes are contract:** 0 pass, 1 findings, 2 usage or config error. Output line shapes
    (`  DRIFT  …`, `[check:x] PASS — …`) are grepped by consumers, so changing one is a minor bump at
    least.
-7. **Semver, enforced by habit:** patch = fix with identical interface; minor = new verb, flag, config
+7. **Semver, enforced by habit** (a version is a release tag made when it ships; a PR need not bump it): patch = fix with identical interface; minor = new verb, flag, config
    key or output shape; major = anything a consumer Makefile or hook must edit to survive.
    `__version__` in `src/godot_devkit/__init__.py` and `version` in `pyproject.toml` move together,
    always — two version sites that disagree ship two products.
@@ -74,74 +78,36 @@ its consumers do. Which repos consume this one is none of its business (rule 8).
 - **Known gap:** `refs` does not index autoload NAMES (declared in `project.godot`, not via
   `class_name`) — fix upstream here, not in consumers.
 
-## The ladder, as this repo runs it
+## How this repo runs
 
-The framework is agentic-sdlc's, pinned: `Makefile` is `DEVKIT_VERSION := <tag>` + `include
-Makefile.devkit` + this repo's own; `check`, `precommit`, `milestone`, `pm` and `help` come from the
-include, and the tiers those compositions run live in `Makefile.tiers`, below the Godot roster
-`install-runners` writes. Never hand-roll an incantation: `make help` lists every target, and a check
-that is not a target gets a target first.
+`Makefile` sets `GDK_CHECKS := godot-check` and includes its own `Makefile.gates`; the Python tiers
+live in `Makefile.tiers`, below the Godot roster `install-runners` writes. Never hand-roll an
+incantation: `make help` lists every target, and a check that is not a target gets a target first.
 
-| rung | command | what it is |
-|---|---|---|
-| a PM-tree or doc edit | `make check` | the pinned kit's `check all`, then `godot-check` through `[gates] extra`: `godot-devkit check all` from `src/` over `tests/fixtures/godot_project/`, the committed clean Godot project, staged by `tools/dev/godot_devkit_on_fixture.sh` — this tree holds no scene outside its fixtures |
-| a builder's whole proof | `make pyunit` | `[verify] spot`: the suite minus the spawns (`-m "not shell"`), seconds. This tree has no Godot project; a consumer's spot is `make spot SYS=<slice>` |
-| a batch of lanes | `make sdlc ARGS='integrate <slug>...'` | merges the batch, runs `[integrate] proof` (`check` + `test`) once, closes its stories, deletes the lanes |
-| closing a story or feature | `make pm ARGS='story done <id>'` | a status write; `integrate` writes it for a batch |
-| closing a milestone | `make sdlc ARGS='release <version>'` | checks facts, writes `done`, runs no gate; CI runs `make milestone` (`check` + `matrix`) once on the release PR |
-| a pin bump | `agentic-sdlc adopt <version>` | what proves the bump; `install-* --diff` shows a hand-edit |
-
-Costs are the ledger's: `agentic-sdlc verify --plan` and `make pm ARGS='ledger report'`.
+| what | command |
+|---|---|
+| static gate | `make check`: shellcheck, then `godot-devkit check all` from `src/` over `tests/fixtures/godot_project/` (staged by `tools/dev/godot_devkit_on_fixture.sh`) |
+| inner loop | `make pyunit`: the suite minus the spawns, seconds |
+| per change | `make precommit`: `check` + `test` (the whole suite on the floor interpreter) |
+| what CI runs | `make verify`: `check` + `matrix` (every claimed interpreter) |
 
 - **Every gate prints ONE verdict line** naming its transcript under `.gate-reports/`; `VERBOSE=1` streams
   it. A new target routes through `$(call gdk_gate,…)`; never grep a gate's output for its result.
+- **Self-hosting.** `Makefile.gates`, `tools/dev/gdk_gate.sh` and the head of `Makefile.tiers` are byte
+  copies of the installables; `tests/test_makefile_gates.py` and `tests/test_runners_installable.py`
+  hold them current. The runners are proven by installing them into a temp repo, never by this repo's copies.
 - **The `shell` mark is derived** per module in `tests/conftest.py` from what the source does; a
   hand-written one is a collection refusal.
 - **Verify against source, never a cached wheel:** `PYTHONPATH=src python3 -m godot_devkit.cli …`.
-  `uvx --from <path>` caches by version, so a fixed bug keeps reproducing.
 - **A write verb under test writes to scratch, never to a fixture in place.** Round-trip fidelity is
   proven on `tests/fixtures/corpus/`, byte-compared; a construct the corpus lacks gets a scrubbed
   scene VENDORED, which is how coverage grows.
 - **A gate-semantics change needs a deliberately-broken probe:** introduce the drift class in a
   scratch copy of a fixture repo and confirm the gate FAILS; prove the config path too — a bad value
   for that section exits 2, and a zero-file census FAILS.
-
-## Self-hosting
-
-This package runs its own tooling on its own tree, and each installed file below is held current
-with its installable by something that runs, never by intention.
-
-- **Its own.** `Makefile.tiers` opens with what `install-runners` writes, byte for byte, and this
-  repo's Python tiers follow below the roster (`tests/test_runners_installable.py` holds the
-  prefix); `tools/hooks/cc-godot-sandbox.sh` is the shipped engine-boot guard, identical to its
-  installable. The runners are proven by installing them into a temp repo
-  (`tests/test_runners_installable.py`, `tests/test_hooks_payloads.py`), never by this repo's copies.
-- **The pin's.** `Makefile.devkit` and `tools/dev/gdk_gate.sh` (`agentic-sdlc install-gates`);
-  `tools/hooks/` except the sandbox guard, `tools/setup-hooks.sh` and `tools/dev/agent-worktree.sh`
-  (`install-hooks`, with `.claude/settings.json` carrying the entries it prints);
-  `.github/workflows/verify.yml` (`install-ci`: one job, `make milestone`);
-  `.claude/agents/` except `code-reviewer.md`, which is this repo's own (`install-agents`);
-  `.claude/rules/pm-execution.md` and `.claude/skills/` except `release/` (`pm install-skills`).
-  `agentic-sdlc adopt` proves a pin bump; `install-* --diff` shows a hand-edit.
-- `pm/roadmap/` is a real PM tree, moved only through `make pm ARGS="…"`; `devkit.toml` turns on every
-  `[pm]` rule except D8 (bump at start — this repo bumps at close). A rule that fails here gets its
-  finding fixed; switching one off is only right when it encodes a flow this repo does not run.
+- **Do not boot Godot here** (rule 2). CI runs the same `make verify`.
 - **`CHANGELOG.md` is hand-maintained.** A consumer-visible change lands as a bullet under
   `## Unreleased` with the work; the release retitles the section.
-
-## Reporting to Chris
-
-**Every decision he needs to make goes in a numbered `NEEDS YOU` list at the TOP**, so he can
-answer "1 yes, 2 delete" without scrolling. Each item is a decision, not an observation, and carries
-the thing being decided **in the message** — a path, a commit hash, or the content itself. Never
-"there are three open questions" — name them A, B, C. When nothing needs him, say "nothing needs you".
-
-- **Gate output only when it FAILED, or when you ran it yourself** — one line ("157/157, my run"),
-  never a pasted PASS block. A wall of green tells him nothing.
-- **Numbers, not adjectives.** "228 files, census unchanged", not "verified thoroughly".
-- **Say what you did NOT verify.** A claim with an unstated gap is worse than a gap.
-
-## Releases
-
-`agentic-sdlc release <version>` is the belt; the `/release` skill carries the ceremony around it —
-the reviewer first, the gate last, both version sites together. Never tag by hand.
+- **Release:** bump `version` in `pyproject.toml` and `__version__` together on `main`; `auto-tag.yml` tags it
+  and `release.yml` publishes the wheel to the index. Never tag by hand.
+- Report in ASD-STE100: numbered NEEDS YOU list first, outcome first, one fact per sentence, numbers not adjectives.
