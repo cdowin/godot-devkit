@@ -49,11 +49,11 @@ class RefusesRatherThanGuesses(unittest.TestCase):
         # `"addons/"` under a plain `tuple(...)` is seven single characters,
         # and `data/planted.tres` starts with `d`.
         with temp_repo('tres_comment_repo', only=PLANTED) as root:
-            (root / 'devkit.toml').write_text(
+            (root / 'godot-devkit.toml').write_text(
                 '[tres_comment]\nexclude_prefixes = ["data/", "scenes/"]\n',
                 encoding='utf-8')
             code, out = run_check(tres_comment)
-            (root / 'devkit.toml').write_text(
+            (root / 'godot-devkit.toml').write_text(
                 '[tres_comment]\nexclude_prefixes = "addons/"\n', encoding='utf-8')
             with self.assertRaises(ConfigError):
                 run_check(tres_comment)

@@ -24,7 +24,7 @@ def _gate(only, config=None):
     """One run of the gate in a throwaway repo holding `only`, under `config`."""
     with temp_repo('rng_repo', only=only) as root:
         if config:
-            (root / 'devkit.toml').write_text(config, encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text(config, encoding='utf-8')
         return run_check(rng)
 
 

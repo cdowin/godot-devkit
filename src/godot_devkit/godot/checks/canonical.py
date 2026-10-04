@@ -32,7 +32,7 @@ bump must not redden a tree that was never canonicalized.
 
 Fix a finding with `godot-devkit scene canonicalize --respell --order <file>`.
 
-devkit.toml: [canonical] exclude_prefixes = ["addons/"]
+godot-devkit.toml: [canonical] exclude_prefixes = ["addons/"]
 """
 from __future__ import annotations
 

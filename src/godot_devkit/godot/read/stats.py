@@ -22,7 +22,7 @@ one indented row per immediate subdir of each tests prefix carries a
 Exit 0 with a table; 1 when the scan counted zero files (a census of nothing
 is never a clean answer); 2 on a usage or `[stats]` config error.
 
-devkit.toml: [stats] tests    = ["tests/"]
+godot-devkit.toml: [stats] tests    = ["tests/"]
                      tools    = ["tools/"]
                      vendored = ["addons/"]
              (repo-relative prefixes; each key replaces its default

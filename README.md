@@ -18,11 +18,18 @@ never an error, it is silent partial success); **read output is write input**; *
 because models retry; **bounded blast radius**; and **`scene-diff`**, so an edit is provable
 without re-reading the file.
 
-## Install — two pins
+## What it is, and how a game uses it
 
-A consumer pins two kits and includes one file. `agentic-sdlc` is the gate framework and the SDLC
-(`check`, `precommit`, `milestone`, hooks, CI, the PM tree, the release belts; its overview is
-[on DeepWiki](https://deepwiki.com/cdowin/agentic-sdlc)); this kit is the Godot tiers and gates. `Makefile.tiers` finds this kit in one of two shapes; keep one:
+godot-devkit has Godot tooling; agentic-sdlc has agent guardrails; neither imports the other.
+A game needs godot-devkit and nothing from agentic-sdlc to run `make check`, `make precommit` and
+`make verify`. Agent guardrails (the git denylist hook, the model guide, the agents and the CI
+checks) come from the agentic-sdlc plugin: see [cdowin/agentic-sdlc](https://github.com/cdowin/agentic-sdlc).
+
+The verbs: `scene`, `scene-diff`, `refs`, `orphans`, `autoloads`, `stats`, `tiles` (read and
+surgical write), `check <gate>` and `check all`, and two installers, `install-runners` and
+`install-gates`.
+
+`Makefile.tiers` finds this kit in one of two shapes; keep one:
 
 | shape | the pin | what `make` runs |
 |---|---|---|
@@ -34,52 +41,38 @@ both, the legacy pin runs, as it did before the lock existed, and `make` warns y
 `GODOT_DEVKIT_VERSION` line (two pins of one tool ship two products). Neither is refused at parse
 time. `GODOT_DEVKIT` set to a command overrides both.
 
-Both kits lock the same way: a dev dependency from each kit's own index, hash-pinned in `uv.lock`.
-agentic-sdlc runs only from the lock since its 1.0.0 (no `DEVKIT_VERSION` line), so the Makefile
-is the include plus your own targets:
+```sh
+uv add --dev godot-devkit==3.0.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
+# then add `explicit = true` to the [[tool.uv.index]] table `uv add` wrote
+uv run godot-devkit install-gates     # Makefile.gates + tools/dev/gdk_gate.sh
+uv run godot-devkit install-runners   # Makefile.tiers + the runners
+```
+
+Then a game's `Makefile` includes the gate framework. `Makefile.gates` `-include`s `Makefile.tiers`
+and reads the tier lists it declares (`GDK_PRECOMMIT_TIERS`, `GDK_VERIFY_TIERS`):
 
 ```make
-include Makefile.devkit      # runs the agentic-sdlc version uv.lock pins
+GDK_CHECKS := godot-check          # make targets that join `check`; add uid-scan, hermetic-scan...
+include Makefile.gates
 ```
 
-```sh
-uv add --dev agentic-sdlc==2.2.0 --index agentic-sdlc=https://cdowin.github.io/agentic-sdlc/simple/
-uv add --dev godot-devkit==2.1.0 --index cdowin=https://cdowin.github.io/godot-devkit/simple/
-# then add `explicit = true` to both [[tool.uv.index]] tables `uv add` wrote
-uv run agentic-sdlc install-gates     # Makefile.devkit
-uv run godot-devkit install-runners   # Makefile.tiers + runners
-```
+- `make check` runs `shell` (shellcheck over every tracked `*.sh`) and then each target in
+  `GDK_CHECKS`. Every gate runs, the last line is the verdict, and the exit is the worst exit.
+- `make precommit` is `check` plus `GDK_PRECOMMIT_TIERS`.
+- `make verify` is `check` plus `GDK_VERIFY_TIERS`, less `GDK_VERIFY_SKIP`. CI runs it.
+- `make milestone` is a deprecated alias of `verify`, kept for 3.x (removed in 4.0), as are
+  `GDK_MILESTONE_TIERS` and `GDK_MILESTONE_SKIP`.
 
-The legacy shape for this kit is `GODOT_DEVKIT_VERSION := v2.1.0` above the include and
-`uvx --from "git+https://github.com/cdowin/godot-devkit@v2.1.0" godot-devkit install-runners`.
-Then join the gates to `make check`:
+`Makefile.gates` reads no TOML. A builder runs `make spot SYS=<slice>`: gdlint and a compile of
+only the `.gd` files changed against `BASE` (default `main`), then that unit slice. Every machine
+and CI runs the same gate code because `uv.lock` pins the bits. `install-gates --diff` prints what
+a re-install would change and writes nothing.
 
-```toml
-# devkit.toml
-[gates]
-extra = ["godot-check"]     # `godot-devkit check all`, the target install-runners wrote
-```
-
-`make check` now runs agentic-sdlc's gates and then the eight Godot gates; `make milestone` runs
-the Godot tiers `Makefile.tiers` declares. A builder runs `make spot SYS=<slice>`: gdlint and a
-compile of only the `.gd` files changed against `BASE` (default `main`), then that unit slice. Every machine and CI runs the same
-gate code because `uv.lock` pins the bits.
-
-**A repo with a PM tree has a third step.** agentic-sdlc's flow — the states `pm` moves work
-through, `[pm.states.*]` in `devkit.toml` — has no default, so a repo that skips this step has a
-working gate set and a `pm` that refuses every verb that moves work:
-
-```sh
-make pm ARGS='init'         # writes the flow; a fresh repo can run `agentic-sdlc init` instead,
-                            # which is this plus install-gates, devkit.toml and the rest
-make pm ARGS='vocabulary'   # reads back the states it wrote, by category
-```
-
-- **A fresh repo:** the two pins, `install-gates` (or `agentic-sdlc init`) and `install-runners`,
-  `[gates] extra`, then `pm init` and `pm vocabulary`.
-- **A consumer bumping a pin:** read both CHANGELOGs; re-run `pm init` once, then `pm vocabulary`;
-  `install-runners --diff` prints what a re-install would change and writes nothing;
-  `agentic-sdlc adopt <version>` proves the bump.
+**Upgrading from 2.x.** Rename `devkit.toml` to `godot-devkit.toml` and delete every section only
+agentic-sdlc read. Move `[checks] godot` to `[roster] checks`. Both old names still work in 3.x with
+one deprecation line on stderr (removed in 4.0). Replace `include Makefile.devkit` with
+`GDK_CHECKS := ...` and `include Makefile.gates`; the targets you listed in `[gates] extra` go in
+`GDK_CHECKS`. Rename `GDK_MILESTONE_TIERS` to `GDK_VERIFY_TIERS`.
 
 ### Consume it locked
 
@@ -110,8 +103,8 @@ once `uv.lock` names the kit, `Makefile.tiers` runs `uv run --frozen godot-devki
 `uv sync` to forget, and never rewrites the lock. In CI the installed `godot-toolchain` action runs
 the same command, `--version`, whenever `uv.lock` names the kit.
 
-- **Upgrade:** `uv add --dev godot-devkit==X.Y.Z`, then agentic-sdlc's adopt belt
-  (`agentic-sdlc adopt <version>`).
+- **Upgrade:** `uv add --dev godot-devkit==X.Y.Z`, then `install-gates --diff` and
+  `install-runners --diff` to see what the new installables change.
 - **Bots:** the pin lives in `pyproject.toml` and `uv.lock`, where Renovate and Dependabot can see it
   and open the bump PR themselves.
 
@@ -185,10 +178,10 @@ unless the whole picture resolved — anything unresolvable is censused `UNVERIF
 | `rng` | `.gd` under the configured roots | a bare `randi()`/`randf()`/`randi_range()`/`randf_range()` or any `randomize()` — a draw a seeded run does not own | `[rng] roots`, `allowlist`, `baseline` |
 | `tres-comment` | tracked `.tscn`/`.tres` | a line opening with `;` — a comment Godot's serializer drops on the next save | `[tres_comment] exclude_prefixes`, `baseline` |
 | `unit-disk` | `.gd` under the unit-test roots | a `user://` literal, a forbidden call, or a save/settings call given fewer arguments than its real-root default needs | `[unit_disk] roots`, `forbidden_literals`, `forbidden_calls`, `min_args`, `baseline` |
-| `canonical` (opt-in) | tracked `.tres` values and property order against what Godot's saver writes, where a parse can prove it | a float the saver spells shorter (`0.30` -> `0.3`), a bare list on an `Array[T]` export, a scripted section out of declaration order — the churn an editor save of a hand-authored resource makes | `[canonical] exclude_prefixes`; not in the stock `check all` — name it in `[checks] godot` |
+| `canonical` (opt-in) | tracked `.tres` values and property order against what Godot's saver writes, where a parse can prove it | a float the saver spells shorter (`0.30` -> `0.3`), a bare list on an `Array[T]` export, a scripted section out of declaration order — the churn an editor save of a hand-authored resource makes | `[canonical] exclude_prefixes`; not in the stock `check all` — name it in `[roster] checks` |
 | `test-shape` | the integration tier | a new scenario over the line cap, a ledgered one that grew, and — with `header = true` — a scenario with no `## covers:`/`## Boots because:` header (a ledgered one is held until it carries both), asked of the roster `make integration-list` boots | `[test_shape] scenario_root`, `cap`, `infra`, `ledger`, `header`, `header_ledger`, `runner` |
 
-**Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `devkit.toml`
+**Exit codes are contract:** `0` pass · `1` findings · `2` usage or config error. A `godot-devkit.toml`
 mistake is always `2`, so CI can never read a typo as drift, and a key this package does not honour
 is named at exit 2, never ignored.
 
@@ -196,7 +189,7 @@ is named at exit 2, never ignored.
 (commit sidecars with their scripts; `--fix` clears stale refs, spellings and orphans) →
 migrate to uid-in-refs, then `check tres` → `check props` (findings are real renamed-export bugs) →
 `scene canonicalize --elide-defaults`, then `check defaults` → `scene canonicalize --respell --order`,
-then `check canonical` (add it to `[checks] godot`) → wire `check all`. Steps two and four
+then `check canonical` (add it to `[roster] checks`) → wire `check all`. Steps two and four
 are also the cure for `.tscn`/`.tres` churn — files you did not edit turning up in every commit.
 
 **Adopting a gate frozen.** Six gates — `tres`, `props`, `defaults`, `rng`, `tres-comment`,
@@ -213,19 +206,19 @@ ratchet as its `ledger`, measured in lines.
 poisons the cache); inject each target's uid into the referencing `ext_resource` lines; prove it
 cold — delete `.godot/`, run a headless `--import`, confirm zero `invalid UID` warnings.
 
-## Configuration — `devkit.toml`
+## Configuration — `godot-devkit.toml`
 
 Optional, at the repo root. Every tool works with stock defaults; a section overrides only what it
-names, and a repo with no `devkit.toml` behaves byte-identically to one declaring the defaults.
+names, and a repo with no `godot-devkit.toml` behaves byte-identically to one declaring the defaults.
 `check <gate> --help` prints each gate's section in full.
 
 ```toml
+[roster]
+checks = ["uid", "tres", "props"]  # narrows `check all` for THIS repo (stock: all eight);
+                                   # an unknown name exits 2
 [checks]
-godot = ["uid", "tres", "props"]   # narrows `check all` for THIS repo (stock: all eight);
-                                   # an unknown name exits 2. `[checks] all` is agentic-sdlc's
-                                   # roster in the same file — two kits, two keys.
-[gates]
-extra = ["godot-check"]            # joins `check all` to `make check`
+godot = ["uid", "tres", "props"]   # 3.x only: the pre-3.0 spelling of `[roster] checks`, read
+                                   # with a deprecation line; removed in 4.0
 
 [uid]
 exclude_prefixes = ["addons/"]     # scopes every uid check
@@ -242,7 +235,7 @@ extra_properties = { MyWidget = ["virtual_prop"] }   # a `_get_property_list` sh
 [defaults]
 exclude_prefixes = ["addons/"]
 baseline = { "data/enemies/grunt.tres" = 3 }
-[canonical]                         # opt-in: name it in [checks] godot to run it in `check all`
+[canonical]                         # opt-in: name it in [roster] checks to run it in `check all`
 exclude_prefixes = ["addons/"]
 [rng]
 roots = ["systems/run/"]           # stock ".": keep it NARROW — the roots that hold run-scoped randomness
@@ -307,12 +300,12 @@ legacy `GODOT_DEVKIT_VERSION` from the Makefile above the include, which wins wi
 both are present.
 
 ```
-Makefile.tiers                          the Godot tier roster on the seam Makefile.devkit -includes:
+Makefile.tiers                          the Godot tier roster on the seam Makefile.gates -includes:
                                         parse lint spot warnings unit integration integration-all
                                         integration-diff integration-list scenario smoke capture
                                         import-cache godot-check uid-scan hermetic-scan
                                         runners-self-test, with
-                                        GDK_PRECOMMIT_TIERS / GDK_MILESTONE_TIERS
+                                        GDK_PRECOMMIT_TIERS / GDK_VERIFY_TIERS
 tools/dev/gdk_runners.sh                the sandboxed headless-run library every runner sources
 tools/dev/runners/parse.sh              every .gd compiles + the headless boot is clean
 tools/dev/runners/compile_sweep.gd      stage 2 of parse.sh (+ its .uid sidecar)
@@ -336,8 +329,8 @@ tools/hooks/cc-godot-sandbox.sh         the Claude Code PreToolUse guard: no raw
                                         the CI toolchain: engine, gdlint, shellcheck, import
 ```
 
-**CI.** The workflow is agentic-sdlc's `install-ci`; its toolchain slot is empty. Fill it with one
-step, after `setup-uv` (the run prints it as a `next:` line):
+**CI.** The workflow is yours; give it one step, after `setup-uv`, that fills the toolchain slot
+(the run prints it as a `next:` line):
 
 ```yaml
       - uses: ./.github/actions/godot-toolchain
@@ -349,9 +342,9 @@ The action reads the engine's MAJOR.MINOR from `project.godot` `config/features`
 (`shellcheck-version`, default `0.11.0`, from the release tarball), then imports the project and
 fails when `.godot/global_script_class_cache.cfg` is absent. `install-runners` no longer writes
 `.github/workflows/uid-guard.yml`. An existing copy stays, and the run names it as retired. It is
-safe to delete only when `[gates] extra` names `godot-check` and `[checks] godot` keeps `uid`: then `check uid` runs in `make check`,
-and so in `make milestone`. `uid-scan` is not a milestone tier, so without `godot-check` the run
-says `check uid` is not in the repo's gate and tells you to keep the file.
+safe to delete only when `GDK_CHECKS` names `godot-check` and `[roster] checks` keeps `uid`: then
+`check uid` runs in `make check`, and so in `make verify`. `uid-scan` is not a verify tier, so
+without `godot-check` in `GDK_CHECKS` the file is the only CI uid gate: keep it.
 
 **The diff slice.** `integration.sh --diff <ref>` (`make integration-diff`) boots the scenarios
 whose `## covers:` header names a touched path, plus smoke. A touched file under
@@ -410,11 +403,11 @@ Isolated because:" or fix its reset`, and counts green. `--no-rerun` leaves it r
 reads `N passed (K flaky, W warm-only), F failed (of T); warm A, cold B, handed back C`. A, B and C
 must sum to the roster, and every scenario must have a result. Otherwise the run FAILS and names
 what is missing. `[INTEGRATION] WALL: warm workers Xs, cold remainder Ys` splits the wall clock,
-and `BOOTS` counts one boot per worker. Compare before and after in your own ledger.
+and `BOOTS` counts one boot per worker. Compare before and after in the run output.
 
 Every runner carries `--help` and a `--self-test` corpus; `make runners-self-test` replays them all.
 The guard's corpus (`bash tools/hooks/cc-godot-sandbox.sh --self-test`) is replayed by this kit's
-own tests, so do not add it to `[gates] extra`. Every gate prints ONE verdict line naming its full
+own tests, so do not add it to `GDK_CHECKS`. Every gate prints ONE verdict line naming its full
 transcript under `.gate-reports/`; `VERBOSE=1` streams the whole thing.
 
 **The spot check.** `make spot SYS=<slice>` is a builder's whole proof. `spot.sh` runs gdlint and
@@ -431,9 +424,7 @@ prints the recorded verdict with `; reused — receipt <id>` and boots nothing. 
 `scenario` file them. The integration key holds the arguments, the roster env, the tree of the
 `--diff` ref, and the roster files with every `## covers:` path, and it is asked before the engine
 lease. A `scenario` run inside a sweep, under `--suite` or with `-v` files none. A path a runner
-names in `GDK_RECEIPT_PATHS` joins the key even inside a `GDK_RECEIPT_EXCLUDE` directory. A reused
-run files no cost row: the `gdk_gate`-wrapped targets export `GDK_GATE_UNMEASURED`, and a hit
-creates that file. `GDK_RECEIPTS=0` runs every tier.
+names in `GDK_RECEIPT_PATHS` joins the key even inside a `GDK_RECEIPT_EXCLUDE` directory. `GDK_RECEIPTS=0` runs every tier.
 
 **Several lanes on one machine.** `unit.sh` bounds its run at 180 s times `ceil(1-minute load /
 cpus)`, clamped to 1-3, and opens with the bound it chose and why (`[UNIT] timeout 360s (2x,
@@ -444,19 +435,16 @@ says `No such process`, or a visible process table lacks it), so the HOME reaper
 peer's live run. Where a sandbox hides pid 1 from `ps`, the library's self-test prints `SKIP — …`
 for its two foreign-pid cases instead of failing them.
 
-**What a tier costs.** Every tier files a cost row in agentic-sdlc's ledger, so `pm ledger report` shows
-what each one costs: `parse`, `lint`, `warnings` and `unit` file theirs from inside the runner
-(`unit` with its GUT test count as the census), and the scenario tiers carry a census of **boots**.
-A scenario file is one cold engine boot whatever its length, so the scenario tier's cost is its
-file count: merging two scenarios saves a boot, trimming lines saves nothing. The boots
-census on `integration-all` / `integration-diff` rows is that cost; `check test-shape`'s line cap
-is a readability gate, not a cost one.
+**What a tier costs.** `unit` prints its GUT test count, and the scenario tiers print a census
+of **boots** (`[INTEGRATION] BOOTS: <n> …`). A scenario file is one cold engine boot whatever its
+length, so the scenario tier's cost is its file count: merging two scenarios saves a boot, trimming
+lines saves nothing. `check test-shape`'s line cap is a readability gate, not a cost one.
 
 ## Development
 
 `make help` lists every target; never hand-roll an incantation. `make check` is the static gate,
 `make pyunit` the inner loop (the suite minus the spawns, seconds), `make test` the whole suite on
-the floor interpreter, `make milestone` the full gate and what CI runs (`check` + `matrix`, every
+the floor interpreter, `make verify` the full gate and what CI runs (`check` + `matrix`, every
 claimed interpreter). Verify against source — `PYTHONPATH=src python3 -m godot_devkit.cli …` —
 never through `uvx --from <path>`, which caches a wheel by version.
 

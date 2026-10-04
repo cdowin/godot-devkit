@@ -18,7 +18,7 @@ enter the corpus. Pure parse — never writes, never boots Godot.
     make orphans
     python3 tools/dev/introspect/orphans.py [--tests]
 
-devkit.toml: [orphans] vendored_prefixes        = ["addons/"]
+godot-devkit.toml: [orphans] vendored_prefixes        = ["addons/"]
                        entry_point_prefixes     = ["tools/"]
                        auto_discovered_prefixes = ["tests/", "data/"]
                        convention_files         = ["default_bus_layout.tres"]

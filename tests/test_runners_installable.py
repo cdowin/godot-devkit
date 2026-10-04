@@ -207,29 +207,6 @@ def test_a_mis_set_report_dir_is_refused_before_anything_is_removed(tmp_path):
 
 
 # --- unit.sh's coverage gate, driven through the RUNNER ----------------------
-# The gate framework's library as this repo's pin installed it: the one a
-# consumer's `install-gates` puts beside gdk_runners.sh, and the owner of the
-# ledger row. Its recorder is GDK_LEDGER_CMD, stood in for by a script that
-# writes down what it was asked to file.
-GATE_LIB = REPO_ROOT / 'tools' / 'dev' / 'gdk_gate.sh'
-ROW = re.compile(r'^pm ledger record --gate (\S+) --verdict (\S+) '
-                 r'--duration-ms \d+(?: --census (\d+))?$')
-
-
-def _recorder(tmp_path: Path, ledger: Path) -> Path:
-    recorder = tmp_path / 'recorder.sh'
-    recorder.write_text(f'printf "%s\\n" "$*" >> "{ledger}"\n', encoding='utf-8')
-    return recorder
-
-
-def _rows(ledger: Path) -> list[tuple[str, str, str]]:
-    """(gate, verdict, census) per filed row; a line of any other shape fails."""
-    lines = ledger.read_text(encoding='utf-8').splitlines() if ledger.exists() else []
-    rows = [ROW.match(line) for line in lines]
-    assert all(rows), lines
-    return [(m.group(1), m.group(2), m.group(3) or '') for m in rows]
-
-
 GUT_TRANSCRIPT = ('#!/usr/bin/env bash\n'
                   'echo "Running tests..."\n'
                   'echo "Totals"\n'
@@ -247,26 +224,17 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     `Scripts 0` into `PASS (0/0 scripts loaded - full coverage)` (MAJOR-2,
     rule 4's sin on the tier a consumer slices by hand every day). A stub
     prints the GUT transcript and unit.sh does everything else for real; the
-    reconciled run is the control the two failures are measured against.
-
-    #7/#8, on the same three runs: each files ONE ledger row through the
-    gate framework's own library (the pin's gdk_gate.sh, beside the runner
-    library where `install-gates` puts it) with the outcome the runner NAMED
-    and GUT's test count as the census. The mismatch is the case that bites:
-    GUT exits 0 there, so a verdict read off the exit code would file PASS."""
+    reconciled run is the control the two failures are measured against."""
     root = tmp_path / 'repo'
     _project(root, UNIT)
-    shutil.copy2(GATE_LIB, root / 'tools' / 'dev' / 'gdk_gate.sh')
     tier = root / 'tests' / 'unit' / 'stats'
     tier.mkdir(parents=True)
     for index in range(2):
         (tier / f'test_{index}.gd').write_text('', encoding='utf-8')
     stub = _stub_engine(tmp_path, GUT_TRANSCRIPT.format(scripts=2))
-    ledger = tmp_path / 'ledger.txt'
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'),
-           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME'],
-           'GDK_LEDGER_CMD': f'bash {_recorder(tmp_path, ledger)}'}
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
 
     def unit(*argv: str) -> subprocess.CompletedProcess:
         return subprocess.run(['bash', 'tools/dev/runners/unit.sh', *argv], cwd=root,
@@ -275,7 +243,6 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     done = unit()
     assert done.returncode == 0, done.stdout + done.stderr
     assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout.splitlines()[-1], done.stdout
-    assert _rows(ledger) == [('unit', 'PASS', '2')], done.stderr
     # The transcript opens with the bound the run was judged under, not only
     # the console: a HARD_TIMEOUT read from the log alone names its number.
     transcript = (root / '.gate-reports' / 'unit.log').read_text(encoding='utf-8')
@@ -286,7 +253,6 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     assert done.returncode == 1, done.stdout + done.stderr
     assert '3 test script(s) on disk, 2 run' in done.stdout, done.stdout
     assert 'COVERAGE FAIL (script count mismatch)' in done.stdout, done.stdout
-    assert _rows(ledger)[1:] == [('unit', 'FAIL', '2')], done.stderr
 
     (stub / 'godot').write_text(GUT_TRANSCRIPT.format(scripts=0), encoding='utf-8')
     done = unit('typo')
@@ -296,18 +262,6 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     # It names the DIRECTORY it scanned: the repair is one of two spellings
     # and a verdict that does not name it chooses neither.
     assert 'tests/unit/typo' in done.stdout, done.stdout
-    assert [row[1] for row in _rows(ledger)] == ['PASS', 'FAIL', 'FAIL'], _rows(ledger)
-
-    # A gate library that defines neither call (empty, renamed upstream) once
-    # sent the cost row back into the runner's own wrapper until fork failed,
-    # while the run still printed PASS. Now: the verdict stands, no row, one note.
-    (root / 'tools' / 'dev' / 'gdk_gate.sh').write_text('', encoding='utf-8')
-    (stub / 'godot').write_text(GUT_TRANSCRIPT.format(scripts=3), encoding='utf-8')
-    done = subprocess.run(['bash', 'tools/dev/runners/unit.sh'], cwd=root, text=True,
-                          capture_output=True, env=env, timeout=60)
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert 'defines no gdk_gate_verdict' in done.stderr, done.stderr
-    assert len(_rows(ledger)) == 3, _rows(ledger)
 
 
 # --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
@@ -703,9 +657,7 @@ def test_the_fan_out_runs_a_runner_with_no_exec_bit_and_tells_every_job_it_has_p
     and broke the whole sweep, once).
 
     #8, on the same sweep: the run reports its BOOTS — one per scenario file,
-    the tier's real cost unit — and the census command the installed
-    Makefile.tiers passes `gdk_gate` reads that count back off the transcript,
-    so the `gate` row `[tests] cases` grades carries it."""
+    the tier's real cost unit."""
     runner = _fanout_fixture(
         tmp_path, 'echo "${GDK_SCENARIO_IN_SWEEP:-unset}" > "$PWD/sweep.txt"\n'
                   'echo "[SCENARIO] $1 PASS"\n', mode=0o644)
@@ -719,13 +671,6 @@ def test_the_fan_out_runs_a_runner_with_no_exec_bit_and_tells_every_job_it_has_p
     assert marker.read_text(encoding='utf-8').strip() == '1', marker.read_text()
     assert re.search(r'^\[INTEGRATION\] BOOTS: 2 scenario\(s\) booted, \d+\.\ds CPU, '
                      r'\d+\.\d\ds per boot$', done.stdout, re.M), done.stdout
-    census = re.search(r'^GDK_CENSUS_BOOTS := (.*)$', install.body_of('Makefile.tiers'), re.M)
-    assert census, 'Makefile.tiers no longer declares the scenario tiers\' census'
-    log = tmp_path / 'integration.log'
-    log.write_text(done.stdout, encoding='utf-8')
-    read = subprocess.run(['bash', '-c', 'log="$1"; ' + census.group(1).replace('$$', '$'),
-                           '_', str(log)], text=True, capture_output=True)
-    assert read.stdout == '2\n', read.stdout + read.stderr
 
 
 def test_a_failing_scenario_with_no_summary_line_still_gets_a_diagnosis(tmp_path):
@@ -1044,15 +989,12 @@ def test_list_prints_the_sorted_roster_honours_the_keep_list_and_fails_on_an_emp
 # The verb's contract is the one every installer this package ever shipped
 # had: write each file once, refuse a differing destination by name (`--force`
 # replaces it whole), `--diff` prints and writes nothing, a second run is a
-# no-op, every `.sh` lands executable. tests/fixtures/agentic_sdlc/
-# Makefile.devkit is agentic-sdlc v0.2.0's `install-gates` output, VENDORED
-# (rule 8): the include the written tier file composes under, held here so the
-# composition is proven on every machine and never against a neighbouring
-# checkout.
-INCLUDE = REPO_ROOT / 'tests' / 'fixtures' / 'agentic_sdlc' / 'Makefile.devkit'
-CONSUMER_MAKEFILE = ('DEVKIT_VERSION := v0.2.0\n'
+# no-op, every `.sh` lands executable. The include the written tier file
+# composes under is this package's own `install-gates` output (Makefile.gates),
+# so the composition is proven on every machine with agentic-sdlc NOT installed.
+CONSUMER_MAKEFILE = ('GDK_CHECKS := godot-check\n'
                      'GODOT_DEVKIT_VERSION := v0.25.0\n'
-                     'include Makefile.devkit\n')
+                     'include Makefile.gates\n')
 # The roster, by destination — pinned rather than read off the plan, because a
 # file dropped from the plan is a file a consumer silently stops getting.
 DESTINATIONS = {
@@ -1074,7 +1016,7 @@ TOOLCHAIN_STEP = '- uses: ./.github/actions/godot-toolchain'
 # Retired in 1.3.0: no longer written, never deleted, named on every run.
 UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
-# `[gates] extra` names.
+# GDK_CHECKS names.
 GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'scenario',
                  'capture', 'import-cache', 'hermetic-scan', 'godot-check')
 
@@ -1082,17 +1024,20 @@ GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'sc
 @contextlib.contextmanager
 def consumer_repo(tmp_path: Path, makefile: bool = False):
     """An empty git repo, cwd'd into with the config caches cleared; with
-    `makefile`, the consumer's three lines and the vendored include."""
+    `makefile`, the consumer's three lines and the gate framework
+    `install-gates` writes."""
     root = tmp_path / 'repo'
     root.mkdir()
     subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
     if makefile:
-        shutil.copy2(INCLUDE, root / 'Makefile.devkit')
         (root / 'Makefile').write_text(CONSUMER_MAKEFILE, encoding='utf-8')
     previous = Path.cwd()
     os.chdir(root)
     repo_root.cache_clear()
     load_config.cache_clear()
+    if makefile:
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert install.main_gates([]) == 0
     try:
         yield root
     finally:
@@ -1164,15 +1109,11 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
 
 
 @pytest.mark.parametrize('toml, says', [
-    # `godot-check` joined: `check uid` runs in `make check`, so the file is
-    # a second run of the same check.
-    ('[gates]\nextra = ["godot-check"]\n', 'is safe to delete'),
-    # Not joined: `uid-scan` is no milestone tier, so this file is the only
-    # CI uid gate, and "safe to delete" would be the lie.
-    ('', 'is NOT in this repo\'s gate: `[gates] extra` does not name'),
-    # Joined, but the roster drops `uid`: `godot-check` runs, `check uid` not.
-    ('[gates]\nextra = ["godot-check"]\n[checks]\ngodot = ["tres"]\n',
-     '`[checks] godot` leaves `uid` out'),
+    # The roster keeps `uid`: `check uid` runs in `make check` once GDK_CHECKS
+    # (a Makefile variable this verb cannot read) names `godot-check`.
+    ('', 'is safe to delete once it does'),
+    # The roster drops `uid`: `godot-check` runs, `check uid` not.
+    ('[roster]\nchecks = ["tres"]\n', '`[roster] checks` leaves `uid` out'),
 ])
 def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
     """uid-guard.yml is the consumer's file after the write: a run leaves it
@@ -1180,7 +1121,7 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
     it is safe to delete ONLY when `check uid` is in the repo's gate."""
     with consumer_repo(tmp_path) as root:
         if toml:
-            (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
         guard = root / UID_GUARD
         guard.parent.mkdir(parents=True)
         guard.write_text('name: UID Guard\n', encoding='utf-8')
@@ -1196,14 +1137,14 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
 
 @pytest.mark.parametrize('toml', [
     # MN4: a malformed value — a bare string is refused, never iterated.
-    '[checks]\ngodot = "uid"\n',
+    '[roster]\nchecks = "uid"\n',
     # #28: an unknown gate. The retired line had its own fallback and said
     # "safe to delete" over a value `check all` refuses at exit 2.
-    '[gates]\nextra = ["godot-check"]\n[checks]\ngodot = ["uid", "tress"]\n',
+    '[roster]\nchecks = ["uid", "tress"]\n',
 ])
 def test_a_roster_check_all_refuses_is_exit_2_before_any_write(tmp_path, toml):
     with consumer_repo(tmp_path) as root:
-        (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+        (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
         (root / UID_GUARD).parent.mkdir(parents=True)
         (root / UID_GUARD).write_text('name: UID Guard\n', encoding='utf-8')
         with pytest.raises(install.ConfigError) as refused:
@@ -1294,15 +1235,16 @@ def _make_n(root: Path, *goals: str) -> subprocess.CompletedProcess:
 
 @pytest.mark.skipif(shutil.which('make') is None, reason='needs make')
 def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
-    """The seam, end to end: agentic-sdlc's include `-include`s the tier file
-    this verb wrote, reads its two lists, and `precommit` / `milestone` name
-    every tier — `make -n`, so nothing boots. The include refuses a tier no
-    makefile defines at parse time, so exit 0 here is the whole claim."""
+    """The seam, end to end: the include `install-gates` wrote `-include`s the
+    tier file this verb wrote, reads its two lists, and `precommit` / `verify`
+    name every tier — `make -n`, so nothing boots. The include refuses a tier
+    no makefile defines at parse time, so exit 0 here is the whole claim.
+    The deprecated `milestone` alias runs `verify`."""
     with consumer_repo(tmp_path, makefile=True) as root:
         assert run_install()[0] == 0
         declared: set[str] = set()
         for composition, var in (('precommit', 'GDK_PRECOMMIT_TIERS'),
-                                 ('milestone', 'GDK_MILESTONE_TIERS')):
+                                 ('verify', 'GDK_VERIFY_TIERS')):
             tiers = _tiers(var)
             assert tiers, f'{var} is empty'
             declared.update(tiers)
@@ -1313,6 +1255,9 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
             assert f'{{MAKE:-make}} check {" ".join(tiers)}' in done.stdout, done.stdout
             # 2.0.0: `precommit` is check + spot and says it is retired, once.
             assert done.stdout.count('[PRECOMMIT] retired') == (composition == 'precommit'), done.stdout
+        done = _make_n(root, 'milestone')
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert f'{{MAKE:-make}} check {" ".join(_tiers("GDK_VERIFY_TIERS"))}' in done.stdout, done.stdout
         # Every declared tier and every named Godot target is a goal make
         # resolves — `integration-diff` / `integration-all` are the slices
         # the compositions run, `integration` the one a hand takes ARGS to.
@@ -1438,3 +1383,67 @@ def test_receipt_keys_on_inputs_not_prose_and_is_shared_by_worktrees(tmp_path):
     # Off means off.
     env['GDK_RECEIPTS'] = '0'
     assert lib('gdk_receipt_key unit world').returncode == 1
+
+
+# --- install-gates: the framework's two files ---------------------------------
+GATES_DESTINATIONS = {'Makefile.gates', 'tools/dev/gdk_gate.sh'}
+
+
+def run_install_gates(*flags: str) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = install.main_gates(list(flags))
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_install_gates_writes_its_two_files_once_and_a_second_run_is_a_no_op(tmp_path):
+    with consumer_repo(tmp_path) as root:
+        code, out, err = run_install_gates()
+        assert code == 0, out + err
+        for rel in sorted(GATES_DESTINATIONS):
+            assert f'[install] wrote {rel}' in out, out
+        assert not (root / 'Makefile.tiers').exists(), 'install-gates wrote a runner file'
+        assert (root / 'Makefile.gates').read_text(encoding='utf-8') == install.body_of('Makefile.gates')
+        assert os.access(root / 'tools/dev/gdk_gate.sh', os.X_OK), 'the library landed without its mode'
+        before = {rel: (root / rel).read_bytes() for rel in GATES_DESTINATIONS}
+        code, out, err = run_install_gates()
+        assert code == 0 and 'wrote' not in out, out + err
+        assert out.count('already current') == 2, out
+        assert before == {rel: (root / rel).read_bytes() for rel in GATES_DESTINATIONS}
+
+
+def test_install_gates_refuses_a_differing_file_by_name_and_force_replaces_it(tmp_path):
+    with consumer_repo(tmp_path) as root:
+        run_install_gates()
+        gates = root / 'Makefile.gates'
+        gates.write_text(gates.read_text(encoding='utf-8') + '\n# mine\n', encoding='utf-8')
+        edited = gates.read_bytes()
+        code, out, err = run_install_gates()
+        assert code == 1, out + err
+        assert 'Makefile.gates exists and differs' in err and 'install-gates' in err, err
+        assert gates.read_bytes() == edited, 'a refusal wrote'
+        code, out, _ = run_install_gates('--diff')
+        assert code == 0 and '-# mine' in out, out
+        assert gates.read_bytes() == edited, 'a --diff wrote'
+        assert run_install_gates('--force')[0] == 0
+        assert gates.read_text(encoding='utf-8') == install.body_of('Makefile.gates')
+
+
+def test_install_gates_rejects_an_unknown_flag_and_names_itself(tmp_path):
+    with consumer_repo(tmp_path):
+        code, out, err = run_install_gates('--nope')
+        assert code == 2 and 'godot-devkit install-gates: unknown flag' in err, err
+        assert 'usage: godot-devkit install-gates' in err, err
+
+
+def test_the_cli_routes_install_gates_and_no_longer_calls_the_old_verbs_agentic_sdlcs(tmp_path):
+    from godot_devkit import cli
+    with consumer_repo(tmp_path) as root:
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli.main(['install-gates']) == 0
+        assert (root / 'Makefile.gates').is_file()
+        for verb in ('install-ci', 'install-agents', 'install-hooks', 'install-sdlc'):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                assert cli.main([verb]) == 2
+            assert f'unknown command {verb!r}' in err.getvalue(), err.getvalue()

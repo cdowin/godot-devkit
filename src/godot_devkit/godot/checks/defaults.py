@@ -25,7 +25,7 @@ every comparison must normalise into one small closed value language, or the
 assignment is censused as UNVERIFIED and never reported. Fix a finding with
 `godot-devkit scene canonicalize --elide-defaults <file>`.
 
-devkit.toml: [defaults] exclude_prefixes = ["addons/"]
+godot-devkit.toml: [defaults] exclude_prefixes = ["addons/"]
              [defaults] baseline = { "data/enemies/grunt.tres" = 3 }
              (existing debt, per file at its CURRENT count of redundant
               assignments: held and counted on a BASELINED line; a file past

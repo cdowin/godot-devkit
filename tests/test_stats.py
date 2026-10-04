@@ -66,14 +66,14 @@ CENSUS = '# 11 file(s) scanned — dirs: ./'
 
 @contextlib.contextmanager
 def tree(files: dict[str, str], toml: str | None = None):
-    """A git repo holding `files` (and `devkit.toml` when given), cwd'd into."""
+    """A git repo holding `files` (and `godot-devkit.toml` when given), cwd'd into."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         for rel, body in files.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(body, encoding='utf-8')
         if toml is not None:
-            (root / 'devkit.toml').write_text(toml, encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
         subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
         previous = Path.cwd()
         os.chdir(root)

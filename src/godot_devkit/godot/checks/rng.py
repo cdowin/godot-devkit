@@ -33,7 +33,7 @@ HONEST SCOPE: matching is per line, after quoted strings and a trailing `#`
 comment are stripped, with `##` doc-comment lines skipped whole — a call NAMED
 in prose is not a call. A call split across a line break slips through.
 
-devkit.toml:
+godot-devkit.toml:
 
     [rng]
     roots = ["systems/progression", "resources/loot"]

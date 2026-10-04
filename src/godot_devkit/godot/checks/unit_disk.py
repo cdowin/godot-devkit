@@ -29,7 +29,7 @@ HONEST SCOPE: matching is per line. A call split across a line break slips
 through, and `min_args` counts only a call whose parentheses close on the same
 line — an unbalanced line is skipped rather than guessed at.
 
-devkit.toml:
+godot-devkit.toml:
 
     [unit_disk]
     roots = ["tests/unit"]

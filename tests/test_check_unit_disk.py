@@ -42,7 +42,7 @@ def _gate(only, config=None):
     """One run of the gate in a throwaway repo holding `only`, under `config`."""
     with temp_repo('unit_disk_repo', only=only) as root:
         if config:
-            (root / 'devkit.toml').write_text(config, encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text(config, encoding='utf-8')
         return run_check(unit_disk)
 
 
@@ -90,7 +90,7 @@ class TheConsumersFiveChecks(unittest.TestCase):
                 'func _s(uuid: String) -> bool:\n\treturn SaveService.save(\n\t\tuuid)\n',
                 encoding='utf-8')
             subprocess.run(['git', 'add', 'tests/unit/wrapped.gd'], cwd=root, check=True)
-            (root / 'devkit.toml').write_text(CONSUMER, encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text(CONSUMER, encoding='utf-8')
             code, out = run_check(unit_disk)
         self.assertEqual(code, 0, out)
         self.assertIn('2 test file(s)', out)

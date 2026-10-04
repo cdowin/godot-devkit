@@ -26,7 +26,7 @@ REFUSES when the NEW path does not exist on disk — retargeting refs onto
 nothing is minting drift. The OLD file being gone is fine; it moved, that is
 the point. `--dry-run` lists every file+line and writes nothing. tests/ are
 scanned (a repair that strands the tests' refs is half a repair); the
-`[refs] exclude_prefixes` scope from devkit.toml applies, same as `refs`.
+`[refs] exclude_prefixes` scope from godot-devkit.toml applies, same as `refs`.
 It rewrites res:// paths only: a hit `refs` prints under `dynamic (untyped
 receiver)` is a signal NAME on an unresolved receiver, and is never acted on.
 """
