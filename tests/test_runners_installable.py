@@ -563,6 +563,9 @@ def test_lint_runs_one_gdlint_per_dir_and_its_receipt_ignores_a_resource_edit(tm
     transcript = (root / '.gate-reports' / 'lint.log').read_text(encoding='utf-8')
     assert transcript.index('Success: no problems found') < transcript.index('systems/bad.gd'), \
         transcript
+    env['GDK_LINT_JOBS'] = 'many'
+    done = lint()
+    assert done.returncode == 2 and 'GDK_LINT_JOBS' in done.stderr, done.stdout + done.stderr
 
 
 def test_spot_checks_only_the_changed_scripts_and_a_scene_only_change_passes_census_0(tmp_path):
