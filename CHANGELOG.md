@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v3.2.0 — 2026-10-04
+
+Minor: a new option, no change a consumer Makefile must make. A consumer bumps its pin to `godot-devkit==3.2.0` and re-runs `install-runners` to get the new runner files.
+
+- `integration.sh --all --shard <i>/<n>` runs 1 slice of the roster, so a game's CI can fan the integration tier out over a matrix (#67). The env spelling is `GDK_SHARD=<i>/<n>`; `make integration-all GDK_SHARD=<i>/<n>` passes it on. The roster is sorted by name, and scenario k (from 1) goes to shard k mod n: the slices differ by at most 1 in size, are the same on every run, and together cover each scenario once. A shard past the end of a short roster has 0 scenarios and passes, with a `0 scenario(s)` line. A malformed `i/n`, `i` < 1 or `i` > n exits 2 with a reason, and so does `--shard` with `--diff`, `--system`, `--smoke`, a name or `--list`. It composes with `GDK_JOBS` inside the shard and weighs the engine lease `GDK_JOBS`, like `--all`. The run says `[INTEGRATION] shard 2/6: 27 scenario(s) of 160` and its SUMMARY ends `; shard 2/6 of 160`. The receipt key includes the shard.
+
 ## v3.1.0 — 2026-10-04
 
 The runner fixes from the round-2 test audit. Minor: new env knobs, no change a consumer Makefile must make. A consumer bumps its pin to `godot-devkit==3.1.0` and re-runs `install-runners` to get the new runner files.
