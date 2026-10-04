@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v3.0.1 — 2026-10-04
+
+Text only, no behavior change. Two comments in the `integration.sh` installable named agentic-sdlc 2.x parts (`pm ledger report`, `Makefile.devkit`); they now describe godot-devkit 3.0 (`make verify`, `Makefile.gates`). No installable matches the games' zero-count grep.
+
 ## v3.0.0 — 2026-10-04
 
 Breaking for a consumer Makefile: the gate framework moves here from agentic-sdlc.

@@ -716,8 +716,8 @@ detect_jobs() {
 # standalone — the line count does not move the number. So the census this
 # runner reports is the boots, with the CPU they burned beside it: merging two
 # scenarios saves a boot, trimming lines saves nothing. Makefile.tiers reads
-# the count off the BOOTS line into the gate's cost row, where agentic-sdlc's
-# `pm ledger report` shows it.
+# the count off the BOOTS line into the gate's cost row, where `make verify`
+# shows it.
 
 # cpu_ms <XmY.YYYs> — one field of `times`, in milliseconds; empty when it is
 # not that shape. Bash writes the fraction with the locale's radix.
@@ -1838,7 +1838,7 @@ trap 'rm -rf "$TMP"' EXIT
 # The $1/$2 below are the INNER bash's positionals, expanded by that shell.
 #
 # `bash "$SCENARIO_SH"`, never a bare exec of it. This is the spelling
-# Makefile.devkit and install-runners' own next step tell a consumer to use,
+# Makefile.gates and install-runners' own next step tell a consumer to use,
 # and the reason is that a checkout can carry the file without its mode bits —
 # a zip, a `git config core.fileMode false` tree, an older install. Exec'ing it
 # directly returned 126 from every scenario, and `Permission denied` matches
