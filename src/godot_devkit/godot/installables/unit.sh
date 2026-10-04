@@ -518,6 +518,18 @@ if [ "$DISK_SCRIPTS" -ne "$RAN_SCRIPTS" ]; then
 	exit 1
 fi
 
+# A parse error in a PRODUCTION script a test instantiates does not stop the
+# test script loading, so the census reconciles and GUT can exit 0 over a
+# broken file (#51). Any such line in the log fails the tier, the way parse.sh
+# reads boot errors.
+LOAD_ERRORS="$(printf '%s\n' "$PLAIN" | grep -E "$LOAD_DIAGNOSTIC_PATTERN" || true)"
+if [ -n "$LOAD_ERRORS" ]; then
+	echo "[$GATE_TAG] SCRIPT ERROR — the run logged a script that did not parse or load:"
+	printf '%s\n' "$LOAD_ERRORS" | sed 's/^/    /'
+	gdk_gate_verdict "$GATE_TAG" "FAIL (script parse error in the run log)" "$LOG"
+	exit 1
+fi
+
 # GUT's -gexit returns non-zero when any test fails or errors; 0 on all-pass.
 if [ "$GODOT_EXIT" -eq 0 ]; then
 	GDK_GATE_VERDICT=PASS

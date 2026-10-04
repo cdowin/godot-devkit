@@ -264,6 +264,39 @@ def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tm
     assert 'tests/unit/typo' in done.stdout, done.stdout
 
 
+def test_unit_fails_when_the_gut_log_carries_a_script_parse_error_over_a_green_run(tmp_path):
+    """#51: a parse error in a production script a test instantiates leaves the
+    census reconciled and GUT exiting 0, so the tier printed PASS (full
+    coverage) over a broken file. The log line alone now fails it."""
+    root = tmp_path / 'repo'
+    _project(root, UNIT)
+    tier = root / 'tests' / 'unit' / 'stats'
+    tier.mkdir(parents=True)
+    for index in range(2):
+        (tier / f'test_{index}.gd').write_text('', encoding='utf-8')
+    stub = _stub_engine(tmp_path, GUT_TRANSCRIPT.format(scripts=2))
+    env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
+           'HOME': str(tmp_path / 'home'),
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
+
+    def unit() -> subprocess.CompletedProcess:
+        return subprocess.run(['bash', 'tools/dev/runners/unit.sh'], cwd=root,
+                              text=True, capture_output=True, env=env)
+
+    control = unit()
+    assert control.returncode == 0 and '[UNIT] PASS' in control.stdout, control.stdout
+    (stub / 'godot').write_text(
+        GUT_TRANSCRIPT.replace('echo "Running tests..."\n',
+                               'echo "Running tests..."\n'
+                               'echo \'SCRIPT ERROR: Parse Error: Identifier "_x" not declared in the current scope.\'\n')
+        .format(scripts=2), encoding='utf-8')
+    done = unit()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert 'PASS' not in done.stdout, done.stdout
+    assert 'FAIL (script parse error in the run log)' in done.stdout, done.stdout
+    assert 'Identifier "_x" not declared' in done.stdout, done.stdout
+
+
 # --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
 # 0.24.0/bugs/import-cache-rebuild-does-not-repair-a-stale-uid-index. In a
 # consumer, 147 of 147 scenarios FAILED on the `invalid UID … using text path
