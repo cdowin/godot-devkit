@@ -40,6 +40,7 @@
 #   tools/dev/runners/integration.sh --diff HEAD --no-rerun   # a sweep failure is red at once
 #   tools/dev/runners/integration.sh boot_a boot_b      # an explicit list
 #   GDK_JOBS=4 tools/dev/runners/integration.sh --all   # cap the parallelism
+#   tools/dev/runners/integration.sh --all --shard 2/6  # slice 2 of 6, for a CI matrix
 #   GDK_INTEGRATION_WARM=1 tools/dev/runners/integration.sh --all   # one boot per worker
 #   GDK_INTEGRATION_WARM=1 tools/dev/runners/integration.sh --all --cold   # not this run
 #   tools/dev/runners/integration.sh --help | --self-test
@@ -131,7 +132,7 @@ COVERS_ENTRY_MAX=200
 
 usage() {
 	cat <<'USAGE_EOF'
-usage: integration.sh --all | --smoke | --system <dir> | --diff <ref> [--no-rerun] [--cold] | <name>...
+usage: integration.sh --all [--shard <i>/<n>] | --smoke | --system <dir> | --diff <ref> [--no-rerun] [--cold] | <name>...
        integration.sh --help | --self-test
 
 Runs integration scenarios, each in its own process, N in parallel. Each one
@@ -139,6 +140,18 @@ goes through scenario.sh, so the isolation is a process boundary rather than a
 convention.
 
   --all            every discovered scenario
+  --shard <i>/<n>  with --all only (or env GDK_SHARD=<i>/<n>): run slice i of n
+                   of the roster, for a CI matrix. The roster is sorted by name
+                   (C locale); scenario k (counting from 1) goes to shard
+                   k mod n, so the slices differ by at most 1 in size, are the
+                   same on every run, and together cover each scenario exactly
+                   once. A shard past the end of a short roster has 0
+                   scenarios and passes, saying so. i or n not a whole number,
+                   i < 1, n < 1 or i > n exits 2, and so does --shard with
+                   --diff, --system, --smoke, a name or --list. It composes
+                   with GDK_JOBS (parallelism inside the shard) and weighs
+                   the engine lease GDK_JOBS, like --all. The verdict line
+                   names it: `[INTEGRATION] shard 2/6: 27 scenario(s) of 160`
   --list           the roster: every scenario file --all would boot, one
                    repo-relative path per line, sorted, booting nothing —
                    what `check test-shape` asks the header rule of. An
@@ -200,6 +213,7 @@ Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
      GDK_INTEGRATION_RERUN      0 turns off --diff's rerun-alone (default 1)
      GDK_INTEGRATION_WARM       1 runs --all/--diff/--system warm (default 0)
      GDK_JOBS                   parallelism (default: cores - 2, floor 1)
+     GDK_SHARD                  <i>/<n>: the env spelling of --shard (--all only)
 Sets: GDK_SCENARIO_IN_SWEEP=1 on every job, the rerun alone included — the
      runner's import-cache recovery must not remove a .godot its peers, or a
      playing session, are using. So before a --diff/--all sweep boots
@@ -1576,15 +1590,50 @@ case "$GDK_INTEGRATION_WARM" in
 	0|1) WARM="$GDK_INTEGRATION_WARM" ;;
 	*) echo "[$GATE_TAG] GDK_INTEGRATION_WARM='$GDK_INTEGRATION_WARM' — expected 0 or 1" >&2; exit 2 ;;
 esac
+# --shard <i>/<n> is a modifier too (#67), as is its env spelling GDK_SHARD;
+# the flag wins. It slices --all and nothing else.
+SHARD="${GDK_SHARD:-}"; SHARD_FLAGGED=0
 REST=()
-for arg in "$@"; do
-	case "$arg" in
+while [ "$#" -gt 0 ]; do
+	case "$1" in
 		--no-rerun) RERUN=0 ;;
 		--cold) WARM=0 ;;
-		*) REST+=("$arg") ;;
+		--shard|--shard=*)
+			[ "$SHARD_FLAGGED" -eq 0 ] || { echo "[$GATE_TAG] --shard given twice. See --help." >&2; exit 2; }
+			SHARD_FLAGGED=1
+			case "$1" in
+				--shard=*) SHARD="${1#--shard=}" ;;
+				*)
+					[ "$#" -ge 2 ] || { echo "[$GATE_TAG] --shard takes <i>/<n>, for example --shard 2/6. See --help." >&2; exit 2; }
+					SHARD="$2"; shift ;;
+			esac ;;
+		*) REST+=("$1") ;;
 	esac
+	shift
 done
 set -- ${REST[@]+"${REST[@]}"}
+SHARD_I=''; SHARD_N=''
+if [ -n "$SHARD" ]; then
+	case "$SHARD" in
+		[0-9]*/[0-9]*) ;;
+		*) echo "[$GATE_TAG] shard '$SHARD' is not <i>/<n> (two whole numbers, for example 2/6). See --help." >&2; exit 2 ;;
+	esac
+	SHARD_I="${SHARD%%/*}"; SHARD_N="${SHARD#*/}"
+	case "$SHARD_I$SHARD_N" in
+		*[!0-9]*) echo "[$GATE_TAG] shard '$SHARD' is not <i>/<n> (two whole numbers, for example 2/6). See --help." >&2; exit 2 ;;
+	esac
+	if [ "${#SHARD_I}" -gt 6 ] || [ "${#SHARD_N}" -gt 6 ]; then
+		echo "[$GATE_TAG] shard '$SHARD' is out of range (at most 6 digits each). See --help." >&2; exit 2
+	fi
+	SHARD_I=$((10#$SHARD_I)); SHARD_N=$((10#$SHARD_N))
+	if [ "$SHARD_N" -lt 1 ] || [ "$SHARD_I" -lt 1 ] || [ "$SHARD_I" -gt "$SHARD_N" ]; then
+		echo "[$GATE_TAG] shard '$SHARD': need 1 <= i <= n (shards count from 1). See --help." >&2; exit 2
+	fi
+	SHARD="$SHARD_I/$SHARD_N"
+	if [ "${1:-}" != "--all" ] || [ "$#" -ne 1 ]; then
+		echo "[$GATE_TAG] --shard (or GDK_SHARD) slices --all only; it does not combine with ${1:-no mode}. See --help." >&2; exit 2
+	fi
+fi
 
 # Resolved before the cd: a relative $0 stops resolving once the cwd moves.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 2
@@ -1627,7 +1676,7 @@ if [ -n "${1:-}" ]; then
 	while IFS= read -r f; do [ -n "$f" ] && roster_files+=("$f"); done < <(discover_gate_files)
 	# shellcheck disable=SC2034  # read by gdk_receipt_key, in the sourced library
 	GDK_RECEIPT_PATHS="$(gdk_receipt_covers ${roster_files[@]+"${roster_files[@]}"} | tr '\n' ' ')"
-	RECEIPT_ARGS=("$@" "ref-tree=$receipt_ref_tree" "rerun=$RERUN" "warm=$WARM"
+	RECEIPT_ARGS=("$@" "ref-tree=$receipt_ref_tree" "rerun=$RERUN" "warm=$WARM" "shard=$SHARD"
 		"$GDK_SCENARIO_SOURCE_DIR" "$GDK_INTEGRATION_INFRA_RE" "$GDK_CAPTURE_SUFFIX_RE"
 		"$GDK_CAPTURE_GATE_RE" "$GDK_SMOKE_SCENARIO" "$GDK_SCENARIO_SUBSTRATE_RE"
 		"$GDK_SCENARIO_FIXTURE_DIR")
@@ -1647,7 +1696,7 @@ if [ "$held_rc" -eq 1 ]; then
 		--all|--system|--diff) GATE_WEIGHT="${GDK_JOBS:-$(detect_jobs)}" ;;
 		*) GATE_WEIGHT=1 ;;
 	esac
-	GDK_ENGINE_GATE_WEIGHT="$GATE_WEIGHT" GDK_INTEGRATION_RERUN="$RERUN" GDK_INTEGRATION_WARM="$WARM" \
+	GDK_ENGINE_GATE_WEIGHT="$GATE_WEIGHT" GDK_INTEGRATION_RERUN="$RERUN" GDK_INTEGRATION_WARM="$WARM" GDK_SHARD="$SHARD" \
 		gdk_engine_gate_run "$GATE_TAG" -- bash "$SCRIPT_DIR/$(basename "$0")" ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
 	exit $?
 fi
@@ -1663,7 +1712,25 @@ SLICE_NOTE=""
 case "${1:-}" in
 	"") echo "[$GATE_TAG] nothing to run. See --help." >&2; usage >&2; exit 2 ;;
 	# `while read`, not `mapfile`: macOS ships bash 3.2.
-	--all) while IFS= read -r n; do NAMES+=("$n"); done < <(discover_all) ;;
+	--all)
+		while IFS= read -r n; do NAMES+=("$n"); done < <(discover_all)
+		if [ -n "$SHARD" ]; then
+			# Stable and count-balanced (#67): sorted by name in the C locale,
+			# so every machine agrees; scenario k (from 1) goes to shard k mod n.
+			SHARD_ROSTER=${#NAMES[@]}
+			SHARDED=()
+			while IFS= read -r n; do [ -n "$n" ] && SHARDED+=("$n"); done < <(
+				printf '%s\n' ${NAMES[@]+"${NAMES[@]}"} | LC_ALL=C sort -u \
+					| awk -v i="$SHARD_I" -v n="$SHARD_N" '(NR - 1) % n == i - 1')
+			NAMES=(${SHARDED[@]+"${SHARDED[@]}"})
+			SLICE_NOTE="; shard $SHARD of $SHARD_ROSTER"
+			if [ "${#NAMES[@]}" -eq 0 ]; then
+				echo "[$GATE_TAG] shard $SHARD: 0 scenario(s) of $SHARD_ROSTER — this slice is past the end of the roster, nothing to boot"
+				echo "[$GATE_TAG] SUMMARY: 0 passed, 0 failed (of 0)$SLICE_NOTE"
+				exit 0
+			fi
+			echo "[$GATE_TAG] shard $SHARD: ${#NAMES[@]} scenario(s) of $SHARD_ROSTER (sorted by name, scenario k to shard k mod $SHARD_N)"
+		fi ;;
 	--smoke) NAMES=("$GDK_SMOKE_SCENARIO") ;;
 	--system)
 		[ "$#" -eq 2 ] || { echo "[$GATE_TAG] --system takes exactly one directory name. See --help." >&2; exit 2; }
