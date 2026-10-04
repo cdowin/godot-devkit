@@ -192,9 +192,9 @@ integration: ## Integration tier. Pass ARGS="--all|--system <dir>|--diff <ref>|<
 	@rm -f -- "$$GDK_GATE_UNMEASURED"
 	$(call gdk_gate,integration,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh $(if $(ARGS),$(ARGS),--all))
 
-integration-all: ## Every integration scenario, one process each, N in parallel
+integration-all: ## Every integration scenario, one process each, N in parallel. GDK_SHARD=i/n runs slice i of n
 	@rm -f -- "$$GDK_GATE_UNMEASURED"
-	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all)
+	$(call gdk_gate,integration-all,INTEGRATION,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/integration.sh --all$(if $(GDK_SHARD), --shard $(GDK_SHARD)))
 
 # The per-change slice: every scenario whose header declares it covers a path
 # the diff against REF touched, plus the smoke scenario. A touched scenario runs;
