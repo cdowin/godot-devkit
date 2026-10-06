@@ -1306,8 +1306,15 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         for needle in ('using: composite', '  godot-patch:\n',
                        'default: "4.5.0"', 'default: "0.11.0"',
                        'gdlint --version',
-                       'test -f .godot/global_script_class_cache.cfg'):
+                       'test -f .godot/global_script_class_cache.cfg',
+                       # A preinstalled engine skips setup-godot (#80); shellcheck
+                       # follows the runner's arch (#79); `import: false` keeps the
+                       # class-cache assert.
+                       '  godot-root:\n', "if: steps.preinstalled.outputs.found != 'true'",
+                       'shellcheck-v$v.linux.$a.tar.xz', '  import:\n',
+                       'IMPORT: ${{ inputs.import }}'):
             assert needle in action, needle
+        assert 'linux.x86_64.tar.xz' not in action
         godot_patch = action.split('  godot-patch:\n', 1)[1].split('\n  gdtoolkit', 1)[0]
         assert 'required: true' in godot_patch and 'default' not in godot_patch
         assert not (root / UID_GUARD).exists()
