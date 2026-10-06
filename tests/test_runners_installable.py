@@ -1325,6 +1325,8 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         # config job, an export and an upload, and no cache or artifact delete.
         release = (root / RELEASE).read_text(encoding='utf-8')
         for needle in ('workflow_dispatch', 'tag:', 'fromJSON(needs.config.outputs.presets)',
+                       'fromJSON(needs.config.outputs.gates)', 'fromJSON(needs.config.outputs.gate_timeout)',
+                       'fail-fast: true', "needs.config.outputs.gates != '[]'", 'GATE: ${{ matrix.gate }}',
                        '--export-release', 'gh release upload', 'contents: write'):
             assert needle in release, needle
         for banned in ('actions/caches', 'DELETE', 'actions: write'):
@@ -1360,14 +1362,21 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
             {'name': 'Linux', 'preset': 'Linux', 'output': 'build/linux/g.x86_64', 'archive': 'tar.gz'},
             {'name': 'Windows Desktop', 'preset': 'Windows Desktop', 'output': 'build/win/g.exe',
              'archive': 'zip'}]
-        assert (got['gate'], got['title'], got['godot_version'], got['before_export']) == \
-            ('verify', 'game', '4.7.2', '[]')
-        got = read_config('[release]\ngodot_patch = "2"\ngate = ""\ntitle = "Game"\n'
+        assert (got['gates'], got['gate_timeout'], got['title'], got['godot_version'],
+                got['before_export']) == ('["verify"]', '30', 'game', '4.7.2', '[]')
+        got = read_config('[release]\ngodot_patch = "2"\ngate = ""\ngate_timeout = 90\ntitle = "Game"\n'
                           'before_export = ["make assets"]\n[[release.presets]]\n'
                           'preset = "Linux"\narchive = "zip"\n')
-        assert (got['gate'], got['title'], got['before_export']) == ('', 'Game', '["make assets"]')
+        assert (got['gates'], got['gate_timeout'], got['title'], got['before_export']) == \
+            ('[]', '90', 'Game', '["make assets"]')
         assert json.loads(got['presets']) == [
             {'name': 'Linux', 'preset': 'Linux', 'output': 'build/linux/g.x86_64', 'archive': 'zip'}]
+        # Each gate entry is one parallel job: a string, or a list joined by spaces.
+        got = read_config('[release]\ngodot_patch = "2"\ngate = ["gates-self-test", '
+                          '["check", "parse"], "integration-all GDK_SHARD=1/3"]\n')
+        assert json.loads(got['gates']) == ['gates-self-test', 'check parse', 'integration-all GDK_SHARD=1/3']
+        assert 'gate_timeout' in read_config('[release]\ngodot_patch = "2"\ngate_timeout = 0\n')['error']
+        assert 'gate_timeout' in read_config('[release]\ngodot_patch = "2"\ngate_timeout = "5"\n')['error']
         assert 'both or neither' in read_config('[release]\ngodot_patch = "2"\nversion_file = "v"\n')['error']
         (root / 'godot-devkit.toml').unlink()
         (root / 'export_presets.cfg').unlink()
