@@ -28,10 +28,18 @@
 # that pinned tag instead: one sync nothing uses, never a wrong kit.
 # The index is public: no token. A lock that does not name the kit skips it.
 #
+# A runner image may carry the engine at `<godot-root>/<version>/godot` (input
+# `godot-root`, default /opt/godot). Then this uses that binary and downloads
+# nothing; otherwise setup-godot fetches it. shellcheck skips its download
+# when the installed one is the pinned version.
+#
+# A workflow that imports once per run, then restores `.godot/` in its other
+# jobs, passes `import: false` to them: the import pass costs an engine boot.
+#
 # After this file is written it is YOURS. Edit it here; re-installing needs
 # --force, and `--diff` shows what a re-install would change.
 name: godot-toolchain
-description: godot-devkit from uv.lock (when locked), the Godot engine (line from project.godot), gdlint and shellcheck at pinned versions, and an import pass.
+description: godot-devkit from uv.lock (when locked), the Godot engine (line from project.godot; a preinstalled one when present), gdlint and shellcheck at pinned versions, and an import pass (unless import is false).
 
 inputs:
   godot-patch:
@@ -45,6 +53,14 @@ inputs:
     description: The shellcheck release, from its release tarball.
     required: false
     default: "0.11.0"
+  godot-root:
+    description: Where a runner image keeps preinstalled engines, as <godot-root>/<version>/godot. A missing one falls back to setup-godot.
+    required: false
+    default: /opt/godot
+  import:
+    description: Run the import pass. Pass false when this job restored a .godot/ that an earlier job of the run imported.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -93,7 +109,26 @@ runs:
         esac
         echo "Godot $engine.$GODOT_PATCH — config/features declares $engine, the godot-patch input pins $GODOT_PATCH."
         echo "version=$engine.$GODOT_PATCH" >> "$GITHUB_OUTPUT"
+    - name: Godot, preinstalled on the runner image
+      id: preinstalled
+      shell: bash
+      env:
+        GODOT_ROOT: ${{ inputs.godot-root }}
+        VERSION: ${{ steps.godot-version.outputs.version }}
+      run: |
+        set -eu
+        bin="$GODOT_ROOT/$VERSION/godot"
+        if [ -x "$bin" ]; then
+          echo "Godot $VERSION is preinstalled at $bin: no download."
+          echo "$GODOT_ROOT/$VERSION" >> "$GITHUB_PATH"
+          { echo "GODOT=$bin"; echo "GODOT4=$bin"; } >> "$GITHUB_ENV"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "No $bin on this runner: setup-godot fetches Godot $VERSION."
+          echo "found=false" >> "$GITHUB_OUTPUT"
+        fi
     - uses: chickensoft-games/setup-godot@v2
+      if: steps.preinstalled.outputs.found != 'true'
       with:
         version: ${{ steps.godot-version.outputs.version }}
         include-templates: false
@@ -113,7 +148,13 @@ runs:
       run: |
         set -eu
         v="$SHELLCHECK_VERSION"
-        curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v$v/shellcheck-v$v.linux.x86_64.tar.xz" \
+        if shellcheck --version 2>/dev/null | grep -qx "version: $v"; then
+          echo "shellcheck $v is installed: no download."
+          exit 0
+        fi
+        # The runner's arch: a self-hosted runner may be linux/arm64 (#79).
+        case "$(uname -m)" in aarch64|arm64) a=aarch64 ;; *) a=x86_64 ;; esac
+        curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v$v/shellcheck-v$v.linux.$a.tar.xz" \
           | tar -xJ -C "$RUNNER_TEMP"
         sudo install -m 0755 "$RUNNER_TEMP/shellcheck-v$v/shellcheck" /usr/local/bin/shellcheck
         shellcheck --version
@@ -121,10 +162,17 @@ runs:
       # The import's own exit is noisy (a missing optional asset, a plugin
       # warning), so it only warns. The ASSERT is the gate: with no class cache
       # the `class_name` globals do not resolve and every tier after this
-      # fails for a fact about the runner rather than about the code.
+      # fails for a fact about the runner rather than about the code. With
+      # `import: false` the assert still runs, on the restored .godot/.
       shell: bash
+      env:
+        IMPORT: ${{ inputs.import }}
       run: |
-        "$GODOT" --path . --headless --import \
-          || echo "::warning::godot --import exited non-zero; the class-cache check below decides."
+        if [ "$IMPORT" = true ]; then
+          "$GODOT" --path . --headless --import \
+            || echo "::warning::godot --import exited non-zero; the class-cache check below decides."
+        else
+          echo "import: false — this job uses the .godot/ an earlier job imported."
+        fi
         test -f .godot/global_script_class_cache.cfg \
           || { echo "::error::no .godot/global_script_class_cache.cfg after the import pass." >&2; exit 1; }
