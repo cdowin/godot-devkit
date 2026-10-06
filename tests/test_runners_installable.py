@@ -1327,8 +1327,15 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         for needle in ('workflow_dispatch', 'tag:', 'fromJSON(needs.config.outputs.presets)',
                        'fromJSON(needs.config.outputs.gates)', 'fromJSON(needs.config.outputs.gate_timeout)',
                        'fail-fast: true', "needs.config.outputs.gates != '[]'", 'GATE: ${{ matrix.gate }}',
-                       '--export-release', 'gh release upload', 'contents: write'):
+                       '--export-release', 'gh release upload', 'contents: write',
+                       # The tag-last order (#89): export uploads artifacts, release downloads
+                       # them, needs export, and creates the tag at the sha.
+                       'actions/upload-artifact@v4', 'actions/download-artifact@v4',
+                       'merge-multiple: true', '--target', 'needs: [config, gate, export]',
+                       'needs.export.result == \'success\'', 'sha:'):
             assert needle in release, needle
+        export_job = release.split('\n  export:\n', 1)[1].split('\n  release:\n', 1)[0]
+        assert 'gh release' not in export_job and 'upload-artifact' in export_job
         for banned in ('actions/caches', 'DELETE', 'actions: write'):
             assert banned not in release, banned
         # The config heredoc, run on its own against a sample repo: the stock
