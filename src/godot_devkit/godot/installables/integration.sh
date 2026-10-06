@@ -1141,7 +1141,7 @@ STUB_EOF
 # filesystem and text, which is exactly why they are written as functions over
 # a directory and a list.
 self_test() {
-	local scratch rc out failures=0 cases=0 name bad fx mono host host_before host_after
+	local scratch rc out failures=0 cases=0 name bad fx mono host host_before host_after jobs_n
 	local GDK_RUNNERS_LIB="${GDK_RUNNERS_LIB:-}"
 	# Every case runs: a receipt one case files must not answer the next.
 	export GDK_RECEIPTS=0
@@ -1538,7 +1538,9 @@ FIXTURE_EOF
 	cases=$((cases + 1))
 	# detect_jobs leans on the library's gdk_cpu_count, so source it in a
 	# subshell: this process has not loaded it.
-	[ "$( . "$GDK_RUNNERS_LIB"; detect_jobs )" -ge 1 ] 2>/dev/null \
+	# shellcheck source=/dev/null
+	jobs_n="$( . "$GDK_RUNNERS_LIB"; detect_jobs )"
+	[ "$jobs_n" -ge 1 ] 2>/dev/null \
 		|| miss "the job count must be at least 1"
 
 	# --- the census: boots, and what they cost -------------------------------
