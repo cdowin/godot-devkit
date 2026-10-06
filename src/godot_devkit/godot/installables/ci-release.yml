@@ -13,9 +13,11 @@
 #
 #   config   reads the `[release]` section of godot-devkit.toml and, where it
 #            says nothing, derives the rest from the repo. Emits the preset
-#            matrix, the gate target and the version-injection settings.
-#   gate     the full gate (`make <gate>`) on the tagged tree, after the
-#            godot-toolchain action. Skipped when `gate` is empty.
+#            matrix, the gate matrix and timeout, and the version-injection
+#            settings.
+#   gate     one parallel job per `gate` entry (`make <entry>`) on the tagged
+#            tree, after the godot-toolchain action. Any red job stops the
+#            release. Skipped when there are no entries.
 #   release  creates or updates the GitHub Release. The body is the
 #            `## Release notes` section of the pull request that merged the
 #            tagged commit, or `--generate-notes` when there is none.
@@ -29,9 +31,19 @@
 #                        from project.godot `config/features`. No default.
 #   title                The Release title is "<title> <tag>". Default: the
 #                        repository name.
-#   gate                 The make target(s) of the release gate, a string or a
-#                        list. Default: `verify` when a Makefile defines it,
-#                        else `milestone`, else "" (no gate). "" skips the gate.
+#   gate                 The release gate: a string, or a list of entries. EACH
+#                        ENTRY IS ONE PARALLEL JOB running `make <entry>`. An
+#                        entry is a string, or a list of strings joined by
+#                        spaces; it may name several targets and make
+#                        variables, so a suite can be sharded:
+#                          gate = ["gates-self-test", "check parse lint warnings unit",
+#                                  "integration-all GDK_SHARD=1/3",
+#                                  "integration-all GDK_SHARD=2/3",
+#                                  "integration-all GDK_SHARD=3/3"]
+#                        Default: `verify` when a Makefile defines it, else
+#                        `milestone`, else none. "" or [] skips the gate.
+#   gate_timeout         The `timeout-minutes` of each gate job: a positive
+#                        integer. Default: 30.
 #   before_export        A list of shell commands run before each export, in
 #                        the repo root, with $GODOT set. Default: none.
 #   version_file         A file whose placeholder is replaced with the version
@@ -90,7 +102,8 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       presets: ${{ steps.config.outputs.presets }}
-      gate: ${{ steps.config.outputs.gate }}
+      gates: ${{ steps.config.outputs.gates }}
+      gate_timeout: ${{ steps.config.outputs.gate_timeout }}
       before_export: ${{ steps.config.outputs.before_export }}
       version_file: ${{ steps.config.outputs.version_file }}
       version_placeholder: ${{ steps.config.outputs.version_placeholder }}
@@ -219,13 +232,27 @@ jobs:
           if not presets:
               fail("no export presets: export_presets.cfg has none with a name and an export_path, and [release] presets is empty.")
 
+          def gate_entry(entry):
+              if isinstance(entry, list) and entry and all(isinstance(g, str) for g in entry):
+                  entry = " ".join(entry)
+              if not isinstance(entry, str) or not entry.strip():
+                  fail("each [release] gate entry must be a non-empty string or a list of strings.")
+              return entry.strip()
+
+
           gate = cfg.get("gate")
           if gate is None:
-              gate = next((t for t in ("verify", "milestone") if has_target(t)), "")
-          elif isinstance(gate, list) and all(isinstance(g, str) for g in gate):
-              gate = " ".join(gate)
-          elif not isinstance(gate, str):
-              fail("[release] gate must be a string or a list of strings.")
+              gates = [t for t in ("verify", "milestone") if has_target(t)][:1]
+          elif isinstance(gate, str):
+              gates = [gate_entry(gate)] if gate.strip() else []
+          elif isinstance(gate, list):
+              gates = [gate_entry(e) for e in gate]
+          else:
+              fail("[release] gate must be a string or a list of entries.")
+
+          gate_timeout = cfg.get("gate_timeout", 30)
+          if not isinstance(gate_timeout, int) or isinstance(gate_timeout, bool) or gate_timeout <= 0:
+              fail("[release] gate_timeout must be a positive integer (minutes).")
 
           version_file = text("version_file")
           version_placeholder = text("version_placeholder")
@@ -249,7 +276,8 @@ jobs:
           title = text("title") or os.environ.get("GITHUB_REPOSITORY", "/release").split("/")[1]
           outputs = {
               "presets": json.dumps(presets),
-              "gate": gate,
+              "gates": json.dumps(gates),
+              "gate_timeout": str(gate_timeout),
               "before_export": json.dumps(strings("before_export")),
               "version_file": version_file,
               "version_placeholder": version_placeholder,
@@ -266,11 +294,16 @@ jobs:
           PY
 
   gate:
-    name: Release gate
+    name: gate (${{ matrix.gate }})
     needs: config
-    if: needs.config.outputs.gate != ''
+    if: needs.config.outputs.gates != '[]'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ fromJSON(needs.config.outputs.gate_timeout) }}
+    strategy:
+      # Any red entry stops the others, and so the release.
+      fail-fast: true
+      matrix:
+        gate: ${{ fromJSON(needs.config.outputs.gates) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -281,14 +314,16 @@ jobs:
           godot-patch: ${{ needs.config.outputs.godot_patch }}
       - name: Run the gate
         env:
-          GATE: ${{ needs.config.outputs.gate }}
-        # `gate` may name several targets, so $GATE is split on purpose.
+          GATE: ${{ matrix.gate }}
+        # An entry may name several targets and make variables, so $GATE is
+        # split on purpose (word splitting, no eval).
         run: make $GATE
 
   release:
     name: Create the Release
     needs: [config, gate]
-    # A gate skipped by design (no gate target) does not stop the release.
+    # A gate matrix skipped by design (no gates) does not stop the release;
+    # when it ran, every entry must have succeeded.
     if: always() && needs.config.result == 'success' && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
