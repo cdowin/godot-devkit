@@ -106,7 +106,7 @@ if [ -z "${GDK_RUNNERS_LIB:-}" ]; then
 	[ -f "$GDK_RUNNERS_LIB" ] || GDK_RUNNERS_LIB="$GDK_INTEGRATION_SCRIPT_DIR/gdk_runners.sh"
 	unset GDK_INTEGRATION_SCRIPT_DIR
 fi
-# Env: GDK_JOBS  parallelism (default: cores - 2, floor 1)
+# Env: GDK_JOBS  parallelism (default: cores - 2, floor 1; cores honour a container CPU quota)
 # -----------------------------------------------------------------------------
 
 # This runner only READS git; an optional lock taken by a status/diff here
@@ -212,7 +212,8 @@ Env: GDK_SCENARIO_SOURCE_DIR    where scenario scripts live
                                 directory under the repo exits 2)
      GDK_INTEGRATION_RERUN      0 turns off --diff's rerun-alone (default 1)
      GDK_INTEGRATION_WARM       1 runs --all/--diff/--system warm (default 0)
-     GDK_JOBS                   parallelism (default: cores - 2, floor 1)
+     GDK_JOBS                   parallelism (default: cores - 2, floor 1; a container
+                                CPU quota caps the cores, see gdk_cpu_count)
      GDK_SHARD                  <i>/<n>: the env spelling of --shard (--all only)
 Sets: GDK_SCENARIO_IN_SWEEP=1 on every job, the rerun alone included — the
      runner's import-cache recovery must not remove a .godot its peers, or a
@@ -282,7 +283,7 @@ system_name_defect() {
 		*/*|*\\*) echo "carries a path separator — one directory name, not a path"; return 0 ;;
 		.|..) echo "is a dot segment"; return 0 ;;
 	esac
-	if ! printf '%s' "$arg" | grep -qE '^[A-Za-z0-9_-]+$'; then
+	if ! grep -qE '^[A-Za-z0-9_-]+$' <<<"$arg"; then
 		echo "carries a character outside [A-Za-z0-9_-]"; return 0
 	fi
 	return 1
@@ -440,8 +441,8 @@ touched_substrate() {
 	while IFS= read -r p; do
 		[ -n "$p" ] || continue
 		base="${p##*/}"; base="${base%.gd}"
-		if printf '%s\n' "$p" | grep -qE "$GDK_SCENARIO_SUBSTRATE_RE" \
-			|| printf '%s\n' "$base" | grep -qE "$GDK_INTEGRATION_INFRA_RE"; then
+		if grep -qE "$GDK_SCENARIO_SUBSTRATE_RE" <<<"$p" \
+			|| grep -qE "$GDK_INTEGRATION_INFRA_RE" <<<"$base"; then
 			printf '%s\n' "$p"
 		fi
 	done
@@ -714,12 +715,13 @@ scratch_git() {
 	env ${drop[@]+"${drop[@]}"} git -C "$@"
 }
 
-# detect_jobs — cores minus two, floor one. Two are left for the shell, the
+# detect_jobs — cores minus two, floor one. Cores come from gdk_cpu_count, which
+# honours a container CPU quota. Two are left for the shell, the
 # aggregator and whatever else the machine is doing; a sweep that saturates
 # every core makes each engine slower than the parallelism buys back.
 detect_jobs() {
 	local n j
-	n="$( (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) )"
+	n="$(gdk_cpu_count)"
 	j=$((n - 2)); [ "$j" -lt 1 ] && j=1
 	printf '%s\n' "$j"
 }
@@ -1244,13 +1246,13 @@ self_test() {
 	# Each exclusion said separately, because each is a different claim: a
 	# capture is a tool, a base class is not a scenario, support/ is fixtures.
 	cases=$((cases + 1))
-	printf '%s\n' "$out" | grep -q 'thing_capture' \
+	grep -q 'thing_capture' <<<"$out" \
 		&& miss "a capture TOOL still boots in the sweep"
 	cases=$((cases + 1))
-	printf '%s\n' "$out" | grep -q 'scenario_base' \
+	grep -q 'scenario_base' <<<"$out" \
 		&& miss "a fixture base class was discovered as a scenario"
 	cases=$((cases + 1))
-	printf '%s\n' "$out" | grep -q 'helper' \
+	grep -q 'helper' <<<"$out" \
 		&& miss "a support/ fixture was discovered as a scenario"
 
 	# A keep-listed capture comes BACK into the sweep — the exception has to
@@ -1285,7 +1287,7 @@ self_test() {
 	[ "$rc" -eq 2 ] || miss "--system with no such directory should exit 2, got $rc"
 	cases=$((cases + 1))
 	out="$(select_system nope "$scratch" 2>&1 >/dev/null || true)"
-	printf '%s\n' "$out" | grep -q 'protocol' \
+	grep -q 'protocol' <<<"$out" \
 		|| miss "the no-such-directory refusal does not name the directories that exist"
 	cases=$((cases + 1))
 	out="$(select_system tools_only "$scratch" | tr '\n' ' ')"
@@ -1534,7 +1536,9 @@ FIXTURE_EOF
 		|| miss "the stubbed keep-list named no gate, so the pipe-buffer row checked nothing"
 
 	cases=$((cases + 1))
-	[ "$(detect_jobs)" -ge 1 ] \
+	# detect_jobs leans on the library's gdk_cpu_count, so source it in a
+	# subshell: this process has not loaded it.
+	[ "$( . "$GDK_RUNNERS_LIB"; detect_jobs )" -ge 1 ] 2>/dev/null \
 		|| miss "the job count must be at least 1"
 
 	# --- the census: boots, and what they cost -------------------------------

@@ -953,6 +953,39 @@ gdk_rebuild_import_cache() {
 	fi
 }
 
+# --- gdk_cpu_count — cores this process may use ------------------------------
+# The machine's core count (sysctl, then nproc, then 4), capped by a Linux
+# cgroup CPU quota when one is set: a container limited with `--cpus` still
+# sees every core of its host through nproc, and a sweep sized from that boots
+# more engines than the quota can run. cgroup v2 reads cpu.max ("<quota>
+# <period>", quota "max" = unlimited); cgroup v1 reads cpu.cfs_quota_us
+# (-1 = unlimited) and cpu.cfs_period_us. The quota rounds UP, and never
+# raises the count above what the machine reports. GDK_CGROUP_ROOT moves the
+# cgroup root (default /sys/fs/cgroup) so a test can point it at a temp dir.
+_gdk_host_cpus() {
+	sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4
+}
+gdk_cpu_count() {
+	local root="${GDK_CGROUP_ROOT:-/sys/fs/cgroup}" host quota='' period='' cores
+	host="$(_gdk_host_cpus)"
+	case "$host" in ''|*[!0-9]*|0) host=4 ;; esac
+	if [ -r "$root/cpu.max" ]; then
+		read -r quota period < "$root/cpu.max" || true
+		[ "$quota" != max ] || quota=''
+	elif [ -r "$root/cpu/cpu.cfs_quota_us" ] && [ -r "$root/cpu/cpu.cfs_period_us" ]; then
+		read -r quota < "$root/cpu/cpu.cfs_quota_us" || true
+		read -r period < "$root/cpu/cpu.cfs_period_us" || true
+	fi
+	case "$quota" in ''|*[!0-9]*|0) quota='' ;; esac
+	case "$period" in ''|*[!0-9]*|0) quota='' ;; esac
+	if [ -n "$quota" ]; then
+		cores=$(( (quota + period - 1) / period ))
+		[ "$cores" -ge 1 ] || cores=1
+		[ "$cores" -lt "$host" ] && host="$cores"
+	fi
+	printf '%s\n' "$host"
+}
+
 # --- --self-test — the contract, PROVEN rather than claimed ------------------
 # `bash gdk_runners.sh --self-test` runs a fake gate through capture → verdict
 # and checks every claim the comments above make. Same shape as the hook
@@ -1361,6 +1394,39 @@ res://addons/tool.gd' "$(gdk_sweep_failed_paths "$scratch/sweep.log")"
 	printf 'Godot Engine v4.6.stable\nERROR: the editor died\n' > "$scratch/sweep.log"
 	_gdk_st_eq 'a transcript with no SWEEP_RESULT reads as EMPTY, never 0/0' \
 		'' "$(gdk_sweep_result_line "$scratch/sweep.log")"
+
+	# --- gdk_cpu_count honours a container CPU quota -------------------------
+	# A host reporting 6 cores (stubbed) under a 2-CPU quota must yield 2; an
+	# unlimited quota, an absent cgroup and a quota above the host all keep the
+	# host's count; the v1 files read the same way.
+	mkdir -p "$scratch/cg2" "$scratch/cg1/cpu" "$scratch/cg0"
+	local host_orig
+	host_orig="$(declare -f _gdk_host_cpus)"
+	_gdk_host_cpus() { echo 6; }
+	{
+		printf '200000 100000\n' > "$scratch/cg2/cpu.max"
+		_gdk_st_eq 'cpu quota 2 on 6 cores (cgroup v2) yields 2' \
+			2 "$(GDK_CGROUP_ROOT="$scratch/cg2" gdk_cpu_count)"
+		printf '250000 100000\n' > "$scratch/cg2/cpu.max"
+		_gdk_st_eq 'a fractional quota rounds up (2.5 -> 3)' \
+			3 "$(GDK_CGROUP_ROOT="$scratch/cg2" gdk_cpu_count)"
+		printf 'max 100000\n' > "$scratch/cg2/cpu.max"
+		_gdk_st_eq 'cpu.max "max" falls back to the host count' \
+			6 "$(GDK_CGROUP_ROOT="$scratch/cg2" gdk_cpu_count)"
+		printf '1200000 100000\n' > "$scratch/cg2/cpu.max"
+		_gdk_st_eq 'a quota above the host never raises the count' \
+			6 "$(GDK_CGROUP_ROOT="$scratch/cg2" gdk_cpu_count)"
+		printf '200000\n' > "$scratch/cg1/cpu/cpu.cfs_quota_us"
+		printf '100000\n' > "$scratch/cg1/cpu/cpu.cfs_period_us"
+		_gdk_st_eq 'cpu quota 2 on 6 cores (cgroup v1) yields 2' \
+			2 "$(GDK_CGROUP_ROOT="$scratch/cg1" gdk_cpu_count)"
+		printf -- '-1\n' > "$scratch/cg1/cpu/cpu.cfs_quota_us"
+		_gdk_st_eq 'cgroup v1 quota -1 falls back to the host count' \
+			6 "$(GDK_CGROUP_ROOT="$scratch/cg1" gdk_cpu_count)"
+		_gdk_st_eq 'no cgroup files fall back to the host count' \
+			6 "$(GDK_CGROUP_ROOT="$scratch/cg0" gdk_cpu_count)"
+	}
+	eval "$host_orig"
 
 	cd / || return 1
 	rm -rf "$scratch"

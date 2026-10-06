@@ -251,7 +251,7 @@ stale_scenario_reports() {
 			*.log) stem="${base%.log}" ;;
 			*) printf '%s\n' "$entry"; continue ;;
 		esac
-		if ! printf '%s\n' "$live" | grep -qxF -- "$stem"; then
+		if ! grep -qxF -- "$stem" <<<"$live"; then
 			printf '%s\n' "$entry"
 			continue
 		fi
@@ -944,13 +944,13 @@ self_test() {
 		|| { echo "  MISS — the stale set, got '$out'" >&2; failures=$((failures + 1)); }
 
 	cases=$((cases + 1))
-	printf '%s\n' "$out" | grep -q "alive.log" \
+	grep -q "alive.log" <<<"$out" \
 		&& { echo "  MISS — a LIVE scenario's transcript was called stale" >&2; failures=$((failures + 1)); }
 
 	# The pid is what protects a peer mid-write. Without it a parallel sweep
 	# deletes its own siblings' transcripts as it goes.
 	cases=$((cases + 1))
-	printf '%s\n' "$out" | grep -q "\.alive\.$$\." \
+	grep -q "\.alive\.$$\." <<<"$out" \
 		&& { echo "  MISS — a CONCURRENT run's in-flight transcript was called stale" >&2; failures=$((failures + 1)); }
 
 	# The reaper only ever deletes INSIDE the directory it was given. Fed a

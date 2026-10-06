@@ -84,7 +84,8 @@ derived from git's index rather than from a list somebody maintains.
 Env: GDK_LINT_CMD          the linter to run (default `gdlint`)
      GDK_LINT_EXCLUDE_RE   ERE of tracked paths to leave alone
      GDK_LINT_NESTED_ROOT  top-level dir whose children scan individually
-     GDK_LINT_JOBS         gdlint processes at once (default: core count)
+     GDK_LINT_JOBS         gdlint processes at once (default: core count, capped
+                           by a container CPU quota)
      GDK_RUNNERS_LIB       path to gdk_runners.sh, relative to this file
      VERBOSE=1             stream the transcript to the console too
 Exit: 0 clean | 1 findings | 2 harness/usage error
@@ -248,7 +249,7 @@ if [ "${#SCAN_DIRS[@]}" -eq 0 ]; then
 fi
 
 if [ -z "$GDK_LINT_JOBS" ]; then
-	GDK_LINT_JOBS="$( (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) )"
+	GDK_LINT_JOBS="$(gdk_cpu_count)"
 fi
 case "$GDK_LINT_JOBS" in
 	''|*[!0-9]*|0)
