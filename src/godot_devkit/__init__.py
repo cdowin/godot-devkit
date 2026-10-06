@@ -1,2 +1,2 @@
 """godot-devkit — headless scene introspection + static repo gates for Godot 4.x."""
-__version__ = '3.3.1'
+__version__ = '3.4.0'

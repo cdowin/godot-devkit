@@ -120,6 +120,11 @@ PLAN: tuple[tuple[str, str], ...] = (
     # `make verify`) through `godot-check`, when GDK_CHECKS names it
     # (see RETIRED).
     ('ci-godot-toolchain.yml', '.github/actions/godot-toolchain/action.yml'),
+    # The RELEASE workflow, written like the toolchain: a version tag becomes
+    # a GitHub Release with one build per export preset. Its per-project
+    # variation is the `[release]` section of godot-devkit.toml (see the
+    # file's header); with no section it derives everything from the repo.
+    ('ci-release.yml', '.github/workflows/release.yml'),
     # The CALLERS, at the repo root: the Godot target roster, on the seam
     # Makefile.gates `-include`s (`install-gates`), declaring which tiers
     # `precommit` and `verify` run. It ships with the runners rather than
@@ -183,7 +188,10 @@ the .claude/settings.json entry that fires it) — and
 the toolchain slot of your .github/workflows/verify.yml: the engine (MAJOR.MINOR
 from project.godot, the patch from its `godot-patch` input), gdlint and
 shellcheck at pinned versions, and an import pass (the run prints the step to
-paste). .github/workflows/uid-guard.yml is no longer written. An existing
+paste). .github/workflows/release.yml, the release workflow: a v* tag (or an
+auto-tag dispatch with a `tag` input) runs the gate, creates the GitHub Release
+and exports and uploads one build per export preset; `[release]` in
+godot-devkit.toml configures it (its header lists the keys). .github/workflows/uid-guard.yml is no longer written. An existing
 copy is left in place and named as retired: safe to delete when GDK_CHECKS
 names `godot-check` and `[roster] checks` keeps `uid` (then `check uid` runs
 in `make check`), and to keep otherwise.

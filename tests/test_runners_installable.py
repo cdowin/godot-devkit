@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import re
 import signal
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -1233,10 +1235,12 @@ DESTINATIONS = {
     'tools/dev/runners/hermetic_run_scan.sh',
     'tools/hooks/cc-godot-sandbox.sh',
     '.github/actions/godot-toolchain/action.yml',
+    '.github/workflows/release.yml',
     'Makefile.tiers',
 }
 HOOK_ENTRY = '"command": "bash tools/hooks/cc-godot-sandbox.sh"'
 TOOLCHAIN = '.github/actions/godot-toolchain/action.yml'
+RELEASE = '.github/workflows/release.yml'
 TOOLCHAIN_STEP = '- uses: ./.github/actions/godot-toolchain'
 # Retired in 1.3.0: no longer written, never deleted, named on every run.
 UID_GUARD = '.github/workflows/uid-guard.yml'
@@ -1317,6 +1321,59 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         assert 'linux.x86_64.tar.xz' not in action
         godot_patch = action.split('  godot-patch:\n', 1)[1].split('\n  gdtoolkit', 1)[0]
         assert 'required: true' in godot_patch and 'default' not in godot_patch
+        # The release workflow (#85): both triggers, the preset matrix from the
+        # config job, an export and an upload, and no cache or artifact delete.
+        release = (root / RELEASE).read_text(encoding='utf-8')
+        for needle in ('workflow_dispatch', 'tag:', 'fromJSON(needs.config.outputs.presets)',
+                       '--export-release', 'gh release upload', 'contents: write'):
+            assert needle in release, needle
+        for banned in ('actions/caches', 'DELETE', 'actions: write'):
+            assert banned not in release, banned
+        # The config heredoc, run on its own against a sample repo: the stock
+        # defaults (presets from export_presets.cfg, a gate from the Makefile)
+        # and a [release] override, proven once here rather than per job.
+        heredoc = re.split(r'\n[ ]+PY\n', release.split("python3 - <<'PY'\n", 1)[1], maxsplit=1)[0]
+        script = textwrap.dedent(heredoc + '\n')
+        (root / 'project.godot').write_text(
+            'config/features=PackedStringArray("4.7", "GL Compatibility")\n', encoding='utf-8')
+        (root / 'export_presets.cfg').write_text(
+            '[preset.0]\nname="Linux"\nexport_path="build/linux/g.x86_64"\n[preset.0.options]\n'
+            'name="no"\n[preset.1]\nname="Windows Desktop"\nexport_path="build/win/g.exe"\n',
+            encoding='utf-8')
+        (root / 'Makefile').write_text('verify:\n\t@true\n', encoding='utf-8')
+
+        def read_config(toml: str) -> dict[str, str]:
+            (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
+            sink = root / 'gh_output'
+            sink.unlink(missing_ok=True)
+            done = subprocess.run([sys.executable, '-c', script], cwd=root, text=True,
+                                  capture_output=True,
+                                  env={**os.environ, 'GITHUB_OUTPUT': str(sink),
+                                       'GITHUB_REPOSITORY': 'o/game'})
+            if done.returncode:
+                return {'error': done.stdout}
+            return dict(line.split('=', 1) for line in sink.read_text().splitlines())
+
+        assert 'godot_patch' in read_config('')['error']
+        got = read_config('[release]\ngodot_patch = "2"\n')
+        assert json.loads(got['presets']) == [
+            {'name': 'Linux', 'preset': 'Linux', 'output': 'build/linux/g.x86_64', 'archive': 'tar.gz'},
+            {'name': 'Windows Desktop', 'preset': 'Windows Desktop', 'output': 'build/win/g.exe',
+             'archive': 'zip'}]
+        assert (got['gate'], got['title'], got['godot_version'], got['before_export']) == \
+            ('verify', 'game', '4.7.2', '[]')
+        got = read_config('[release]\ngodot_patch = "2"\ngate = ""\ntitle = "Game"\n'
+                          'before_export = ["make assets"]\n[[release.presets]]\n'
+                          'preset = "Linux"\narchive = "zip"\n')
+        assert (got['gate'], got['title'], got['before_export']) == ('', 'Game', '["make assets"]')
+        assert json.loads(got['presets']) == [
+            {'name': 'Linux', 'preset': 'Linux', 'output': 'build/linux/g.x86_64', 'archive': 'zip'}]
+        assert 'both or neither' in read_config('[release]\ngodot_patch = "2"\nversion_file = "v"\n')['error']
+        (root / 'godot-devkit.toml').unlink()
+        (root / 'export_presets.cfg').unlink()
+        (root / 'project.godot').unlink()
+        (root / 'Makefile').unlink()
+        (root / 'gh_output').unlink(missing_ok=True)
         assert not (root / UID_GUARD).exists()
         assert TOOLCHAIN_STEP in out and 'retired' not in out, out
         # The locked shape (#38), pasteable whole: the running version, from
