@@ -495,7 +495,7 @@ _st_run() {
 
 self_test() {
 	local scratch stamp out rc failures=0 cases=0
-	local proj script stub before after i stub_pid census_before census_after fallback_dest
+	local proj script stub before after i stub_pid census_before census_after fallback_dest churn
 
 	# argument handling: --help is 0, an unknown argument is a usage error (2).
 	cases=$((cases + 1))
@@ -776,11 +776,11 @@ SHIM_EOF
 	[ "$(cat "$proj/-dash.gd.uid" 2>/dev/null)" = 'uid://dash' ] || i="$i the new root-level '-dash.gd.uid' did not come back;"
 	[ "$(cat "$proj/.godot/uid_cache.bin" 2>/dev/null)" = 'stub-uid-cache' ] || i="$i .godot/ is not the pass's;"
 	[ -f "$proj/.godot/imported/a.ctex" ] || i="$i the existing cache was not carried into the copy;"
-	printf '%s\n' "$out" | grep -qF "$TAG scratch copy: $census_after paths" \
+	grep -qF "$TAG scratch copy: $census_after paths" <<<"$out" \
 		|| i="$i the copy census did not match the pruned traversal ($census_after);"
-	printf '%s\n' "$out" | grep -q 'MissingSymlink' \
+	grep -q 'MissingSymlink' <<<"$out" \
 		&& i="$i rsync followed or lost a listed symlink;"
-	printf '%s\n' "$out" | grep -qF "$TAG dropped 1 re-serialised files (import churn): data/thing.tres" \
+	grep -qF "$TAG dropped 1 re-serialised files (import churn): data/thing.tres" <<<"$out" \
 		|| i="$i no dropped line naming data/thing.tres;"
 	[ -z "$(ls -A "$proj/.headless-userdata/runs" 2>/dev/null)" ] || i="$i a scratch copy was left behind;"
 	[ -z "$(cd "$proj" && ls -d "$IMPORT_DIR".old* 2>/dev/null)" ] || i="$i the old .godot/ was left behind;"
@@ -792,16 +792,17 @@ SHIM_EOF
 	cases=$((cases + 1))
 	i=''
 	[ "$(cat "$proj/scripts/old.gd.uid" 2>/dev/null)" = 'uid://dupe' ] || i="$i the rewritten sidecar was applied;"
-	printf '%s\n' "$out" | grep -qxF "$TAG 1 existing sidecars rewritten by the pass, NOT applied; the new cache expects them: scripts/old.gd.uid" \
+	grep -qxF "$TAG 1 existing sidecars rewritten by the pass, NOT applied; the new cache expects them: scripts/old.gd.uid" <<<"$out" \
 		|| i="$i no line of its own naming scripts/old.gd.uid;"
-	printf '%s\n' "$out" | grep 'import churn' | grep -qF 'old.gd.uid' && i="$i it was counted as import churn;"
+	churn="$(grep 'import churn' <<<"$out" || true)"
+	grep -qF 'old.gd.uid' <<<"$churn" && i="$i it was counted as import churn;"
 	[ -z "$i" ] \
 		|| { echo "  MISS — a rewritten existing sidecar:$i output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
 
 	# the same run: the census line says what copied the tree and the cache,
 	# and how much — never a bare flag that reads as "cloned".
 	cases=$((cases + 1))
-	printf '%s\n' "$out" | grep -qE "^\\$TAG scratch copy: $census_after paths by (rsync|cp( [^ ]+ \\(clone or copy\\))?) \\+ \\.godot/ by cp( [^ ]+ \\(clone or copy\\))?, [0-9.]+ (KiB|MiB|GiB) at " \
+	grep -qE "^\\$TAG scratch copy: $census_after paths by (rsync|cp( [^ ]+ \\(clone or copy\\))?) \\+ \\.godot/ by cp( [^ ]+ \\(clone or copy\\))?, [0-9.]+ (KiB|MiB|GiB) at " <<<"$out" \
 		|| { echo "  MISS — the copy census line does not say what ran and how much; output was:" >&2; printf '%s\n' "$out" >&2; failures=$((failures + 1)); }
 
 	# GITIGNORED runtime inputs survive: an addon with its own .git metadata
