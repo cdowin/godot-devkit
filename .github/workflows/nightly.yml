@@ -3,7 +3,7 @@
 # Moved out of verify.yml (#93) to keep the PR gate under 1 minute; the
 # package ships to other people, so the matrix is kept, not dropped.
 # Rule 7: nightly-should-run skips the run when no file the suites depend on
-# changed since the last completed run; nightly-report files one issue per failing tier.
+# changed since the last completed run; nightly-report (its own job, so a timeout still reports) files one issue per failing tier.
 name: nightly
 
 on:
@@ -21,6 +21,8 @@ jobs:
     # Public repo: hosted runner, never the studio Macs.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
     steps:
       - uses: actions/checkout@v7
       - id: gate
@@ -45,30 +47,80 @@ jobs:
         uses: ./.github/actions/pinned-shellcheck
       # `make verify` is `check` then `matrix`; run the two tiers apart so each
       # gets its own result line (matrix is the suite on every claimed interpreter).
-      - id: tiers
+      - name: check
         if: steps.gate.outputs.run == 'true'
+        timeout-minutes: 8
+        continue-on-error: true
         env:
           VERBOSE: "1"
         run: |
-          for tier in check matrix; do
-            if make "$tier"; then s=pass; else s=fail; fi
-            echo "$tier|$s|.gate-reports/$tier.log" >> tier-results.txt
-          done
-          {
-            echo "results<<EOF"
-            cat tier-results.txt
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          exit 0
-      - if: always() && steps.gate.outputs.run == 'true' && steps.tiers.outputs.results != ''
-        uses: cdowin/.github/actions/nightly-report@main
+          mkdir -p nightly-logs
+          if make check; then s=pass; else s=fail; fi
+          echo "check|$s|.gate-reports/check.log" >> nightly-logs/results.txt
+          [ "$s" = pass ]
+      - name: matrix
+        if: steps.gate.outputs.run == 'true'
+        timeout-minutes: 18
+        continue-on-error: true
+        env:
+          VERBOSE: "1"
+        run: |
+          mkdir -p nightly-logs
+          if make matrix; then s=pass; else s=fail; fi
+          echo "matrix|$s|.gate-reports/matrix.log" >> nightly-logs/results.txt
+          [ "$s" = pass ]
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.gate.outputs.run == 'true'
         with:
-          results: ${{ steps.tiers.outputs.results }}
+          name: nightly-logs
+          path: |
+            nightly-logs/
+            .gate-reports/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
       - name: say why the run was skipped
         if: steps.gate.outputs.run != 'true'
         env:
           REASON: ${{ steps.gate.outputs.reason }}
         run: echo "skipped ${{ steps.gate.outputs.reason }}"
       - name: fail the run when a tier failed
-        if: steps.gate.outputs.run == 'true' && contains(steps.tiers.outputs.results, '|fail|')
-        run: exit 1
+        if: steps.gate.outputs.run == 'true'
+        run: '! grep -q "|fail|" nightly-logs/results.txt'
+
+  # Its own job: a timeout or cancel of `matrix` cannot kill the report (cdowin/signalandecho#94).
+  report:
+    needs: matrix
+    if: always() && needs.matrix.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: nightly-logs
+          path: .
+      - name: Collect results
+        id: results
+        run: |
+          # A tier with no result line timed out or was cancelled. With no results file at all,
+          # needs-json reports the job itself.
+          if [ -f nightly-logs/results.txt ]; then
+            for c in check matrix; do
+              grep -q "^$c|" nightly-logs/results.txt || {
+                echo "no result: the step timed out or was cancelled" > "nightly-logs/$c.log"
+                echo "$c|fail|nightly-logs/$c.log" >> nightly-logs/results.txt
+              }
+            done
+            echo "ignore=matrix" >> "$GITHUB_OUTPUT"
+            {
+              echo 'results<<EOF'
+              cat nightly-logs/results.txt
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+          fi
+      - uses: cdowin/.github/actions/nightly-report@main
+        with:
+          results: ${{ steps.results.outputs.results }}
+          needs-json: ${{ toJSON(needs) }}
+          needs-ignore: ${{ steps.results.outputs.ignore }}
