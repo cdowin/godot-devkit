@@ -2,49 +2,71 @@
 # plus the `matrix` tier (the suite on every interpreter the package claims).
 # Moved out of verify.yml (#93) to keep the PR gate under 1 minute; the
 # package ships to other people, so the matrix is kept, not dropped.
-# Rule 7: skip when `main` is unchanged since the last green nightly run.
+# Rule 7: nightly-should-run skips the run when no file the suites depend on
+# changed since the last completed run; nightly-report files one issue per failing tier.
 name: nightly
 
 on:
   schedule:
-    - cron: "17 6 * * *"
+    - cron: "0 8 * * *"
   workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
+  issues: write
 
 jobs:
   matrix:
+    # Public repo: hosted runner, never the studio Macs.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - id: gate
-        if: github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          last=$(gh run list --workflow nightly.yml --status success --event schedule \
-            --json headSha --jq '.[0].headSha // ""' || true)
-          if [ -n "$last" ] && [ "$last" = "$GITHUB_SHA" ]; then
-            echo "main unchanged since the last green nightly run ($last); skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.gate.outputs.skip != 'true'
+        uses: cdowin/signalandecho/.github/actions/nightly-should-run@main
+        with:
+          paths: |
+            src
+            tests
+            tools
+            pyproject.toml
+            uv.lock
+            Makefile
+            Makefile.gates
+            Makefile.tiers
+            godot-devkit.toml
+            .github/workflows/nightly.yml
+      - if: steps.gate.outputs.run == 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
-      - name: make verify
-        if: steps.gate.outputs.skip != 'true'
+      # `make verify` is `check` then `matrix`; run the two tiers apart so each
+      # gets its own result line (matrix is the suite on every claimed interpreter).
+      - id: tiers
+        if: steps.gate.outputs.run == 'true'
         env:
           VERBOSE: "1"
-        run: make verify
-      - name: keep the gate transcripts of a red run
-        if: failure()
-        uses: actions/upload-artifact@v7
+        run: |
+          for tier in check matrix; do
+            if make "$tier"; then s=pass; else s=fail; fi
+            echo "$tier|$s|.gate-reports/$tier.log" >> tier-results.txt
+          done
+          {
+            echo "results<<EOF"
+            cat tier-results.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+      - if: always() && steps.gate.outputs.run == 'true' && steps.tiers.outputs.results != ''
+        uses: cdowin/signalandecho/.github/actions/nightly-report@main
         with:
-          name: gate-reports
-          path: .gate-reports/
-          if-no-files-found: ignore
-          retention-days: 3
+          results: ${{ steps.tiers.outputs.results }}
+      - name: say why the run was skipped
+        if: steps.gate.outputs.run != 'true'
+        env:
+          REASON: ${{ steps.gate.outputs.reason }}
+        run: echo "skipped ${{ steps.gate.outputs.reason }}"
+      - name: fail the run when a tier failed
+        if: steps.gate.outputs.run == 'true' && contains(steps.tiers.outputs.results, '|fail|')
+        run: exit 1
