@@ -1,0 +1,50 @@
+# nightly — what a pull request does not run: `make verify`, which is `check`
+# plus the `matrix` tier (the suite on every interpreter the package claims).
+# Moved out of verify.yml (#93) to keep the PR gate under 1 minute; the
+# package ships to other people, so the matrix is kept, not dropped.
+# Rule 7: skip when `main` is unchanged since the last green nightly run.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - id: gate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list --workflow nightly.yml --status success --event schedule \
+            --json headSha --jq '.[0].headSha // ""' || true)
+          if [ -n "$last" ] && [ "$last" = "$GITHUB_SHA" ]; then
+            echo "main unchanged since the last green nightly run ($last); skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - name: make verify
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VERBOSE: "1"
+        run: make verify
+      - name: keep the gate transcripts of a red run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-reports
+          path: .gate-reports/
+          if-no-files-found: ignore
+          retention-days: 3
