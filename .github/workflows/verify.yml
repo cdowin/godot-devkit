@@ -76,20 +76,8 @@ jobs:
           enable-cache: true
       - name: Pinned shellcheck
         if: steps.decide.outputs.code == 'true'
-        env:
-          SHELLCHECK_VERSION: "0.11.0"
         # The `shell` gate runs this release, so a local pass is a CI pass.
-        # ubuntu-latest preinstalls shellcheck 0.9.0 (a different rule set,
-        # which fails the gate), so the pinned tarball (~1 s) is fetched only
-        # when the preinstalled version is not the pin.
-        run: |
-          if shellcheck --version 2>/dev/null | grep -qx "version: ${SHELLCHECK_VERSION}"; then
-            echo "preinstalled shellcheck is ${SHELLCHECK_VERSION}"
-          else
-            curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz" \
-              | tar -xz -C "$RUNNER_TEMP"
-            echo "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
-          fi
+        uses: ./.github/actions/pinned-shellcheck
       - name: make precommit
         if: steps.decide.outputs.code == 'true'
         # CI has no second look, so the gates stream. The interpreter matrix

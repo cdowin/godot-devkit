@@ -1,0 +1,19 @@
+name: Pinned shellcheck
+description: >
+  Put shellcheck 0.11.0 on PATH, the release the `shell` gate is written for. ubuntu-latest preinstalls
+  an older one (a different rule set), so the pinned tarball (~1 s) is fetched only when the preinstalled
+  version is not the pin. Shared by verify.yml and nightly.yml so both run the same shellcheck.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SHELLCHECK_VERSION: "0.11.0"
+      run: |
+        if shellcheck --version 2>/dev/null | grep -qx "version: ${SHELLCHECK_VERSION}"; then
+          echo "preinstalled shellcheck is ${SHELLCHECK_VERSION}"
+        else
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+        fi

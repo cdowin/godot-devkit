@@ -41,6 +41,8 @@ jobs:
         uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
+      - if: steps.gate.outputs.run == 'true'
+        uses: ./.github/actions/pinned-shellcheck
       # `make verify` is `check` then `matrix`; run the two tiers apart so each
       # gets its own result line (matrix is the suite on every claimed interpreter).
       - id: tiers
