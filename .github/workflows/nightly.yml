@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - id: gate
-        uses: cdowin/signalandecho/.github/actions/nightly-should-run@main
+        uses: cdowin/.github/actions/nightly-should-run@main
         with:
           paths: |
             src
@@ -59,7 +59,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           exit 0
       - if: always() && steps.gate.outputs.run == 'true' && steps.tiers.outputs.results != ''
-        uses: cdowin/signalandecho/.github/actions/nightly-report@main
+        uses: cdowin/.github/actions/nightly-report@main
         with:
           results: ${{ steps.tiers.outputs.results }}
       - name: say why the run was skipped
