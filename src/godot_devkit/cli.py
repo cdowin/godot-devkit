@@ -62,6 +62,12 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # base64 is regenerated
     godot-devkit autoloads add <Name> <res://path>  |  autoloads rm <Name>
                                     # declare / remove one project.godot autoload
+    godot-devkit pot [--dry-run | --check]
+                                    # the localization POT the editor writes,
+                                    # from project.godot's translations_pot_files
+                                    # (.gd only) to `[pot] output`; --check
+                                    # exits 1 on drift and names each missing
+                                    # and extra msgid
     (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 The installer (writes each file once; after that it is the repo's):
@@ -279,6 +285,9 @@ def main(argv: list[str] | None = None) -> int:
             return autoloads_edit.main(rest)
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
+    if cmd == 'pot':
+        from godot_devkit.godot.write import pot
+        return pot.main(rest)
     if cmd == 'stats':
         from godot_devkit.godot.read import stats
         return stats.main(rest)

@@ -64,3 +64,6 @@ convention_files = ["default_bus_layout.tres"]
 tests = ["tests/"]
 tools = ["tools/"]
 vendored = ["addons/"]                # list only the vendored addons; your own addon is game code
+[pot]
+output = "locale/messages.pot"     # required by `godot-devkit pot`: repo-relative, ends in .pot;
+                                   # Godot stores no POT path in project.godot
