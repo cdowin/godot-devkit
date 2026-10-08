@@ -255,7 +255,7 @@ class _Extractor:
 
     def constant_string(self, expr: Expr, ctx: Evaluator) -> str | None:
         value = ctx.eval(expr)
-        return str(value) if is_constant_string(value) else None
+        return str(value) if is_constant_string(value, ctx.where(expr.line)) else None
 
     def assess_assignment(self, expr: Assignment, ctx: Evaluator) -> None:
         self.assess(expr.target, ctx)

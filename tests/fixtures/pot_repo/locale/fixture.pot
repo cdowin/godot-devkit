@@ -1,0 +1,190 @@
+# LANGUAGE translation for Fixture "Quest" for the following files:
+# res://ui/menu.gd
+# res://ui/dialog.gd
+#
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Fixture "Quest"\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8-bit\n"
+
+#. TRANSLATORS: Shown on the title screen.
+#. Shown again after a reload.
+#: ui/menu.gd:13
+#: ui/dialog.gd:20
+#: ui/dialog.gd:21
+msgid "Welcome"
+msgstr ""
+
+#: ui/menu.gd:19
+msgid "Setter"
+msgstr ""
+
+#: ui/menu.gd:17
+msgid "Getter"
+msgstr ""
+
+#: ui/menu.gd:23
+msgid "Play"
+msgstr ""
+
+#: ui/menu.gd:24
+msgid "Settings"
+msgstr ""
+
+#: ui/menu.gd:25
+#: ui/menu.gd:26
+msgid "Save"
+msgstr ""
+
+#: ui/menu.gd:27
+msgid "Quit game"
+msgstr ""
+
+#: ui/menu.gd:28
+msgid "New game"
+msgstr ""
+
+#: ui/menu.gd:29
+msgid "Hello, friend!"
+msgstr ""
+
+#: ui/menu.gd:30
+msgid "Hard"
+msgstr ""
+
+#: ui/menu.gd:31
+msgid "Shield"
+msgstr ""
+
+#: ui/menu.gd:32
+msgid "Name"
+msgstr ""
+
+#. TRANSLATORS: A save prompt.
+#. It spans two lines.
+#: ui/menu.gd:33
+#: ui/dialog.gd:15
+msgctxt "menu"
+msgid "Open"
+msgstr ""
+
+#. TRANSLATORS: Opens the file picker.
+#: ui/menu.gd:34
+#: ui/dialog.gd:12
+msgid "Open"
+msgstr ""
+
+#: ui/menu.gd:35
+msgid "One apple"
+msgid_plural "%d apples"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/menu.gd:36
+msgid "Accessible"
+msgstr ""
+
+#: ui/menu.gd:37
+msgctxt "disk"
+msgid "One file"
+msgid_plural "%d files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: ui/menu.gd:42
+msgid "Local const"
+msgstr ""
+
+#: ui/menu.gd:44
+msgid "Title text"
+msgstr ""
+
+#: ui/menu.gd:45
+msgid "Tooltip"
+msgstr ""
+
+#: ui/menu.gd:47
+msgid "Bare name"
+msgstr ""
+
+#: ui/menu.gd:49
+msgid "Subscript"
+msgstr ""
+
+#: ui/menu.gd:50
+msgid " more"
+msgstr ""
+
+#: ui/menu.gd:51
+msgid "Set text"
+msgstr ""
+
+#: ui/menu.gd:53
+msgid "Item"
+msgstr ""
+
+#: ui/menu.gd:54
+msgid "Separator"
+msgstr ""
+
+#: ui/menu.gd:55
+msgid "Renamed"
+msgstr ""
+
+#: ui/menu.gd:56
+msgid "Icon item"
+msgstr ""
+
+#: ui/menu.gd:60
+msgid "Guard"
+msgstr ""
+
+#: ui/menu.gd:62
+msgid "Lambda"
+msgstr ""
+
+#: ui/menu.gd:64
+msgid "Quote \" and backslash \\ and\ttab"
+msgstr ""
+
+#: ui/menu.gd:65
+msgid ""
+"Line one\n"
+"Line two"
+msgstr ""
+
+#: ui/menu.gd:66
+msgid "Trailing newline\n"
+msgstr ""
+
+#: ui/menu.gd:69
+msgid "Default"
+msgstr ""
+
+#: ui/menu.gd:75
+msgid "Play!"
+msgstr ""
+
+#: ui/dialog.gd:7
+msgid "PNG Images"
+msgstr ""
+
+#: ui/dialog.gd:8
+msgid "JPEG Images"
+msgstr ""
+
+#: ui/dialog.gd:10
+msgid "GDScript Files"
+msgstr ""
+
+#: ui/dialog.gd:11
+msgid "Text Files"
+msgstr ""
+
+msgid "Fixture \"Quest\""
+msgstr ""

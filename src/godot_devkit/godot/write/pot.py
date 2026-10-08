@@ -31,7 +31,13 @@ godot-devkit.toml:
 
 Census (rule 4): every run prints how many files it scanned and how many
 msgids it wrote. An empty manifest, a manifest with no strings, a missing
-`[pot] output` and a script this cannot read are each exit 2.
+`[pot] output`, a script this cannot parse and a constant the editor folds
+and this cannot (a preloaded resource's property, a float formatted into a
+string) are each exit 2 — a refusal, never a smaller POT.
+
+Known gap: a constant read through a variable whose type is INFERRED
+(`var labels := Labels.new()` then `tr(labels.SAVE)`) folds in the editor and
+not here; a declared type (`var labels: Labels`) folds in both.
 """
 from __future__ import annotations
 
@@ -251,7 +257,7 @@ def _script_paths(root: Path) -> list[str]:
     walk = descendants(root, Kind.FILE, SCRIPT_SUFFIX, pattern=SCRIPT_GLOB).filter(
         lambda p: not any(part.startswith('.') for part in p.relative_to(root).parts),
         SkipReason.DOTTED_NAME)
-    return [RES_PREFIX + p.relative_to(root).as_posix() for p in walk.kept]
+    return [RES_PREFIX + p.relative_to(root).as_posix() for p in walk]
 
 
 @dataclass

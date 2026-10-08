@@ -15,9 +15,11 @@ Three answers, never a guess:
     `ClassScope`, or an `Opaque` constant whose value nothing here needs);
   * `NOT_CONSTANT` — the analyzer would not fold it either;
   * `Unsupported` raised — the analyzer WOULD fold it and this module cannot
-    compute the value (a float formatted into a string, a `%x` conversion).
-    The caller refuses the run: a string the editor extracts and this tool
-    drops is the silent miss rule 4 forbids.
+    compute the value: a float formatted into a string, a `%x` conversion, a
+    property of a preloaded resource, an engine constant formatted into a
+    string, a constant of a scene autoload. The caller refuses the run: a
+    string the editor extracts and this tool drops is the silent miss rule 4
+    forbids.
 """
 from __future__ import annotations
 
@@ -60,7 +62,10 @@ from godot_devkit.godot.format.gdscript_syntax import (
 )
 
 RES_PREFIX = 'res://'
+BYTE_ORDER_MARK = '\ufeff'
 SCRIPT_SUFFIX = '.gd'
+# How the engine spells its integer constants (`CoreConstants`, ClassDB).
+ENGINE_CONSTANT_RE = re.compile(r'^[A-Z][A-Z0-9_]*$')
 CLASS_NAME_RE = re.compile(
     r'^(?:@\w+(?:\([^)]*\))?\s+)*class_name\s+([A-Za-z_]\w*)', re.MULTILINE)
 
@@ -134,12 +139,17 @@ class NodePathValue:
 
 @dataclass(frozen=True)
 class Opaque:
-    """A constant whose value nothing here models (`Vector2(1, 2)`, a scene).
+    """A constant whose value nothing here models.
 
-    Known never to be a string, so it is a fine answer to "is this a constant
-    string?" — and an `Unsupported` the moment anything computes with it.
+    `string_free` says whether it can be a string. `Vector2i(1, 2).x * 3` or a
+    `maxi()` result never is, so it answers "is this a constant string?" with
+    no, and arithmetic among such values stays string-free. A preloaded
+    RESOURCE is the other kind: the analyzer reads its properties
+    (`get_named`), one of them may be a string, and only the resource file
+    knows — so asking that question of it is `Unsupported`.
     """
     what: str
+    string_free: bool = True
 
 
 @dataclass(frozen=True)
@@ -149,7 +159,7 @@ class Instance:
     Not a constant itself, but `instance.CONST` folds: the analyzer resolves
     the attribute from the static type (`reduce_identifier_from_base`).
     """
-    scope: 'ClassScope'
+    scope: 'ClassScope | None'   # None: a scene autoload, script unknown here
 
 
 class Unsupported(Exception):
@@ -165,8 +175,11 @@ def is_constant(value: object) -> bool:
     return value is not NOT_CONSTANT and not isinstance(value, Instance)
 
 
-def is_constant_string(value: object) -> bool:
+def is_constant_string(value: object, where: str) -> bool:
     """`_is_constant_string`: reduced, and a String or StringName."""
+    if isinstance(value, Opaque) and not value.string_free:
+        raise Unsupported(where, f'{value.what} may reduce to a string, and only '
+                                 f'the editor can read its value')
     return isinstance(value, str)
 
 
@@ -230,10 +243,15 @@ class Project:
         return self.script(paths[0], where)
 
     def autoload(self, name: str, where: str) -> 'ClassScope | None':
+        """An autoload's script class; None when `name` is no script autoload."""
         path = self._autoloads.get(name)
         if path is None or not path.endswith(SCRIPT_SUFFIX):
             return None
         return self.script(path, where)
+
+    def is_scene_autoload(self, name: str) -> bool:
+        path = self._autoloads.get(name)
+        return path is not None and not path.endswith(SCRIPT_SUFFIX)
 
 
 @dataclass
@@ -304,41 +322,55 @@ class ClassScope:
         return values
 
     def base(self, where: str) -> 'ClassScope | None':
+        """The script class this one extends, or None for a native base.
+
+        `resolve_class_inheritance`'s order for `extends Name`: a global
+        `class_name`, then an autoload, then a native class, then a class or
+        preloaded-script constant of this class or an enclosing one. Nested
+        names (`extends A.B`) step through classes.
+        """
         if self._base is not NOT_CONSTANT:
             return self._base  # type: ignore[return-value]
         decl = self.decl
         where = self.where(decl.line)
         base: ClassScope | None = None
-        if decl.extends is None:
-            base = None
-        elif decl.extends_is_path:
-            base = self.project.script(decl.extends, where)
-        else:
+        if decl.extends_is_path:
+            base = self.project.script(decl.extends, where)  # type: ignore[arg-type]
+        elif decl.extends is not None:
             head, *rest = decl.extends.split('.')
-            found = self._class_in_scope(head, where)
-            if found is None:
-                if not rest and classdb.is_known(head):
-                    base = None
-                else:
+            project = self.project
+            found = project.global_class(head, where) or project.autoload(head, where)
+            if found is None and not classdb.is_known(head):
+                found = self._class_in_scope(head, where)
+                if found is None:
                     raise Unsupported(where, f'cannot resolve the base class '
                                              f'{decl.extends} of {self.path}')
-            else:
-                base = found
-                for name in rest:
-                    member = base.member(name, where)
-                    if member is None or member.kind != 'class':
-                        raise Unsupported(where, f'cannot resolve {decl.extends}')
-                    base = member.value
+            base = found
+            for name in rest:
+                member = base.member(name, where) if base is not None else None
+                if member is None or member.kind != 'class':
+                    raise Unsupported(where, f'cannot resolve {decl.extends}')
+                base = member.value
         self._base = base
         return base
 
     def _class_in_scope(self, name: str, where: str) -> 'ClassScope | None':
-        """What `extends <name>` names: an inner class or a const preload of
-        an enclosing class, else a global `class_name`."""
-        if self.outer is not None:
-            value = Evaluator(self.outer).identifier(Identifier(self.decl.line, name))
-            return value if isinstance(value, ClassScope) else None
-        return self.project.global_class(name, where)
+        """`get_class_node_current_scope_classes`: this class, then each
+        enclosing one — its own name, or a class or constant member."""
+        scope: ClassScope | None = self
+        while scope is not None:
+            if scope.decl.name == name:
+                return scope
+            member = scope.members.get(name)
+            if member is not None:
+                if member.kind == 'class':
+                    return member.value  # type: ignore[return-value]
+                if member.kind == 'const':
+                    value = scope.value_of(member, name)
+                    return value if isinstance(value, ClassScope) else None
+                return None
+            scope = scope.outer
+        return None
 
     def member(self, name: str, where: str) -> _Member | None:
         """This class's member, else its bases' (`reduce_identifier_from_base`)."""
@@ -487,6 +519,12 @@ class Evaluator:
         autoload = self.scope.project.autoload(name, where)
         if autoload is not None:
             return Instance(autoload)
+        if self.scope.project.is_scene_autoload(name):
+            return Instance(None)
+        if ENGINE_CONSTANT_RE.match(name):
+            # A global or ClassDB constant (`KEY_A`, `NOTIFICATION_READY`):
+            # the analyzer folds it to an integer this module does not know.
+            return Opaque(name)
         return NOT_CONSTANT
 
     def _type_scope(self, type_name: str | None, where: str) -> ClassScope | None:
@@ -514,6 +552,9 @@ class Evaluator:
             return member.owner.value_of(member, expr.name)
         base = self.eval(expr.base)
         if isinstance(base, Instance):
+            if base.scope is None:
+                raise Unsupported(where, 'a constant of a scene autoload: the editor '
+                                         'reads its root script from the running scene')
             base = base.scope
             member = base.member(expr.name, where)
             if member is None or member.kind not in ('const', 'enum', 'enum_value', 'class'):
@@ -530,7 +571,7 @@ class Evaluator:
             key = _dict_key(expr.name)
             return base[key] if key in base else NOT_CONSTANT
         if isinstance(base, Opaque):
-            return Opaque(f'{base.what}.{expr.name}')
+            return Opaque(f'{base.what}.{expr.name}', base.string_free)
         return NOT_CONSTANT
 
     def subscript(self, expr: Subscript) -> object:
@@ -550,6 +591,8 @@ class Evaluator:
             if key in base:
                 return base[key]
             raise Unsupported(where, f'key {index!r} is not in the constant dictionary')
+        if isinstance(base, Opaque) and base.string_free:
+            return base
         raise Unsupported(where, f'cannot fold a subscript of {_kind(base)}')
 
     # --- operators ---
@@ -567,6 +610,8 @@ class Evaluator:
         if not is_constant(operand):
             return NOT_CONSTANT
         where = self.where(expr.line)
+        if isinstance(operand, Opaque) and operand.string_free:
+            return operand
         if expr.op == '!':
             return not _booleanize(operand, where)
         if isinstance(operand, bool) or not isinstance(operand, (int, float)):
@@ -586,6 +631,9 @@ class Evaluator:
         if not (is_constant(condition) and is_constant(true_value)
                 and is_constant(false_value)):
             return NOT_CONSTANT
+        if (isinstance(condition, Opaque) and condition.string_free
+                and _string_free(true_value) and _string_free(false_value)):
+            return Opaque('ternary')
         return true_value if _booleanize(condition, self.where(expr.line)) else false_value
 
     def cast(self, expr: Cast) -> object:
@@ -594,9 +642,9 @@ class Evaluator:
             return NOT_CONSTANT
         if expr.type_name in STRING_TYPES and isinstance(operand, str):
             return StringNameValue(operand) if expr.type_name == 'StringName' else str(operand)
-        if isinstance(operand, str):
+        if isinstance(operand, str) or not _string_free(operand):
             raise Unsupported(self.where(expr.line),
-                              f'cannot fold a string cast to {expr.type_name}')
+                              f'cannot fold {_kind(operand)} cast to {expr.type_name}')
         return Opaque(f'cast to {expr.type_name}')
 
     def preload(self, expr: Preload) -> object:
@@ -605,7 +653,7 @@ class Evaluator:
             raise Unsupported(self.where(expr.line), 'preload() of a path this cannot fold')
         if path.endswith(SCRIPT_SUFFIX):
             return self.scope.project.script(path, self.where(expr.line))
-        return Opaque(f'preload({path})')
+        return Opaque(f'preload("{path}")', string_free=False)
 
     def call(self, expr: Call) -> object:
         if expr.is_super or not isinstance(expr.callee, Identifier):
@@ -631,9 +679,18 @@ class Evaluator:
             return len(args[0])
         if name == 'ord' and len(args) == 1 and isinstance(args[0], str) and args[0]:
             return ord(args[0][0])
-        if name in ('type_exists', 'is_instance_of', 'Color8', 'convert'):
+        if name in ('type_exists', 'is_instance_of', 'Color8'):
             return Opaque(f'{name}()')
+        if name == 'convert':
+            return Opaque(f'{name}()', string_free=False)
         raise Unsupported(where, f'cannot fold {name}() of {", ".join(map(_kind, args))}')
+
+
+def _string_free(value: object) -> bool:
+    """Known never to be a String or StringName."""
+    if isinstance(value, Opaque):
+        return value.string_free
+    return not isinstance(value, str)
 
 
 def _dict_key(value: object) -> object:
@@ -739,6 +796,12 @@ def _number(value: object) -> bool:
 def _evaluate(op: str, left: object, right: object, where: str) -> object:
     """`Variant::evaluate` for the operand kinds modeled exactly."""
     if isinstance(left, Opaque) or isinstance(right, Opaque):
+        # Neither side a string and both string-free: the result is a
+        # number, vector or bool — constant, and never a string.
+        free = all(not isinstance(v, str) and (not isinstance(v, Opaque) or v.string_free)
+                   for v in (left, right))
+        if free:
+            return Opaque(f'{_kind(left)} {op} {_kind(right)}')
         raise Unsupported(where, f'cannot fold {_kind(left)} {op} {_kind(right)}')
     if op in ('&&', '||'):
         a, b = _booleanize(left, where), _booleanize(right, where)
@@ -804,7 +867,8 @@ def read_res(root: Path) -> Callable[[str], str | None]:
     """A `Project.read` over a checkout: `res://x.gd` → its text, or None."""
     def read(res_path: str) -> str | None:
         try:
-            return (root / res_to_rel(res_path)).read_text(encoding='utf-8')
+            text = (root / res_to_rel(res_path)).read_text(encoding='utf-8')
         except (OSError, UnicodeDecodeError):
             return None
+        return text.removeprefix(BYTE_ORDER_MARK)
     return read
