@@ -89,7 +89,7 @@ The installer (writes each file once; after that it is the repo's):
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | rng
                       | tres-comment | unit-disk | test-shape
-                      | canonical     # opt-in: not in the stock `check all`
+                      | canonical | patterns   # opt-in: not in the stock `check all`
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
@@ -213,6 +213,9 @@ def _check_module(name: str):
     if name == 'canonical':
         from godot_devkit.godot.checks import canonical
         return canonical
+    if name == 'patterns':
+        from godot_devkit.godot.checks import patterns
+        return patterns
     return None
 
 

@@ -47,7 +47,7 @@ LAYERS = ('format', 'index', 'read', 'write', 'checks')
 CONFIG_IMPORT_ALLOWLIST = frozenset((
     'core/config.py', 'cli.py',
     'godot/checks/canonical.py', 'godot/checks/roster.py',
-    'godot/checks/defaults.py', 'godot/checks/props.py', 'godot/checks/rng.py',
+    'godot/checks/defaults.py', 'godot/checks/patterns.py', 'godot/checks/props.py', 'godot/checks/rng.py',
     'godot/checks/test_shape.py', 'godot/checks/tres.py', 'godot/checks/tres_comment.py',
     'godot/checks/uid.py', 'godot/checks/unit_disk.py',
     'godot/install.py',
@@ -451,6 +451,10 @@ def _keys_the_readers_accept() -> tuple[dict[tuple[str, str], str], list[str], i
     return keys, unresolved, len(readers)
 
 
+# Sections whose keys sit in repeated rows, `[[<section>.<row>]]`.
+ROW_KEYS = {'patterns': 'rule'}
+
+
 def _example_config() -> dict:
     import tomllib
     return tomllib.loads(EXAMPLE.read_text(encoding='utf-8'))
@@ -474,6 +478,11 @@ class EveryConfigKeyShowsItsShape(unittest.TestCase):
         missing, misshapen = [], []
         for (section, key), reader in sorted(keys.items()):
             value = doc.get(section, {})
+            # A section of repeated rows (`[[patterns.rule]]`): its keys live
+            # in the rows, so the first row is the example.
+            row = ROW_KEYS.get(section)
+            if row and value.get(row):
+                value = value[row][0]
             if key not in value:
                 missing.append(f'[{section}] {key}  ({reader})')
                 continue

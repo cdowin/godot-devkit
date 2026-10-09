@@ -42,6 +42,21 @@ godot-devkit check all                                    # the eight gates, one
 
 Every write verb takes `--dry-run` and is idempotent. More: [Quickstart](https://github.com/cdowin/godot-devkit/wiki/Quickstart), [Verb reference](https://github.com/cdowin/godot-devkit/wiki/Verb-reference).
 
+## Pattern rules
+
+A project can forbid its own code patterns. The devkit ships no rule. Declare rules in `godot-devkit.toml`, then name `patterns` in `[roster] checks` or run `godot-devkit check patterns`.
+
+```toml
+[[patterns.rule]]
+id = "no-print"                  # letters, digits, _ and -
+regex = "\\bprint\\("            # Python regex, matched per line
+paths = ["src/**/*.gd"]          # globs over tracked files; ** crosses folders
+exclude = ["src/debug/**"]       # optional
+message = "Use the logger."
+```
+
+Each hit prints `path:line: no-print: Use the logger.` and the exit code is 1. A line opts out with a comment: `# lint-allow: no-print`. A rule whose paths match no file fails. With no rules the check does nothing.
+
 ## Requirements
 
 Python 3.11+ (stdlib only) and git. Godot 4.4+ text-resource format for the uid/tres gates; the
