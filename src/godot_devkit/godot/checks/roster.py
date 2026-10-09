@@ -32,7 +32,7 @@ KNOWN_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
 # roster leaves out: each starts red on any tree its fixer never ran over, so
 # shipping it in `check all` would redden every consumer on a pin bump. A repo
 # opts in by naming it; the aggregate never grows under anyone.
-OPT_IN_GATES = ('canonical',)
+OPT_IN_GATES = ('canonical', 'patterns')
 
 # The godot-devkit.toml key that narrows the roster. It was `[checks] godot`
 # until 3.0, when `[checks]` was agentic-sdlc's table too; 3.x still reads

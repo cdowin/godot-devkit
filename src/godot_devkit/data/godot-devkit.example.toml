@@ -67,3 +67,10 @@ vendored = ["addons/"]                # list only the vendored addons; your own 
 [pot]
 output = "locale/messages.pot"     # required by `godot-devkit pot`: repo-relative, ends in .pot;
                                    # Godot stores no POT path in project.godot
+[[patterns.rule]]                   # opt-in: name "patterns" in [roster] checks. No rule is built in
+id = "no-print"
+regex = "\\bprint\\("
+paths = ["src/**/*.gd"]
+exclude = ["src/debug/**"]         # optional
+message = "Use the logger, not print()."
+                                   # a line opts out with `# lint-allow: no-print`
