@@ -8,7 +8,11 @@ git-known files are counted (tracked + untracked-but-not-ignored, the set
 `orphans` scans), so `.godot/` and every other ignored artifact stays out.
 Pure parse — never writes, never boots Godot.
 
-    godot-devkit stats [<dir>...] [--by dir] [--json]
+    godot-devkit stats [<dir>...] [--by dir] [--json] [--ratchet FILE]
+
+Comment metrics use the shared GDScript lexer. `comments` counts own-line # comments
+and standalone docstrings; `docs` counts the ## subset. Inline comment and docstring
+counts are separately frozen to prevent moving prose to evade a budget.
 
 A CODE line is non-blank and not a comment. In `.gd` a comment line starts
 (after indentation) with `#`, and every line of a block opened by a line that
@@ -35,9 +39,11 @@ import argparse
 import json
 import re
 import sys
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from godot_devkit.godot.format.gdscript_syntax import tokenize, STRING, NAME, EOF, GDSyntaxError
 from godot_devkit.core import walk
 from godot_devkit.core.config import ConfigError, config_section, str_tuple
 from godot_devkit.core.project import repo_root
@@ -58,7 +64,8 @@ NO_CODE = (SCENE, RESOURCE)
 ROOT_LABEL = './'
 DASH = '-'
 CENSUS_LABEL = 'file(s) scanned'
-HEADER = ('bucket', 'files', 'lines', 'code', 'tests')
+HEADER = ('bucket', 'files', 'lines', 'code', 'comments', 'docs', 'inline', 'docstrings', 'tests')
+COMMENT_METRICS = ('comments', 'docs', 'inline', 'docstrings')
 INDENT = '  '
 
 TEST_FUNC = re.compile(r'^\s*func\s+test_')
@@ -80,9 +87,18 @@ class Row:
     lines: int = 0
     code: int | None = 0
     tests: int | None = None
+    comments: int | None = 0
+    docs: int | None = 0
+    inline: int | None = 0
+    docstrings: int | None = 0
     children: dict[str, 'Row'] = field(default_factory=dict)
 
-    def add(self, lines: int, code: int | None, tests: int | None) -> None:
+    def add(self, lines: int, code: int | None, tests: int | None,
+            comments: int | None = None, docs: int | None = None,
+            inline: int | None = None, docstrings: int | None = None) -> None:
+        for metric, value in zip(COMMENT_METRICS, (comments, docs, inline, docstrings)):
+            if getattr(self, metric) is not None and value is not None:
+                setattr(self, metric, getattr(self, metric) + value)
         self.files += 1
         self.lines += lines
         if self.code is not None and code is not None:
@@ -100,6 +116,7 @@ class Row:
     def as_json(self) -> dict:
         out: dict = {'bucket': self.label, 'files': self.files,
                      'lines': self.lines, 'code': self.code}
+        out.update({key: getattr(self, key) for key in COMMENT_METRICS})
         if self.tests is not None:
             out['tests'] = self.tests
         return out
@@ -119,32 +136,30 @@ def load_settings() -> Settings:
     )
 
 
-def gd_line_counts(text: str) -> tuple[int, int, int]:
-    """(lines, code lines, `func test_` count) of one `.gd` source."""
+def gd_line_counts(text: str) -> tuple[int, int, int, int, int, int, int]:
+    """Physical/code/test/comment/doc/inline/docstring counts from the shared lexer."""
     lines = text.splitlines()
-    code = tests = 0
-    in_block = False   # inside a `"""` block
-    block_is_code = False  # …that a code line opened (a multi-line string value)
-    for line in lines:
-        stripped = line.strip()
-        odd = stripped.count(GD_DOCSTRING) % 2 == 1
-        if in_block:
-            if block_is_code and stripped:
-                code += 1
-            if odd:
-                in_block = False
+    tokens, comments = tokenize(text)
+    own = {n for n, comment in comments.items() if comment.own_line}
+    docs = {n for n in own if comments[n].text.startswith('##')}
+    inline = len(comments) - len(own)
+    code_lines, docstrings = set(), set()
+    tests = 0
+    for index, token in enumerate(tokens):
+        if token.kind == EOF:
             continue
-        if not stripped or stripped.startswith('#'):
-            continue
-        if stripped.startswith(GD_DOCSTRING):
-            in_block, block_is_code = odd, False
-            continue
-        code += 1
-        if TEST_FUNC.match(line):
-            tests += 1
-        if odd:
-            in_block, block_is_code = True, True
-    return len(lines), code, tests
+        extent = range(token.line, (token.end_line or token.line) + 1)
+        source = lines[token.line - 1].lstrip()
+        if token.kind == STRING and token.bol and any(source.startswith(prefix + quote * 3) for prefix in ('', 'r', '&', '^') for quote in ('"', chr(39))):
+            docstrings.update(extent)
+        else:
+            code_lines.update(n for n in extent if n <= len(lines) and lines[n - 1].strip())
+        if token.kind == NAME and token.text == 'func' and index + 1 < len(tokens):
+            following = tokens[index + 1]
+            if following.kind == NAME and following.text.startswith('test_'):
+                tests += 1
+    own.update(docstrings)
+    return len(lines), len(code_lines - own), tests, len(own), len(docs), inline, len(docstrings)
 
 
 def _opens_block_comment(line: str) -> bool:
@@ -212,22 +227,24 @@ def tally(root: Path, files: walk.Walk, settings: Settings,
           by_dir: bool) -> dict[str, Row]:
     """Every bucket's row, its tier/dir children filled in."""
     rows = {name: Row(name, code=None if name in NO_CODE else 0,
-                      tests=0 if name == TESTS else None)
+                      tests=0 if name == TESTS else None,
+                      **{key: 0 if name in (GAME, TESTS, TOOLS, VENDORED) else None
+                         for key in COMMENT_METRICS})
             for name in BUCKETS}
     for path in files:
         rel = path.as_posix()
         text = (root / path).read_text(encoding='utf-8', errors='replace')
         suffix = path.suffix.lower()
         if suffix == GD:
-            lines, code, tests = gd_line_counts(text)
+            lines, code, tests, comments, docs, inline, docstrings = gd_line_counts(text)
             name = gd_bucket(rel, settings)
-            rows[name].add(lines, code, tests)
+            rows[name].add(lines, code, tests, comments, docs, inline, docstrings)
             if name == TESTS:
                 prefix = _under(rel, settings.tests)
-                rows[TESTS].child(_subdir_label(rel, prefix)).add(lines, code, tests)
+                rows[TESTS].child(_subdir_label(rel, prefix)).add(lines, code, tests, comments, docs, inline, docstrings)
             elif name == GAME and by_dir:
                 label = rel.split('/', 1)[0] + '/' if '/' in rel else ROOT_LABEL
-                rows[GAME].child(label).add(lines, code, None)
+                rows[GAME].child(label).add(lines, code, None, comments, docs, inline, docstrings)
         elif suffix == SHADER:
             rows[SHADER].add(*shader_line_counts(text), None)
         else:
@@ -277,7 +294,8 @@ def _table(rows: dict[str, Row]) -> list[tuple[str, ...]]:
         for item, indent in [(row, '')] + [(row.children[k], INDENT)
                                            for k in sorted(row.children)]:
             out.append((indent + item.label, str(item.files), str(item.lines),
-                        _cell(item.code), _cell(item.tests)))
+                        _cell(item.code), *(_cell(getattr(item, key)) for key in COMMENT_METRICS),
+                        _cell(item.tests)))
     return out
 
 
@@ -290,6 +308,86 @@ def render(rows: dict[str, Row]) -> list[str]:
             for r in table]
 
 
+def _baseline(document: dict) -> tuple[dict, list[str], dict[str, dict]]:
+    if not isinstance(document, dict) or not isinstance(document.get('settings'), dict):
+        raise ValueError('baseline must be stats --json output with settings')
+    dirs = document.get('dirs')
+    if not isinstance(dirs, list) or not dirs or not all(isinstance(d, str) for d in dirs):
+        raise ValueError('baseline dirs must be a nonempty list of strings')
+    buckets = document.get('buckets')
+    if not isinstance(buckets, list) or len(buckets) != len(BUCKETS):
+        raise ValueError('baseline must contain every stats bucket')
+    entries = {}
+    for bucket in buckets:
+        if not isinstance(bucket, dict) or bucket.get('bucket') not in BUCKETS:
+            raise ValueError('unknown baseline bucket')
+        for entry in [bucket, *bucket.get('tiers', []), *bucket.get('dirs', [])]:
+            key = entry.get('bucket')
+            if not isinstance(key, str) or key in entries:
+                raise ValueError('duplicate or malformed baseline bucket')
+            for metric in (*COMMENT_METRICS, 'code', 'tests'):
+                value = entry.get(metric)
+                if value is not None and (type(value) is not int or value < 0):
+                    raise ValueError(f'{key} {metric} must be a nonnegative integer or null')
+            if bucket['bucket'] in (GAME, TESTS, TOOLS, VENDORED):
+                if any(type(entry.get(metric)) is not int for metric in COMMENT_METRICS):
+                    raise ValueError(f'{key} is missing comment metrics')
+            entries[key] = entry
+    if not all(name in entries for name in BUCKETS):
+        raise ValueError('baseline repeats or omits a stats bucket')
+    return document['settings'], dirs, entries
+
+
+def _limits(entry: dict, test_keys: set[str]) -> tuple[str, ...]:
+    return COMMENT_METRICS + (('code', 'tests') if entry['bucket'] in test_keys else ())
+
+
+def ratchet(root: Path, path: Path, rows: dict[str, Row], settings: Settings,
+            dirs: list[str]) -> list[str]:
+    path = path.resolve()
+    rel = path.relative_to(root.resolve()).as_posix()
+    config, baseline_dirs, caps = _baseline(json.loads(path.read_text()))
+    current_config = {key: list(value) for key, value in settings.__dict__.items()}
+    findings = []
+    if config != current_config or baseline_dirs != dirs:
+        findings.append('scope/settings changed; restore the frozen roots before comparing budgets')
+    test_keys = {TESTS, *rows[TESTS].children}
+    # A scope change cannot silently move a tier out of its specific cap.
+    current = {row.label: row.as_json() for parent in rows.values()
+               for row in (parent, *parent.children.values())}
+    if not set(current).issubset(caps):
+        findings.append('new bucket/tier lacks a frozen budget')
+    for key, entry in current.items():
+        if key not in caps:
+            continue
+        for metric in _limits(entry, test_keys):
+            value, cap = entry.get(metric), caps[key].get(metric)
+            if value is not None and (cap is None or value > cap):
+                findings.append(f'{key} {metric}: {value} exceeds {cap}')
+    # New baselines may be introduced once. Existing scope and limits only shrink.
+    base = 'origin/main'
+    exists = subprocess.run(['git', 'cat-file', '-e', base + '^{commit}'], cwd=root,
+                            capture_output=True).returncode == 0
+    if not exists:
+        base = 'HEAD'
+    previous = subprocess.run(['git', 'show', f'{base}:{rel}'], cwd=root,
+                              capture_output=True, text=True)
+    if previous.returncode == 0:
+        old_config, old_dirs, old_caps = _baseline(json.loads(previous.stdout))
+        if config != old_config or baseline_dirs != old_dirs or set(caps) != set(old_caps):
+            findings.append('baseline scope/buckets changed from the Git base')
+        for key, entry in caps.items():
+            if key not in old_caps:
+                continue
+            # All tier code counts are test-code caps; production code is context only.
+            keys = {TESTS, *[k for k in caps if _under(k, settings.tests) is not None]}
+            for metric in _limits(entry, keys):
+                cap, old = entry.get(metric), old_caps[key].get(metric)
+                if old is not None and (cap is None or cap > old):
+                    findings.append(f'{key} {metric}: baseline cap increased from {old} to {cap}')
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog='godot-devkit stats', description=__doc__,
@@ -300,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
                         help='dir: one row per top-level dir under `game .gd`')
     parser.add_argument('--json', action='store_true',
                         help='the same numbers as one JSON object')
+    parser.add_argument('--ratchet', type=Path, metavar='FILE',
+                        help='fail on comment/doc/test-code growth against a stats JSON baseline')
     args = parser.parse_args(argv)
 
     try:
@@ -307,14 +407,19 @@ def main(argv: list[str] | None = None) -> int:
         root = repo_root()
         prefixes = scope_prefixes(root, args.dirs)
         files = scan(root, prefixes)
-    except (ConfigError, Refusal, Usage) as err:
+    except (ConfigError, Refusal, Usage, GDSyntaxError) as err:
         print(f'godot-devkit: {err}', file=sys.stderr)
         return 2
-    rows = tally(root, files, settings, by_dir=args.by == 'dir')
+    try:
+        rows = tally(root, files, settings, by_dir=args.by == 'dir')
+    except GDSyntaxError as err:
+        print(f'godot-devkit: stats: {err}', file=sys.stderr)
+        return 2
     scanned = sum(rows[name].files for name in BUCKETS)
     dirs = list(prefixes) or [ROOT_LABEL]
     census = f'{files.census(CENSUS_LABEL)} — dirs: {" ".join(dirs)}'
 
+    buckets = []
     if args.json:
         buckets = []
         for name in BUCKETS:
@@ -325,12 +430,23 @@ def main(argv: list[str] | None = None) -> int:
                               for k in sorted(rows[name].children)]
             buckets.append(entry)
         print(json.dumps({'buckets': buckets, 'files': scanned, 'dirs': dirs,
-                          'census': census}, indent=2))
+                          'census': census, 'settings': settings.__dict__}, indent=2))
     else:
         for line in render(rows):
             print(line)
         print(f'# {census}')
-    return 0 if scanned else 1
+    if not scanned:
+        return 1
+    if args.ratchet:
+        try:
+            findings = ratchet(root, args.ratchet, rows, settings, dirs)
+        except (ValueError, OSError, json.JSONDecodeError) as err:
+            print(f'godot-devkit: stats: invalid ratchet: {err}', file=sys.stderr)
+            return 2
+        for finding in findings:
+            print(f'[stats:ratchet] {finding}', file=sys.stderr)
+        return 1 if findings else 0
+    return 0
 
 
 if __name__ == '__main__':

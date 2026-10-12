@@ -116,6 +116,7 @@ class Token:
     indent: int          # that line's leading-whitespace width
     flavor: str = PLAIN  # a string's prefix; unused otherwise
     value: object = None  # a number's value
+    end_line: int | None = None  # physical extent, including multiline strings
 
 
 @dataclass(frozen=True)
@@ -144,7 +145,7 @@ class _Scanner:
     def emit(self, kind: str, text: str, line: int, flavor: str = PLAIN,
              value: object = None) -> None:
         bol = not self.line_has_token and not self.joined
-        self.tokens.append(Token(kind, text, line, bol, self.indent, flavor, value))
+        self.tokens.append(Token(kind, text, line, bol, self.indent, flavor, value, self.line))
         self.line_has_token = True
 
     def start_line(self) -> None:
