@@ -49,18 +49,18 @@ TREE = {
 
 # label -> (files, lines, code, tests); '-' where the column does not apply.
 EXPECTED = {
-    'game .gd': ('2', '14', '8', '-'),
-    'tests .gd': ('3', '11', '9', '3'),
-    'tests/': ('1', '1', '1', '0'),
-    'tests/integration/': ('1', '4', '3', '1'),
-    'tests/unit/': ('1', '6', '5', '2'),
-    'tools .gd': ('1', '3', '1', '-'),
-    'vendored .gd': ('2', '4', '4', '-'),
-    '.gdshader': ('1', '7', '3', '-'),
-    '.tscn': ('1', '3', '-', '-'),
-    '.tres': ('1', '2', '-', '-'),
+    'game .gd': ('2', '14', '8', '5', '1', '0', '3', '-'),
+    'tests .gd': ('3', '11', '9', '1', '0', '0', '0', '3'),
+    'tests/': ('1', '1', '1', '0', '0', '0', '0', '0'),
+    'tests/integration/': ('1', '4', '3', '1', '0', '0', '0', '1'),
+    'tests/unit/': ('1', '6', '5', '0', '0', '0', '0', '2'),
+    'tools .gd': ('1', '3', '1', '1', '0', '0', '0', '-'),
+    'vendored .gd': ('2', '4', '4', '0', '0', '0', '0', '-'),
+    '.gdshader': ('1', '7', '3', '-', '-', '-', '-', '-'),
+    '.tscn': ('1', '3', '-', '-', '-', '-', '-', '-'),
+    '.tres': ('1', '2', '-', '-', '-', '-', '-', '-'),
 }
-BY_DIR = {'./': ('1', '9', '4', '-'), 'scenes/': ('1', '5', '4', '-')}
+BY_DIR = {'./': ('1', '9', '4', '4', '0', '0', '3', '-'), 'scenes/': ('1', '5', '4', '1', '1', '0', '0', '-')}
 CENSUS = '# 11 file(s) scanned — dirs: ./'
 
 
@@ -114,7 +114,7 @@ class Buckets(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(table(out), EXPECTED)
         self.assertEqual(out.splitlines()[0].split(),
-                         ['bucket', 'files', 'lines', 'code', 'tests'])
+                         ['bucket', 'files', 'lines', 'code', 'comments', 'docs', 'inline', 'docstrings', 'tests'])
         self.assertEqual(out.splitlines()[-1], CENSUS)
 
     def test_by_dir_splits_the_game_bucket_by_top_level_dir(self) -> None:
@@ -129,7 +129,7 @@ class Buckets(unittest.TestCase):
 
         def cells(entry):
             return tuple('-' if entry.get(k) is None else str(entry[k])
-                         for k in ('files', 'lines', 'code', 'tests'))
+                         for k in ('files', 'lines', 'code', 'comments', 'docs', 'inline', 'docstrings', 'tests'))
         flat = {}
         for bucket in doc['buckets']:
             flat[bucket['bucket']] = cells(bucket)
@@ -153,13 +153,13 @@ class Scope(unittest.TestCase):
     def test_listing_only_the_vendored_addons_makes_the_rest_game(self) -> None:
         _, out, _ = run(TREE, toml='[stats]\nvendored = ["addons/other/"]\n')
         rows = table(out)
-        self.assertEqual(rows['game .gd'], ('4', '18', '12', '-'))
-        self.assertEqual(rows['vendored .gd'], ('0', '0', '0', '-'))
+        self.assertEqual(rows['game .gd'], ('4', '18', '12', '5', '1', '0', '3', '-'))
+        self.assertEqual(rows['vendored .gd'], ('0', '0', '0', '0', '0', '0', '0', '-'))
 
     def test_a_dir_argument_narrows_the_scan_and_the_census_says_so(self) -> None:
         code, out, _ = run(TREE, 'scenes')
         self.assertEqual(code, 0)
-        self.assertEqual(table(out)['game .gd'], ('1', '5', '4', '-'))
+        self.assertEqual(table(out)['game .gd'], ('1', '5', '4', '1', '1', '0', '0', '-'))
         self.assertEqual(out.splitlines()[-1],
                          '# 2 file(s) scanned, 9 path(s) excluded from scope — dirs: scenes/')
 
@@ -174,3 +174,58 @@ class Scope(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class CommentRatchet(unittest.TestCase):
+    def test_lexer_counts_real_comments_not_hashes_or_quotes_in_strings(self):
+        source = ('## API\nvar text = "# not a comment, \\\"quote\\\"" # real\n'
+                  'var block = """\n# string content\nfunc test_fake():\n"""\n'
+                  '# invariant\nfunc test_real():\n\tpass\n')
+        self.assertEqual(stats.gd_line_counts(source), (9, 7, 1, 2, 1, 1, 0))
+
+    def test_ratchet_rejects_growth_evasion_scope_changes_and_cap_increases(self):
+        with tree({'main.gd': 'extends Node\n# keep\n',
+                   'tests/unit/test_a.gd': 'extends GutTest\nfunc test_contract():\n\tpass\n'}) as root:
+            for cache in (repo_root, load_config):
+                cache.cache_clear()
+            def invoke(*args):
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = stats.main(list(args))
+                return code, out.getvalue(), err.getvalue()
+            code, output, _ = invoke('--json')
+            self.assertEqual(code, 0)
+            baseline = json.loads(output)
+            path = root / 'stats.json'
+            path.write_text(output)
+            self.assertEqual(invoke('--ratchet', str(path))[0], 0)
+            subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+            subprocess.run(['git', '-c', 'user.email=fixture@example.invalid', '-c', 'user.name=Fixture',
+                            'commit', '-qm', 'freeze'], cwd=root, check=True)
+            for source, finding in [
+                ('extends Node\n# keep\n# grew\n', 'comments'),
+                ('extends Node # moved prose\n', 'inline'),
+                ('extends Node\n"""prose"""\n', 'docstrings'),
+            ]:
+                (root / 'main.gd').write_text(source)
+                code, _, err = invoke('--ratchet', str(path))
+                self.assertEqual(code, 1, err)
+                self.assertIn(finding, err)
+            (root / 'main.gd').write_text('extends Node\n# keep\n')
+            (root / 'tests/unit/test_a.gd').write_text('extends GutTest\nfunc test_contract():\n\tpass\n\tpass\n')
+            code, _, err = invoke('--ratchet', str(path))
+            self.assertEqual(code, 1)
+            self.assertIn('code', err)
+            grown = json.loads(output)
+            grown['buckets'][0]['comments'] += 1
+            path.write_text(json.dumps(grown))
+            code, _, err = invoke('--ratchet', str(path))
+            self.assertEqual(code, 1)
+            self.assertIn('cap increased', err)
+            path.write_text(output)
+            (root / 'godot-devkit.toml').write_text('[stats]\nvendored = ["main/"]\n')
+            load_config.cache_clear()
+            self.assertEqual(invoke('--ratchet', str(path))[0], 1)
+            path.write_text('{"buckets": []}')
+            self.assertEqual(invoke('--ratchet', str(path))[0], 2)
+            for cache in (repo_root, load_config):
+                cache.cache_clear()

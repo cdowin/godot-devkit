@@ -6,7 +6,7 @@ Introspection (pure parse, never boots Godot):
     godot-devkit refs <symbol> [--tests]
     godot-devkit orphans [--tests]
     godot-devkit autoloads
-    godot-devkit stats [<dir>...] [--by dir] [--json]
+    godot-devkit stats [<dir>...] [--by dir] [--json] [--ratchet FILE]
                                     # files, lines and code lines per role
                                     # bucket (game/tests/tools/vendored .gd,
                                     # .gdshader, .tscn, .tres)
