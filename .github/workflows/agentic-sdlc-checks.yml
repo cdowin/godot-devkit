@@ -1,5 +1,4 @@
-# The 3 agentic-sdlc 3.0 checks. None is a required check; each warns or reports on its own.
-# This file does not touch the required check `verify`.
+# The agentic-sdlc checks report in 1 job. The required verify gate stays separate.
 name: agentic-sdlc-checks
 
 on:
@@ -14,9 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  context-budget:
-    uses: cdowin/agentic-sdlc/.github/workflows/context-budget.yml@v3.0.0
-  test-budget:
-    uses: cdowin/agentic-sdlc/.github/workflows/test-budget.yml@v3.0.0
-  issue-link:
-    uses: cdowin/agentic-sdlc/.github/workflows/issue-link.yml@v3.0.0
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: cdowin/agentic-sdlc/checks@v4.9.0
+        with:
+          checks: context-budget test-budget issue-link
