@@ -114,7 +114,7 @@ incantation: `make help` lists every target, and a check that is not a target ge
 - **Docs for people live in the wiki**, https://github.com/cdowin/godot-devkit/wiki. You may read it. Only a local
   session publishes there; a cloud session drafts the wiki text in its PR body and the issue is marked
   blocked-by Chris (local session). This repo keeps no `docs/` and no `.md` outside `README.md`, `CLAUDE.md`,
-  `AGENTS.md` (`tests/test_docs_ratchet.py`); `README.md` stays under 80 lines.
+  `AGENTS.md` (`tests/test_docs_ratchet.py`); The bundled machine-loaded `godot-ui/SKILL.md` is also allowed. `README.md` stays under 80 lines.
 - **Release:** bump `version` in `pyproject.toml` and `__version__` together on `main`; `auto-tag.yml` tags it
   and `release.yml` publishes the wheel to the index. Never tag by hand.
 - Report in ASD-STE100: numbered NEEDS YOU list first, outcome first, one fact per sentence, numbers not adjectives.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "godot-devkit"
-version = "3.8.0"
+version = "3.9.0"
 description = "Headless dev tooling for Godot 4.x - pure-parse scene introspection, surgical scene, TileMapLayer and autoload edits, the eight Godot gates, and the test-tier runners."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,4 +39,7 @@ markers = [
 packages = ["src/godot_devkit"]
 # The installables are read at runtime via importlib.resources — they must be
 # in the wheel, not just the sdist.
-artifacts = ["src/godot_devkit/godot/installables/*"]
+artifacts = [
+    "src/godot_devkit/godot/installables/*",
+    "src/godot_devkit/godot/installables/skills/godot-ui/**",
+]

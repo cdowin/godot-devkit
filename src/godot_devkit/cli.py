@@ -85,6 +85,10 @@ The installer (writes each file once; after that it is the repo's):
                                     # library tools/dev/gdk_gate.sh. A game sets
                                     # GDK_CHECKS and includes Makefile.gates;
                                     # it needs nothing from agentic-sdlc
+    godot-devkit install-skills [--runtime codex|claude] [--dest ROOT]
+                                [--check] [--force] [--diff]
+                                    # install the bundled godot-ui skill into
+                                    # a skills root; --check reports drift
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | rng
@@ -300,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'install-gates':
         from godot_devkit.godot import install
         return install.main_gates(rest)
+    if cmd == 'install-skills':
+        from godot_devkit.godot import skill_install
+        return skill_install.main(rest)
     if cmd in RETIRED_COMMANDS:
         return _retired(cmd)
     if cmd == 'check':

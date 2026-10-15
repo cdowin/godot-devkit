@@ -1,14 +1,17 @@
 """test_docs_ratchet.py — docs for people live in the wiki, so the repo cannot grow them back.
 
 Fails when a tracked file is a `docs/` path, a `CHANGELOG*` file, or a `.md` outside the
-allowlist (README.md, CLAUDE.md, AGENTS.md, and `.md` fixtures under tests/fixtures/).
+allowlist (root entrypoints, the bundled agent skill, and `.md` test fixtures).
 README.md is a landing page: at most README_MAX_LINES lines.
 """
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ALLOWED_MD = {"README.md", "CLAUDE.md", "AGENTS.md"}
+ALLOWED_MD = {
+    "README.md", "CLAUDE.md", "AGENTS.md",
+    "src/godot_devkit/godot/installables/skills/godot-ui/SKILL.md",
+}
 README_MAX_LINES = 80
 
 
