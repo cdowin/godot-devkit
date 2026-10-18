@@ -48,7 +48,7 @@
 #                        entry is a string, or a list of strings joined by
 #                        spaces; it may name several targets and make
 #                        variables, so a suite can be sharded:
-#                          gate = ["gates-self-test", "check parse lint warnings unit",
+#                          gate = ["gates-self-test", "check parse lint unit",
 #                                  "integration-all GDK_SHARD=1/3",
 #                                  "integration-all GDK_SHARD=2/3",
 #                                  "integration-all GDK_SHARD=3/3"]

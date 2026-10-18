@@ -11,7 +11,7 @@ extends SceneTree
 ## assumed; a consumer shipped a broken integration scenario through a green
 ## parse gate for exactly this reason.
 ##
-## Run by parse.sh (stage 2) and warnings.sh over the whole project, and by
+## Run by parse.sh (stage 2) over the whole project, and by
 ## spot.sh over a LIST — never invoke godot directly, the wrapper owns the
 ## user:// sandbox.
 ##

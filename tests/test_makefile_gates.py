@@ -235,7 +235,7 @@ def test_the_installed_gates_run_with_neither_agentic_sdlc_nor_godot(game):
     # `milestone` is a deprecated alias of `verify`: the same goals.
     done = game_make(game, 'milestone', '-n')
     assert done.returncode == 0, done.stdout + done.stderr
-    assert '${MAKE:-make} check parse lint warnings unit integration-all' in done.stdout, done.stdout
+    assert '${MAKE:-make} check parse lint unit integration-all' in done.stdout, done.stdout
 
 
 def test_a_red_gate_fails_check_and_names_itself_and_the_rest_still_run(game):

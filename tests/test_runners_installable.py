@@ -1229,7 +1229,6 @@ DESTINATIONS = {
     'tools/dev/runners/import_cache.sh', 'tools/dev/runners/parse.sh',
     'tools/dev/runners/compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd.uid',
     'tools/dev/runners/lint.sh', 'tools/dev/runners/spot.sh',
-    'tools/dev/runners/warnings.sh',
     'tools/dev/runners/unit.sh', 'tools/dev/runners/scenario.sh',
     'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
     'tools/dev/runners/hermetic_run_scan.sh',
@@ -1246,7 +1245,7 @@ TOOLCHAIN_STEP = '- uses: ./.github/actions/godot-toolchain'
 UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
 # GDK_CHECKS names.
-GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'scenario',
+GODOT_TARGETS = ('parse', 'lint', 'spot', 'unit', 'integration', 'scenario',
                  'capture', 'import', 'hermetic-scan', 'godot-check')
 
 
@@ -1439,6 +1438,20 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
             assert says in line, line
             assert ('safe to delete' in line) == ('safe' in says), line
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
+
+
+def test_a_stale_warnings_runner_is_kept_and_named_retired(tmp_path):
+    """warnings.sh became `check warnings`: the old runner is no longer written,
+    never deleted, and named on every run that finds it."""
+    with consumer_repo(tmp_path) as root:
+        old = root / 'tools/dev/runners/warnings.sh'
+        old.parent.mkdir(parents=True)
+        old.write_text('echo old\n', encoding='utf-8')
+        code, out, err = run_install()
+        assert code == 0, out + err
+        assert any(l.startswith('[install] retired: tools/dev/runners/warnings.sh')
+                   and '`check warnings`' in l for l in out.splitlines()), out
+        assert old.read_text(encoding='utf-8') == 'echo old\n'
 
 
 @pytest.mark.parametrize('toml', [

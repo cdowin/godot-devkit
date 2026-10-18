@@ -412,7 +412,7 @@ gdk_receipt_write() {
 # 1), and a run holds GDK_ENGINE_GATE_WEIGHT of them (default 1; `all` is
 # every slot; a weight above the count is the count). integration.sh's
 # fan-out (--all, --system, --diff) weighs GDK_JOBS; a unit slice, a single
-# scenario, parse, warnings and spot weigh 1; an in-place import-cache rebuild
+# scenario, parse and spot weigh 1; an in-place import-cache rebuild
 # weighs `all`, because it rewrites the .godot/ a peer run in the same
 # checkout reads. GDK_ENGINE_GATE_SLOTS=1 is the old one-at-a-time lease.
 #
@@ -813,7 +813,7 @@ gdk_run_bounded() {
 # --- gate output: a summary on the console, the full transcript on disk ------
 # A headless gate used to STREAM its whole boot to the console: `make parse`
 # printed 273 lines of which two mattered (the verdict, and any error line);
-# `make warnings` printed 1,581. Every agent pays that on every run, so the
+# an analyzer-warnings run printed 1,581. Every agent pays that on every run, so the
 # default is the summary and the stream goes to a file.
 #
 # The report dir cannot rot the way a per-scenario one does: the slot is named
@@ -884,8 +884,8 @@ gdk_gate_verdict() {
 # --- the compile-sweep transcript --------------------------------------------
 # compile_sweep.gd's output contract is two line shapes in a stream that also
 # carries every engine warning the boot produced. TWO runners read it — parse
-# (does every .gd compile?) and warnings (does every .gd analyze clean under
-# the promotion?) — so the readers live here, once. They read that contract
+# (does every .gd compile?) and spot (does every touched .gd?) — so the
+# readers live here, once. They read that contract
 # and nothing else, which is what lets a self-test fire them at a fixture
 # transcript where no engine exists.
 GDK_SWEEP_FAIL_PREFIX="SWEEP_FAIL "

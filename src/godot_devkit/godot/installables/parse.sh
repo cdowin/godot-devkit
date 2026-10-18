@@ -66,8 +66,7 @@ GATE_SLOT="parse"
 BOOT_ERROR_PATTERN='SCRIPT ERROR: Parse Error|^ERROR: .*\.gd'
 
 # The transcript is compile_sweep.gd's output contract, read through the
-# library's gdk_sweep_* readers — shared with warnings.sh, which sweeps the
-# same script under the analyzer promotion. The engine lines that say WHY a
+# library's gdk_sweep_* readers — shared with spot.sh. The engine lines that say WHY a
 # script would not compile — the actionable diagnosis behind each failed path:
 SWEEP_DIAGNOSTIC_PATTERN='SCRIPT ERROR: Parse Error|Failed to load script|Compile Error|at: GDScript::reload'
 

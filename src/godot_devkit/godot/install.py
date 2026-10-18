@@ -96,7 +96,6 @@ PLAN: tuple[tuple[str, str], ...] = (
     # .gd files the change touched. It reaches compile_sweep.gd the way
     # parse.sh does, so it sits in the same directory.
     ('spot.sh', 'tools/dev/runners/spot.sh'),
-    ('warnings.sh', 'tools/dev/runners/warnings.sh'),
     ('unit.sh', 'tools/dev/runners/unit.sh'),
     # scenario.sh is the single-scenario entry point; integration.sh fans it
     # out and capture.sh is its headed twin. All three sit in one directory
@@ -176,7 +175,7 @@ sandbox, a bounded-run contract, a project.godot restore) — and under
 tools/dev/runners/ the runners that source it: import_cache.sh, parse.sh (+
 its compile_sweep.gd and the .uid sidecar the engine would otherwise mint),
 lint.sh, spot.sh (lint and a compile of only the .gd a change touched),
-warnings.sh, unit.sh (GUT, sliced, with the coverage gate that fails
+unit.sh (GUT, sliced, with the coverage gate that fails
 a test script GUT refused to load), scenario.sh, integration.sh (the same
 scenarios, one process each, N in parallel), capture.sh (headed, because
 headless is blind to render), and hermetic_run_scan.sh — the gate proving a
@@ -196,7 +195,7 @@ copy is left in place and named as retired: safe to delete when GDK_CHECKS
 names `godot-check` and `[roster] checks` keeps `uid` (then `check uid` runs
 in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
-runners (parse lint spot warnings unit integration scenario capture
+runners (parse lint spot unit integration scenario capture
 import hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
 the GDK_PRECOMMIT_TIERS / GDK_VERIFY_TIERS lists the gate framework's
 compositions run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
@@ -273,7 +272,9 @@ TOOLCHAIN_STEP = ('      - uses: ./.github/actions/godot-toolchain\n'
 # it, so the retirement is not silence (a file that looks installed and that
 # nothing maintains any more).
 UID_GUARD = '.github/workflows/uid-guard.yml'
-RETIRED: tuple[str, ...] = (UID_GUARD,)
+# `warnings.sh` became `check warnings`, a parse of project.godot (4.0).
+WARNINGS_RUNNER = 'tools/dev/runners/warnings.sh'
+RETIRED: tuple[str, ...] = (UID_GUARD, WARNINGS_RUNNER)
 
 
 def retired_line(rel: str) -> str:
@@ -289,6 +290,9 @@ def retired_line(rel: str) -> str:
     exactly as it does there (#28).
     """
     head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
+    if rel == WARNINGS_RUNNER:
+        return (head + '`check warnings` replaces it and runs in `check all`; '
+                'it was left in place and is safe to delete')
     roster = all_roster()
     if 'uid' not in roster:
         return (head + '`check uid` is NOT in this repo\'s gate: `[roster] '
