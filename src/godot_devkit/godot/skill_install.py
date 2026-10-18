@@ -1,4 +1,4 @@
-"""Install the bundled godot-ui skill into a Codex or Claude skills root.
+"""Install the bundled skills into a Codex or Claude skills root.
 
 The destination is a skills root, not a project root. Existing differing files
 require --force. Every path is checked before the mutation plan runs.
@@ -18,32 +18,40 @@ COMMAND = 'install-skills'
 PACKAGE = 'godot_devkit.godot.installables'
 FILES = ('SKILL.md', 'agents/openai.yaml')
 USAGE = ('usage: godot-devkit install-skills [--runtime codex|claude] '
-         '[--dest ROOT] [--check] [--force] [--diff]\n'
-         'Install the bundled godot-ui skill. ROOT is a skills directory; '
+         '[--dest ROOT] [--skill NAME] [--check] [--force] [--diff]\n'
+         'Install every bundled skill, or only NAME. ROOT is a skills directory; '
          'the default is .agents/skills for Codex or .claude/skills for Claude.')
 
 
-def _source(name: str) -> str:
+def _skills() -> list[str]:
+    root = resources.files(PACKAGE).joinpath('skills')
+    return sorted(p.name for p in root.iterdir() if p.joinpath('SKILL.md').is_file())
+
+
+def _source(skill: str, name: str) -> str:
     path = resources.files(PACKAGE)
-    for part in ('skills', 'godot-ui', *name.split('/')):
+    for part in ('skills', skill, *name.split('/')):
         path = path.joinpath(part)
     return path.read_text(encoding='utf-8')
 
 
-def _options(argv: list[str]) -> tuple[str, Path | None, bool, bool, bool] | None:
+def _options(argv: list[str]) -> tuple[str, Path | None, bool, bool, bool, str | None] | None:
     runtime = 'codex'
+    skill: str | None = None
     dest: Path | None = None
     check = force = diff = False
     index = 0
     while index < len(argv):
         arg = argv[index]
-        if arg in ('--runtime', '--dest'):
+        if arg in ('--runtime', '--dest', '--skill'):
             if index + 1 >= len(argv) or argv[index + 1].startswith('--'):
                 print(f'godot-devkit {COMMAND}: {arg} needs a value', file=sys.stderr)
                 return None
             value = argv[index + 1]
             if arg == '--runtime':
                 runtime = value
+            elif arg == '--skill':
+                skill = value
             else:
                 dest = Path(value).expanduser()
             index += 2
@@ -67,7 +75,7 @@ def _options(argv: list[str]) -> tuple[str, Path | None, bool, bool, bool] | Non
         print(f'godot-devkit {COMMAND}: --check and --force cannot be combined',
               file=sys.stderr)
         return None
-    return runtime, dest, check, force, diff
+    return runtime, dest, check, force, diff, skill
 
 
 def _difference(label: str, existing: str | None, desired: str) -> None:
@@ -102,12 +110,17 @@ def main(argv: list[str]) -> int:
     if options is None:
         print(USAGE, file=sys.stderr)
         return 2
-    runtime, dest, check, force, diff = options
+    runtime, dest, check, force, diff, skill = options
     root = dest if dest is not None else repo_root() / (
         '.agents/skills' if runtime == 'codex' else '.claude/skills')
     try:
-        entries = [(root / 'godot-ui' / name, f'godot-ui/{name}', _source(name))
-                   for name in FILES]
+        names = _skills()
+        if skill is not None and skill not in names:
+            print(f'godot-devkit {COMMAND}: unknown skill {skill!r} '
+                  f'(bundled: {", ".join(names)})', file=sys.stderr)
+            return 2
+        entries = [(root / one / name, f'{one}/{name}', _source(one, name))
+                   for one in names if skill in (None, one) for name in FILES]
     except (OSError, UnicodeError) as err:
         print(f'godot-devkit {COMMAND}: bundled skill cannot be read: {err}',
               file=sys.stderr)

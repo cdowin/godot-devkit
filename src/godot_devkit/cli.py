@@ -86,9 +86,9 @@ The installer (writes each file once; after that it is the repo's):
                                     # GDK_CHECKS and includes Makefile.gates;
                                     # it needs nothing from agentic-sdlc
     godot-devkit install-skills [--runtime codex|claude] [--dest ROOT]
-                                [--check] [--force] [--diff]
-                                    # install the bundled godot-ui skill into
-                                    # a skills root; --check reports drift
+                                [--skill NAME] [--check] [--force] [--diff]
+                                    # install every bundled skill (or NAME)
+                                    # into a skills root; --check reports drift
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check uid [--fix] | tres | props | defaults | rng
