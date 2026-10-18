@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_MD = {
     "README.md", "CLAUDE.md", "AGENTS.md",
     "src/godot_devkit/godot/installables/skills/godot-ui/SKILL.md",
+    "src/godot_devkit/godot/installables/skills/godot-native-first/SKILL.md",
 }
 README_MAX_LINES = 80
 
