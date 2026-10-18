@@ -210,7 +210,7 @@ to defend the existing code finds nothing to change.
 
 - The docs site has no `llms.txt`. Do not guess an API from training data. Dump the installed
   engine's class reference and grep it: `godot --headless --doctool <dir>` writes one XML file per
-  class. `--gdscript-docs <path>` documents the project's own scripts, and
+  class. Add `--gdscript-docs <path>` to document the project's own scripts instead, and
   `--dump-extension-api-with-docs` writes the API as JSON with descriptions.
 - Run these in the project's own environment. This toolkit never boots Godot, so it does not run them.
 - Treat every Godot 3 snippet as suspect (section 6).
