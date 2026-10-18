@@ -46,7 +46,11 @@ Learn from the engine's own material, in this order, before tutorials or trainin
   "Other engines can encourage the use of creating manager classes, singletons that organize a lot
   of functionality into a globally accessible object. Godot offers many ways to avoid global state
   thanks to the node tree and signals." The fix: each scene owns its nodes, for example its own
-  `AudioStreamPlayer`.
+  `AudioStreamPlayer`. The same page keeps a place for autoloads: a wide-scope system that "is
+  managing its own information and not invading the data of other objects" (its examples: a quest
+  or dialogue system). The test is not the name `Manager`; it is whether the class reaches into
+  other objects' data. For shared helpers or data, a `class_name` with `static func` and
+  `static var` (Godot 4.1+) needs no autoload.
 - [godot_interfaces](https://docs.godotengine.org/en/4.7/tutorials/best_practices/godot_interfaces.html): reach other objects through the tree, groups, duck typing and Callables.
 - [godot_notifications](https://docs.godotengine.org/en/4.7/tutorials/best_practices/godot_notifications.html): which callback or notification runs when.
 - [node_alternatives](https://docs.godotengine.org/en/4.7/tutorials/best_practices/node_alternatives.html): `Object`, `RefCounted` or `Resource` for data that needs no node.
