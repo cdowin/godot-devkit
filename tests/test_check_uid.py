@@ -337,7 +337,7 @@ class CliRouting(unittest.TestCase):
     reason to weaken a gate. 3.x still reads the pre-3.0 key `[checks] godot`,
     with one deprecation line (see `LegacyConfigNames`)."""
 
-    THE_EIGHT = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+    THE_EIGHT = ('warnings', 'uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
                  'unit-disk', 'test-shape')
 
     def _check_all(self, root: Path) -> tuple[int, str]:

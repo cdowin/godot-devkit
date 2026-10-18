@@ -8,6 +8,10 @@ checks = ["uid", "tres", "props"]  # narrows `check all` for THIS repo (stock: a
 godot = ["uid", "tres", "props"]   # 3.x only: the pre-3.0 spelling of `[roster] checks`, read
                                    # with a deprecation line; removed in 4.0
 
+[warnings]
+errors = ["unused_variable", "integer_division"]   # each must be gdscript/warnings/<name>=2 under [debug]
+                                   # in project.godot (stock: unused_variable shadowed_variable
+                                   # unused_signal integer_division standalone_expression)
 [uid]
 exclude_prefixes = ["addons/"]     # scopes every uid check
 [tres]

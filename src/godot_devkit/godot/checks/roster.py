@@ -25,7 +25,7 @@ from godot_devkit.core.project import deprecated
 # that runs three of eight and prints PASS is the quieter cardinal sin, and a
 # project on the first day sees exactly which gates its tree is not shaped
 # for, each naming the section that scopes it.
-KNOWN_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+KNOWN_GATES = ('warnings', 'uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
                'unit-disk', 'test-shape')
 
 # Gates that dispatch and that `[roster] checks` may name, but that the STOCK
