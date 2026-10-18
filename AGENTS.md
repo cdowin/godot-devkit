@@ -1,5 +1,13 @@
 Read CLAUDE.md first and follow it.
 
+For Godot project work, start with the installed `godot-101` skill and use
+`godot-native-first` before adding a manager, service, registry or autoload.
+Prefer `class_name` types, scene-owned nodes, typed signals, Resource catalogs
+and static helpers. Reserve autoloads for a concrete app-wide lifecycle need.
+The devkit Python CLI is pure text parsing; installed shell runners boot Godot
+through sandboxed `make` targets. Never run `godot --headless` outside those
+wrappers; use `make help` to find the target.
+
 ## Agents and models (agentic-sdlc 4.9.0)
 
 - Before you delegate to a subagent, read the model guide:

@@ -39,12 +39,11 @@ trap 'exit 0' ERR
 # the agent is pointed at the door, not just turned away at the wall.
 SANDBOX_OWNER='tools/dev/gdk_runners.sh (its gdk_sandbox_home function)'
 # The wrapper roster the BLOCK message offers — your project's spellings.
-WRAPPER_ROSTER='    make parse | make lint | make check      # static gates
-    make unit SYS=<system>                   # unit tier (sliced)
-    make scenario NAME=<name>                # one integration scenario, cold
-    make integration ARGS="--system <x>"     # a scenario slice
-    make smoke                               # the boot smoke test
-    make import                        # rebuild .godot, sandboxed
+WRAPPER_ROSTER='    make parse | make lint | make check      # project checks
+    make unit ARGS="-gselect=<name>"         # native GUT unit selection
+    make integration ARGS="-gselect=<name>"  # native GUT integration selection
+    make capture NAME=<name>                 # headed GUT screenshot test
+    make import                              # rebuild .godot, sandboxed
     make help                                # every target, authoritative'
 # A shell FUNCTION that boots the engine itself is the other way past this
 # guard: typing it (after sourcing the library) is a raw boot with no `godot`

@@ -1,0 +1,15 @@
+{
+  "dirs": [
+    "res://tests/integration"
+  ],
+  "include_subdirs": true,
+  "prefix": "test_",
+  "suffix": ".gd",
+  "failure_error_types": [
+    "engine",
+    "gut",
+    "push_error"
+  ],
+  "exit": true,
+  "junit_xml_timestamp": false
+}

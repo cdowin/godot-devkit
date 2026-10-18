@@ -1,10 +1,9 @@
 # godot-devkit
 
-**godot-devkit** is scene tooling and eight static gates for Godot 4.x projects, shipped as a
-**pinned-tag, stdlib-only** Python package. It reads `.tscn`/`.tres` files without loading them,
-edits them without reformatting them, and gates the silent-failure classes Godot drops without a
-word — renamed exports, uid drift, path-only refs. Nothing here boots Godot: every verb is pure text
-parsing, safe anywhere, anytime, in parallel.
+**godot-devkit** is scene tooling, configurable checks and installable Godot runners for Godot 4.x
+projects, shipped as a **pinned-tag, stdlib-only** Python package. Its Python CLI reads and edits
+`.tscn`/`.tres` as text without starting Godot. The installed shell runners use a sandboxed
+`user://` to run the engine's import, GUT tests and other project checks.
 
 > **Any change you can make to a scene by hand, you should be able to make through one
 > deterministic command that touches nothing else — and prove it, without ever reading the file.**
@@ -18,7 +17,7 @@ never an error, it is silent partial success); **read output is write input**; *
 because models retry; **bounded blast radius**; and **`scene-diff`**, so an edit is provable
 without re-reading the file.
 
-Docs: https://github.com/cdowin/godot-devkit/wiki (verbs, gates, configuration, CI recipes, migration from 2.x).
+Docs: https://github.com/cdowin/godot-devkit/wiki (verbs, checks, CI and [migration to 4.0](https://github.com/cdowin/godot-devkit/wiki/Migrating-from-3.x-to-4.0)).
 
 ## Install
 
@@ -37,10 +36,12 @@ Pin it and read the rest: [Installing and pinning](https://github.com/cdowin/god
 godot-devkit scene scenes/world/hub.tscn                  # node tree, ext_resources, a few hundred tokens
 godot-devkit scene set scenes/world/hub.tscn Player/Camera zoom "Vector2(2, 2)"
 godot-devkit scene-diff scenes/world/hub.tscn --git HEAD  # the one line that changed, and nothing else
-godot-devkit check all                                    # the eight gates, one census and verdict each
+godot-devkit check all                                    # the configured static checks
 ```
 
 Every write verb takes `--dry-run` and is idempotent. More: [Quickstart](https://github.com/cdowin/godot-devkit/wiki/Quickstart), [Verb reference](https://github.com/cdowin/godot-devkit/wiki/Verb-reference).
+The stock check roster covers selected static drift; UID, `.tres` and pattern checks are opt-in via
+`[roster] checks`. Installed `make parse` imports, compiles every script and boots the main scene.
 
 ## Pattern rules
 
@@ -59,8 +60,9 @@ Each hit prints `path:line: no-print: Use the logger.` and the exit code is 1. A
 
 ## Requirements
 
-Python 3.11+ (stdlib only) and git. Godot 4.4+ text-resource format for the uid/tres gates; the
-parser handles any Godot 4.x `.tscn`/`.tres`.
+Python 3.11+ (stdlib only) and git for the CLI; its parser handles Godot 4.x `.tscn`/`.tres`.
+Engine runners were tested with Godot 4.7.2 and GUT 9.6.1. Older versions are unverified.
+Opt-in UID and `.tres` checks target Godot 4.4+ text resources.
 
 ## License
 
@@ -71,5 +73,7 @@ MIT — see [LICENSE](LICENSE).
 `godot-devkit install-skills --runtime codex` installs every bundled skill (`godot-101`,
 `godot-ui`, `godot-native-first`) in `.agents/skills/`; `--skill NAME` installs one;
 `--runtime claude` uses `.claude/skills/`. `--dest <skills-root>` selects another scope.
-Use `--check` to verify installed files. The skill maps UI contracts to native scene proof.
+Use `--check` to verify installed files. Start Godot work with `godot-101`; use
+`godot-native-first` before designing a manager, registry or other custom system. `godot-ui`
+covers native Control layouts and visual proof.
 `install-runners` prints a context block for your CLAUDE.md and AGENTS.md; it never writes them.

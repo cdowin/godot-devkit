@@ -52,6 +52,8 @@ class TheWarningsGate(unittest.TestCase):
             _gate('', '[warnings]\nerrors = ["Bad Name"]\n')
         with self.assertRaises(ConfigError):
             _gate('', '[warnings]\nerrors = "unused_variable"\n')
+        with self.assertRaises(ConfigError):
+            _gate('', '[warnings]\nerrors = []\n')
 
     def test_no_project_godot_fails_loudly(self) -> None:
         with temp_repo('godot_project', only=['project.godot']) as root:
@@ -59,3 +61,8 @@ class TheWarningsGate(unittest.TestCase):
             code, out = run_check(warnings)
         self.assertEqual(code, 1, out)
         self.assertIn('scanned 0', out)
+
+    def test_disabled_analyzer_cannot_pass_with_error_levels(self) -> None:
+        code, out = _gate('gdscript/warnings/enable=false\n' + _lines(STOCK))
+        self.assertEqual(code, 1, out)
+        self.assertIn('must not disable the analyzer', out)

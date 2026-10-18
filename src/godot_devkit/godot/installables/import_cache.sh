@@ -17,11 +17,11 @@
 #
 # WHEN YOU NEED IT:
 #   - a NEW `class_name` script — the global class registry and the script's
-#     sibling `.gd.uid` are not written until an editor import pass runs. A
-#     parse gate does NOT do it, and a test runner hides the resulting error.
+#     sibling `.gd.uid` are not written until an editor import pass runs. The
+#     native parse/import target also refreshes them.
 #   - after adding / deleting / moving `.tscn` / `.tres` / asset files.
-#   - a cold checkout with no `.godot/` (otherwise the parse gate fails with a
-#     cascade of "Failed to instantiate an autoload").
+#   - a cold checkout with no `.godot/` (the native parse/import target also
+#     prepares a cold checkout).
 #   - `invalid UID … using text path instead` warnings on a cold run.
 #   - after editing a `.png`/`.tres` asset, before a screenshot capture —
 #     otherwise the capture renders the OLD art.

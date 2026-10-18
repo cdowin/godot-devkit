@@ -87,7 +87,7 @@ exit "$$status"
 endef
 
 # Only what this file defines; the tier file declares its own.
-.PHONY: help shell check precommit verify milestone \
+.PHONY: help shell check precommit verify \
         gdk-tiers-none-precommit gdk-tiers-none-verify gdk-tiers-skipped-verify
 
 help: ## Show this help (authoritative target list)
@@ -147,13 +147,16 @@ check: ## Static gate: shell + every target in GDK_CHECKS
 GDK_TIERS_MK        ?= Makefile.tiers
 GDK_PRECOMMIT_TIERS ?=
 GDK_VERIFY_TIERS    ?=
-# DEPRECATED, remove in 4.0: the 2.x names. A non-empty GDK_MILESTONE_TIERS
-# wins over GDK_VERIFY_TIERS, and GDK_MILESTONE_SKIP adds to GDK_VERIFY_SKIP.
-GDK_MILESTONE_TIERS ?=
-GDK_MILESTONE_SKIP  ?=
+# Refuse retired names instead of silently ignoring a consumer's tier list.
+ifneq ($(origin GDK_MILESTONE_TIERS),undefined)
+$(error GDK_MILESTONE_TIERS was removed in 4.0; use GDK_VERIFY_TIERS)
+endif
+ifneq ($(origin GDK_MILESTONE_SKIP),undefined)
+$(error GDK_MILESTONE_SKIP was removed in 4.0; use GDK_VERIFY_SKIP)
+endif
 -include $(GDK_TIERS_MK)
 
-GDK_VERIFY_EFFECTIVE = $(if $(strip $(GDK_MILESTONE_TIERS)),$(GDK_MILESTONE_TIERS),$(GDK_VERIFY_TIERS))
+GDK_VERIFY_EFFECTIVE = $(GDK_VERIFY_TIERS)
 
 # The typo guard: `-include` is silent on a missing file, so a non-empty tier
 # list with no file, or a tier no makefile defines, is refused here.
@@ -194,8 +197,8 @@ gdk-tiers-none-verify:
 # concurrently and sets GDK_VERIFY_SKIP=<tier>. A tier named here leaves
 # `verify` and the gate SAYS so; a name no verify tier carries leaves nothing.
 GDK_VERIFY_SKIP    ?=
-GDK_VERIFY_SKIPPED  = $(filter $(GDK_VERIFY_SKIP) $(GDK_MILESTONE_SKIP),$(GDK_VERIFY_EFFECTIVE))
-GDK_VERIFY_RUN      = $(filter-out $(GDK_VERIFY_SKIP) $(GDK_MILESTONE_SKIP),$(GDK_VERIFY_EFFECTIVE))
+GDK_VERIFY_SKIPPED  = $(filter $(GDK_VERIFY_SKIP),$(GDK_VERIFY_EFFECTIVE))
+GDK_VERIFY_RUN      = $(filter-out $(GDK_VERIFY_SKIP),$(GDK_VERIFY_EFFECTIVE))
 
 gdk-tiers-skipped-verify:
 	@echo "[TIERS] verify skips [$(strip $(GDK_VERIFY_SKIPPED))] — GDK_VERIFY_SKIP names them, so another job runs them or nothing does"
@@ -225,7 +228,3 @@ precommit: $(if $(GDK_PRECOMMIT_TIERS),,gdk-tiers-none-precommit) ## Per-change 
 
 verify: $(if $(GDK_VERIFY_EFFECTIVE),,gdk-tiers-none-verify) $(if $(GDK_VERIFY_SKIPPED),gdk-tiers-skipped-verify) ## Full gate: check + GDK_VERIFY_TIERS, less GDK_VERIFY_SKIP
 	$(call gdk_composition,verify,VERIFY,check $(GDK_VERIFY_RUN))
-
-# DEPRECATED, remove in 4.0: the 2.x name of `verify`, kept so game CI that
-# still says `make milestone` keeps working until the game renames the call.
-milestone: verify ## Deprecated alias of verify (removed in 4.0)

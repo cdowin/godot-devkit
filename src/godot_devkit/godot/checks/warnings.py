@@ -52,6 +52,9 @@ def paste_lines(names) -> list[str]:
 def required() -> tuple[str, ...]:
     """The configured warning names; a name that is not a plain identifier exits 2."""
     names = str_tuple(config_section(SECTION), SECTION, 'errors', STOCK_ERRORS)
+    if not names:
+        raise ConfigError('[warnings] errors must name at least one warning; '
+                          'omit warnings from [roster] checks to disable the gate')
     bad = [n for n in names if not _NAME.fullmatch(n)]
     if bad:
         raise ConfigError(f'[{SECTION}] errors names {", ".join(bad)} — a warning '
@@ -69,6 +72,10 @@ def run() -> int:
         print(f'{TAG} FAIL — project.godot is not readable at the repo root; scanned 0 files')
         return 1
     levels = debug_levels(text)
+    if levels.get('enable', 'true') != 'true':
+        print(f'{TAG} FAIL — gdscript/warnings/enable must not disable the analyzer')
+        print('  Fix: set gdscript/warnings/enable=true under [debug] in project.godot')
+        return 1
     missing = [n for n in names if levels.get(n) != str(ERROR_LEVEL)]
     for name in missing:
         have = levels.get(name)

@@ -40,7 +40,7 @@
 #                             on a PATH that has it; an absolute
 #                             /Applications/Godot.app/… path otherwise.
 #   GDK_HEADLESS_HOME         set BY A CALLER that mints and owns its own HOME
-#                             (a parallel scenario runner giving each job one).
+#                             (a per-file GUT runner giving each job one).
 #                             Honored verbatim: not reaped, not destroyed.
 #   VERBOSE=1                 stream every captured gate to the console too.
 #   GDK_GATE_LIB              gdk_gate.sh — the gate framework's capture library
@@ -193,7 +193,7 @@ _gdk_reap_stale_run_homes() {
 # create, CLEAR and reap; otherwise the one-line reason it may not, printed on
 # stdout, with a non-zero return.
 #
-# scenario.sh and capture.sh each own their report directory and each aims an
+# capture.sh owns its report directory and each aims an
 # `rm -rf` at what the project config names. Both took that name on trust:
 # `GDK_SCENARIO_REPORT_DIR=.` deleted a probe repo whole — `.git` included —
 # BEFORE the boot, and `GDK_CAPTURE_REPORT_DIR=tests` emptied `tests/`. Neither
@@ -243,7 +243,7 @@ gdk_report_dir_defect() {
 gdk_sandbox_home() {
 	if [ -n "${GDK_HEADLESS_HOME:-}" ]; then
 		# The CALLER minted this home and owns its lifetime (a parallel
-		# scenario runner gives every job its own). Honor it verbatim — do not
+		# per-file GUT runner gives every job its own). Honor it verbatim — do not
 		# reap it, do not destroy it.
 		HOME="$GDK_HEADLESS_HOME"
 		export HOME
@@ -353,33 +353,6 @@ gdk_receipt_hit() {
 	printf '%s; reused — receipt %s from %s\n' "$(sed -n 2p "$file")" "${2:0:12}" "$(sed -n 1p "$file")"
 	[ -z "${GDK_GATE_UNMEASURED:-}" ] || : > "$GDK_GATE_UNMEASURED" 2>/dev/null || true
 	return 0
-}
-
-# gdk_receipt_covers <file>... — each scenario file, then every `## covers:`
-# entry its header declares, one per line: the paths a scenario receipt keys
-# on. It reads the header as integration.sh's scenario_covers does, without
-# the grammar check: an extra path only widens a key, and the gate that
-# refuses a bad entry is `check test-shape`.
-gdk_receipt_covers() {
-	[ "$#" -gt 0 ] || return 0
-	awk '
-		FNR == 1 { print FILENAME; head = 1 }
-		!head { next }
-		/^[[:space:]]*$/ || /^#/ || /^extends[[:space:]]/ || /^class_name[[:space:]]/ || /^@/ {
-			if ($0 ~ /^##[[:space:]]*covers:/) {
-				sub(/^##[[:space:]]*covers:[[:space:]]*/, "")
-				n = split($0, parts, ",")
-				for (i = 1; i <= n; i++) {
-					e = parts[i]
-					gsub(/^[[:space:]]+|[[:space:]]+$/, "", e)
-					sub(/\/$/, "", e)
-					if (e != "") print e
-				}
-			}
-			next
-		}
-		{ head = 0 }
-	' "$@" 2>/dev/null
 }
 
 # gdk_receipt_write <tier> <key> <verdict line> [args...] — file a PASS
@@ -1442,7 +1415,7 @@ usage: source gdk_runners.sh            the normal use — a shell library
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
 gdk_engine_gate_run, gdk_engine_gate_held,
-gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write, gdk_receipt_covers,
+gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.

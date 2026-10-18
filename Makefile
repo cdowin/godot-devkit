@@ -41,12 +41,12 @@ PYTEST_Q  ?= -q
 # GODOT_DEVKIT_VERSION pin; this tree sets it ahead of the include, so the tier
 # file resolves nothing). It is the package from src/ INSIDE a scratch copy of
 # the committed clean Godot project — this tree is not a Godot project, and the
-# self-hosting proof is the eight gates over something committed here, not a
+# self-hosting proof is the configured checks over something committed here, not a
 # 0-file census over the repo itself.
 PY          ?= python3
 GODOT_DEVKIT ?= bash tools/dev/godot_devkit_on_fixture.sh
 
-# What `make check` runs after `shell`: the eight Godot gates over the fixture.
+# What `make check` runs after `shell`: the configured Godot checks over the fixture.
 GDK_CHECKS := godot-check
 
 include Makefile.gates

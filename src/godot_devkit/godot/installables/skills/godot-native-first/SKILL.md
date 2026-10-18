@@ -6,16 +6,18 @@ description: Before adding a manager, service, registry, bus or system to a Godo
 # Godot native first: ask what the engine calls it
 
 Before you name a new manager, service, registry or system, ask what the engine calls it, and use
-that node or resource. Use an autoload only for a true app service (save slot, settings, scene
-change). A custom layer over a feature the engine already has is code to maintain, to test and to
-explain, and it hides the engine's own editor tooling, docs and fixes.
+that node or resource. Register reusable script types with `class_name`; let scenes own their nodes
+and connect them with typed signals. Shared data can live in a Resource catalog, and shared
+stateless behavior in a static helper. An autoload needs a concrete app-wide lifecycle requirement;
+settings data alone does not require one. A custom layer over an existing feature takes code to
+maintain, test and explain, and hides the engine's editor tooling, docs and fixes.
 
 ## Workflow
 
 1. Restate the request as a behavior ("play a sound at a place", not "SoundManager").
 2. Look it up in the table below, then in the class reference for the installed Godot version
-   (`godot --doc`, or the editor help) before you search the project. The class reference is the
-   source of truth for what the engine offers.
+   (the editor help or matching online manual) before you search the project. The class reference
+   is the source of truth for what the engine offers.
 3. Check the project for an existing use of that feature and follow it.
 4. Build on the engine feature. Configure it in the scene or in a `.tres`; write script only for
    what the engine cannot express.
@@ -30,7 +32,7 @@ explain, and it hides the engine's own editor tooling, docs and fixes.
 | save manager | Resource + ResourceSaver/ResourceLoader |
 | settings | ConfigFile |
 | event bus | typed signals |
-| registry | Resource catalog (`.tres`) |
+| registry | `class_name` Resource catalog (`.tres`) referenced by its consumers |
 | state machine | state nodes (one child node per state); AnimationTree only blends animation |
 | pause | `get_tree().paused` + `process_mode` |
 | cursor manager | `Input.set_custom_mouse_cursor` |

@@ -6,7 +6,7 @@
 # rule, and nothing is a fork — rule 5 is that per-project variation lives in
 # this file, and this file is the proof it can.
 #
-# The roster (`[roster] checks`) is deliberately NOT set: the stock eight run on
+# The roster (`[roster] checks`) is deliberately NOT set: the stock checks run on
 # the committed clean Godot project that `godot-check` stages
 # (tools/dev/godot_devkit_on_fixture.sh), with no godot-devkit.toml in that
 # scratch tree either. The make targets `make check` runs are GDK_CHECKS in

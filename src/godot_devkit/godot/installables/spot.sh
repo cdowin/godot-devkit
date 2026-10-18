@@ -35,7 +35,7 @@ GDK_SPOT_BASE="${GDK_SPOT_BASE:-main}"
 # The linter and the vendored-code exclusion, as lint.sh reads them.
 GDK_LINT_CMD="${GDK_LINT_CMD:-gdlint}"
 GDK_LINT_EXCLUDE_RE="${GDK_LINT_EXCLUDE_RE:-^addons/(gut)/}"
-# The sweep script parse.sh runs, addressed the same way.
+# Scoped compile helper; the full parse target uses native import.
 GDK_PARSE_SWEEP_SCRIPT="${GDK_PARSE_SWEEP_SCRIPT:-res://tools/dev/runners/compile_sweep.gd}"
 # Env: GDK_SPOT_TIMEOUT  seconds bounding the compile (default 120)
 #      GDK_GODOT         the engine binary (default `godot`)

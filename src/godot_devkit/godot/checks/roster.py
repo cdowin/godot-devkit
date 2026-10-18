@@ -16,17 +16,17 @@ from godot_devkit.core.config import ConfigError, config_section, str_tuple
 #
 # Stock is what the engine does NOT already catch. `warnings` reads the
 # project's analyzer levels; `props`, `defaults`, `rng`, `tres-comment`,
-# `unit-disk` and `test-shape` find what the engine drops silently or the
-# editor rewrites. A repo narrows by config, never the other way round.
+# `unit-disk` finds what the engine drops silently or the
+# editor rewrites. Project-specific test-shape policy is opt-in.
 KNOWN_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
-               'unit-disk', 'test-shape')
+               'unit-disk')
 
 # Gates that dispatch and that `[roster] checks` may name, but that the STOCK
 # roster leaves out. `uid` and `tres` police what the editor owns, and the
 # import pass in `parse` already fails on uid drift. `canonical` and `patterns`
 # each start red on any tree its fixer never ran over. A repo opts in by naming
 # a gate; the aggregate never grows under anyone.
-OPT_IN_GATES = ('uid', 'tres', 'canonical', 'patterns')
+OPT_IN_GATES = ('uid', 'tres', 'canonical', 'patterns', 'test-shape')
 
 ROSTER_SECTION = 'roster'
 ROSTER_KEY = 'checks'
@@ -41,12 +41,14 @@ def all_roster() -> tuple[str, ...]:
     red. That is not drift and it is not a reason to weaken a gate — it is the
     roster being wrong for the repo, which is exactly the kind of variation
     rule 5 puts in godot-devkit.toml. A repo with no godot-devkit.toml and one
-    declaring the eight get byte-identical output (rule 5, proven in the suite).
+    declaring the stock roster get byte-identical output (rule 5, proven in the suite).
 
     An unknown name is REFUSED rather than skipped: a typo would otherwise
     narrow the aggregate in silence, which is the cardinal sin with a config
     file in front of it.
     """
+    if 'godot' in config_section('checks'):
+        raise ConfigError('[checks] godot was removed in 4.0; use [roster] checks')
     roster = str_tuple(config_section(ROSTER_SECTION), ROSTER_SECTION,
                        ROSTER_KEY, KNOWN_GATES)
     unknown = [c for c in roster if c not in (*KNOWN_GATES, *OPT_IN_GATES)]

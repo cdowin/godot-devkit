@@ -49,8 +49,8 @@ Learn from the engine's own material, in this order, before tutorials or trainin
   `AudioStreamPlayer`. The same page keeps a place for autoloads: a wide-scope system that "is
   managing its own information and not invading the data of other objects" (its examples: a quest
   or dialogue system). The test is not the name `Manager`; it is whether the class reaches into
-  other objects' data. For shared helpers or data, a `class_name` with `static func` and
-  `static var` (Godot 4.1+) needs no autoload.
+  other objects' data. Register named script types with `class_name`; use `static func` for
+  stateless helpers and Resources for shared data. Neither needs an autoload.
 - [godot_interfaces](https://docs.godotengine.org/en/4.7/tutorials/best_practices/godot_interfaces.html): reach other objects through the tree, groups, duck typing and Callables.
 - [godot_notifications](https://docs.godotengine.org/en/4.7/tutorials/best_practices/godot_notifications.html): which callback or notification runs when.
 - [node_alternatives](https://docs.godotengine.org/en/4.7/tutorials/best_practices/node_alternatives.html): `Object`, `RefCounted` or `Resource` for data that needs no node.
@@ -71,7 +71,7 @@ This mapping is this skill's guidance, not a quote from the book. Read the patte
 | Flyweight | Shared Resources |
 | Update method | `_process`, `_physics_process` |
 | Game loop | The engine's main loop; you do not write one |
-| Singleton, service locator | Autoload, only for a true app service (section 3, autoloads page) |
+| Singleton, service locator | First use scene ownership, `class_name` types and explicit Resource references; an autoload needs an app-wide lifecycle (section 3) |
 | Object pool | Only after the profiler shows an allocation cost |
 | Command, event queue | Usually signals |
 | Spatial partition | The physics server (`Area2D`, space queries) and `TileMapLayer` |
@@ -105,9 +105,9 @@ them. For per-instance state, set `resource_local_to_scene` on the resource, or 
 `duplicate()` (`duplicate_deep()` for nested resources) before you change it.
 
 **Processing.** `_process(delta)` runs once per rendered frame: visuals, UI, input polling.
-`_physics_process(delta)` runs at the fixed physics rate (60 Hz by default): movement, collision,
-anything that must be deterministic. Input events arrive in `_input` / `_unhandled_input`; gameplay
-input usually goes in `_unhandled_input` so the UI can consume an event first.
+`_physics_process(delta)` runs at the fixed physics rate (60 Hz by default): movement and collision.
+Its fixed step alone does not make a simulation deterministic. Input events arrive in `_input` /
+`_unhandled_input`; gameplay input usually goes in `_unhandled_input` so the UI can consume an event first.
 
 **Pause.** `get_tree().paused = true` stops every node whose `process_mode` is `PAUSABLE` (the
 default, inherited from the parent). Set the pause menu to `PROCESS_MODE_WHEN_PAUSED` and the
@@ -118,9 +118,10 @@ music or a debug overlay to `PROCESS_MODE_ALWAYS`. No pause flags in each script
 teardown for "destroyed" goes in `NOTIFICATION_PREDELETE`. Detail: `reference/scenes-and-lifecycle.md`.
 
 **Autoloads are the exception.** An autoload is a node the engine adds above the main scene and
-keeps for the whole run. Use one only for a true app-wide service: settings, the save slot, scene
-change, music that plays across scenes. Gameplay state in an autoload is a global that every scene
-depends on and no scene can be tested without (section 3, the autoloads page).
+keeps for the whole run. Start with `class_name` types and scene-owned nodes. Pass a Resource
+catalog to its consumers, and put stateless helpers in static methods. Use an autoload when a
+concrete lifecycle must span scenes, such as uninterrupted music. Gameplay state in an autoload
+couples every scene to a global (section 3, the autoloads page).
 
 ## 6. Godot 3 habits that break in Godot 4
 
@@ -212,11 +213,10 @@ to defend the existing code finds nothing to change.
 
 ## 9. For agents
 
-- The docs site has no `llms.txt`. Do not guess an API from training data. Dump the installed
-  engine's class reference and grep it: `godot --headless --doctool <dir>` writes one XML file per
-  class. Add `--gdscript-docs <path>` to document the project's own scripts instead, and
-  `--dump-extension-api-with-docs` writes the API as JSON with descriptions.
-- Run these in the project's own environment. This toolkit never boots Godot, so it does not run them.
+- The docs site has no `llms.txt`. Do not guess an API from training data. Use the installed
+  editor's class reference (F1) or the matching online manual. Headless engine checks belong in
+  the project's sandboxed `make` wrappers. The devkit's Python CLI does not boot Godot; its
+  installed shell runners do.
 - Treat every Godot 3 snippet as suspect (section 6).
 - Pin doc URLs (`/en/4.7/`) and demo branches to the project's engine version.
 
