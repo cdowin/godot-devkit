@@ -27,7 +27,7 @@ Anything else — an engine-typed float, an enum element type, an export with
 an accessor — is censused as NOT A FINDING and never reported. A PASS means
 "nothing provable drifts", not "the editor would leave this file alone";
 default elision is `check defaults`'s, and a `;` comment is `check
-tres-comment`'s. Out of `check all` unless `[checks] godot` names it: a pin
+tres-comment`'s. Out of `check all` unless `[roster] checks` names it: a pin
 bump must not redden a tree that was never canonicalized.
 
 Fix a finding with `godot-devkit scene canonicalize --respell --order <file>`.

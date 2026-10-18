@@ -91,20 +91,20 @@ The installer (writes each file once; after that it is the repo's):
                                     # into a skills root; --check reports drift
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check uid [--fix] | tres | props | defaults | rng
+    godot-devkit check warnings | props | defaults | rng
                       | tres-comment | unit-disk | test-shape
-                      | canonical | patterns   # opt-in: not in the stock `check all`
+                      | uid [--fix] | tres | canonical | patterns
+                                    # the last four are opt-in: not in the stock `check all`
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
                                     # rewritten to the sidecar's, non-canonical
                                     # spellings canonicalized (same id), and
                                     # orphan .gd.uid sidecars deleted
-    godot-devkit check all          # the eight Godot gates, stock. `[roster]
+    godot-devkit check all          # the stock Godot gates. `[roster]
                                     # checks` in godot-devkit.toml narrows the
                                     # roster for THIS repo; an unknown name is
-                                    # refused, never skipped. (3.x still reads
-                                    # the old `[checks] godot`, with a warning.)
+                                    # refused, never skipped.
 
 Per-project config: godot-devkit.toml at the consuming repo root (see each tool's
 module docstring for its section).
@@ -214,6 +214,9 @@ def _check_module(name: str):
     if name == 'test-shape':
         from godot_devkit.godot.checks import test_shape
         return test_shape
+    if name == 'warnings':
+        from godot_devkit.godot.checks import warnings
+        return warnings
     if name == 'canonical':
         from godot_devkit.godot.checks import canonical
         return canonical

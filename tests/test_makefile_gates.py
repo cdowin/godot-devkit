@@ -38,16 +38,16 @@ GATES = REPO_ROOT / 'Makefile.gates'
 OWN_MAKEFILES = (MAKEFILE, GATES, REPO_ROOT / 'Makefile.tiers')
 RUNNERS = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
-GODOT_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk', 'test-shape')
+GODOT_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk', 'test-shape')
 # Targets this repo's files define that are NOT gates: `integration-list`
-# prints the roster — the list IS the output — `import-cache` rebuilds the
+# prints the roster — the list IS the output — `import` rebuilds the
 # engine's import cache, a tool with an outcome rather than a gate with a
 # verdict, `gdk-precommit-retired` and the `gdk-tiers-*` notices are one line
 # each, `help` prints the target list, and the compositions (`check`,
 # `precommit`, `verify`, the deprecated `milestone`) print their members'
 # verdicts and their own through the `gdk_composition` define.
 COMPOSITIONS = ('check', 'precommit', 'verify', 'milestone')
-NOT_A_GATE = {'integration-list', 'import-cache', 'gdk-precommit-retired', 'help',
+NOT_A_GATE = {'integration-list', 'import', 'gdk-precommit-retired', 'help',
               'gdk-tiers-none-precommit', 'gdk-tiers-none-verify',
               'gdk-tiers-skipped-verify', *COMPOSITIONS}
 
@@ -235,7 +235,7 @@ def test_the_installed_gates_run_with_neither_agentic_sdlc_nor_godot(game):
     # `milestone` is a deprecated alias of `verify`: the same goals.
     done = game_make(game, 'milestone', '-n')
     assert done.returncode == 0, done.stdout + done.stderr
-    assert '${MAKE:-make} check parse lint warnings unit integration-all' in done.stdout, done.stdout
+    assert '${MAKE:-make} check parse lint unit integration-all' in done.stdout, done.stdout
 
 
 def test_a_red_gate_fails_check_and_names_itself_and_the_rest_still_run(game):

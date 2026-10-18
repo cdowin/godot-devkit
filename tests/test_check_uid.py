@@ -337,7 +337,7 @@ class CliRouting(unittest.TestCase):
     reason to weaken a gate. 3.x still reads the pre-3.0 key `[checks] godot`,
     with one deprecation line (see `LegacyConfigNames`)."""
 
-    THE_EIGHT = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
+    THE_EIGHT = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
                  'unit-disk', 'test-shape')
 
     def _check_all(self, root: Path) -> tuple[int, str]:
@@ -386,6 +386,8 @@ class CliRouting(unittest.TestCase):
         self.assertEqual(stock, declared)
         for gate in self.THE_EIGHT:
             self.assertIn(f'[check:{gate}] PASS', stock)
+        for opt_in in ('uid', 'tres'):
+            self.assertNotIn(f'[check:{opt_in}]', stock)
         self.assertEqual(one_code, 0, one)
         self.assertIn('[check:uid]', one)
         self.assertNotIn('[check:tres]', one)
@@ -405,10 +407,9 @@ class CliRouting(unittest.TestCase):
 
 
 class LegacyConfigNames(unittest.TestCase):
-    """3.0 renamed the config file (`devkit.toml` -> `godot-devkit.toml`) and the
-    roster key (`[checks] godot` -> `[roster] checks`). 3.x reads the old names
-    with one deprecation line on stderr; remove in 4.0. The new name wins when
-    both are present."""
+    """3.0 renamed the config file (`devkit.toml` -> `godot-devkit.toml`). It is
+    read with one deprecation line on stderr; the new name wins when both are
+    present. The roster key `[checks] godot` is gone (4.0)."""
 
     def _run(self, root: Path) -> tuple[int, str, str]:
         proc = subprocess.run(
@@ -451,24 +452,13 @@ class LegacyConfigNames(unittest.TestCase):
         self.assertNotIn('[check:tres]', out)
         self.assertEqual(err, '')
 
-    def test_the_old_roster_key_is_read_with_one_deprecation_line(self) -> None:
+    def test_the_old_roster_key_is_no_longer_read(self) -> None:
+        # `[checks] godot` was removed in 4.0: the stock roster runs, not the old list.
         with temp_repo('godot_project') as root:
             (root / 'godot-devkit.toml').write_text('[checks]\ngodot = ["uid"]\n',
                                                     encoding='utf-8')
             code, out, err = self._run(root)
         self.assertEqual(code, 0, out + err)
-        self.assertIn('[check:uid]', out)
-        self.assertNotIn('[check:tres]', out)
-        self.assertEqual(err.count('[checks] godot is read as a fallback'), 1, err)
-        self.assertIn('move it to [roster] checks', err)
-
-    def test_the_new_roster_key_beats_the_old_one(self) -> None:
-        with temp_repo('godot_project') as root:
-            (root / 'godot-devkit.toml').write_text(
-                '[checks]\ngodot = ["tres"]\n[roster]\nchecks = ["uid"]\n',
-                encoding='utf-8')
-            code, out, err = self._run(root)
-        self.assertEqual(code, 0, out + err)
-        self.assertIn('[check:uid]', out)
-        self.assertNotIn('[check:tres]', out)
-        self.assertEqual(err, '')
+        self.assertIn('[check:props]', out)
+        self.assertNotIn('[check:uid]', out)
+        self.assertNotIn('fallback', err)

@@ -91,7 +91,7 @@ def test_the_armed_corpus_passes_and_grows_by_exactly_the_function_cases(hook):
     armed = hook.parent / 'armed-sandbox.sh'
     armed.write_text(hook.read_text()
                      .replace("SANDBOX_FUNCTION=''", "SANDBOX_FUNCTION='proj_rebuild_import_cache'", 1)
-                     .replace("SANDBOX_FUNCTION_TARGET=''", "SANDBOX_FUNCTION_TARGET='make import-cache'", 1))
+                     .replace("SANDBOX_FUNCTION_TARGET=''", "SANDBOX_FUNCTION_TARGET='make import'", 1))
     done = self_test(armed)
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.split('—')[1].strip() == '15 block / 18 allow case(s)', done.stdout
@@ -102,5 +102,5 @@ def test_the_block_message_names_the_function_that_matched(hook):
     # function sends the agent to a door that does not exist.
     done = fire(hook, 'gdk_rebuild_import_cache')
     assert done.returncode == 2
-    assert all(text in done.stderr for text in ('`gdk_rebuild_import_cache`', 'make import-cache',
+    assert all(text in done.stderr for text in ('`gdk_rebuild_import_cache`', 'make import',
                                                 'gdk_runners.sh')), done.stderr

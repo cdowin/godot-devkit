@@ -358,7 +358,7 @@ def test_parse_boots_the_engine_once_and_a_boot_error_still_fails_it(tmp_path):
 STALE_MARKER = '.godot/stale'
 SCENARIO_STUB = """#!/usr/bin/env bash
 case " $* " in
-	*" --editor "*)
+	*" --import "*)
 		echo rebuild >> "$GDK_STUB_LOG"
 		mkdir -p .godot && : > .godot/uid_cache.bin
 		exit 0 ;;
@@ -465,7 +465,7 @@ def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
     assert _engine_runs(log) == (1, 0), done.stdout + done.stderr
     assert (root / STALE_MARKER).exists(), 'a sweep removed a shared cache'
     assert REMOVAL_NOTICE not in done.stderr, done.stderr
-    assert 'make import-cache' in done.stderr, done.stderr
+    assert 'make import' in done.stderr, done.stderr
     assert 'rm -rf .godot' in done.stderr, done.stderr
 
 
@@ -1229,7 +1229,6 @@ DESTINATIONS = {
     'tools/dev/runners/import_cache.sh', 'tools/dev/runners/parse.sh',
     'tools/dev/runners/compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd.uid',
     'tools/dev/runners/lint.sh', 'tools/dev/runners/spot.sh',
-    'tools/dev/runners/warnings.sh',
     'tools/dev/runners/unit.sh', 'tools/dev/runners/scenario.sh',
     'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
     'tools/dev/runners/hermetic_run_scan.sh',
@@ -1246,8 +1245,8 @@ TOOLCHAIN_STEP = '- uses: ./.github/actions/godot-toolchain'
 UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
 # GDK_CHECKS names.
-GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'scenario',
-                 'capture', 'import-cache', 'hermetic-scan', 'godot-check')
+GODOT_TARGETS = ('parse', 'lint', 'spot', 'unit', 'integration', 'scenario',
+                 'capture', 'import', 'hermetic-scan', 'godot-check')
 
 
 @contextlib.contextmanager
@@ -1416,10 +1415,11 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
 
 
 @pytest.mark.parametrize('toml, says', [
-    # The roster keeps `uid`: `check uid` runs in `make check` once GDK_CHECKS
+    # The roster names `uid`: `check uid` runs in `make check` once GDK_CHECKS
     # (a Makefile variable this verb cannot read) names `godot-check`.
-    ('', 'is safe to delete once it does'),
-    # The roster drops `uid`: `godot-check` runs, `check uid` not.
+    ('[roster]\nchecks = ["uid"]\n', 'is safe to delete once it does'),
+    # The stock roster leaves `uid` out (opt-in since 4.0), and so does any roster not naming it.
+    ('', '`[roster] checks` leaves `uid` out'),
     ('[roster]\nchecks = ["tres"]\n', '`[roster] checks` leaves `uid` out'),
 ])
 def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
@@ -1440,6 +1440,20 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
             assert says in line, line
             assert ('safe to delete' in line) == ('safe' in says), line
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
+
+
+def test_a_stale_warnings_runner_is_kept_and_named_retired(tmp_path):
+    """warnings.sh became `check warnings`: the old runner is no longer written,
+    never deleted, and named on every run that finds it."""
+    with consumer_repo(tmp_path) as root:
+        old = root / 'tools/dev/runners/warnings.sh'
+        old.parent.mkdir(parents=True)
+        old.write_text('echo old\n', encoding='utf-8')
+        code, out, err = run_install()
+        assert code == 0, out + err
+        assert any(l.startswith('[install] retired: tools/dev/runners/warnings.sh')
+                   and '`check warnings`' in l for l in out.splitlines()), out
+        assert old.read_text(encoding='utf-8') == 'echo old\n'
 
 
 @pytest.mark.parametrize('toml', [

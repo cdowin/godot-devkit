@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # import_cache.sh — regenerate Godot's `.godot` import cache, sandboxed.
-# Wire it as `make import-cache`.
+# Wire it as `make import`.
 #
 # WHY A WRAPPER EXISTS FOR A ONE-LINE FUNCTION. The rebuild is a headless
-# EDITOR boot (`godot --headless --editor --quit`): it runs the project's full
+# EDITOR boot (`godot --headless --import`): it runs the project's full
 # autoload stack against whatever `user://` resolves to, so it must never run
 # without the HOME sandbox. The rebuild itself is `gdk_rebuild_import_cache`
 # (gdk_runners.sh); this file is the sanctioned ENTRY POINT that owns
@@ -50,7 +50,7 @@
 # no longer restores project.godot: the tree's copy is never touched. The
 # library's gdk_sandbox_home still arms its restore; here it is a no-op.)
 #
-# Usage: tools/dev/runners/import_cache.sh   (via `make import-cache`)
+# Usage: tools/dev/runners/import_cache.sh   (via `make import`)
 #        tools/dev/runners/import_cache.sh --help | --self-test
 # Exit:  0 = cache refreshed | 1 = it was not (import failed or hit the bound)
 #        2 = harness error (unusable repo, the copy failed, or a usage mistake)
@@ -598,7 +598,7 @@ b.gd.uid' | head -1)"
 	cases=$((cases + 1))
 	out="$(live_project_processes godot /r/proj /private/r/proj <<'PS_EOF' | awk '{ print $1 }' | tr '\n' ' '
   101 /Applications/Godot.app/Contents/MacOS/Godot --path /r/proj --remote-debug tcp://127.0.0.1:6007
-  102 godot --path /r/proj/.headless-userdata/runs/run-1-import-x --headless --editor --quit
+  102 godot --path /r/proj/.headless-userdata/runs/run-1-import-x --headless --import
   103 vim /r/proj
   104 /usr/bin/godot --path /r/other
   105 godot4 -e /private/r/proj/project.godot
@@ -614,7 +614,7 @@ PS_EOF
 	cases=$((cases + 1))
 	out="$(live_project_processes godot '/r/my proj' <<'PS_EOF' | awk '{ print $1 }' | tr '\n' ' '
   201 godot --path /r/my proj --headless
-  202 godot --path /r/my proj/.headless-userdata/runs/run-1-import-x --headless --editor --quit
+  202 godot --path /r/my proj/.headless-userdata/runs/run-1-import-x --headless --import
   203 godot -e /r/my proj/project.godot
   204 godot --path /r/my project
   205 godot --path /r/my proj/
@@ -1000,7 +1000,7 @@ if [ -n "$stale" ]; then
 	echo "${C_BAD}$TAG FAIL — the import pass did not refresh the cache (${elapsed}s):${C_OFF}"
 	printf '%s\n' "$stale" | sed 's/^/      /'
 	echo "  The pass either failed or hit the ${TIMEOUT_SECONDS}s bound; the tree's $IMPORT_DIR/ is untouched."
-	echo "  Raise it with GDK_IMPORT_CACHE_TIMEOUT=<seconds> make import-cache,"
+	echo "  Raise it with GDK_IMPORT_CACHE_TIMEOUT=<seconds> make import,"
 	echo "  or run your parse gate — its boot prints the underlying error."
 	exit 1
 fi

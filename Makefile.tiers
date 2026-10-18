@@ -31,11 +31,11 @@
 # for that use: it still runs (check + spot) and says so on its first line.
 #
 # EVERY GATE PRINTS ONE LINE: its verdict, naming .gate-reports/<gate>.log;
-# `VERBOSE=1` streams the transcript. parse, lint, warnings and unit publish
+# `VERBOSE=1` streams the transcript. parse, lint and unit publish
 # their own verdict from inside the runner and are not wrapped again (a gate
 # wrapped twice reports the wrapper's summary and files the runner's verdict
 # in a log nobody opens); the rest go through the include's `gdk_gate`.
-# `import-cache` and `integration-list` are tools, not gates: the first has an
+# `import` and `integration-list` are tools, not gates: the first has an
 # outcome, the second's output IS the list. GNU make 3.81 is the floor.
 
 # The godot-devkit command, resolved in this order:
@@ -102,10 +102,10 @@ BASE ?= main
 # declared coverage selects). `verify` is the full gate. (3.x reads the old
 # name GDK_MILESTONE_TIERS as an alias; remove in 4.0.)
 GDK_PRECOMMIT_TIERS := spot
-GDK_VERIFY_TIERS := parse lint warnings unit integration-all
+GDK_VERIFY_TIERS := parse lint unit integration-all
 
-.PHONY: parse lint spot warnings unit integration integration-all integration-diff \
-        integration-list scenario smoke capture import-cache \
+.PHONY: parse lint spot unit integration integration-all integration-diff \
+        integration-list scenario smoke capture import \
         godot-check uid-scan hermetic-scan runners-self-test gdk-precommit-retired
 
 # --- Tier 1: static / fast gates ---------------------------------------------
@@ -131,9 +131,6 @@ spot: ## The builder's check: lint + compile of the .gd changed vs BASE (default
 precommit: gdk-precommit-retired
 gdk-precommit-retired:
 	@$(if $(filter spot,$(GDK_PRECOMMIT_TIERS)),echo "[PRECOMMIT] retired: it runs check + spot. A builder runs \`make spot SYS=<slice>\`; the integrator proves the batch once")
-
-warnings: ## GDScript analyzer-warnings gate (the editor-only ones)
-	@bash $(GDK_RUNNERS_DIR)/warnings.sh
 
 # The eight Godot checks, as ONE member of `make check` — name it in
 # GDK_CHECKS. Their roster is `[roster] checks` in godot-devkit.toml; an unknown
@@ -227,7 +224,7 @@ capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture
 	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }
 	$(call gdk_gate,capture,CAPTURE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME))
 
-import-cache: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
+import: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
 	@bash $(GDK_RUNNERS_DIR)/import_cache.sh
 
 # =============================================================================

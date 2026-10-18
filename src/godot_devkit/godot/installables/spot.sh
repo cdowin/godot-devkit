@@ -2,7 +2,7 @@
 # spot.sh — the builder's spot check: gdlint and a compile of ONLY the .gd
 # files the change touched. `make spot SYS=<slice>` runs this, then the unit
 # slice; the two together are a builder's whole proof, under 30 s on a quiet
-# machine. The wide tiers (parse, warnings, integration) are the integrator's,
+# machine. The wide tiers (parse, integration) are the integrator's,
 # run once per batch.
 #
 # THE CHANGE is every .gd that differs from the merge base of HEAD and
