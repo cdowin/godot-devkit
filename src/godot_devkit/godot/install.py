@@ -318,6 +318,15 @@ HOOK_SETTINGS = '''{
   }
 }'''
 
+# The agent-context block for the consumer's CLAUDE.md and AGENTS.md. PRINTED,
+# never written, for the same reason as the hook entry: those files are
+# hand-maintained.
+CONTEXT_BLOCK = (
+    'Before you name a new manager, service, registry or system, ask what the '
+    'engine calls it, and use that node or resource. Use an autoload only for '
+    'a true app service (save slot, settings, scene change). '
+    'Skill: godot-native-first.')
+
 # The per-entry annotation for a collision confined to the editable block.
 # Short, because it hangs off a path in a list; the sentence that says what it
 # MEANS is printed once, below the list.
@@ -678,6 +687,8 @@ def _install(argv: list[str], command: str,
               f'engine patch number:\n\n{TOOLCHAIN_STEP}\n')
         # Raw, unprefixed, so the block can be selected and pasted whole: a
         # JSON file is the one place a stray `[install] ` is not cosmetic.
+        print(f'\nCLAUDE.md and AGENTS.md — the agent context (add to both; '
+              f'install the skill with `install-skills`):\n\n{CONTEXT_BLOCK}\n')
         print(f'\n.claude/settings.json — the entry that FIRES the engine-boot '
               f'guard (merge into yours):\n\n{HOOK_SETTINGS}\n')
     # A withheld replacement is a non-zero exit even when additions landed.

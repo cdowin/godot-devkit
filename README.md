@@ -66,8 +66,10 @@ parser handles any Godot 4.x `.tscn`/`.tres`.
 
 MIT — see [LICENSE](LICENSE).
 
-## Agent UI skill
+## Agent skills
 
-`godot-devkit install-skills --runtime codex` installs `godot-ui` in `.agents/skills/`;
+`godot-devkit install-skills --runtime codex` installs every bundled skill (`godot-ui`,
+`godot-native-first`) in `.agents/skills/`; `--skill NAME` installs one;
 `--runtime claude` uses `.claude/skills/`. `--dest <skills-root>` selects another scope.
 Use `--check` to verify installed files. The skill maps UI contracts to native scene proof.
+`install-runners` prints a context block for your CLAUDE.md and AGENTS.md; it never writes them.

@@ -1296,6 +1296,8 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         code, out, err = run_install()
         assert code == 0, out + err
         assert {rel for _name, rel in install.PLAN} == DESTINATIONS
+        assert install.CONTEXT_BLOCK in out and 'godot-native-first' in out
+        assert not (root / 'CLAUDE.md').exists() and not (root / 'AGENTS.md').exists()
         for rel in DESTINATIONS:
             assert (root / rel).is_file(), f'{rel} was not written'
             assert f'[install] wrote {rel}' in out, out
