@@ -39,12 +39,11 @@ trap 'exit 0' ERR
 # the agent is pointed at the door, not just turned away at the wall.
 SANDBOX_OWNER='tools/dev/gdk_runners.sh (its gdk_sandbox_home function)'
 # The wrapper roster the BLOCK message offers — your project's spellings.
-WRAPPER_ROSTER='    make parse | make lint | make check      # static gates
-    make unit SYS=<system>                   # unit tier (sliced)
-    make scenario NAME=<name>                # one integration scenario, cold
-    make integration ARGS="--system <x>"     # a scenario slice
-    make smoke                               # the boot smoke test
-    make import-cache                        # rebuild .godot, sandboxed
+WRAPPER_ROSTER='    make parse | make lint | make check      # project checks
+    make unit ARGS="-gselect=<name>"         # native GUT unit selection
+    make integration ARGS="-gselect=<name>"  # native GUT integration selection
+    make capture NAME=<name>                 # headed GUT screenshot test
+    make import                              # rebuild .godot, sandboxed
     make help                                # every target, authoritative'
 # A shell FUNCTION that boots the engine itself is the other way past this
 # guard: typing it (after sourcing the library) is a raw boot with no `godot`
@@ -58,7 +57,7 @@ WRAPPER_ROSTER='    make parse | make lint | make check      # static gates
 # deliberately NOT here: it is the door, not a boot, and blocking the one
 # function that MAKES a run safe would teach people to switch this guard off.
 GDK_BOOT_FUNCTIONS='gdk_rebuild_import_cache'
-GDK_BOOT_FUNCTION_TARGET='make import-cache'
+GDK_BOOT_FUNCTION_TARGET='make import'
 # OPTIONAL, empty by default: one more function name, for a repo that still
 # carries a project-prefixed spelling of the same thing. Set SANDBOX_FUNCTION
 # to the name and SANDBOX_FUNCTION_TARGET to the wrapper that owns the job.
@@ -129,7 +128,7 @@ SELF_TEST_ALLOW=(
 	# Single quotes take the same path through the walk.
 	$'git commit -m \'chore: y\n\ngodot --headless\' -- a.py'
 	$'cat <<EOF\ngodot --headless --quit\nEOF'
-	'make import-cache'
+	'make import'
 	'grep -rn gdk_rebuild_import_cache docs/'
 	'echo "run it: (gdk_rebuild_import_cache) by hand"'
 	# gdk_sandbox_home is the DOOR — it exports a sandboxed HOME and boots

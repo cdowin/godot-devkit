@@ -47,13 +47,10 @@
 #                        ENTRY IS ONE PARALLEL JOB running `make <entry>`. An
 #                        entry is a string, or a list of strings joined by
 #                        spaces; it may name several targets and make
-#                        variables, so a suite can be sharded:
-#                          gate = ["gates-self-test", "check parse lint warnings unit",
-#                                  "integration-all GDK_SHARD=1/3",
-#                                  "integration-all GDK_SHARD=2/3",
-#                                  "integration-all GDK_SHARD=3/3"]
+#                        variables, for example:
+#                          gate = ["check parse lint unit", "integration"]
 #                        Default: `verify` when a Makefile defines it, else
-#                        `milestone`, else none. "" or [] skips the gate.
+#                        none. "" or [] skips the gate.
 #   gate_timeout         The `timeout-minutes` of each gate job: a positive
 #                        integer. Default: 30.
 #   before_export        A list of shell commands run before each export, in
@@ -265,7 +262,7 @@ jobs:
 
           gate = cfg.get("gate")
           if gate is None:
-              gates = [t for t in ("verify", "milestone") if has_target(t)][:1]
+              gates = [t for t in ("verify",) if has_target(t)][:1]
           elif isinstance(gate, str):
               gates = [gate_entry(gate)] if gate.strip() else []
           elif isinstance(gate, list):

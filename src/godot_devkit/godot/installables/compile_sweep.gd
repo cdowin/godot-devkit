@@ -11,7 +11,7 @@ extends SceneTree
 ## assumed; a consumer shipped a broken integration scenario through a green
 ## parse gate for exactly this reason.
 ##
-## Run by parse.sh (stage 2) and warnings.sh over the whole project, and by
+## Run by parse.sh (stage 2) over the whole project, and by
 ## spot.sh over a LIST — never invoke godot directly, the wrapper owns the
 ## user:// sandbox.
 ##
@@ -22,8 +22,8 @@ extends SceneTree
 ## With GDK_SWEEP_MAIN_SCENE=1 in the environment and no user arguments, it
 ## then loads the project's main scene and adds it to the tree, after the
 ## result line. That is the one thing a `--quit` boot did that `-s` does not
-## (autoloads boot under `-s` already), so parse.sh needs ONE engine run, not
-## a boot and then a sweep (#49). A main scene that names a missing script, or
+## (autoloads boot under `-s` already), so the compile stage also proves boot without
+## a third engine process after the native import. A main scene that names a missing script, or
 ## whose _ready reports an error, prints the same engine lines the boot did.
 ##
 ## Output contract (the wrapper greps these; the exit code is advisory):

@@ -40,7 +40,7 @@
 #                             on a PATH that has it; an absolute
 #                             /Applications/Godot.app/… path otherwise.
 #   GDK_HEADLESS_HOME         set BY A CALLER that mints and owns its own HOME
-#                             (a parallel scenario runner giving each job one).
+#                             (a per-file GUT runner giving each job one).
 #                             Honored verbatim: not reaped, not destroyed.
 #   VERBOSE=1                 stream every captured gate to the console too.
 #   GDK_GATE_LIB              gdk_gate.sh — the gate framework's capture library
@@ -193,7 +193,7 @@ _gdk_reap_stale_run_homes() {
 # create, CLEAR and reap; otherwise the one-line reason it may not, printed on
 # stdout, with a non-zero return.
 #
-# scenario.sh and capture.sh each own their report directory and each aims an
+# capture.sh owns its report directory and each aims an
 # `rm -rf` at what the project config names. Both took that name on trust:
 # `GDK_SCENARIO_REPORT_DIR=.` deleted a probe repo whole — `.git` included —
 # BEFORE the boot, and `GDK_CAPTURE_REPORT_DIR=tests` emptied `tests/`. Neither
@@ -243,7 +243,7 @@ gdk_report_dir_defect() {
 gdk_sandbox_home() {
 	if [ -n "${GDK_HEADLESS_HOME:-}" ]; then
 		# The CALLER minted this home and owns its lifetime (a parallel
-		# scenario runner gives every job its own). Honor it verbatim — do not
+		# per-file GUT runner gives every job its own). Honor it verbatim — do not
 		# reap it, do not destroy it.
 		HOME="$GDK_HEADLESS_HOME"
 		export HOME
@@ -355,33 +355,6 @@ gdk_receipt_hit() {
 	return 0
 }
 
-# gdk_receipt_covers <file>... — each scenario file, then every `## covers:`
-# entry its header declares, one per line: the paths a scenario receipt keys
-# on. It reads the header as integration.sh's scenario_covers does, without
-# the grammar check: an extra path only widens a key, and the gate that
-# refuses a bad entry is `check test-shape`.
-gdk_receipt_covers() {
-	[ "$#" -gt 0 ] || return 0
-	awk '
-		FNR == 1 { print FILENAME; head = 1 }
-		!head { next }
-		/^[[:space:]]*$/ || /^#/ || /^extends[[:space:]]/ || /^class_name[[:space:]]/ || /^@/ {
-			if ($0 ~ /^##[[:space:]]*covers:/) {
-				sub(/^##[[:space:]]*covers:[[:space:]]*/, "")
-				n = split($0, parts, ",")
-				for (i = 1; i <= n; i++) {
-					e = parts[i]
-					gsub(/^[[:space:]]+|[[:space:]]+$/, "", e)
-					sub(/\/$/, "", e)
-					if (e != "") print e
-				}
-			}
-			next
-		}
-		{ head = 0 }
-	' "$@" 2>/dev/null
-}
-
 # gdk_receipt_write <tier> <key> <verdict line> [args...] — file a PASS
 # receipt, but only when the tree still keys to <key>: a tree edited while the
 # tier ran was never wholly proven.
@@ -412,7 +385,7 @@ gdk_receipt_write() {
 # 1), and a run holds GDK_ENGINE_GATE_WEIGHT of them (default 1; `all` is
 # every slot; a weight above the count is the count). integration.sh's
 # fan-out (--all, --system, --diff) weighs GDK_JOBS; a unit slice, a single
-# scenario, parse, warnings and spot weigh 1; an in-place import-cache rebuild
+# scenario, parse and spot weigh 1; an in-place import-cache rebuild
 # weighs `all`, because it rewrites the .godot/ a peer run in the same
 # checkout reads. GDK_ENGINE_GATE_SLOTS=1 is the old one-at-a-time lease.
 #
@@ -813,7 +786,7 @@ gdk_run_bounded() {
 # --- gate output: a summary on the console, the full transcript on disk ------
 # A headless gate used to STREAM its whole boot to the console: `make parse`
 # printed 273 lines of which two mattered (the verdict, and any error line);
-# `make warnings` printed 1,581. Every agent pays that on every run, so the
+# an analyzer-warnings run printed 1,581. Every agent pays that on every run, so the
 # default is the summary and the stream goes to a file.
 #
 # The report dir cannot rot the way a per-scenario one does: the slot is named
@@ -884,8 +857,8 @@ gdk_gate_verdict() {
 # --- the compile-sweep transcript --------------------------------------------
 # compile_sweep.gd's output contract is two line shapes in a stream that also
 # carries every engine warning the boot produced. TWO runners read it — parse
-# (does every .gd compile?) and warnings (does every .gd analyze clean under
-# the promotion?) — so the readers live here, once. They read that contract
+# (does every .gd compile?) and spot (does every touched .gd?) — so the
+# readers live here, once. They read that contract
 # and nothing else, which is what lets a self-test fire them at a fixture
 # transcript where no engine exists.
 GDK_SWEEP_FAIL_PREFIX="SWEEP_FAIL "
@@ -931,10 +904,10 @@ gdk_rebuild_import_cache() {
 		if [ "$held" -eq 1 ]; then
 			GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
 				"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-				"$GDK_GODOT" --path . --headless --editor --quit || return $?
+				"$GDK_GODOT" --path . --headless --import || return $?
 		else
 			"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-				"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+				"$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
 		fi
 		return 0
 	fi
@@ -947,9 +920,9 @@ gdk_rebuild_import_cache() {
 	[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
 	if [ "$held" -eq 1 ]; then
 		GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
-			"$GDK_GODOT" --path . --headless --editor --quit
+			"$GDK_GODOT" --path . --headless --import
 	else
-		"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+		"$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
 	fi
 }
 
@@ -1442,7 +1415,7 @@ usage: source gdk_runners.sh            the normal use — a shell library
 Public functions: gdk_on_exit, gdk_sandbox_home, gdk_sandbox_tmpfile,
 gdk_pid_is_live, gdk_report_dir_defect, gdk_run_bounded,
 gdk_engine_gate_run, gdk_engine_gate_held,
-gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write, gdk_receipt_covers,
+gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
 gdk_sweep_failed_paths, gdk_rebuild_import_cache.

@@ -1,6 +1,6 @@
 # CLAUDE.md — godot-devkit
 
-Scene tooling and the eight Godot gates for Godot 4.x, consumed as a **pinned-tag, stdlib-only
+Scene tooling, configurable checks and installable Godot runners for Godot 4.x, consumed as a **pinned-tag, stdlib-only
 Python package** by shipping game repos. Two audiences, humans and LLMs; for the second the
 deliverables are a stable verb vocabulary, determinism, and token reduction. The northstar in one
 line: *any change you can make to a scene by hand should be makeable through one deterministic
@@ -20,9 +20,9 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
 
 1. **Stdlib only, forever.** Python 3.11+ (`tomllib`), no runtime dependencies — a consumer's
    pre-push hook must never break because of a transitive dep.
-2. **Pure parse — never boots Godot.** No tool starts the engine, runs an import or depends on
-   `.godot/` cache state; a `.tscn` is text and the write verbs edit it as text — which is what makes
-   every verb safe anywhere, anytime, in parallel.
+2. **Keep the Python CLI pure parse.** Its scene verbs and static checks do not boot Godot or depend
+   on `.godot/` cache state. The installed shell runners deliberately boot Godot for import, GUT and
+   project checks; they sandbox `user://`. Keep that boundary clear in code and documentation.
 3. **A write verb touches only what it was asked to touch.** Parse → serialise with no mutation is
    byte-identical, proven on a corpus of real scenes; a verb that cannot guarantee a correct result
    refuses and says why, never edits partially, never reformats an adjacent line; the same command
@@ -49,7 +49,7 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
    somebody else's uncommitted work can redden is not a gate. Prose names a SHAPE ("a project whose
    `check` carries extra gates"), never a repo.
 9. **Test what BITES, the cheapest way that can fail.** A test earns its place by gating something
-   that would cost real time if it broke — a scene write verb, one of the eight gates, the runners
+   that would cost real time if it broke — a scene write verb, a configured check, the runners
    installer, parse→serialise byte-identity, or one of rule 4's two sins; coverage is not the goal.
    Prove it ONCE: a function call before a temp tree, a temp tree before a process — a rule proven at
    two altitudes is one altitude of cost for no coverage. Before a new test, name the one that already
@@ -64,10 +64,11 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
   enumerates a filesystem and `apply.py` the ONE place it mutates one. Nothing here imports `godot/`.
 - **`godot/`** — everything that knows what a `.tscn` is, layered `format/` → `index/` →
   `read/`+`write/` → `checks/`, with the shipped files under `godot/installables/`. A layer imports
-  downward, never up. Tool modules own their behaviour and expose `main(argv)` or `run()`; `cli.py`
+  downward, never up. The standalone `installables/gut_junit.py` runner helper uses stdlib
+  filesystem discovery in the consumer; it cannot import the CLI package there. Tool modules own their behaviour and expose `main(argv)` or `run()`; `cli.py`
   only routes.
-- **New check** = module in `godot/checks/` + a branch in `_dispatch_check` + a Verb-reference or
-  The-eight-gates wiki row drafted in the PR body + a Release-notes section, plus the probe below.
+- **New check** = module in `godot/checks/` + a branch in `_dispatch_check` + a check-reference
+  wiki row drafted in the PR body + a Release-notes section, plus the probe below.
   **New read verb** = module + `cli.py` route + a Verb-reference wiki row drafted in the PR body + a
   Release-notes section. **New write verb** = usually a scene subverb — a row in `scene_edit.py`'s
   `VERBS` + `HANDLERS` plus `_build_parser`/`_check_usage`; a new top-level verb is module + route +
@@ -107,14 +108,20 @@ incantation: `make help` lists every target, and a check that is not a target ge
 - **A gate-semantics change needs a deliberately-broken probe:** introduce the drift class in a
   scratch copy of a fixture repo and confirm the gate FAILS; prove the config path too — a bad value
   for that section exits 2, and a zero-file census FAILS.
-- **Do not boot Godot here** (rule 2). CI runs the same `make verify`.
+- **Do not boot Godot in this toolkit checkout.** Test runner behavior with stubs here. A scratch
+  consumer can validate a real engine through installed `make` wrappers, which sandbox `user://`;
+  never invoke `godot --headless` outside them. The Python CLI remains engine-independent.
+- **Native-first context belongs in installed skills.** Route Godot design work to `godot-101`
+  and `godot-native-first`. Prefer `class_name` types, scene-owned nodes and typed signals. Use
+  `Resource` catalogs and static helpers for shared data or behavior. Autoloads are rare and need
+  a concrete app-wide lifecycle requirement. This guidance does not require the CLI to boot Godot.
 - **Release notes live in the version-bump PR.** There is no CHANGELOG. A consumer-visible PR says so in its
   body under `## Release notes`: 1 sentence, the semver class, and an `Upgrade:` line for what a consumer must
   edit. `release.yml` uses that section from the bump PR as the Release body, or falls back to `--generate-notes`.
 - **Docs for people live in the wiki**, https://github.com/cdowin/godot-devkit/wiki. You may read it. Only a local
   session publishes there; a cloud session drafts the wiki text in its PR body and the issue is marked
   blocked-by Chris (local session). This repo keeps no `docs/` and no `.md` outside `README.md`, `CLAUDE.md`,
-  `AGENTS.md` (`tests/test_docs_ratchet.py`); The bundled machine-loaded `godot-ui/SKILL.md` is also allowed. `README.md` stays under 80 lines.
+  `AGENTS.md` (`tests/test_docs_ratchet.py`); the bundled machine-loaded skill files listed there are also allowed. `README.md` stays under 80 lines.
 - **Release:** bump `version` in `pyproject.toml` and `__version__` together on `main`; `auto-tag.yml` tags it
   and `release.yml` publishes the wheel to the index. Never tag by hand.
 - Report in ASD-STE100: numbered NEEDS YOU list first, outcome first, one fact per sentence, numbers not adjectives.

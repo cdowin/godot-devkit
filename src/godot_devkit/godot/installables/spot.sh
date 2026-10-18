@@ -2,7 +2,7 @@
 # spot.sh — the builder's spot check: gdlint and a compile of ONLY the .gd
 # files the change touched. `make spot SYS=<slice>` runs this, then the unit
 # slice; the two together are a builder's whole proof, under 30 s on a quiet
-# machine. The wide tiers (parse, warnings, integration) are the integrator's,
+# machine. The wide tiers (parse, integration) are the integrator's,
 # run once per batch.
 #
 # THE CHANGE is every .gd that differs from the merge base of HEAD and
@@ -35,7 +35,7 @@ GDK_SPOT_BASE="${GDK_SPOT_BASE:-main}"
 # The linter and the vendored-code exclusion, as lint.sh reads them.
 GDK_LINT_CMD="${GDK_LINT_CMD:-gdlint}"
 GDK_LINT_EXCLUDE_RE="${GDK_LINT_EXCLUDE_RE:-^addons/(gut)/}"
-# The sweep script parse.sh runs, addressed the same way.
+# Scoped compile helper; the full parse target uses native import.
 GDK_PARSE_SWEEP_SCRIPT="${GDK_PARSE_SWEEP_SCRIPT:-res://tools/dev/runners/compile_sweep.gd}"
 # Env: GDK_SPOT_TIMEOUT  seconds bounding the compile (default 120)
 #      GDK_GODOT         the engine binary (default `godot`)

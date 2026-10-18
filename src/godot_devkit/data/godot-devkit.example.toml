@@ -2,12 +2,14 @@
 # tests/test_boundaries.py checks that each key a reader accepts appears here in its right shape.
 # The wiki page "Configuration reference" shows this file. Optional at the repo root; stock defaults apply.
 [roster]
-checks = ["uid", "tres", "props"]  # narrows `check all` for THIS repo (stock: all eight);
-                                   # an unknown name exits 2
-[checks]
-godot = ["uid", "tres", "props"]   # 3.x only: the pre-3.0 spelling of `[roster] checks`, read
-                                   # with a deprecation line; removed in 4.0
+checks = ["warnings", "uid", "props"]  # replaces the stock `check all` roster for THIS repo (stock:
+                                   # warnings props defaults rng tres-comment unit-disk;
+                                   # opt-in: uid tres canonical patterns test-shape); an unknown name exits 2
 
+[warnings]
+errors = ["unused_variable", "integer_division"]   # each must be gdscript/warnings/<name>=2 under [debug]
+                                   # in project.godot (stock: unused_variable shadowed_variable
+                                   # unused_signal integer_division standalone_expression)
 [uid]
 exclude_prefixes = ["addons/"]     # scopes every uid check
 [tres]
@@ -41,14 +43,10 @@ forbidden_calls = { "the live settings autoload" = ["SettingsManager\\.(save|loa
 min_args = { "SaveService.save" = 2 }
 baseline = { "tests/unit/test_save_roundtrip.gd" = 3 }
 [test_shape]
-scenario_root = "tests/integration"
+integration_root = "tests/integration"
 unit_root = "tests/unit"           # the other side of the tier-balance line
-cap = 300                          # lines; a NEW scenario over it fails
-infra = ["scenario_base.gd"]       # basenames of the tier's shared harness, not priced as scenarios
+cap = 300                          # lines; a NEW integration script over it fails
 ledger = { "tests/integration/big_flow.gd" = 812 }   # existing debt at its CURRENT size; only shrinks
-header = true                      # every booted scenario declares `## covers:` and `## Boots because:`
-header_ledger = ["tests/integration/big_flow.gd"]    # scenarios exempt until they carry both lines; only shrinks
-runner = "tools/dev/runners/integration.sh"
 
 [autoloads]
 suffixes = { Manager = "emits", Registry = "inert" }

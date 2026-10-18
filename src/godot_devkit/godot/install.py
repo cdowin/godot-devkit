@@ -96,13 +96,12 @@ PLAN: tuple[tuple[str, str], ...] = (
     # .gd files the change touched. It reaches compile_sweep.gd the way
     # parse.sh does, so it sits in the same directory.
     ('spot.sh', 'tools/dev/runners/spot.sh'),
-    ('warnings.sh', 'tools/dev/runners/warnings.sh'),
     ('unit.sh', 'tools/dev/runners/unit.sh'),
-    # scenario.sh is the single-scenario entry point; integration.sh fans it
-    # out and capture.sh is its headed twin. All three sit in one directory
-    # because integration.sh reaches scenario.sh by GDK_SCENARIO_RUNNER,
-    # relative to itself.
-    ('scenario.sh', 'tools/dev/runners/scenario.sh'),
+    ('gut_junit.py', 'tools/dev/runners/gut_junit.py'),
+    ('gutconfig.json', '.gutconfig.json'),
+    ('gutconfig.integration.json', '.gutconfig.integration.json'),
+    ('integration_test_template.gd', 'tests/integration/integration_test_template.gd'),
+    ('measure_test_template.gd', 'tests/integration/measure_test_template.gd'),
     ('integration.sh', 'tools/dev/runners/integration.sh'),
     ('capture.sh', 'tools/dev/runners/capture.sh'),
     # The gate ON the library rather than a gate that uses it: it proves a
@@ -160,7 +159,7 @@ Your Makefile sets what is yours, then includes the framework:
 `check` runs `shell` (shellcheck over every tracked *.sh) and then each target
 in GDK_CHECKS. `precommit` = `check` + GDK_PRECOMMIT_TIERS. `verify` = `check`
 + GDK_VERIFY_TIERS, less GDK_VERIFY_SKIP. The tier lists come from
-Makefile.tiers. `milestone` is a deprecated alias of `verify` (removed in 4.0).
+Makefile.tiers.
 
 A destination that already exists and differs is REFUSED — that file, not the
 roster: the entries with nothing in their way are written, every collision is
@@ -176,11 +175,12 @@ sandbox, a bounded-run contract, a project.godot restore) — and under
 tools/dev/runners/ the runners that source it: import_cache.sh, parse.sh (+
 its compile_sweep.gd and the .uid sidecar the engine would otherwise mint),
 lint.sh, spot.sh (lint and a compile of only the .gd a change touched),
-warnings.sh, unit.sh (GUT, sliced, with the coverage gate that fails
-a test script GUT refused to load), scenario.sh, integration.sh (the same
-scenarios, one process each, N in parallel), capture.sh (headed, because
+unit.sh (GUT with a JUnit test-script census), gut_junit.py, integration.sh
+(a second GUT config and optional per-file isolation), capture.sh (headed, because
 headless is blind to render), and hermetic_run_scan.sh — the gate proving a
-run's HOME self-destructs. Every one carries --help and --self-test. Plus
+run's HOME self-destructs. The shell runners carry --help and --self-test.
+The installer also writes .gutconfig.json, .gutconfig.integration.json and
+integration/measure GUT templates under tests/integration/. Plus
 tools/hooks/cc-godot-sandbox.sh — the Claude Code guard against a raw engine
 boot, whose stock roster is the library's own boot function (the run prints
 the .claude/settings.json entry that fires it) — and
@@ -196,8 +196,7 @@ copy is left in place and named as retired: safe to delete when GDK_CHECKS
 names `godot-check` and `[roster] checks` keeps `uid` (then `check uid` runs
 in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
-runners (parse lint spot warnings unit integration scenario capture
-import-cache hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
+runners (parse lint spot unit integration capture import hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
 the GDK_PRECOMMIT_TIERS / GDK_VERIFY_TIERS lists the gate framework's
 compositions run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
 (the run prints the pyproject.toml block that locks it), or — the legacy
@@ -217,9 +216,8 @@ file, header included. --diff prints what would change and writes nothing."""
 # A `.sh` installable is WRITTEN EXECUTABLE. Every one of them is a script a
 # caller runs — a make recipe, a hook dispatcher, another runner's fan-out —
 # and a script that is not executable is a file that looks installed and is
-# not: `integration.sh` exec'd `scenario.sh` directly and got exit 126 from
-# every scenario, under a FAILURES block that printed nothing, because
-# `Permission denied` matched no summary pattern. The mode is part of the
+# not: a shell runner without its executable bit cannot be invoked directly.
+# The mode is part of the
 # WRITE, in `core.apply`, which owns every mutation this package makes.
 EXECUTABLE_SUFFIX = '.sh'
 
@@ -233,7 +231,7 @@ NEXT_STEP = (
     'your Makefile and `include Makefile.gates` (it `-include`s '
     'Makefile.tiers, where the Godot targets live) — never a fork of the '
     'include. Then gitignore .gate-reports/, '
-    '.scenario-reports/, .capture-reports/ and .headless-userdata/. Every '
+    '.capture-reports/ and .headless-userdata/. Every '
     '`.sh` here is written EXECUTABLE, so a target may call it either way — '
     'the stock recipes say `bash tools/dev/runners/<x>.sh`, which also works '
     'on a checkout that lost the mode bits. Then edit each file\'s `project '
@@ -273,7 +271,10 @@ TOOLCHAIN_STEP = ('      - uses: ./.github/actions/godot-toolchain\n'
 # it, so the retirement is not silence (a file that looks installed and that
 # nothing maintains any more).
 UID_GUARD = '.github/workflows/uid-guard.yml'
-RETIRED: tuple[str, ...] = (UID_GUARD,)
+# `warnings.sh` became `check warnings`, a parse of project.godot (4.0).
+WARNINGS_RUNNER = 'tools/dev/runners/warnings.sh'
+SCENARIO_RUNNER = 'tools/dev/runners/scenario.sh'
+RETIRED: tuple[str, ...] = (UID_GUARD, WARNINGS_RUNNER, SCENARIO_RUNNER)
 
 
 def retired_line(rel: str) -> str:
@@ -284,11 +285,21 @@ def retired_line(rel: str) -> str:
     when GDK_CHECKS names it (a Makefile variable this verb cannot read) and
     `[roster] checks` keeps `uid`. "Safe to delete" said to any other repo
     removes its only CI uid gate, and nothing would say so. The roster is
-    `all_roster()`, the one `check all` reads: an absent key is all eight, and
+    `all_roster()`, the one `check all` reads: an absent key is the stock roster, and
     a malformed value or an unknown gate raises ConfigError (exit 2) here
     exactly as it does there (#28).
     """
     head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
+    if rel == WARNINGS_RUNNER:
+        if 'warnings' in all_roster():
+            return (head + '`check warnings` replaces it in `check all`; '
+                    'it was left in place and is safe to delete')
+        return (head + '`check warnings` is omitted from this repo\'s '
+                '`[roster] checks`; it was left in place — keep it or add '
+                '"warnings" to that roster')
+    if rel == SCENARIO_RUNNER:
+        return (head + '`integration.sh` now runs native GUT tests; it was left '
+                'in place and is safe to delete after updating Makefile.tiers')
     roster = all_roster()
     if 'uid' not in roster:
         return (head + '`check uid` is NOT in this repo\'s gate: `[roster] '
@@ -317,6 +328,15 @@ HOOK_SETTINGS = '''{
     ]
   }
 }'''
+
+# The agent-context block for the consumer's CLAUDE.md and AGENTS.md. PRINTED,
+# never written, for the same reason as the hook entry: those files are
+# hand-maintained.
+CONTEXT_BLOCK = (
+    'Use named class_name types and scene-node ownership for gameplay state. '
+    'Keep gameplay autoloads near zero; reserve them for a few app-lifetime '
+    'services such as save slots and settings. '
+    'Skill: godot-native-first.')
 
 # The per-entry annotation for a collision confined to the editable block.
 # Short, because it hangs off a path in a list; the sentence that says what it
@@ -678,6 +698,8 @@ def _install(argv: list[str], command: str,
               f'engine patch number:\n\n{TOOLCHAIN_STEP}\n')
         # Raw, unprefixed, so the block can be selected and pasted whole: a
         # JSON file is the one place a stray `[install] ` is not cosmetic.
+        print(f'\nCLAUDE.md and AGENTS.md — the agent context (add to both; '
+              f'install the skill with `install-skills`):\n\n{CONTEXT_BLOCK}\n')
         print(f'\n.claude/settings.json — the entry that FIRES the engine-boot '
               f'guard (merge into yours):\n\n{HOOK_SETTINGS}\n')
     # A withheld replacement is a non-zero exit even when additions landed.

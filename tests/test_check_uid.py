@@ -334,11 +334,10 @@ class CliRouting(unittest.TestCase):
     THIS repo. Most of the roster reads `.tscn`/`.tres`/`.gd`, so a repo
     holding none of them gets a handful of 0-file censuses and rule 4 correctly
     reddens every one; that is the roster being wrong for the repo, not a
-    reason to weaken a gate. 3.x still reads the pre-3.0 key `[checks] godot`,
-    with one deprecation line (see `LegacyConfigNames`)."""
+    reason to weaken a gate. 4.0 refuses the retired key `[checks] godot` (see `LegacyConfigNames`)."""
 
-    THE_EIGHT = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment',
-                 'unit-disk', 'test-shape')
+    STOCK_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
+                 'unit-disk')
 
     def _check_all(self, root: Path) -> tuple[int, str]:
         # A fresh process, so two runs compare bytes and not cache state.
@@ -360,22 +359,22 @@ class CliRouting(unittest.TestCase):
         self.assertIn('unexpected argument', tres_out)
         self.assertEqual(all_code, 2)
 
-    def test_the_stock_roster_is_the_eight_and_a_declared_one_runs_what_it_names(
+    def test_the_stock_roster_is_the_stock_and_a_declared_one_runs_what_it_names(
             self) -> None:
-        # ONE roster: the eight, in the order they run, and a repo with NO
+        # ONE roster: the stock gates, in the order they run, and a repo with NO
         # godot-devkit.toml gets byte-identical output to one declaring exactly
         # that (rule 5). Asked of the committed clean Godot project, where
-        # all eight PASS — the tree `make godot-check` stages for this repo's
+        # all stock gates PASS — the tree `make godot-check` stages for this repo's
         # own `make check`, so what is proven here is what that gate runs;
         # every known gate dispatching is the same run. Then a roster naming
         # one gate runs that gate only — and `[checks] all`, the pre-3.0
         # agentic-sdlc key naming gates this package has never heard of, is
         # not read.
-        self.assertEqual(roster.KNOWN_GATES, self.THE_EIGHT)
+        self.assertEqual(roster.KNOWN_GATES, self.STOCK_GATES)
         with temp_repo('godot_project') as root:
             stock_code, stock = self._check_all(root)
             (root / 'godot-devkit.toml').write_text(
-                '[roster]\nchecks = [' + ', '.join(f'"{g}"' for g in self.THE_EIGHT)
+                '[roster]\nchecks = [' + ', '.join(f'"{g}"' for g in self.STOCK_GATES)
                 + ']\n', encoding='utf-8')
             declared_code, declared = self._check_all(root)
             (root / 'godot-devkit.toml').write_text(
@@ -384,8 +383,10 @@ class CliRouting(unittest.TestCase):
             one_code, one = run_cli('check', 'all')
         self.assertEqual((stock_code, declared_code), (0, 0), stock + declared)
         self.assertEqual(stock, declared)
-        for gate in self.THE_EIGHT:
+        for gate in self.STOCK_GATES:
             self.assertIn(f'[check:{gate}] PASS', stock)
+        for opt_in in ('uid', 'tres'):
+            self.assertNotIn(f'[check:{opt_in}]', stock)
         self.assertEqual(one_code, 0, one)
         self.assertIn('[check:uid]', one)
         self.assertNotIn('[check:tres]', one)
@@ -405,10 +406,9 @@ class CliRouting(unittest.TestCase):
 
 
 class LegacyConfigNames(unittest.TestCase):
-    """3.0 renamed the config file (`devkit.toml` -> `godot-devkit.toml`) and the
-    roster key (`[checks] godot` -> `[roster] checks`). 3.x reads the old names
-    with one deprecation line on stderr; remove in 4.0. The new name wins when
-    both are present."""
+    """3.0 renamed the config file (`devkit.toml` -> `godot-devkit.toml`). It is
+    read with one deprecation line on stderr; the new name wins when both are
+    present. The roster key `[checks] godot` is gone (4.0)."""
 
     def _run(self, root: Path) -> tuple[int, str, str]:
         proc = subprocess.run(
@@ -451,24 +451,9 @@ class LegacyConfigNames(unittest.TestCase):
         self.assertNotIn('[check:tres]', out)
         self.assertEqual(err, '')
 
-    def test_the_old_roster_key_is_read_with_one_deprecation_line(self) -> None:
+    def test_the_old_roster_key_is_refused(self) -> None:
         with temp_repo('godot_project') as root:
-            (root / 'godot-devkit.toml').write_text('[checks]\ngodot = ["uid"]\n',
-                                                    encoding='utf-8')
+            (root / 'godot-devkit.toml').write_text('[checks]\ngodot = ["uid"]\n', encoding='utf-8')
             code, out, err = self._run(root)
-        self.assertEqual(code, 0, out + err)
-        self.assertIn('[check:uid]', out)
-        self.assertNotIn('[check:tres]', out)
-        self.assertEqual(err.count('[checks] godot is read as a fallback'), 1, err)
-        self.assertIn('move it to [roster] checks', err)
-
-    def test_the_new_roster_key_beats_the_old_one(self) -> None:
-        with temp_repo('godot_project') as root:
-            (root / 'godot-devkit.toml').write_text(
-                '[checks]\ngodot = ["tres"]\n[roster]\nchecks = ["uid"]\n',
-                encoding='utf-8')
-            code, out, err = self._run(root)
-        self.assertEqual(code, 0, out + err)
-        self.assertIn('[check:uid]', out)
-        self.assertNotIn('[check:tres]', out)
-        self.assertEqual(err, '')
+        self.assertEqual(code, 2, out + err)
+        self.assertIn('removed in 4.0', out + err)

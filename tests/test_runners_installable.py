@@ -46,11 +46,11 @@ pytestmark = pytest.mark.skipif(shutil.which('bash') is None,
 INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 LIBRARY = INSTALLABLES / 'gdk_runners.sh'
 RUNNER = INSTALLABLES / 'import_cache.sh'
-SCENARIO = INSTALLABLES / 'scenario.sh'
 CAPTURE = INSTALLABLES / 'capture.sh'
 UNIT = INSTALLABLES / 'unit.sh'
 INTEGRATION = INSTALLABLES / 'integration.sh'
 PARSE = INSTALLABLES / 'parse.sh'
+SPOT = INSTALLABLES / 'spot.sh'
 # Every shell RUNNER install-runners ships — the library and what lands under
 # tools/dev/. A runner added to the plan and not here would be a runner nothing
 # holds to the shape. The engine-boot guard ships on the same plan but is a
@@ -72,7 +72,6 @@ def isolated_engine_admission(tmp_path, monkeypatch):
     # root; otherwise --diff treats the test lease itself as a changed path.
     home = str(tmp_path.parent / f'{tmp_path.name}-engine-admission-home')
     monkeypatch.setenv('GDK_ENGINE_GATE_HOME', home)
-    monkeypatch.setitem(FANOUT_ENV, 'GDK_ENGINE_GATE_HOME', home)
 
 
 def run(*argv: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -134,8 +133,11 @@ def _project(root: Path, *runners: Path, godot: bool = True) -> None:
     project.godot unless told otherwise."""
     (root / 'tools' / 'dev' / 'runners').mkdir(parents=True)
     shutil.copy2(LIBRARY, root / 'tools' / 'dev' / 'gdk_runners.sh')
+    shutil.copy2(INSTALLABLES / 'gut_junit.py', root / 'tools' / 'dev' / 'runners/gut_junit.py')
     for runner in runners:
         shutil.copy2(runner, root / 'tools' / 'dev' / 'runners' / runner.name)
+    if UNIT in runners:
+        shutil.copy2(INSTALLABLES / 'gutconfig.json', root / '.gutconfig.json')
     if godot:
         (root / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
 
@@ -149,6 +151,13 @@ def _stub_engine(tmp_path: Path, body: str) -> Path:
     for name in ('godot', 'timeout'):
         (stub / name).chmod(0o755)
     return stub
+
+
+def _commit_all(root: Path) -> None:
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=root, check=True)
+    (root / '.gitignore').write_text('.gate-reports/\n.headless-userdata/\n.godot/\n', encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
+    subprocess.run([*GIT, 'commit', '-q', '-m', 'fixture'], cwd=root, check=True)
 
 
 def test_the_runner_refuses_a_root_that_is_not_a_godot_project_and_admits_one(tmp_path):
@@ -187,8 +196,7 @@ def test_a_mis_set_report_dir_is_refused_before_anything_is_removed(tmp_path):
     (`gdk_report_dir_defect`); this is each runner CALLING it before the rm,
     and not refusing the stock dir every consumer runs (with no engine the
     stock run fails LATER and differently)."""
-    for variable, runner in (('GDK_SCENARIO_REPORT_DIR', SCENARIO),
-                             ('GDK_CAPTURE_REPORT_DIR', CAPTURE)):
+    for variable, runner in (('GDK_CAPTURE_REPORT_DIR', CAPTURE),):
         root = tmp_path / runner.stem
         _project(root, runner)
         (root / 'tests').mkdir()
@@ -209,297 +217,136 @@ def test_a_mis_set_report_dir_is_refused_before_anything_is_removed(tmp_path):
         assert 'REPORT_DIR' not in done.stderr, f'{runner.name}: {done.stderr}'
 
 
-# --- unit.sh's coverage gate, driven through the RUNNER ----------------------
-GUT_TRANSCRIPT = ('#!/usr/bin/env bash\n'
-                  'echo "Running tests..."\n'
-                  'echo "Totals"\n'
-                  'echo "Scripts        {scripts}"\n'
-                  'echo "Tests          {scripts}"\n'
-                  'exit 0\n')
+# --- GUT's JUnit census, driven through stub engines -------------------------
+def _gut_stub(suites: list[str], tests: int, *, png: bool = False, error: bool = False) -> str:
+    cases = ''.join(f'<testsuite name="{name}" tests="1"><testcase name="ok"/></testsuite>'
+                    for name in suites)
+    xml = f'<testsuites tests="{tests}" failures="0">{cases}</testsuites>'
+    lines = ['#!/usr/bin/env bash',
+             'for arg in "$@"; do case "$arg" in -gjunit_xml_file=*) xml="${arg#*=}";; esac; done',
+             'xml="${xml#res://}"', 'mkdir -p "$(dirname "$xml")"',
+             f"printf '%s\\n' '{xml}' > \"$xml\""]
+    if png:
+        lines += ['mkdir -p .capture-reports', 'echo image > .capture-reports/eyes.png']
+    if error:
+        lines += ['echo "SCRIPT ERROR: Parse Error: bad script"']
+    return '\n'.join(lines) + '\n'
 
 
-def test_unit_passes_a_reconciled_census_and_fails_a_mismatch_or_an_empty_one(tmp_path):
-    """The self-test corpus proves the two parsers. The BRANCH that reconciles
-    them is main-flow, and nothing exercised it: a mutant deleting the
-    count-mismatch check survived the whole suite (MINOR-6b — GUT drops a
-    script that will not parse from its totals and prints "All tests
-    passed!"), and `DISK_SCRIPTS=0` reconciled with GUT's unconditional
-    `Scripts 0` into `PASS (0/0 scripts loaded - full coverage)` (MAJOR-2,
-    rule 4's sin on the tier a consumer slices by hand every day). A stub
-    prints the GUT transcript and unit.sh does everything else for real; the
-    reconciled run is the control the two failures are measured against."""
+def test_unit_reconciles_junit_scripts_and_rejects_zero_tests_and_engine_errors(tmp_path):
     root = tmp_path / 'repo'
     _project(root, UNIT)
-    tier = root / 'tests' / 'unit' / 'stats'
+    tier = root / 'tests/unit'
     tier.mkdir(parents=True)
-    for index in range(2):
-        (tier / f'test_{index}.gd').write_text('', encoding='utf-8')
-    stub = _stub_engine(tmp_path, GUT_TRANSCRIPT.format(scripts=2))
+    (tier / 'test_a.gd').write_text('extends GutTest\n', encoding='utf-8')
+    stub = _stub_engine(tmp_path, _gut_stub(['tests/unit/test_a.gd'], 1))
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'),
            'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
 
-    def unit(*argv: str) -> subprocess.CompletedProcess:
-        return subprocess.run(['bash', 'tools/dev/runners/unit.sh', *argv], cwd=root,
+    def unit(*args: str):
+        return subprocess.run(['bash', 'tools/dev/runners/unit.sh', *args], cwd=root,
                               text=True, capture_output=True, env=env)
 
+    done = unit()
+    assert done.returncode == 0 and '[UNIT] PASS (1 test(s), 1 script(s))' in done.stdout, done.stdout + done.stderr
+    (stub / 'godot').write_text(_gut_stub(['tests/unit/test_a.gd.Inner'], 1), encoding='utf-8')
     done = unit()
     assert done.returncode == 0, done.stdout + done.stderr
-    assert '[UNIT] PASS (2/2 scripts loaded' in done.stdout.splitlines()[-1], done.stdout
-    # The transcript opens with the bound the run was judged under, not only
-    # the console: a HARD_TIMEOUT read from the log alone names its number.
-    transcript = (root / '.gate-reports' / 'unit.log').read_text(encoding='utf-8')
-    assert transcript.startswith('[UNIT] timeout '), transcript[:200]
-
-    (tier / 'test_2.gd').write_text('', encoding='utf-8')
+    (stub / 'godot').write_text(_gut_stub(['tests/unit/test_a.gd'], 1), encoding='utf-8')
+    (tier / 'test_b.gd').write_text('extends GutTest\n', encoding='utf-8')
     done = unit()
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert '3 test script(s) on disk, 2 run' in done.stdout, done.stdout
-    assert 'COVERAGE FAIL (script count mismatch)' in done.stdout, done.stdout
+    assert done.returncode == 1 and 'script census mismatch' in done.stdout, done.stdout + done.stderr
+    done = unit('-gtest', 'res://tests/unit/test_a.gd')
+    assert done.returncode == 0, done.stdout + done.stderr
+    (stub / 'godot').write_text(_gut_stub(['tests/unit/test_a.gd', 'tests/unit/test_b.gd'], 0), encoding='utf-8')
+    done = unit()
+    assert done.returncode == 1 and 'zero tests' in done.stdout, done.stdout + done.stderr
+    (stub / 'godot').write_text(_gut_stub(['tests/unit/test_a.gd', 'tests/unit/test_b.gd'], 2, error=True), encoding='utf-8')
+    done = unit()
+    assert done.returncode == 1 and '[UNIT] FAIL' in done.stdout, done.stdout + done.stderr
+    done = unit('-gtest=res://tests/unit/test_a.gd')
+    assert done.returncode == 1  # engine error still fails a selected file
+    (root / '.gutconfig.json').write_text(
+        '{"dirs":["res://tests/unit"],"junit_xml_timestamp":true}', encoding='utf-8')
+    done = unit()
+    assert done.returncode == 2 and 'junit_xml_timestamp must be false' in done.stderr
 
-    (stub / 'godot').write_text(GUT_TRANSCRIPT.format(scripts=0), encoding='utf-8')
-    done = unit('typo')
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert 'full coverage' not in done.stdout, done.stdout
-    assert 'COVERAGE FAIL (0 test scripts found)' in done.stdout, done.stdout
-    # It names the DIRECTORY it scanned: the repair is one of two spellings
-    # and a verdict that does not name it chooses neither.
-    assert 'tests/unit/typo' in done.stdout, done.stdout
 
-
-def test_unit_fails_when_the_gut_log_carries_a_script_parse_error_over_a_green_run(tmp_path):
-    """#51: a parse error in a production script a test instantiates leaves the
-    census reconciled and GUT exiting 0, so the tier printed PASS (full
-    coverage) over a broken file. The log line alone now fails it."""
+def test_integration_uses_second_config_and_per_file_isolation(tmp_path):
     root = tmp_path / 'repo'
-    _project(root, UNIT)
-    tier = root / 'tests' / 'unit' / 'stats'
+    _project(root, UNIT, INTEGRATION)
+    tier = root / 'tests/integration'
     tier.mkdir(parents=True)
-    for index in range(2):
-        (tier / f'test_{index}.gd').write_text('', encoding='utf-8')
-    stub = _stub_engine(tmp_path, GUT_TRANSCRIPT.format(scripts=2))
+    (tier / 'test_world.gd').write_text('extends GutTest\n', encoding='utf-8')
+    (root / '.gutconfig.integration.json').write_text(
+        '{"dirs":["res://tests/integration"],"include_subdirs":true}', encoding='utf-8')
+    stub = _stub_engine(tmp_path, _gut_stub(['tests/integration/test_world.gd'], 1))
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'),
            'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
+    done = subprocess.run(['bash', 'tools/dev/runners/integration.sh'], cwd=root,
+                          text=True, capture_output=True, env=env)
+    assert done.returncode == 0 and '[INTEGRATION] PASS' in done.stdout, done.stdout + done.stderr
+    done = subprocess.run(['bash', 'tools/dev/runners/integration.sh'], cwd=root,
+                          text=True, capture_output=True,
+                          env={**env, 'GDK_INTEGRATION_PER_FILE': '1', 'GDK_JOBS': '2'})
+    assert done.returncode == 0 and '[INTEGRATION] PASS (1 file(s))' in done.stdout, done.stdout + done.stderr
 
-    def unit() -> subprocess.CompletedProcess:
-        return subprocess.run(['bash', 'tools/dev/runners/unit.sh'], cwd=root,
-                              text=True, capture_output=True, env=env)
 
-    control = unit()
-    assert control.returncode == 0 and '[UNIT] PASS' in control.stdout, control.stdout
-    (stub / 'godot').write_text(
-        GUT_TRANSCRIPT.replace('echo "Running tests..."\n',
-                               'echo "Running tests..."\n'
-                               'echo \'SCRIPT ERROR: Parse Error: Identifier "_x" not declared in the current scope.\'\n')
-        .format(scripts=2), encoding='utf-8')
-    done = unit()
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert 'PASS' not in done.stdout, done.stdout
-    assert 'FAIL (script parse error in the run log)' in done.stdout, done.stdout
-    assert 'Identifier "_x" not declared' in done.stdout, done.stdout
+def test_capture_runs_one_headed_gut_file_and_requires_a_fresh_png(tmp_path):
+    root = tmp_path / 'repo'
+    _project(root, CAPTURE)
+    test = root / 'tests/capture/test_eyes.gd'
+    test.parent.mkdir(parents=True)
+    test.write_text('extends GutTest\n', encoding='utf-8')
+    stub = _stub_engine(tmp_path, _gut_stub(['tests/capture/test_eyes.gd'], 1, png=True))
+    env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
+           'HOME': str(tmp_path / 'home'),
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
+    def capture(extra=None):
+        return subprocess.run(['bash', 'tools/dev/runners/capture.sh', 'eyes'],
+                              cwd=root, text=True, capture_output=True, env={**env, **(extra or {})})
+    for extra in ({}, {'CAPTURE_VISIBLE': '1'}):
+        done = capture(extra)
+        assert done.returncode == 0 and '[CAPTURE] PASS' in done.stdout, done.stdout + done.stderr
+    (stub / 'godot').write_text(_gut_stub(['tests/capture/test_eyes.gd'], 1), encoding='utf-8')
+    done = capture()
+    assert done.returncode == 1 and '[CAPTURE] FAIL' in done.stdout, done.stdout + done.stderr
+    assert (root / '.capture-reports/previous/eyes.png').is_file()
 
 
 # --- parse.sh: one engine run, driven through the RUNNER ---------------------
-def test_parse_boots_the_engine_once_and_a_boot_error_still_fails_it(tmp_path):
-    """#49: the gate was a `--quit` boot and then a `-s` sweep, two engine
-    starts on every cold parse. Autoloads boot under `-s`, and the sweep boots
-    the main scene when GDK_SWEEP_MAIN_SCENE=1, so ONE run proves both. A
-    stub engine records each start; a boot error in that one run (a main
-    scene naming a missing script) is still FAIL (boot), not a PASS."""
+def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
     root = tmp_path / 'repo'
     _project(root, PARSE)
-    shutil.copy2(INSTALLABLES / 'compile_sweep.gd', root / 'tools/dev/runners/compile_sweep.gd')
     starts = tmp_path / 'starts.log'
     stub = _stub_engine(tmp_path, '#!/usr/bin/env bash\n'
-                        'echo "$* main_scene=${GDK_SWEEP_MAIN_SCENE:-}" >> "$GDK_STUB_LOG"\n'
-                        'echo "SWEEP_RESULT 2 2"\n')
+                        'echo "$*" >> "$GDK_STUB_LOG"\n'
+                        'case "$*" in *--import*) echo "Godot Engine ready";; '
+                        '*) echo "SWEEP_RESULT 1 1";; esac\n')
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'), 'GDK_RECEIPTS': '0',
            'GDK_STUB_LOG': str(starts),
            'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
-
-    def parse() -> subprocess.CompletedProcess:
+    def parse():
         return subprocess.run(['bash', 'tools/dev/runners/parse.sh'], cwd=root,
                               text=True, capture_output=True, env=env)
-
     done = parse()
     assert done.returncode == 0, done.stdout + done.stderr
-    assert '[PARSE] PASS (boot clean; 2/2 scripts compiled)' in done.stdout, done.stdout
     assert starts.read_text(encoding='utf-8').splitlines() == [
-        '--path . --headless -s res://tools/dev/runners/compile_sweep.gd main_scene=1'
-    ], starts.read_text(encoding='utf-8')
-    # The sweep reads the variable parse.sh sets; a rename on one side only
-    # would boot no main scene and still print PASS.
-    sweep = (INSTALLABLES / 'compile_sweep.gd').read_text(encoding='utf-8')
-    assert 'MAIN_SCENE_ENV := "GDK_SWEEP_MAIN_SCENE"' in sweep
-    assert 'OS.get_environment(MAIN_SCENE_ENV) == "1"' in sweep
-
-    (stub / 'godot').write_text(
-        '#!/usr/bin/env bash\n'
-        'echo "ERROR: Failed loading resource: res://gone.gd."\n'
-        'echo "SWEEP_RESULT 2 2"\n', encoding='utf-8')
+        '--path . --headless --import',
+        '--path . --headless -s res://tools/dev/runners/compile_sweep.gd']
+    (stub / 'godot').write_text('#!/usr/bin/env bash\n'
+                                'case "$*" in *--import*) exit 0;; esac\n'
+                                'echo "SWEEP_FAIL res://bad.gd"\necho "SWEEP_RESULT 0 1"\n', encoding='utf-8')
+    done = parse()
+    assert done.returncode == 1 and 'compiled 0/1' in done.stdout, done.stdout + done.stderr
+    (stub / 'godot').write_text('#!/usr/bin/env bash\necho "SCRIPT ERROR: bad script"\n', encoding='utf-8')
     done = parse()
     assert done.returncode == 1, done.stdout + done.stderr
-    assert '[PARSE] FAIL (boot)' in done.stdout, done.stdout
-    assert 'res://gone.gd' in done.stdout, done.stdout
 
 
-# --- scenario.sh's cold-cache recovery, driven through the RUNNER ------------
-# 0.24.0/bugs/import-cache-rebuild-does-not-repair-a-stale-uid-index. In a
-# consumer, 147 of 147 scenarios FAILED on the `invalid UID … using text path
-# instead` sweep while every one of them printed its own PASS line. The
-# recovery detected the class precisely and then applied a remedy that cannot
-# work: an import pass against an EXISTING .godot/ does not rebuild the uid
-# index for tracked files already missing from it; `rm -rf .godot` then a
-# rebuild does. The stub below IS that distinction: its rebuild branch
-# rewrites the cache file and leaves `.godot/stale` alone, so only a run that
-# REMOVES the directory can clear it. Nothing here boots an engine.
-STALE_MARKER = '.godot/stale'
-SCENARIO_STUB = """#!/usr/bin/env bash
-case " $* " in
-	*" --editor "*)
-		echo rebuild >> "$GDK_STUB_LOG"
-		mkdir -p .godot && : > .godot/uid_cache.bin
-		exit 0 ;;
-esac
-echo boot >> "$GDK_STUB_LOG"
-{warn}
-echo "[SCENARIO] alpha {result} steps=1 errors=0"
-exit 0
-"""
-UID_WARNING = ('echo \'WARNING: invalid UID "uid://cabc" - using text path'
-               ' instead: res://alpha.gd\'')
-# The repairable tree: the warning stops exactly when the directory goes.
-WARN_WHILE_STALE = f'if [ -f {STALE_MARKER} ]; then {UID_WARNING}; fi'
-# The tree no remedy repairs — what proves the ladder has a last rung.
-WARN_ALWAYS = UID_WARNING
-# What rung 2 says before it removes anything.
-REMOVAL_NOTICE = 'REMOVING .godot/'
-
-
-def _scenario_fixture(tmp_path: Path, warn: str,
-                      result: str = 'PASS') -> tuple[Path, dict, Path]:
-    """A Godot project carrying scenario.sh at stock depth, a `.godot` whose
-    index is stale, and a `godot` that reports the uid class per `warn`."""
-    root = tmp_path / 'repo'
-    _project(root, SCENARIO)
-    (root / 'tests' / 'integration').mkdir(parents=True)
-    (root / 'tests' / 'integration' / 'alpha.gd').write_text('extends Node\n',
-                                                             encoding='utf-8')
-    (root / '.godot').mkdir()
-    (root / '.godot' / 'uid_cache.bin').write_text('', encoding='utf-8')
-    (root / STALE_MARKER).write_text('56 tracked sidecars missing\n',
-                                     encoding='utf-8')
-    stub = _stub_engine(tmp_path, SCENARIO_STUB.format(warn=warn, result=result))
-    log = tmp_path / 'stub.log'
-    log.write_text('', encoding='utf-8')
-    env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
-           'GDK_STUB_LOG': str(log),
-           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
-    return root, env, log
-
-
-def _run_scenario(root: Path, env: dict) -> subprocess.CompletedProcess:
-    return subprocess.run(['bash', 'tools/dev/runners/scenario.sh', 'alpha'],
-                          cwd=root, text=True, capture_output=True, env=env)
-
-
-def _engine_runs(log: Path) -> tuple[int, int]:
-    """(boots, rebuilds) — every engine invocation the run actually made."""
-    lines = log.read_text(encoding='utf-8').split()
-    return lines.count('boot'), lines.count('rebuild')
-
-
-def test_a_stale_uid_index_survives_the_rebuild_and_the_run_removes_the_cache(tmp_path):
-    """The bug, end to end. Rung 1 rebuilds and changes nothing; rung 2 removes
-    `.godot/` and rebuilds, and the third boot is clean. Before the escalation
-    the run stopped after rung 1 and reported FAIL over a scenario that had
-    passed twice. `rm -rf .godot` throws away a local editor's state, so it is
-    announced — once."""
-    root, env, log = _scenario_fixture(tmp_path, WARN_WHILE_STALE)
-    done = _run_scenario(root, env)
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert '[SCENARIO] alpha PASS' in done.stdout, done.stdout
-    assert _engine_runs(log) == (3, 2), done.stdout + done.stderr
-    assert not (root / STALE_MARKER).exists(), 'the stale index was left in place'
-    assert done.stderr.count(REMOVAL_NOTICE) == 1, done.stderr
-
-
-def test_the_escalation_is_bounded_at_two_remedies_and_the_third_failure_is_final(tmp_path):
-    """A tree neither remedy repairs must cost exactly two remedies. The ladder
-    is straight-line code, never a loop — a retry re-evaluating its own
-    condition would boot the engine forever on a tree that is really broken.
-    Announced once, and the failure that followed did not un-announce it."""
-    root, env, log = _scenario_fixture(tmp_path, WARN_ALWAYS)
-    done = _run_scenario(root, env)
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert _engine_runs(log) == (3, 2), done.stdout + done.stderr
-    assert 'FAIL — engine-level errors' in done.stdout, done.stdout
-    assert done.stderr.count(REMOVAL_NOTICE) == 1, done.stderr
-
-
-def test_a_genuinely_failing_scenario_is_never_retried_and_never_costs_a_remedy(tmp_path):
-    """The conjunct that keeps the recovery from papering over real failures.
-    No PASS line means the tree is not what is broken, so nothing is rebuilt,
-    nothing is removed, and the run fails on its first boot."""
-    root, env, log = _scenario_fixture(tmp_path, WARN_ALWAYS, result='FAIL')
-    done = _run_scenario(root, env)
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert _engine_runs(log) == (1, 0), done.stdout + done.stderr
-    assert REMOVAL_NOTICE not in done.stderr, done.stderr
-    assert (root / STALE_MARKER).exists(), 'a failing scenario cost the cache'
-
-
-def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
-    """integration.sh runs N scenarios in ONE tree. Removing `.godot/` under
-    peers that are mid-boot turns one cache defect into a scatter of failures
-    that look like real ones — the read-side cardinal sin, manufactured by the
-    recovery itself. Rung 1 is no better there: an editor pass IN THE TREE,
-    from every job that hits the cold cache at once. Inside a sweep the run
-    names the repair instead of performing either rung, and the tree it would
-    not touch is still there."""
-    root, env, log = _scenario_fixture(tmp_path, WARN_WHILE_STALE)
-    done = _run_scenario(root, dict(env, GDK_SCENARIO_IN_SWEEP='1'))
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert _engine_runs(log) == (1, 0), done.stdout + done.stderr
-    assert (root / STALE_MARKER).exists(), 'a sweep removed a shared cache'
-    assert REMOVAL_NOTICE not in done.stderr, done.stderr
-    assert 'make import-cache' in done.stderr, done.stderr
-    assert 'rm -rf .godot' in done.stderr, done.stderr
-
-
-# What a run writes into the tree, ignored as the install's next step says, so
-# a receipt's key holds still across the run that files it.
-RUN_OUTPUT_IGNORES = '.gate-reports/\n.scenario-reports/\n.headless-userdata/\n.godot/\nran.txt\n'
-
-
-def _commit_all(root: Path) -> None:
-    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=root, check=True)
-    (root / '.gitignore').write_text(RUN_OUTPUT_IGNORES, encoding='utf-8')
-    subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
-    subprocess.run([*GIT, 'commit', '-q', '-m', 'fixture'], cwd=root, check=True)
-
-
-def test_a_direct_scenario_run_reuses_its_receipt_and_a_sweep_job_never_does(tmp_path):
-    """gdk#44. A direct `scenario.sh <name>` that passed files a receipt; the
-    same tree again boots nothing. A job inside a sweep is integration.sh's to
-    receipt, so it boots every time and files none."""
-    root, env, log = _scenario_fixture(tmp_path, warn='')
-    _commit_all(root)
-    for boots in (1, 1):
-        done = _run_scenario(root, env)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert _engine_runs(log) == (boots, 0), done.stdout + done.stderr
-    assert '[SCENARIO] alpha PASS steps=1 errors=0; reused — receipt' in done.stdout, done.stdout
-    done = _run_scenario(root, dict(env, GDK_SCENARIO_IN_SWEEP='1', GDK_RECEIPTS='1'))
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _engine_runs(log) == (2, 0), 'a sweep job reused a receipt'
-
-
-SPOT = INSTALLABLES / 'spot.sh'
-# gdlint and the engine, each recording what it was asked. The engine prints
-# the sweep's result line over exactly the scripts after `--`.
 GDLINT_STUB = ('#!/usr/bin/env bash\necho "lint $*" >> "$GDK_STUB_LOG"\n'
                'for f; do case "$f" in *bad*) echo "$f:1: Error: bad name"; exit 1 ;; esac; done\n'
                'echo "Success: no problems found"\n')
@@ -659,59 +506,6 @@ def test_spot_checks_only_the_changed_scripts_and_a_scene_only_change_passes_cen
     assert done.returncode == 2 and 'no merge base' in done.stderr, done.stdout + done.stderr
 
 
-def test_a_parse_error_fails_fast_and_names_itself_instead_of_waiting_for_the_bound(tmp_path):
-    """GitHub #12. A runner whose load() came back null over a broken script
-    never quits, so the run sat out the whole hard timeout and blamed a hang
-    on what stderr had already named. The stub prints Godot's signature and
-    then outlives the bound; the watch must stop it within seconds — the run
-    returning at all proves the engine holding the pipe is gone."""
-    parse = ('echo \'SCRIPT ERROR: Parse Error: Identifier "nope" not declared'
-             ' in the current scope.\'; sleep 30')   # not exec'd: a wrapper's child
-    root, env, _ = _scenario_fixture(tmp_path, parse)
-    # The REAL timeout, not the exec stub: the stop is a signal to the bound,
-    # which forwards it to the engine's whole process group.
-    real = shutil.which('timeout') or shutil.which('gtimeout')
-    assert real, 'GNU coreutils timeout is required for this case'
-    (tmp_path / 'bin' / 'timeout').unlink()
-    (tmp_path / 'bin' / 'timeout').symlink_to(real)
-    started = time.monotonic()
-    done = _run_scenario(root, dict(env, GDK_SCENARIO_HARD_TIMEOUT='20'))
-    elapsed = time.monotonic() - started
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert elapsed < 10, f'{elapsed:.1f}s — the run waited on the engine'
-    assert done.stdout.startswith('[SCENARIO] alpha FAIL — GDScript parse error: '
-                                  'SCRIPT ERROR: Parse Error: Identifier "nope"'), done.stdout
-    assert 'likely hang' not in done.stdout and not done.stderr, done.stdout + done.stderr
-
-
-# --- the fan-out: integration.sh CALLS scenario.sh --------------------------
-# What the fan-out prints when every job came back 0. Both halves are asserted:
-# the count, and that nothing was quietly dropped.
-SWEEP_SUMMARY = '[INTEGRATION] SUMMARY: 2 passed, 0 failed (of 2)'
-FANOUT_ENV = {'PATH': '/usr/bin:/bin', 'GDK_JOBS': '2',
-              'GDK_SCENARIO_RUNNER': 'stub_scenario.sh'}
-
-
-def _fanout_fixture(tmp_path: Path, stub_body: str, mode: int = 0o755) -> Path:
-    """A repo holding integration.sh at its stock depth and a stand-in
-    scenario runner at `mode`. No engine anywhere: the stand-in IS the
-    scenario, so what is exercised is the one thing the fan-out owns — how it
-    invokes the runner beside it."""
-    runners = tmp_path / 'tools' / 'dev' / 'runners'
-    runners.mkdir(parents=True)
-    (tmp_path / 'project.godot').write_text('config_version=5\n', encoding='utf-8')
-    # A current import cache, written after project.godot: a --diff/--all
-    # sweep repairs a stale one first, and no import_cache.sh stands here.
-    (tmp_path / '.godot').mkdir()
-    (tmp_path / '.godot' / 'uid_cache.bin').write_bytes(b'')
-    shutil.copy2(INTEGRATION, runners / 'integration.sh')
-    shutil.copy2(LIBRARY, runners.parent / 'gdk_runners.sh')
-    stub = runners / 'stub_scenario.sh'
-    stub.write_text('#!/usr/bin/env bash\n' + stub_body, encoding='utf-8')
-    stub.chmod(mode)
-    return runners / 'integration.sh'
-
-
 def test_engine_gate_conflicts_fast_and_descendants_keep_host_lease_after_home_sandbox(tmp_path):
     """The lock is host-scoped and descriptor-backed: a second gate with
     GDK_ENGINE_GATE_WAIT=0 fails immediately with owner context, while sourced
@@ -861,63 +655,6 @@ def test_bounded_env_godot_command_is_leased_and_invalid_cache_lease_refuses(tmp
     assert marker.read_text(encoding='utf-8').strip() == '2'
 
 
-def test_integration_read_only_verbs_do_not_consult_engine_lease(tmp_path):
-    runner = _fanout_fixture(tmp_path, 'exit 0\n')
-    poisoned = dict(FANOUT_ENV, HOME=str(tmp_path / 'home'),
-                    GDK_ENGINE_GATE_FD='999999', GDK_ENGINE_GATE_OWNER_PID='1')
-    for verb in ('--help', '--list', '--self-test'):
-        done = subprocess.run(['bash', str(runner), verb], cwd=tmp_path,
-                              text=True, capture_output=True, env=poisoned)
-        assert done.returncode in (0, 1), f'{verb}: {done.stdout}{done.stderr}'
-        assert 'engine gate' not in done.stderr.lower(), done.stderr
-
-
-def test_the_fan_out_runs_a_runner_with_no_exec_bit_and_tells_every_job_it_has_peers(tmp_path):
-    """MAJOR-1. `install-runners` wrote every runner -rw-r--r--, and this one
-    caller exec'd `$SCENARIO_SH` directly — so every scenario on every
-    `init`'d project came back 126. The runner is invoked as `bash <path>`,
-    which is what makes the sweep independent of a checkout's mode bits. And
-    the sweep guard in scenario.sh is only as good as the one caller that
-    sets the marker: asserted through the REAL fan-out, because the marker
-    lives inside a single-quoted xargs body — the place a plausible edit
-    silently stops running (an apostrophe in a comment there ended the string
-    and broke the whole sweep, once).
-
-    #8, on the same sweep: the run reports its BOOTS — one per scenario file,
-    the tier's real cost unit."""
-    runner = _fanout_fixture(
-        tmp_path, 'echo "${GDK_SCENARIO_IN_SWEEP:-unset}" > "$PWD/sweep.txt"\n'
-                  'echo "[SCENARIO] $1 PASS"\n', mode=0o644)
-    done = subprocess.run(['bash', str(runner), 'alpha', 'beta'], cwd=tmp_path,
-                          text=True, capture_output=True, env=FANOUT_ENV)
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.splitlines()[-1] == SWEEP_SUMMARY, done.stdout
-    assert 'Permission denied' not in done.stdout + done.stderr
-    marker = tmp_path / 'sweep.txt'
-    assert marker.exists(), done.stdout + done.stderr
-    assert marker.read_text(encoding='utf-8').strip() == '1', marker.read_text()
-    assert re.search(r'^\[INTEGRATION\] BOOTS: 2 scenario\(s\) booted, \d+\.\ds CPU, '
-                     r'\d+\.\d\ds per boot$', done.stdout, re.M), done.stdout
-
-
-def test_a_failing_scenario_with_no_summary_line_still_gets_a_diagnosis(tmp_path):
-    """The other half of MAJOR-1: `Permission denied` matched nothing in
-    FAILURE_SUMMARY_RE, so the FAILURES block printed the scenario name and
-    then nothing at all. A transcript the summary patterns cannot read is the
-    case a reader needs the MOST."""
-    runner = _fanout_fixture(tmp_path, 'echo boot >> "$PWD/boots.txt"\n'
-                                      'echo "some engine noise nothing matches"\nexit 1\n')
-    done = subprocess.run(['bash', str(runner), 'alpha', '--no-rerun', '--cold'], cwd=tmp_path,
-                          text=True, capture_output=True,
-                          env=dict(FANOUT_ENV, GDK_INTEGRATION_WARM='1'))
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert '--- alpha ---' in done.stdout, done.stdout
-    assert 'some engine noise nothing matches' in done.stdout, (
-        'the FAILURES block named the scenario and said nothing about it')
-    assert (tmp_path / 'boots.txt').read_text() == 'boot\n', done.stdout
-
-
-@pytest.mark.skipif(shutil.which('shellcheck') is None, reason='needs shellcheck')
 def test_every_shipped_runner_and_a_consumer_sourcing_the_library_shellcheck_clean(tmp_path):
     """`shellcheck -x` on the installables: they land in consumer trees whose
     own shell gate runs over tools/ (this repo's `check shell` scans tools/,
@@ -951,267 +688,6 @@ def test_every_shipped_runner_and_a_consumer_sourcing_the_library_shellcheck_cle
     assert done.returncode == 0, done.stdout + done.stderr
 
 
-# --- the slice: --system is a DIRECTORY, --diff is what the change covers ----
-# The self-test corpus proves the pure functions (the three grammars, the
-# multi-path awk). These prove the CLI end to end against a git repo and a
-# stand-in scenario runner, booting nothing.
-COVERS_HEADER = ('extends "res://tests/integration/scenario_base.gd"\n\n'
-                 '## Boots because: tests/unit/alpha/test_alpha.gd cannot drive '
-                 'the live flow.\n'
-                 '## covers: systems/alpha\n\n'
-                 'func run() -> void:\n\tpass\n')
-UNDECLARED_BODY = 'extends "res://tests/integration/scenario_base.gd"\n\nfunc run() -> void:\n\tpass\n'
-ROSTER = {'tests/integration/alpha/alpha_flow.gd', 'tests/integration/beta/beta_flow.gd',
-          'tests/integration/smoke.gd'}
-
-
-def _slice_fixture(tmp_path: Path, git_root: Path | None = None) -> Path:
-    """A git repo at the stock layout: a declared scenario in alpha/, an
-    undeclared one in beta/, a directory holding only a capture tool, the
-    smoke scenario, and the system the declared one covers — committed, so a
-    diff against HEAD is empty until the test touches something.
-
-    `git_root` puts the git toplevel ABOVE the project (a monorepo's game/);
-    stock is the project root itself."""
-    git_root = git_root or tmp_path
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    # The fan-out files each job's output under its own log, so the stand-in
-    # records what it was asked to run where the test can read it.
-    runner = _fanout_fixture(
-        tmp_path, f'echo "$1" >> "{tmp_path / "ran.txt"}"\necho "[SCENARIO] $1 PASS"\n')
-    tier = tmp_path / 'tests' / 'integration'
-    for rel, body in (('alpha/alpha_flow.gd', COVERS_HEADER),
-                      ('beta/beta_flow.gd', UNDECLARED_BODY),
-                      ('tools_only/eyes_capture.gd', UNDECLARED_BODY),
-                      ('smoke.gd', UNDECLARED_BODY),
-                      ('scenario_base.gd', 'extends Node\n')):
-        (tier / rel).parent.mkdir(parents=True, exist_ok=True)
-        (tier / rel).write_text(body, encoding='utf-8')
-    (tmp_path / 'systems' / 'alpha').mkdir(parents=True)
-    (tmp_path / 'systems' / 'alpha' / 'thing.gd').write_text('extends Node\n', encoding='utf-8')
-    (tmp_path / 'tests' / 'support').mkdir()
-    (tmp_path / 'tests' / 'support' / 'fixture.gd').write_text('extends Node\n', encoding='utf-8')
-    subprocess.run(['git', 'init', '-q'], cwd=git_root, check=True)
-    subprocess.run(['git', 'add', '-A'], cwd=git_root, check=True)
-    subprocess.run([*GIT, 'commit', '-q', '-m', 'fixture'], cwd=git_root, check=True)
-    return runner
-
-
-def _slice(runner: Path, *argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    root = runner.parents[3]
-    record = root / 'ran.txt'
-    if record.exists():
-        record.unlink()
-    return subprocess.run(['bash', str(runner), *argv], cwd=root, text=True,
-                          capture_output=True, env={**FANOUT_ENV, **(env or {})})
-
-
-def _ran(done: subprocess.CompletedProcess) -> set[str]:
-    """What the stand-in runner was asked to boot on THIS run — read from its
-    own record, because the fan-out files every scenario's output under its
-    own log."""
-    record = Path(done.args[1]).parents[3] / 'ran.txt'
-    if not record.exists():
-        return set()
-    return set(record.read_text(encoding='utf-8').split())
-
-
-def _touch(path: Path, body: str = 'extends Node2D\n') -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding='utf-8')
-
-
-def test_system_selects_the_directory_and_a_prefix_or_a_bad_ref_is_a_usage_error(tmp_path):
-    """`--system <x>` once matched a scenario NAME prefix: `--system threads`
-    found nothing in tests/integration/threads/ (the files are thread_*.gd)
-    and two agents in a row concluded the system had no coverage, while a
-    typo'd prefix could quietly under-select. A prefix is not a directory,
-    and the refusal names the directories that exist. A ref naming no commit
-    is refused the same way: nothing boots on a usage error."""
-    runner = _slice_fixture(tmp_path)
-    done = _slice(runner, '--system', 'beta')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'beta_flow'}, done.stdout
-    done = _slice(runner, '--system', 'alph')
-    assert done.returncode == 2, done.stdout + done.stderr
-    assert _ran(done) == set(), 'a prefix selected scenarios'
-    assert "no directory 'alph'" in done.stderr, done.stderr
-    assert 'alpha' in done.stderr and 'beta' in done.stderr, done.stderr
-    done = _slice(runner, '--diff', 'no-such-ref')
-    assert done.returncode == 2, done.stdout + done.stderr
-    assert 'does not name a commit' in done.stderr, done.stderr
-    assert _ran(done) == set()
-
-
-def test_an_integration_receipt_boots_nothing_until_a_covered_path_moves(tmp_path):
-    """gdk#44. A passing `--smoke` files a receipt, asked before the engine
-    lease; the second run boots nothing and creates the file
-    GDK_GATE_UNMEASURED names, so its wrapper files no cost row. A path the
-    scenario's header covers is an input even inside an excluded directory:
-    editing it re-runs, and editing prose nothing covers does not."""
-    runner = _slice_fixture(tmp_path)
-    (tmp_path / 'tests' / 'integration' / 'smoke.gd').write_text(
-        'extends Node\n## covers: docs/smoke\n\nfunc run() -> void:\n\tpass\n', encoding='utf-8')
-    _touch(tmp_path / 'docs' / 'smoke' / 'route.md', 'a\n')
-    _touch(tmp_path / 'docs' / 'other.md', 'a\n')
-    (tmp_path / '.gitignore').write_text(RUN_OUTPUT_IGNORES, encoding='utf-8')
-    unmeasured = tmp_path / '.gate-reports' / '.smoke.unmeasured'
-    unmeasured.parent.mkdir()
-    env = {'GDK_GATE_UNMEASURED': str(unmeasured)}
-
-    done = _slice(runner, '--smoke', env=env)
-    assert done.returncode == 0 and _ran(done) == {'smoke'}, done.stdout + done.stderr
-    assert not unmeasured.exists(), 'a measured run said it measured nothing'
-    done = _slice(runner, '--smoke', env=env)
-    assert done.returncode == 0 and _ran(done) == set(), done.stdout + done.stderr
-    assert '[INTEGRATION] SUMMARY: 1 passed, 0 failed (of 1); reused — receipt' in done.stdout
-    assert unmeasured.exists(), 'a reused run left its wrapper to file a cost row'
-    _touch(tmp_path / 'docs' / 'other.md', 'b\n')
-    assert _ran(_slice(runner, '--smoke', env=env)) == set(), 'uncovered prose re-ran smoke'
-    _touch(tmp_path / 'docs' / 'smoke' / 'route.md', 'b\n')
-    assert _ran(_slice(runner, '--smoke', env=env)) == {'smoke'}, 'a covered path moved no key'
-
-
-def test_a_directory_holding_no_gate_is_a_FAIL_not_a_green_run_over_nothing(tmp_path):
-    runner = _slice_fixture(tmp_path)
-    done = _slice(runner, '--system', 'tools_only')
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert 'EMPTY' in done.stderr, done.stderr
-    assert '1 .gd file(s)' in done.stderr, done.stderr
-
-
-def test_diff_slices_a_clean_tree_to_smoke_and_a_change_by_every_touched_path(tmp_path):
-    """Three trees, one fixture. Clean: exactly smoke, which is what
-    `precommit` runs on a clean tree. A touched path OUTSIDE every
-    declaration: smoke alone — `systems/alphabet` is not under the prefix
-    `systems/alpha`. Then the shape a real change has: several paths (BWK awk
-    on macOS refuses a newline inside a `-v` string, so a two-path list once
-    came back as an EMPTY slice reporting nothing undeclared — green over the
-    wrong set), a touched undeclared scenario, and a NEW untracked one; every
-    one of them runs, and the undeclared are REPORTED, not silently skipped."""
-    runner = _slice_fixture(tmp_path)
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'smoke'}, done.stdout
-    assert '0 touched path(s)' in done.stdout, done.stdout
-
-    _touch(tmp_path / 'systems' / 'alphabet' / 'x.gd')
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'smoke'}, 'alphabet matched the prefix alpha'
-
-    _touch(tmp_path / 'systems' / 'alpha' / 'thing.gd')
-    _touch(tmp_path / 'README.md', '# touched too\n')
-    _touch(tmp_path / 'tests' / 'integration' / 'beta' / 'beta_flow.gd', UNDECLARED_BODY + '\n')
-    _touch(tmp_path / 'tests' / 'integration' / 'beta' / 'beta_new.gd', UNDECLARED_BODY)
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'alpha_flow', 'beta_flow', 'beta_new', 'smoke'}, done.stdout
-    assert '5 touched path(s)' in done.stdout, done.stdout
-    assert 'UNDECLARED: 3 scenario(s)' in done.stdout, done.stdout
-    assert '    beta_flow' in done.stdout and '    smoke' in done.stdout, done.stdout
-    assert done.stdout.strip().endswith(
-        '(of 4); slice of 5 touched path(s), 3 undeclared scenario(s) ride only --all'), done.stdout
-
-
-def test_a_touched_piece_of_the_tiers_ground_selects_every_scenario(tmp_path):
-    """The scenario base is ground: every scenario boots on it. A fixture
-    under tests/support/ is not (#33) — but one NO scenario loads boots the
-    tier too, and says so, rather than selecting nothing (rule 4)."""
-    runner = _slice_fixture(tmp_path)
-    _touch(tmp_path / 'tests' / 'integration' / 'scenario_base.gd')
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
-    assert "the tier's own ground" in done.stdout, done.stdout
-    assert 'eyes_capture' not in done.stdout, 'a capture TOOL boots in the whole-tier slice'
-    subprocess.run([*GIT, 'commit', '-q', '-am', 'base'], cwd=tmp_path, check=True)
-    _touch(tmp_path / 'tests' / 'support' / 'fixture.gd')
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'alpha_flow', 'beta_flow', 'smoke'}, done.stdout
-    assert ('[INTEGRATION] fixture tests/support/fixture.gd is referenced by no scenario'
-            ' — booting the tier') in done.stdout, done.stdout
-
-
-def test_a_hostile_or_doubled_slash_covers_entry_selects_nothing_and_reads_as_undeclared(tmp_path):
-    """The gate refuses the declaration; the runner must still not act on it.
-    An absolute, `..`, glob or `res://` entry compared as a prefix of a touched
-    path can match nothing git reports — proven, not assumed. And
-    `systems/alpha//`: the gate once normalised it away and passed while the
-    runner dropped ONE slash and compared `systems/alpha/` as a prefix, which
-    `systems/alpha/thing.gd` is not — declared, never selected, and nothing
-    said so. One grammar in both now: an empty segment is refused, so every
-    one of these reads as UNDECLARED and is reported."""
-    runner = _slice_fixture(tmp_path)
-    _touch(tmp_path / 'tests' / 'integration' / 'alpha' / 'alpha_flow.gd',
-           COVERS_HEADER.replace(
-               '## covers: systems/alpha',
-               '## covers: /systems, ../systems, systems/*, res://systems, systems/alpha//'))
-    subprocess.run([*GIT, 'commit', '-q', '-am', 'hostile'], cwd=tmp_path, check=True)
-    _touch(tmp_path / 'systems' / 'alpha' / 'thing.gd')
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'smoke'}, done.stdout
-    assert 'UNDECLARED: 3 scenario(s)' in done.stdout, done.stdout
-    assert '    alpha_flow' in done.stdout, 'a scenario whose every entry is refused is undeclared'
-
-
-# --- the touched list is REPO_ROOT-relative and literal ----------------------
-# `git diff --name-only` names a path relative to the git TOPLEVEL and C-quotes
-# a non-ASCII one under core.quotePath (git's default), while a `## covers:`
-# entry is REPO_ROOT-relative and literal. A Godot project below the toplevel
-# (game/ in a monorepo) or a `café.gd` never matched anything, and `--diff`
-# under-selected to smoke without a word.
-def test_a_project_below_the_git_toplevel_slices_by_root_relative_paths(tmp_path):
-    """game/ in a monorepo: git names the change `game/systems/alpha/thing.gd`;
-    the scenario covers `systems/alpha`. A change OUTSIDE the project is not a
-    touched path of the project — nothing repo-relative can name it."""
-    project = tmp_path / 'game'
-    runner = _slice_fixture(project, git_root=tmp_path)
-    _touch(project / 'systems' / 'alpha' / 'thing.gd')
-    _touch(tmp_path / 'README.md', '# outside the project\n')
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'alpha_flow', 'smoke'}, done.stdout
-    assert '1 touched path(s)' in done.stdout, done.stdout
-
-
-def test_a_non_ascii_path_is_compared_literally_not_c_quoted(tmp_path):
-    """Under core.quotePath=true (git's default) `git diff --name-only` prints
-    `"systems/alpha/caf\\303\\251.gd"` — quotes and octal — which is a prefix
-    of nothing. The runner must ask git for the bytes."""
-    runner = _slice_fixture(tmp_path)
-    subprocess.run(['git', 'config', 'core.quotePath', 'true'], cwd=tmp_path, check=True)
-    _touch(tmp_path / 'systems' / 'alpha' / 'café.gd', 'extends Node\n')
-    done = _slice(runner, '--diff', 'HEAD')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert _ran(done) == {'alpha_flow', 'smoke'}, done.stdout
-    assert '1 touched path(s)' in done.stdout, done.stdout
-
-
-def test_list_prints_the_sorted_roster_honours_the_keep_list_and_fails_on_an_empty_one(tmp_path):
-    """`check test-shape` once scanned `git ls-files` minus infra basenames
-    while this runner discovers with find minus support/, the capture tools
-    and its keep-list — two rosters, and the header rule was asked of files
-    --diff can never slice to. The runner owns discovery (its config is in
-    this file and in GDK_* env, where no TOML reader can see it), so it prints
-    the roster and the gate asks. A roster of ZERO is a FAIL naming the
-    directory, never an empty page (rule 4)."""
-    runner = _slice_fixture(tmp_path)
-    done = _slice(runner, '--list')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.split('\n')[:-1] == sorted(ROSTER), done.stdout
-    assert _ran(done) == set(), 'listing the roster booted something'
-    done = _slice(runner, '--list', env={'GDK_CAPTURE_GATE_RE': '^(eyes_capture)$'})
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert set(done.stdout.split('\n')) - {''} == ROSTER | {'tests/integration/tools_only/eyes_capture.gd'}
-    done = _slice(runner, '--list', env={'GDK_SCENARIO_SOURCE_DIR': 'tests/integration/tools_only'})
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert 'EMPTY' in done.stderr and 'tests/integration/tools_only' in done.stderr, done.stderr
-    assert done.stdout == ''
-
-
 # --- the install verb: whole-file writes, once ---------------------------------
 # The verb's contract is the one every installer this package ever shipped
 # had: write each file once, refuse a differing destination by name (`--force`
@@ -1229,8 +705,10 @@ DESTINATIONS = {
     'tools/dev/runners/import_cache.sh', 'tools/dev/runners/parse.sh',
     'tools/dev/runners/compile_sweep.gd', 'tools/dev/runners/compile_sweep.gd.uid',
     'tools/dev/runners/lint.sh', 'tools/dev/runners/spot.sh',
-    'tools/dev/runners/warnings.sh',
-    'tools/dev/runners/unit.sh', 'tools/dev/runners/scenario.sh',
+    'tools/dev/runners/unit.sh', 'tools/dev/runners/gut_junit.py',
+    '.gutconfig.json', '.gutconfig.integration.json',
+    'tests/integration/integration_test_template.gd',
+    'tests/integration/measure_test_template.gd',
     'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
     'tools/dev/runners/hermetic_run_scan.sh',
     'tools/hooks/cc-godot-sandbox.sh',
@@ -1246,8 +724,8 @@ TOOLCHAIN_STEP = '- uses: ./.github/actions/godot-toolchain'
 UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
 # GDK_CHECKS names.
-GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'scenario',
-                 'capture', 'import-cache', 'hermetic-scan', 'godot-check')
+GODOT_TARGETS = ('parse', 'lint', 'spot', 'unit', 'integration',
+                 'capture', 'import', 'hermetic-scan', 'godot-check')
 
 
 @contextlib.contextmanager
@@ -1296,6 +774,8 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
         code, out, err = run_install()
         assert code == 0, out + err
         assert {rel for _name, rel in install.PLAN} == DESTINATIONS
+        assert install.CONTEXT_BLOCK in out and 'godot-native-first' in out
+        assert not (root / 'CLAUDE.md').exists() and not (root / 'AGENTS.md').exists()
         for rel in DESTINATIONS:
             assert (root / rel).is_file(), f'{rel} was not written'
             assert f'[install] wrote {rel}' in out, out
@@ -1380,8 +860,8 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
             {'name': 'Linux', 'preset': 'Linux', 'output': 'build/linux/g.x86_64', 'archive': 'zip'}]
         # Each gate entry is one parallel job: a string, or a list joined by spaces.
         got = read_config('[release]\ngodot_patch = "2"\ngate = ["gates-self-test", '
-                          '["check", "parse"], "integration-all GDK_SHARD=1/3"]\n')
-        assert json.loads(got['gates']) == ['gates-self-test', 'check parse', 'integration-all GDK_SHARD=1/3']
+                          '["check", "parse"], "integration"]\n')
+        assert json.loads(got['gates']) == ['gates-self-test', 'check parse', 'integration']
         assert 'gate_timeout' in read_config('[release]\ngodot_patch = "2"\ngate_timeout = 0\n')['error']
         assert 'gate_timeout' in read_config('[release]\ngodot_patch = "2"\ngate_timeout = "5"\n')['error']
         assert 'both or neither' in read_config('[release]\ngodot_patch = "2"\nversion_file = "v"\n')['error']
@@ -1414,10 +894,11 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
 
 
 @pytest.mark.parametrize('toml, says', [
-    # The roster keeps `uid`: `check uid` runs in `make check` once GDK_CHECKS
+    # The roster names `uid`: `check uid` runs in `make check` once GDK_CHECKS
     # (a Makefile variable this verb cannot read) names `godot-check`.
-    ('', 'is safe to delete once it does'),
-    # The roster drops `uid`: `godot-check` runs, `check uid` not.
+    ('[roster]\nchecks = ["uid"]\n', 'is safe to delete once it does'),
+    # The stock roster leaves `uid` out (opt-in since 4.0), and so does any roster not naming it.
+    ('', '`[roster] checks` leaves `uid` out'),
     ('[roster]\nchecks = ["tres"]\n', '`[roster] checks` leaves `uid` out'),
 ])
 def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
@@ -1438,6 +919,24 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
             assert says in line, line
             assert ('safe to delete' in line) == ('safe' in says), line
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
+
+
+@pytest.mark.parametrize('toml, safe', [('', True), ('[roster]\nchecks = ["uid"]\n', False)])
+def test_a_stale_warnings_runner_is_kept_and_named_retired(tmp_path, toml, safe):
+    """warnings.sh became `check warnings`: the old runner is no longer written,
+    never deleted, and named on every run that finds it."""
+    with consumer_repo(tmp_path) as root:
+        if toml:
+            (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
+        old = root / 'tools/dev/runners/warnings.sh'
+        old.parent.mkdir(parents=True)
+        old.write_text('echo old\n', encoding='utf-8')
+        code, out, err = run_install()
+        assert code == 0, out + err
+        line = next(l for l in out.splitlines()
+                    if l.startswith('[install] retired: tools/dev/runners/warnings.sh'))
+        assert '`check warnings`' in line and ('safe to delete' in line) is safe, line
+        assert old.read_text(encoding='utf-8') == 'echo old\n'
 
 
 @pytest.mark.parametrize('toml', [
@@ -1544,7 +1043,7 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
     tier file this verb wrote, reads its two lists, and `precommit` / `verify`
     name every tier — `make -n`, so nothing boots. The include refuses a tier
     no makefile defines at parse time, so exit 0 here is the whole claim.
-    The deprecated `milestone` alias runs `verify`."""
+    The retired `milestone` alias is not a target."""
     with consumer_repo(tmp_path, makefile=True) as root:
         assert run_install()[0] == 0
         declared: set[str] = set()
@@ -1561,8 +1060,7 @@ def test_the_written_tiers_resolve_under_the_pinned_include(tmp_path):
             # 2.0.0: `precommit` is check + spot and says it is retired, once.
             assert done.stdout.count('[PRECOMMIT] retired') == (composition == 'precommit'), done.stdout
         done = _make_n(root, 'milestone')
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert f'{{MAKE:-make}} check {" ".join(_tiers("GDK_VERIFY_TIERS"))}' in done.stdout, done.stdout
+        assert done.returncode != 0, done.stdout + done.stderr
         # Every declared tier and every named Godot target is a goal make
         # resolves — `integration-diff` / `integration-all` are the slices
         # the compositions run, `integration` the one a hand takes ARGS to.
@@ -1752,79 +1250,3 @@ def test_the_cli_routes_install_gates_and_no_longer_calls_the_old_verbs_agentic_
             with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
                 assert cli.main([verb]) == 2
             assert f'unknown command {verb!r}' in err.getvalue(), err.getvalue()
-
-
-# --- --shard i/n: one slice of the roster for a CI matrix (#67) --------------
-def _shard_fixture(tmp_path: Path, count: int) -> Path:
-    """The stub fan-out, plus a roster of `count` scenarios s01.gd, s02.gd, ...
-    The stand-in runner records each name it is asked to boot in ran.txt."""
-    runner = _fanout_fixture(
-        tmp_path, f'echo "$1" >> "{tmp_path / "ran.txt"}"\necho "[SCENARIO] $1 PASS"\n')
-    tier = tmp_path / 'tests' / 'integration'
-    for k in range(1, count + 1):
-        _touch(tier / ('sub' if k % 2 else '') / f's{k:02d}.gd', 'extends Node\n')
-    return runner
-
-
-def _booted(done: subprocess.CompletedProcess) -> list[str]:
-    record = Path(done.args[1]).parents[3] / 'ran.txt'
-    return record.read_text(encoding='utf-8').split() if record.exists() else []
-
-
-def test_shard_runs_a_stable_count_balanced_slice_and_the_slices_cover_the_roster_once(tmp_path):
-    """Every n in 1, 4, 6: the n slices are disjoint, together they are the
-    whole roster, they differ in size by at most 1, scenario k (from 1, sorted
-    by name) is in shard k mod n, and the same run twice gives the same slice.
-    The verdict line names the shard, and GDK_JOBS=2 still fans out inside it."""
-    total = 13
-    runner = _shard_fixture(tmp_path, total)
-    roster = [f's{k:02d}' for k in range(1, total + 1)]
-    for n in (1, 4, 6):
-        seen: list[str] = []
-        sizes = []
-        for i in range(1, n + 1):
-            done = _slice(runner, '--all', '--shard', f'{i}/{n}')
-            assert done.returncode == 0, done.stdout + done.stderr
-            slice_ = _booted(done)
-            assert sorted(slice_) == roster[i - 1::n], (i, n, slice_)
-            assert f'[INTEGRATION] shard {i}/{n}: {len(slice_)} scenario(s) of {total}' in done.stdout, done.stdout
-            assert f'(of {len(slice_)}); shard {i}/{n} of {total}' in done.stdout, done.stdout
-            assert '2-way parallel' in done.stdout, done.stdout
-            seen += slice_
-            sizes.append(len(slice_))
-        assert sorted(seen) == roster, (n, seen)
-        assert max(sizes) - min(sizes) <= 1, (n, sizes)
-    again = _slice(runner, '--all', '--shard', '2/4')
-    assert sorted(_booted(again)) == roster[1::4]
-    # The env spelling, and the =form, name the same slice; the flag wins.
-    done = _slice(runner, '--all', env={'GDK_SHARD': '3/6'})
-    assert sorted(_booted(done)) == roster[2::6] and 'shard 3/6' in done.stdout, done.stdout
-    done = _slice(runner, '--all', '--shard=1/6', env={'GDK_SHARD': '3/6'})
-    assert sorted(_booted(done)) == roster[0::6], done.stdout
-    # A rerun of the same slice is not answered by another slice's receipt.
-    done = _slice(runner, '--all')
-    assert sorted(_booted(done)) == roster, done.stdout
-
-
-def test_a_shard_past_the_end_of_a_short_roster_passes_with_a_0_scenarios_line(tmp_path):
-    runner = _shard_fixture(tmp_path, 3)
-    done = _slice(runner, '--all', '--shard', '5/6')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert '[INTEGRATION] shard 5/6: 0 scenario(s) of 3' in done.stdout, done.stdout
-    assert _booted(done) == [], done.stdout
-
-
-def test_a_malformed_shard_or_one_beside_another_mode_exits_2_with_a_reason(tmp_path):
-    runner = _shard_fixture(tmp_path, 3)
-    for bad in ('x', '1', '2/', '/3', '0/4', '5/4', '1/0', '-1/3', '1/2/3', 'a/b', '1.5/3', '1/9999999'):
-        done = _slice(runner, '--all', '--shard', bad)
-        assert done.returncode == 2, (bad, done.stdout, done.stderr)
-        assert 'shard' in done.stderr and _booted(done) == [], (bad, done.stderr)
-    done = _slice(runner, '--all', '--shard')
-    assert done.returncode == 2 and '--shard takes' in done.stderr, done.stderr
-    done = _slice(runner, '--all', env={'GDK_SHARD': '9/4'})
-    assert done.returncode == 2 and 'need 1 <= i <= n' in done.stderr, done.stderr
-    for other in (['--diff', 'HEAD'], ['--system', 'sub'], ['s01'], ['--smoke'], ['--list']):
-        done = _slice(runner, *other, '--shard', '1/2')
-        assert done.returncode == 2, (other, done.stdout, done.stderr)
-        assert 'slices --all only' in done.stderr and _booted(done) == [], (other, done.stderr)

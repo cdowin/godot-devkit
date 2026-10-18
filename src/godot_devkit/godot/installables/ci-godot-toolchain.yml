@@ -4,7 +4,7 @@
 # .github/workflows/verify.yml (agentic-sdlc's `install-ci` writes that file
 # and leaves the slot empty). The full gate boots the engine and shells out to
 # gdlint and shellcheck; this installs each at the version the laptop runs,
-# then imports the project, so `make milestone` on the runner reads the same
+# then imports the project, so `make verify` on the runner reads the same
 # tree the local gate reads. Paste, AFTER `astral-sh/setup-uv` (step 3 installs
 # gdlint with `uv tool`):
 #

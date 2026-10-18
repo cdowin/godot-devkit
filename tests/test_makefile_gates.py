@@ -3,7 +3,7 @@ tiers, and the seam between them.
 
 Three things are held here. The Godot roster that opens Makefile.tiers is what
 `install-runners` writes, and its `godot-check` target is how a consumer joins
-the eight gates to `make check` (GDK_CHECKS): that target is run for real over
+the stock gates to `make check` (GDK_CHECKS): that target is run for real over
 the committed clean Godot project, because a census over the file could not
 prove it fires. Every gate-shaped target this repo's files define routes
 through the capture library (`gdk_gate_capture` / `gdk_gate_verdict`), while
@@ -38,16 +38,15 @@ GATES = REPO_ROOT / 'Makefile.gates'
 OWN_MAKEFILES = (MAKEFILE, GATES, REPO_ROOT / 'Makefile.tiers')
 RUNNERS = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
-GODOT_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk', 'test-shape')
-# Targets this repo's files define that are NOT gates: `integration-list`
-# prints the roster — the list IS the output — `import-cache` rebuilds the
+GODOT_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk')
+# Targets this repo's files define that are NOT gates: `import` rebuilds the
 # engine's import cache, a tool with an outcome rather than a gate with a
 # verdict, `gdk-precommit-retired` and the `gdk-tiers-*` notices are one line
 # each, `help` prints the target list, and the compositions (`check`,
 # `precommit`, `verify`, the deprecated `milestone`) print their members'
 # verdicts and their own through the `gdk_composition` define.
-COMPOSITIONS = ('check', 'precommit', 'verify', 'milestone')
-NOT_A_GATE = {'integration-list', 'import-cache', 'gdk-precommit-retired', 'help',
+COMPOSITIONS = ('check', 'precommit', 'verify')
+NOT_A_GATE = {'import', 'gdk-precommit-retired', 'help',
               'gdk-tiers-none-precommit', 'gdk-tiers-none-verify',
               'gdk-tiers-skipped-verify', *COMPOSITIONS}
 
@@ -94,14 +93,20 @@ def publishes_a_verdict(body: str) -> bool:
     if 'gdk_gate_verdict' in body or '$(call gdk_gate,' in body:
         return True
     handoff = RUNNER_CALL.search(body)
-    return (handoff is not None and (RUNNERS / handoff.group(1)).is_file()
-            and 'gdk_gate_verdict' in (RUNNERS / handoff.group(1)).read_text(encoding='utf-8'))
+    if handoff is None or not (RUNNERS / handoff.group(1)).is_file():
+        return False
+    runner = (RUNNERS / handoff.group(1)).read_text(encoding='utf-8')
+    if 'gdk_gate_verdict' in runner:
+        return True
+    # Integration reuses the unit entry point's bounded GUT/verdict contract.
+    return ('exec bash "$RUNNER_DIR/unit.sh" "$@"' in runner
+            and 'gdk_gate_verdict' in (RUNNERS / 'unit.sh').read_text(encoding='utf-8'))
 
 
-def test_godot_check_runs_the_eight_gates_and_is_what_make_check_carries(tmp_path):
+def test_godot_check_runs_the_stock_gates_and_is_what_make_check_carries(tmp_path):
     """`godot-devkit check all` over the committed clean Godot project: one
     `[GODOT]` verdict line, nothing else on stdout, and the transcript says all
-    eight ran. GDK_CHECKS is how `make check` picks it up, so the joining is
+    stock gates ran. GDK_CHECKS is how `make check` picks it up, so the joining is
     asserted of the Makefile."""
     reports = tmp_path / 'reports'
     done = make('godot-check', GDK_GATE_REPORT_DIR=str(reports))
@@ -201,7 +206,7 @@ def test_the_installed_gates_run_with_neither_agentic_sdlc_nor_godot(game):
     done = game_make(game, 'help')
     assert done.returncode == 0, done.stdout + done.stderr
     plain = re.sub(r'\x1b\[[0-9;]*m', '', done.stdout)
-    for target in ('check', 'precommit', 'verify', 'milestone'):
+    for target in ('check', 'precommit', 'verify'):
         assert re.search(rf'^  {target}\s', plain, re.M), (target, plain)
     assert 'agentic' not in plain.lower()
     assert 'check runs: shell dummy' in plain, plain
@@ -232,10 +237,11 @@ def test_the_installed_gates_run_with_neither_agentic_sdlc_nor_godot(game):
     assert '[TIERS] verify skips [unit]' in done.stdout, done.stdout
     assert 'unit' not in re.search(r'check ([^\n"]*)', done.stdout.split('${MAKE:-make}')[1]).group(1).split(), done.stdout
 
-    # `milestone` is a deprecated alias of `verify`: the same goals.
-    done = game_make(game, 'milestone', '-n')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert '${MAKE:-make} check parse lint warnings unit integration-all' in done.stdout, done.stdout
+    # The old target and config names refuse instead of silently narrowing proof.
+    assert game_make(game, 'milestone', '-n').returncode != 0
+    for key in ('GDK_MILESTONE_TIERS', 'GDK_MILESTONE_SKIP'):
+        refused = game_make(game, 'verify', '-n', **{key: 'unit'})
+        assert refused.returncode != 0 and 'removed in 4.0' in refused.stderr
 
 
 def test_a_red_gate_fails_check_and_names_itself_and_the_rest_still_run(game):
@@ -286,13 +292,13 @@ def test_the_gate_library_corpus_passes():
     assert 'SELF-TEST OK' in done.stdout, done.stdout
 
 
-def test_integration_all_passes_gdk_shard_to_the_runner(game):
-    """`make integration-all GDK_SHARD=i/n` is `integration.sh --all --shard i/n`;
-    without it the recipe is the plain `--all` (`make -n`: no engine boots)."""
+def test_retired_integration_targets_and_sharding_refuse(game):
     (game / 'Makefile').write_text(GAME_MAKEFILE.split('GDK_PRECOMMIT_TIERS := tier-a')[0],
                                    encoding='utf-8')
-    done = game_make(game, 'integration-all', '-n', GDK_SHARD='2/6')
+    refused = game_make(game, 'integration', '-n', GDK_SHARD='2/6')
+    assert refused.returncode != 0 and 'GDK_SHARD' in refused.stderr
+    done = game_make(game, 'integration', '-n', ARGS='-gselect=boot')
     assert done.returncode == 0, done.stdout + done.stderr
-    assert re.search(r'integration\.sh --all --shard 2/6\b', done.stdout), done.stdout
-    done = game_make(game, 'integration-all', '-n')
-    assert re.search(r'integration\.sh --all(?! --shard)', done.stdout), done.stdout
+    assert re.search(r'integration\.sh -gselect=boot', done.stdout), done.stdout
+    for retired in ('scenario', 'smoke', 'integration-all', 'integration-diff', 'integration-list'):
+        assert game_make(game, retired, '-n').returncode != 0

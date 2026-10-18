@@ -4,3 +4,11 @@ config_version=5
 
 config/name="godot project fixture"
 config/features=PackedStringArray("4.4")
+
+[debug]
+
+gdscript/warnings/unused_variable=2
+gdscript/warnings/shadowed_variable=2
+gdscript/warnings/unused_signal=2
+gdscript/warnings/integer_division=2
+gdscript/warnings/standalone_expression=2
