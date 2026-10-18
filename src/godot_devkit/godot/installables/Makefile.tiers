@@ -75,7 +75,6 @@ GDK_HOOKS_DIR   ?= tools/hooks
 # so an exported empty value takes the runner's default and this file never
 # holds a second copy of it.
 #   GDK_GODOT           the engine binary (runner default: `godot`)
-#   GDK_SMOKE_SCENARIO  what `make smoke` boots (runner default: `smoke`)
 #   GDK_GUT_CMDLN       GUT's entry point (default: res://addons/gut/gut_cmdln.gd)
 GDK_GODOT          ?=
 GDK_GUT_CMDLN      ?=
