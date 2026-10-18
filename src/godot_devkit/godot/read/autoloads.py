@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """autoloads.py — autoload census + suffix/heuristic cross-check.
 
-A live check on an autoload naming contract: the suffix
-carries the semantic, so a data-lookup must NOT be a *Manager and a stateful
-lifecycle owner must NOT be a *Registry. This parses `project.godot
+A live check on an autoload naming contract a project declares: with no
+`[autoloads] suffixes` the verb lists the autoloads and their source heuristic;
+with a vocabulary, the suffix carries the semantic. This parses `project.godot
 [autoload]`, then for each autoload compares two independent signals:
 
-  * the NAME suffix — the *declared* class (override the vocabulary via
-    `[autoloads] suffixes` in godot-devkit.toml):
-      Registry  read-only data lookup (no signals)
-      Manager   stateful service that owns state + emits signals
-      Tracker   passive observer: subscribes to signals, emits none of its own
-      Store     append-only disk-backed window (no signals)
-      Service   stateful query owner: scalar/boolean answers, no signals
+  * the NAME suffix — the *declared* class (empty by default; declare the
+    vocabulary via `[autoloads] suffixes` in godot-devkit.toml)
   * a source HEURISTIC — declares a signal → emits (Manager-like); connects
     to others without declaring its own → relays (Tracker-like); neither →
     inert (Registry/Store/Service-like).
@@ -66,14 +61,9 @@ BUCKETS = (EMITS, RELAYS, INERT)
 
 # --- Declared classes (the name-suffix vocabulary) ---------------------------
 # Each suffix maps to the set of heuristic buckets consistent with its
-# contract; `[autoloads] suffixes` in godot-devkit.toml replaces this wholesale.
-DEFAULT_SUFFIXES: dict[str, tuple[str, ...]] = {
-    'Manager': (EMITS,),
-    'Tracker': (RELAYS,),
-    'Registry': (INERT,),
-    'Store': (INERT,),
-    'Service': (INERT,),
-}
+# contract. The stock vocabulary is empty (the kit teaches no framework words);
+# a project declares its own via `[autoloads] suffixes` in godot-devkit.toml.
+DEFAULT_SUFFIXES: dict[str, tuple[str, ...]] = {}
 NO_SUFFIX = '(no recognized suffix)'
 
 

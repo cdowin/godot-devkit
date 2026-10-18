@@ -122,6 +122,7 @@ class ConfigThroughCore(unittest.TestCase):
 
 class AutoloadsCensus(unittest.TestCase):
     def test_census_groups_by_suffix_and_flags_layout(self) -> None:
+        self.assertEqual(autoloads.DEFAULT_SUFFIXES, {})  # no stock framework words
         code, out, _ = run_in(autoloads)
         self.assertEqual(code, 0, out)
         for phrase in ('# autoload census (2)',
