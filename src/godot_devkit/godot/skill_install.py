@@ -23,9 +23,11 @@ USAGE = ('usage: godot-devkit install-skills [--runtime codex|claude] '
          'the default is .agents/skills for Codex or .claude/skills for Claude.')
 
 
+SKILLS = ('godot-native-first', 'godot-ui')
+
+
 def _skills() -> list[str]:
-    root = resources.files(PACKAGE).joinpath('skills')
-    return sorted(p.name for p in root.iterdir() if p.joinpath('SKILL.md').is_file())
+    return sorted(SKILLS)
 
 
 def _source(skill: str, name: str) -> str:
