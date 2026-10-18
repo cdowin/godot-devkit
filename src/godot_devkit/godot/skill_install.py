@@ -28,7 +28,7 @@ SKILLS = ('godot-101', 'godot-native-first', 'godot-ui')
 EXTRA_FILES = {
     'godot-101': tuple(f'reference/{name}.md' for name in (
         'animation', 'audio', 'physics-and-collision', 'saving-and-data',
-        'streaming-and-performance', 'testing-and-debugging', 'ui')),
+        'scenes-and-lifecycle', 'streaming-and-performance', 'testing-and-debugging', 'ui')),
 }
 
 
