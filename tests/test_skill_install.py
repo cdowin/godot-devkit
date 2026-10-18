@@ -23,6 +23,9 @@ def test_default_roots_check_and_idempotence(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
     assert (codex / 'SKILL.md').read_text() == skill_install._source('godot-ui', 'SKILL.md')
     assert (codex / 'agents' / 'openai.yaml').read_text() == skill_install._source('godot-ui', 'agents/openai.yaml')
+    reference = 'reference/ui.md'
+    assert (tmp_path / '.agents' / 'skills' / 'godot-101' / reference).read_text() == \
+        skill_install._source('godot-101', reference)
     before = {p: p.stat().st_mtime_ns for p in codex.rglob('*') if p.is_file()}
     assert skill_install.main([]) == 0
     assert 'already current' in capsys.readouterr().out

@@ -68,8 +68,8 @@ MIT — see [LICENSE](LICENSE).
 
 ## Agent skills
 
-`godot-devkit install-skills --runtime codex` installs every bundled skill (`godot-ui`,
-`godot-native-first`) in `.agents/skills/`; `--skill NAME` installs one;
+`godot-devkit install-skills --runtime codex` installs every bundled skill (`godot-101`,
+`godot-ui`, `godot-native-first`) in `.agents/skills/`; `--skill NAME` installs one;
 `--runtime claude` uses `.claude/skills/`. `--dest <skills-root>` selects another scope.
 Use `--check` to verify installed files. The skill maps UI contracts to native scene proof.
 `install-runners` prints a context block for your CLAUDE.md and AGENTS.md; it never writes them.

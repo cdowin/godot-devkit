@@ -7,11 +7,16 @@ README.md is a landing page: at most README_MAX_LINES lines.
 import subprocess
 from pathlib import Path
 
+from godot_devkit.godot.skill_install import EXTRA_FILES, FILES, SKILLS
+
 ROOT = Path(__file__).resolve().parent.parent
+# The bundled skills' .md files are the ones the installer ships, so a skill file the
+# installer would not ship is stray here too.
+SKILLS_DIR = "src/godot_devkit/godot/installables/skills"
 ALLOWED_MD = {
     "README.md", "CLAUDE.md", "AGENTS.md",
-    "src/godot_devkit/godot/installables/skills/godot-ui/SKILL.md",
-    "src/godot_devkit/godot/installables/skills/godot-native-first/SKILL.md",
+    *(f"{SKILLS_DIR}/{skill}/{name}" for skill in SKILLS
+      for name in FILES + EXTRA_FILES.get(skill, ()) if name.endswith(".md")),
 }
 README_MAX_LINES = 80
 

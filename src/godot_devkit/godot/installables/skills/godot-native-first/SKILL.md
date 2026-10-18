@@ -31,13 +31,13 @@ explain, and it hides the engine's own editor tooling, docs and fixes.
 | settings | ConfigFile |
 | event bus | typed signals |
 | registry | Resource catalog (`.tres`) |
-| state machine | state node or AnimationTree |
+| state machine | state nodes (one child node per state); AnimationTree only blends animation |
 | pause | `get_tree().paused` + `process_mode` |
 | cursor manager | `Input.set_custom_mouse_cursor` |
 | debug overlay | `Performance.add_custom_monitor` |
 | overlap check every frame | Area2D signals |
 | autotile code | TileSet terrains |
-| pose code | AnimationTree / AnimationPlayer |
+| pose code | AnimatedSprite2D + SpriteFrames for sprite sheets; AnimationPlayer to key properties, AnimationTree to blend |
 
 ## When a custom node is right
 
@@ -46,3 +46,10 @@ explain, and it hides the engine's own editor tooling, docs and fixes.
 
 Say which of the two applies in the change description. A custom node that wraps one engine call
 is neither.
+
+## Where to go next
+
+- `godot-101`: the scene and node model, the Godot 3 habits that break in Godot 4, and the engine
+  feature for each common game need, with a reference file per domain. Read it when you start a
+  project or design a new system.
+- `godot-ui`: menus, HUDs, dialogs and Control layouts.

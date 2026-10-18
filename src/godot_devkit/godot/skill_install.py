@@ -23,7 +23,13 @@ USAGE = ('usage: godot-devkit install-skills [--runtime codex|claude] '
          'the default is .agents/skills for Codex or .claude/skills for Claude.')
 
 
-SKILLS = ('godot-native-first', 'godot-ui')
+SKILLS = ('godot-101', 'godot-native-first', 'godot-ui')
+# Files a skill ships beyond FILES, named here so enumeration stays in core.walk.
+EXTRA_FILES = {
+    'godot-101': tuple(f'reference/{name}.md' for name in (
+        'animation', 'audio', 'physics-and-collision', 'saving-and-data',
+        'streaming-and-performance', 'testing-and-debugging', 'ui')),
+}
 
 
 def _skills() -> list[str]:
@@ -122,7 +128,8 @@ def main(argv: list[str]) -> int:
                   f'(bundled: {", ".join(names)})', file=sys.stderr)
             return 2
         entries = [(root / one / name, f'{one}/{name}', _source(one, name))
-                   for one in names if skill in (None, one) for name in FILES]
+                   for one in names if skill in (None, one)
+                   for name in FILES + EXTRA_FILES.get(one, ())]
     except (OSError, UnicodeError) as err:
         print(f'godot-devkit {COMMAND}: bundled skill cannot be read: {err}',
               file=sys.stderr)
