@@ -100,6 +100,9 @@ files. Most game data never needs them.
 - Renaming a resource script's property breaks old saves silently (the value is dropped). Keep a
   version field and migrate.
 - `ResourceLoader.load` caches; pass `CACHE_MODE_IGNORE` to re-read a save from disk.
+- The cache holds a resource only while something references it. A shared catalog accessor that
+  returns `load(PATH)` and keeps no reference re-reads the file on every call once the last user
+  drops it. Hold it: `static var _shared: MyCatalog` set on first use (or `preload` into a const).
 
 ## Class reference
 
