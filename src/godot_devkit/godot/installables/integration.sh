@@ -1887,11 +1887,11 @@ if { [ "$MODE" = "--diff" ] || [ "$MODE" = "--all" ]; } && [ -f project.godot ] 
 	# Its usage/config error (not a project, no library, a copy that failed)
 	# is this run's too: exit 2 passes through (rule 6); any other is a FAIL.
 	if [ "$repair_rc" -eq 2 ]; then
-		echo "[$GATE_TAG] the import-cache repair ($IMPORT_CACHE_RUNNER) exited 2, a usage or config error; the sweep did not start. Run it alone (make import-cache) and read its report." >&2
+		echo "[$GATE_TAG] the import-cache repair ($IMPORT_CACHE_RUNNER) exited 2, a usage or config error; the sweep did not start. Run it alone (make import) and read its report." >&2
 		exit 2
 	fi
 	if [ "$repair_rc" -ne 0 ]; then
-		echo "[$GATE_TAG] FAIL — the import-cache repair ($IMPORT_CACHE_RUNNER) exited $repair_rc; the sweep did not start. Run it alone (make import-cache) and read its report."
+		echo "[$GATE_TAG] FAIL — the import-cache repair ($IMPORT_CACHE_RUNNER) exited $repair_rc; the sweep did not start. Run it alone (make import) and read its report."
 		exit 1
 	fi
 fi

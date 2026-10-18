@@ -197,7 +197,7 @@ names `godot-check` and `[roster] checks` keeps `uid` (then `check uid` runs
 in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
 runners (parse lint spot warnings unit integration scenario capture
-import-cache hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
+import hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
 the GDK_PRECOMMIT_TIERS / GDK_VERIFY_TIERS lists the gate framework's
 compositions run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
 (the run prints the pyproject.toml block that locks it), or — the legacy

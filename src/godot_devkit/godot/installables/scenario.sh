@@ -713,7 +713,7 @@ suite_cases() {
 	cat > "$bin/godot" <<'STUB_EOF'
 #!/usr/bin/env bash
 # An editor pass (the cache recovery's rung 1) leaves a mark, and nothing else.
-case " $* " in *" --editor "*) [ -z "${GDK_STUB_EDITOR_MARK:-}" ] || : > "$GDK_STUB_EDITOR_MARK"; exit 0 ;; esac
+case " $* " in *" --import "*) [ -z "${GDK_STUB_EDITOR_MARK:-}" ] || : > "$GDK_STUB_EDITOR_MARK"; exit 0 ;; esac
 list=''; single=''
 while [ "$#" -gt 0 ]; do
 	case "$1" in --scenarios) list="${2-}" ;; --scenario) single="${2-}" ;; esac
@@ -854,7 +854,7 @@ STUB_EOF
 		|| miss "a slice past GDK_LOG_CAP_BYTES goes cold alone; its neighbours stay warm (rc $rc): $out"
 
 	# The cache recovery inside a sweep: rung 1's in-tree editor pass is
-	# declined and `make import-cache` named, as rung 2's removal already was.
+	# declined and `make import` named, as rung 2's removal already was.
 	# Outside a sweep the same run still takes rung 1 — the stub's mark is
 	# what proves the case reached the ladder at all.
 	cases=$((cases + 1))
@@ -867,12 +867,12 @@ STUB_EOF
 	why=''
 	[ "$rc" -eq 1 ] || why="$why exit $rc;"
 	[ ! -e "$scratch/editor-pass" ] || why="$why the editor pass ran in the tree;"
-	grep -qxF '[SCENARIO]   make import-cache' <<<"$out" || why="$why make import-cache is not named;"
+	grep -qxF '[SCENARIO]   make import' <<<"$out" || why="$why make import is not named;"
 	! grep -qF 'rebuilding and retrying' <<<"$out" || why="$why it said it was rebuilding;"
 	( export GDK_STUB_EDITOR_MARK="$scratch/editor-pass"; cold coldcache a )
 	[ -e "$scratch/editor-pass" ] || why="$why outside a sweep, rung 1 never ran;"
 	[ -z "$why" ] \
-		|| miss "a sweep job declines rung 1's in-tree editor pass and names make import-cache; a direct run still takes it:$why $out"
+		|| miss "a sweep job declines rung 1's in-tree editor pass and names make import; a direct run still takes it:$why $out"
 }
 
 # --- --self-test -------------------------------------------------------------
@@ -1242,15 +1242,15 @@ run_scenario
 # a diff that looks legitimate — and removing .godot under peers that are
 # mid-boot converts one cache defect into a scatter of failures that look like
 # real ones. There the run names the repair instead of performing it: the
-# operator runs `make import-cache` once, serially, which does the pass in a
+# operator runs `make import` once, serially, which does the pass in a
 # scratch copy. Outside a sweep both rungs run as they always have.
 if [ -n "${GDK_SCENARIO_IN_SWEEP:-}" ] && cold_cache_only "$RUN_REPORT" "$godot_exit"; then
 	echo "[$GATE_TAG] $SCENARIO_NAME — cold import cache on a passing run." >&2
 	echo "[$GATE_TAG] A sweep shares one $IMPORT_DIR/ with every peer still booting, so this run will" >&2
 	echo "[$GATE_TAG] not run an editor pass in the tree. Repair the tree ONCE, serially, then re-run:" >&2
-	echo "[$GATE_TAG]   make import-cache" >&2
+	echo "[$GATE_TAG]   make import" >&2
 	echo "[$GATE_TAG] Still reported after that, the uid index is STALE, not cold:" >&2
-	echo "[$GATE_TAG]   rm -rf $IMPORT_DIR && make import-cache" >&2
+	echo "[$GATE_TAG]   rm -rf $IMPORT_DIR && make import" >&2
 elif cold_cache_only "$RUN_REPORT" "$godot_exit"; then
 	echo "[$GATE_TAG] $SCENARIO_NAME — cold import cache on a passing run; rebuilding and retrying once" >&2
 	gdk_rebuild_import_cache "$HARD_TIMEOUT_SECONDS"

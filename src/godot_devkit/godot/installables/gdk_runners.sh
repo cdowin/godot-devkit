@@ -931,10 +931,10 @@ gdk_rebuild_import_cache() {
 		if [ "$held" -eq 1 ]; then
 			GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
 				"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-				"$GDK_GODOT" --path . --headless --editor --quit || return $?
+				"$GDK_GODOT" --path . --headless --import || return $?
 		else
 			"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-				"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+				"$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
 		fi
 		return 0
 	fi
@@ -947,9 +947,9 @@ gdk_rebuild_import_cache() {
 	[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
 	if [ "$held" -eq 1 ]; then
 		GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
-			"$GDK_GODOT" --path . --headless --editor --quit
+			"$GDK_GODOT" --path . --headless --import
 	else
-		"$GDK_GODOT" --path . --headless --editor --quit >/dev/null 2>&1 || true
+		"$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
 	fi
 }
 

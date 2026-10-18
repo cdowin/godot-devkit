@@ -35,7 +35,7 @@
 # their own verdict from inside the runner and are not wrapped again (a gate
 # wrapped twice reports the wrapper's summary and files the runner's verdict
 # in a log nobody opens); the rest go through the include's `gdk_gate`.
-# `import-cache` and `integration-list` are tools, not gates: the first has an
+# `import` and `integration-list` are tools, not gates: the first has an
 # outcome, the second's output IS the list. GNU make 3.81 is the floor.
 
 # The godot-devkit command, resolved in this order:
@@ -105,7 +105,7 @@ GDK_PRECOMMIT_TIERS := spot
 GDK_VERIFY_TIERS := parse lint warnings unit integration-all
 
 .PHONY: parse lint spot warnings unit integration integration-all integration-diff \
-        integration-list scenario smoke capture import-cache \
+        integration-list scenario smoke capture import \
         godot-check uid-scan hermetic-scan runners-self-test gdk-precommit-retired
 
 # --- Tier 1: static / fast gates ---------------------------------------------
@@ -227,5 +227,5 @@ capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture
 	@test -n "$(NAME)" || { echo "usage: make capture NAME=<scenario>"; exit 2; }
 	$(call gdk_gate,capture,CAPTURE,$(GDK_SUM_TAIL),bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME))
 
-import-cache: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
+import: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
 	@bash $(GDK_RUNNERS_DIR)/import_cache.sh

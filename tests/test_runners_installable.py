@@ -358,7 +358,7 @@ def test_parse_boots_the_engine_once_and_a_boot_error_still_fails_it(tmp_path):
 STALE_MARKER = '.godot/stale'
 SCENARIO_STUB = """#!/usr/bin/env bash
 case " $* " in
-	*" --editor "*)
+	*" --import "*)
 		echo rebuild >> "$GDK_STUB_LOG"
 		mkdir -p .godot && : > .godot/uid_cache.bin
 		exit 0 ;;
@@ -465,7 +465,7 @@ def test_a_sweep_reports_the_removal_instead_of_doing_it_to_its_peers(tmp_path):
     assert _engine_runs(log) == (1, 0), done.stdout + done.stderr
     assert (root / STALE_MARKER).exists(), 'a sweep removed a shared cache'
     assert REMOVAL_NOTICE not in done.stderr, done.stderr
-    assert 'make import-cache' in done.stderr, done.stderr
+    assert 'make import' in done.stderr, done.stderr
     assert 'rm -rf .godot' in done.stderr, done.stderr
 
 
@@ -1247,7 +1247,7 @@ UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
 # GDK_CHECKS names.
 GODOT_TARGETS = ('parse', 'lint', 'spot', 'warnings', 'unit', 'integration', 'scenario',
-                 'capture', 'import-cache', 'hermetic-scan', 'godot-check')
+                 'capture', 'import', 'hermetic-scan', 'godot-check')
 
 
 @contextlib.contextmanager
