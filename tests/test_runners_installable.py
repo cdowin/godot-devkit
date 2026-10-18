@@ -1414,10 +1414,11 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
 
 
 @pytest.mark.parametrize('toml, says', [
-    # The roster keeps `uid`: `check uid` runs in `make check` once GDK_CHECKS
+    # The roster names `uid`: `check uid` runs in `make check` once GDK_CHECKS
     # (a Makefile variable this verb cannot read) names `godot-check`.
-    ('', 'is safe to delete once it does'),
-    # The roster drops `uid`: `godot-check` runs, `check uid` not.
+    ('[roster]\nchecks = ["uid"]\n', 'is safe to delete once it does'),
+    # The stock roster leaves `uid` out (opt-in since 4.0), and so does any roster not naming it.
+    ('', '`[roster] checks` leaves `uid` out'),
     ('[roster]\nchecks = ["tres"]\n', '`[roster] checks` leaves `uid` out'),
 ])
 def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):

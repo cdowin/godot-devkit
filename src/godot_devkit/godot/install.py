@@ -284,7 +284,7 @@ def retired_line(rel: str) -> str:
     when GDK_CHECKS names it (a Makefile variable this verb cannot read) and
     `[roster] checks` keeps `uid`. "Safe to delete" said to any other repo
     removes its only CI uid gate, and nothing would say so. The roster is
-    `all_roster()`, the one `check all` reads: an absent key is all eight, and
+    `all_roster()`, the one `check all` reads: an absent key is the stock roster, and
     a malformed value or an unknown gate raises ConfigError (exit 2) here
     exactly as it does there (#28).
     """

@@ -38,7 +38,7 @@ GATES = REPO_ROOT / 'Makefile.gates'
 OWN_MAKEFILES = (MAKEFILE, GATES, REPO_ROOT / 'Makefile.tiers')
 RUNNERS = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 RUNNER_CALL = re.compile(r'@bash \$\(GDK_RUNNERS_DIR\)/([a-z_]+\.sh)')
-GODOT_GATES = ('uid', 'tres', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk', 'test-shape')
+GODOT_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment', 'unit-disk', 'test-shape')
 # Targets this repo's files define that are NOT gates: `integration-list`
 # prints the roster — the list IS the output — `import-cache` rebuilds the
 # engine's import cache, a tool with an outcome rather than a gate with a
