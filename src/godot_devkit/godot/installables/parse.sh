@@ -21,8 +21,9 @@ usage() {
 usage: parse.sh [--help] [--self-test]
 
 Import the project, then compile every script and boot the main scene, all
-inside the HOME sandbox. Fail on engine errors, UID drift, missing sweep
-results, nonzero exits or timeouts. Writes import caches and sidecars normally.
+inside the HOME sandbox. Fail on runtime engine errors, UID drift, missing
+sweep results, nonzero exits or timeouts. Exact post-completion shutdown
+resource diagnostics stay visible without changing the compile verdict. Writes import caches and sidecars normally.
 
 Env: GDK_PARSE_TIMEOUT seconds bounding the import (default 300)
      GDK_PARSE_SWEEP_SCRIPT compile helper path
@@ -106,7 +107,9 @@ fi
 RESULT="$(gdk_sweep_result_line "$LOG")"
 COMPILED="$(gdk_sweep_result_field "$RESULT" 1)"
 TOTAL="$(gdk_sweep_result_field "$RESULT" 2)"
-if [ "$SWEEP_EXIT" -ne 0 ] || grep -qE "$ERROR_PATTERN|^SWEEP_FAIL " "$LOG" || \
+OUTPUT_STATUS=0
+python3 "$(dirname "$LIB")/runners/gut_junit.py" parse-output "$LOG" || OUTPUT_STATUS=$?
+if [ "$SWEEP_EXIT" -ne 0 ] || [ "$OUTPUT_STATUS" -ne 0 ] || grep -qE '^SWEEP_FAIL ' "$LOG" || \
  [[ ! "$TOTAL" =~ ^[1-9][0-9]*$ ]] || [ "$COMPILED" != "$TOTAL" ]; then
  tail -40 "$LOG"
  gdk_gate_verdict "$GATE_TAG" "FAIL (compile/boot exit $SWEEP_EXIT, compiled ${COMPILED:-0}/${TOTAL:-0})" "$LOG"; exit 1

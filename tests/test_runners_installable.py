@@ -274,6 +274,11 @@ def test_unit_reconciles_junit_scripts_and_rejects_zero_tests_and_engine_errors(
         ('GUT version: 9.6.1\nSCRIPT ERROR: Invalid call\nResults saved to report.xml', 1),
         ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: 42 resources still in use at exit (run with --verbose for details).', 0),
         ("GUT version: 9.6.1\nResults saved to report.xml\nERROR: 3 RID allocations of type 'DummyTexture' were leaked at exit.", 0),
+        ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: Texture with GL ID of 41: leaked 21844 bytes.\n   at: ~Utilities (drivers/gles3/storage/utilities.cpp:82)', 0),
+        ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: Texture with GL ID of 41: leaked 21844 bytes.', 1),
+        ('ERROR: Texture with GL ID of 41: leaked 21844 bytes.\n   at: ~Utilities (drivers/gles3/storage/utilities.cpp:82)\nGUT version: 9.6.1', 1),
+        ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: Parameter "RenderingServer::get_singleton()" is null.\n   at: ~CompressedTexture2D (scene/resources/compressed_texture.cpp:464)', 0),
+        ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: Parameter "RenderingServer::get_singleton()" is null.\n   at: process (other.cpp:1)', 1),
         ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: teardown failed', 1),
     ]:
         script = valid + "cat <<'OUTPUT'\n" + output + "\nOUTPUT\n"
@@ -369,6 +374,17 @@ def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
     (stub / 'godot').write_text('#!/usr/bin/env bash\necho "SCRIPT ERROR: bad script"\n', encoding='utf-8')
     done = parse()
     assert done.returncode == 1, done.stdout + done.stderr
+    for marker, error, expected in (
+        ('SWEEP_COMPLETE', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 0),
+        ('SWEEP_COMPLETE', "ERROR: 2 RID allocations of type 'Texture' were leaked at exit.", 0),
+        ('', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 1),
+        ('SWEEP_COMPLETE', 'ERROR: main scene broke', 1),
+    ):
+        (stub / 'godot').write_text('#!/usr/bin/env bash\ncase "$*" in *--import*) exit 0;; esac\n'
+                                   + 'echo "SWEEP_RESULT 1 1"\n'
+                                   + f"echo '{marker}'\n" + 'cat <<\'EOF\'\n' + error + '\nEOF\n', encoding='utf-8')
+        done = parse()
+        assert done.returncode == expected, done.stdout + done.stderr
 
 
 GDLINT_STUB = ('#!/usr/bin/env bash\necho "lint $*" >> "$GDK_STUB_LOG"\n'
