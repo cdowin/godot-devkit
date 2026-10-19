@@ -25,6 +25,12 @@ def read_config(config: str) -> dict:
         raise ValueError('junit_xml_timestamp must be false for a stable JUnit path')
     if opts.get('errors_do_not_cause_failure') is True:
         raise ValueError('errors_do_not_cause_failure must be false for a gate')
+    if opts.get('no_error_tracking', False) is not False:
+        raise ValueError('no_error_tracking must be false for a gate')
+    if 'failure_error_types' in opts and (not isinstance(opts['failure_error_types'], list)
+            or any(not isinstance(item, str) for item in opts['failure_error_types'])
+            or set(opts['failure_error_types']) != {'engine', 'gut', 'push_error'}):
+        raise ValueError('failure_error_types must include engine, gut and push_error')
     return opts
 
 

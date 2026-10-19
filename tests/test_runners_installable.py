@@ -286,6 +286,11 @@ def test_unit_reconciles_junit_scripts_and_rejects_zero_tests_and_engine_errors(
     failed = valid.replace('failures="0"', 'failures="1"')
     (stub / 'godot').write_text(failed + 'echo "GUT version: 9.6.1"\n', encoding='utf-8')
     assert unit().returncode == 1
+    for option in ('-gfailure_error_types=', '-gno_error_tracking'):
+        assert unit(option).returncode == 2
+    for config in ({'failure_error_types': []}, {'no_error_tracking': True}):
+        (root / '.gutconfig.json').write_text(json.dumps(config), encoding='utf-8')
+        assert unit().returncode == 2
     (root / '.gutconfig.json').write_text(
         '{"dirs":["res://tests/unit"],"junit_xml_timestamp":true}', encoding='utf-8')
     done = unit()

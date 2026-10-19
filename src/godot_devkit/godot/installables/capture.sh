@@ -78,7 +78,7 @@ rm -f -- "$JUNIT"
 case "$JUNIT" in /*) JUNIT_ARG="$JUNIT" ;; *) JUNIT_ARG="res://$JUNIT" ;; esac
 RAW="$(gdk_run_bounded "$GDK_CAPTURE_TIMEOUT" -- \
 	"$GDK_GODOT" --path . ${POSITION_ARGS[@]+"${POSITION_ARGS[@]}"} -s "$GDK_GUT_CMDLN" \
-	-gconfig="$GDK_GUT_CONFIG" -gdir= -gtest="res://$TEST" -gexit \
+	-gconfig="$GDK_GUT_CONFIG" -gfailure_error_types=engine,gut,push_error -gdir= -gtest="res://$TEST" -gexit \
 	-gjunit_xml_file="$JUNIT_ARG" 2>&1)"
 STATUS=$?
 gdk_gate_publish "$LOG" "$RAW"

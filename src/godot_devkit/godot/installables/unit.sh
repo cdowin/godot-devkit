@@ -36,7 +36,7 @@ GDIR_OVERRIDE=()
 for arg in "$@"; do
 	case "$arg" in
 		'') echo "[$GDK_GUT_GATE_TAG] empty GUT option; see --help" >&2; exit 2 ;;
-		-gconfig*|-gjunit_xml_file*|-gjunit_xml_timestamp*|-gexit*|-gerrors_do_not_cause_failure*)
+		-gconfig*|-gjunit_xml_file*|-gjunit_xml_timestamp*|-gexit*|-gerrors_do_not_cause_failure*|-gfailure_error_types*|-gno_error_tracking*)
 			echo "[$GDK_GUT_GATE_TAG] $arg is controlled by this gate" >&2; exit 2 ;;
 		-gtest|-gtest=*) GDIR_OVERRIDE=(-gdir=) ;;
 	esac
@@ -61,7 +61,7 @@ gdk_sandbox_home
 RAW="$(gdk_run_bounded "$GDK_UNIT_TIMEOUT" -- \
 	"$GDK_GODOT" --path . --headless -s "$GDK_GUT_CMDLN" \
 	-gconfig="$GDK_GUT_CONFIG" -gjunit_xml_file="$JUNIT_ARG" \
-	-gexit ${GDIR_OVERRIDE[@]+"${GDIR_OVERRIDE[@]}"} "$@" 2>&1)"
+	-gexit -gfailure_error_types=engine,gut,push_error ${GDIR_OVERRIDE[@]+"${GDIR_OVERRIDE[@]}"} "$@" 2>&1)"
 STATUS=$?
 gdk_gate_publish "$LOG" "$RAW"
 if gdk_timeout_is_hang "$STATUS"; then
