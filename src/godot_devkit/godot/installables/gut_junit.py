@@ -117,36 +117,46 @@ def check(xml_path: str, config: str, default_dir: str, args: list[str]) -> str:
     return f'{count} test(s), {len(actual)} script(s)'
 
 
-def check_output(log_path: str) -> str:
+def check_output(log_path: str, *, compile_sweep: bool = False) -> str:
     """GUT owns in-session error assertions; bootstrap and parse failures do not."""
     text = re.sub(r"\x1b\[[0-9;]*m", "", Path(log_path).read_text(encoding="utf-8", errors="replace"))
     in_gut = False
     finished = False
     shutdown = []
-    for line in text.splitlines():
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
         if "GUT version:" in line:
             in_gut = True
-        if line.startswith("Results saved to "):
+        if (compile_sweep and line == "SWEEP_COMPLETE") or (not compile_sweep and line.startswith("Results saved to ")):
             finished = True
-        if re.search(r"SCRIPT ERROR|Failed to load script|invalid UID", line):
+        if re.search(r"SCRIPT ERROR|Parse Error|Failed to load script|invalid UID", line):
             raise ValueError(line)
         if line.startswith("ERROR:"):
-            if finished and (re.fullmatch(r"ERROR: \d+ resources still in use at exit \(run with --verbose for details\)\.", line)
+            frame = lines[index + 1].strip() if index + 1 < len(lines) else ''
+            gles_cleanup = (
+                re.fullmatch(r"ERROR: Texture with GL ID of \d+: leaked \d+ bytes\.", line)
+                and re.fullmatch(r"at: ~Utilities \(drivers/gles3/storage/utilities\.cpp:\d+\)", frame)
+            ) or (
+                line == 'ERROR: Parameter "RenderingServer::get_singleton()" is null.'
+                and re.fullmatch(r"at: ~CompressedTexture2D \(scene/resources/compressed_texture\.cpp:\d+\)", frame)
+            )
+            if finished and (gles_cleanup or re.fullmatch(r"ERROR: \d+ resources still in use at exit \(run with --verbose for details\)\.", line)
                     or re.fullmatch(r"ERROR: \d+ RID allocations of type '.+' were leaked at exit\.", line)):
                 shutdown.append(line)
-            elif not in_gut or finished:
+            elif compile_sweep or not in_gut or finished:
                 raise ValueError(line)
     # These are real diagnostic debt, not test failures. Keep both the counts
     # and the complete engine transcript; never discard or relabel them clean.
-    return "\n".join("[GUT] shutdown diagnostic: " + line for line in shutdown)
+    tag = "PARSE" if compile_sweep else "GUT"
+    return "\n".join(f"[{tag}] shutdown diagnostic: " + line for line in shutdown)
 
 
 def main(argv: list[str]) -> int:
-    if argv and argv[0] == 'output':
+    if argv and argv[0] in ('output', 'parse-output'):
         if len(argv) != 2:
             return 2
         try:
-            note = check_output(argv[1])
+            note = check_output(argv[1], compile_sweep=argv[0] == 'parse-output')
             if note:
                 print(note)
         except (OSError, ValueError) as exc:

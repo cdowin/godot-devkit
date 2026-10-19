@@ -29,6 +29,7 @@ extends SceneTree
 ## Output contract (the wrapper greps these; the exit code is advisory):
 ##   SWEEP_FAIL <res://path.gd>      one per script that would not compile
 ##   SWEEP_RESULT <compiled> <total>
+##   SWEEP_COMPLETE               after main-scene boot, before shutdown
 
 const SCRIPT_SUFFIX := ".gd"
 const SCRIPT_TYPE_HINT := "Script"
@@ -66,6 +67,7 @@ func _initialize() -> void:
 	if whole_project and OS.get_environment(MAIN_SCENE_ENV) == "1":
 		_boot_main_scene()
 
+	print("SWEEP_COMPLETE")
 	quit(EXIT_FAIL if not failures.is_empty() else 0)
 
 
