@@ -352,7 +352,7 @@ def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
     starts = tmp_path / 'starts.log'
     stub = _stub_engine(tmp_path, '#!/usr/bin/env bash\n'
                         'echo "$*" >> "$GDK_STUB_LOG"\n'
-                        'case "$*" in *--import*) echo "Godot Engine ready";; '
+                        'case "$*" in *--import*) echo "[ DONE ] loading_editor_layout";; '
                         '*) echo "SWEEP_RESULT 1 1";; esac\n')
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'), 'GDK_RECEIPTS': '0',
@@ -367,7 +367,7 @@ def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
         '--path . --headless --import',
         '--path . --headless -s res://tools/dev/runners/compile_sweep.gd']
     (stub / 'godot').write_text('#!/usr/bin/env bash\n'
-                                'case "$*" in *--import*) exit 0;; esac\n'
+                                'case "$*" in *--import*) echo "[ DONE ] loading_editor_layout"; exit 0;; esac\n'
                                 'echo "SWEEP_FAIL res://bad.gd"\necho "SWEEP_RESULT 0 1"\n', encoding='utf-8')
     done = parse()
     assert done.returncode == 1 and 'compiled 0/1' in done.stdout, done.stdout + done.stderr
@@ -380,11 +380,35 @@ def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
         ('', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 1),
         ('SWEEP_COMPLETE', 'ERROR: main scene broke', 1),
     ):
-        (stub / 'godot').write_text('#!/usr/bin/env bash\ncase "$*" in *--import*) exit 0;; esac\n'
+        (stub / 'godot').write_text('#!/usr/bin/env bash\ncase "$*" in *--import*) echo "[ DONE ] loading_editor_layout"; exit 0;; esac\n'
                                    + 'echo "SWEEP_RESULT 1 1"\n'
                                    + f"echo '{marker}'\n" + 'cat <<\'EOF\'\n' + error + '\nEOF\n', encoding='utf-8')
         done = parse()
         assert done.returncode == expected, done.stdout + done.stderr
+
+    # Editor imports need their own completion boundary before exact shutdown debt
+    # may be reported separately from the later all-script compile verdict.
+    for marker, error, engine_exit, expected in (
+        ('', '', 0, 1),
+        ('[ DONE ] first_scan_filesystem', '', 0, 1),
+        ('[ DONE ] loading_editor_layout', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 0, 0),
+        ('[ DONE ] loading_editor_layout', "ERROR: 2 RID allocations of type 'Texture' were leaked at exit.", 0, 0),
+        ('', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 0, 1),
+        ('[ DONE ] first_scan_filesystem', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 0, 1),
+        ('[ DONE ] loading_editor_layout', 'SCRIPT ERROR: broken autoload', 0, 1),
+        ('[ DONE ] loading_editor_layout', 'ERROR: resource import failed', 0, 1),
+        ('[ DONE ] loading_editor_layout', 'ERROR: 3 resources still in use at exit (run with --verbose for details).', 7, 1),
+    ):
+        imported = marker + '\n' + error
+        (stub / 'godot').write_text('#!/usr/bin/env bash\ncase "$*" in *--import*)\n'
+                                   + "cat <<'EOF'\n" + imported + '\nEOF\n'
+                                   + f'exit {engine_exit};; esac\n'
+                                   + 'echo "SWEEP_RESULT 1 1"\necho "SWEEP_COMPLETE"\n', encoding='utf-8')
+        done = parse()
+        assert done.returncode == expected, done.stdout + done.stderr
+        if expected == 0:
+            assert '[PARSE] shutdown diagnostic:' in done.stdout
+            assert error in (root / '.gate-reports/parse-import.log').read_text(encoding='utf-8')
 
 
 GDLINT_STUB = ('#!/usr/bin/env bash\necho "lint $*" >> "$GDK_STUB_LOG"\n'

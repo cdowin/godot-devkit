@@ -117,7 +117,7 @@ def check(xml_path: str, config: str, default_dir: str, args: list[str]) -> str:
     return f'{count} test(s), {len(actual)} script(s)'
 
 
-def check_output(log_path: str, *, compile_sweep: bool = False) -> str:
+def check_output(log_path: str, *, compile_sweep: bool = False, editor_import: bool = False) -> str:
     """GUT owns in-session error assertions; bootstrap and parse failures do not."""
     text = re.sub(r"\x1b\[[0-9;]*m", "", Path(log_path).read_text(encoding="utf-8", errors="replace"))
     in_gut = False
@@ -127,7 +127,9 @@ def check_output(log_path: str, *, compile_sweep: bool = False) -> str:
     for index, line in enumerate(lines):
         if "GUT version:" in line:
             in_gut = True
-        if (compile_sweep and line == "SWEEP_COMPLETE") or (not compile_sweep and line.startswith("Results saved to ")):
+        if ((compile_sweep and line == "SWEEP_COMPLETE")
+                or (editor_import and re.fullmatch(r"\[ DONE \]\s+loading_editor_layout", line.strip()))
+                or (not compile_sweep and not editor_import and line.startswith("Results saved to "))):
             finished = True
         if re.search(r"SCRIPT ERROR|Parse Error|Failed to load script|invalid UID", line):
             raise ValueError(line)
@@ -143,20 +145,23 @@ def check_output(log_path: str, *, compile_sweep: bool = False) -> str:
             if finished and (gles_cleanup or re.fullmatch(r"ERROR: \d+ resources still in use at exit \(run with --verbose for details\)\.", line)
                     or re.fullmatch(r"ERROR: \d+ RID allocations of type '.+' were leaked at exit\.", line)):
                 shutdown.append(line)
-            elif compile_sweep or not in_gut or finished:
+            elif compile_sweep or editor_import or not in_gut or finished:
                 raise ValueError(line)
+    if editor_import and not finished:
+        raise ValueError("editor import did not finish loading_editor_layout")
     # These are real diagnostic debt, not test failures. Keep both the counts
     # and the complete engine transcript; never discard or relabel them clean.
-    tag = "PARSE" if compile_sweep else "GUT"
+    tag = "PARSE" if compile_sweep or editor_import else "GUT"
     return "\n".join(f"[{tag}] shutdown diagnostic: " + line for line in shutdown)
 
 
 def main(argv: list[str]) -> int:
-    if argv and argv[0] in ('output', 'parse-output'):
+    if argv and argv[0] in ('output', 'parse-output', 'import-output'):
         if len(argv) != 2:
             return 2
         try:
-            note = check_output(argv[1], compile_sweep=argv[0] == 'parse-output')
+            note = check_output(argv[1], compile_sweep=argv[0] == 'parse-output',
+                                editor_import=argv[0] == 'import-output')
             if note:
                 print(note)
         except (OSError, ValueError) as exc:
