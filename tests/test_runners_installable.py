@@ -267,6 +267,30 @@ def test_unit_reconciles_junit_scripts_and_rejects_zero_tests_and_engine_errors(
     assert done.returncode == 1 and '[UNIT] FAIL' in done.stdout, done.stdout + done.stderr
     done = unit('-gtest=res://tests/unit/test_a.gd')
     assert done.returncode == 1  # engine error still fails a selected file
+    valid = _gut_stub(['tests/unit/test_a.gd', 'tests/unit/test_b.gd'], 2)
+    for output, code in [
+        ('ERROR: bootstrap failed\nGUT version: 9.6.1', 1),
+        ('GUT version: 9.6.1\nERROR: asserted corrupt input\nResults saved to report.xml', 0),
+        ('GUT version: 9.6.1\nSCRIPT ERROR: Invalid call\nResults saved to report.xml', 1),
+        ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: 42 resources still in use at exit (run with --verbose for details).', 0),
+        ("GUT version: 9.6.1\nResults saved to report.xml\nERROR: 3 RID allocations of type 'DummyTexture' were leaked at exit.", 0),
+        ('GUT version: 9.6.1\nResults saved to report.xml\nERROR: teardown failed', 1),
+    ]:
+        script = valid + "cat <<'OUTPUT'\n" + output + "\nOUTPUT\n"
+        (stub / 'godot').write_text(script, encoding='utf-8')
+        done = unit()
+        assert done.returncode == code, done.stdout + done.stderr
+        if 'leaked at exit' in output or 'resources still in use at exit' in output:
+            assert 'shutdown diagnostic:' in done.stdout
+    # An error captured by GUT, but never asserted by the test, is still red.
+    failed = valid.replace('failures="0"', 'failures="1"')
+    (stub / 'godot').write_text(failed + 'echo "GUT version: 9.6.1"\n', encoding='utf-8')
+    assert unit().returncode == 1
+    for option in ('-gfailure_error_types=', '-gno_error_tracking'):
+        assert unit(option).returncode == 2
+    for config in ({'failure_error_types': []}, {'no_error_tracking': True}):
+        (root / '.gutconfig.json').write_text(json.dumps(config), encoding='utf-8')
+        assert unit().returncode == 2
     (root / '.gutconfig.json').write_text(
         '{"dirs":["res://tests/unit"],"junit_xml_timestamp":true}', encoding='utf-8')
     done = unit()

@@ -78,7 +78,7 @@ rm -f -- "$JUNIT"
 case "$JUNIT" in /*) JUNIT_ARG="$JUNIT" ;; *) JUNIT_ARG="res://$JUNIT" ;; esac
 RAW="$(gdk_run_bounded "$GDK_CAPTURE_TIMEOUT" -- \
 	"$GDK_GODOT" --path . ${POSITION_ARGS[@]+"${POSITION_ARGS[@]}"} -s "$GDK_GUT_CMDLN" \
-	-gconfig="$GDK_GUT_CONFIG" -gdir= -gtest="res://$TEST" -gexit \
+	-gconfig="$GDK_GUT_CONFIG" -gfailure_error_types=engine,gut,push_error -gdir= -gtest="res://$TEST" -gexit \
 	-gjunit_xml_file="$JUNIT_ARG" 2>&1)"
 STATUS=$?
 gdk_gate_publish "$LOG" "$RAW"
@@ -89,8 +89,9 @@ fi
 CENSUS="$(python3 "$RUNNER_DIR/gut_junit.py" "$JUNIT" "$GDK_GUT_CONFIG" "$GDK_CAPTURE_TEST_ROOT" \
 	-gdir= "-gtest=res://$TEST" 2>&1)"
 CENSUS_STATUS=$?
-if [ "$STATUS" -ne 0 ] || [ ! -f "$OUT" ] || [ "$CENSUS_STATUS" -ne 0 ] || \
-	printf '%s\n' "$RAW" | grep -Eq 'SCRIPT ERROR: Parse Error|Failed to load script|^ERROR:'; then
+OUTPUT_STATUS=0
+python3 "$RUNNER_DIR/gut_junit.py" output "$LOG" || OUTPUT_STATUS=$?
+if [ "$STATUS" -ne 0 ] || [ ! -f "$OUT" ] || [ "$CENSUS_STATUS" -ne 0 ] || [ "$OUTPUT_STATUS" -ne 0 ]; then
 	gdk_gate_verdict CAPTURE "FAIL ($NAME: engine=$STATUS, $CENSUS, PNG=$OUT)" "$LOG"
 	exit 1
 fi

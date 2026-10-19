@@ -7,6 +7,7 @@ This standalone consumer runner helper cannot depend on the devkit CLI package.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -24,6 +25,12 @@ def read_config(config: str) -> dict:
         raise ValueError('junit_xml_timestamp must be false for a stable JUnit path')
     if opts.get('errors_do_not_cause_failure') is True:
         raise ValueError('errors_do_not_cause_failure must be false for a gate')
+    if opts.get('no_error_tracking', False) is not False:
+        raise ValueError('no_error_tracking must be false for a gate')
+    if 'failure_error_types' in opts and (not isinstance(opts['failure_error_types'], list)
+            or any(not isinstance(item, str) for item in opts['failure_error_types'])
+            or set(opts['failure_error_types']) != {'engine', 'gut', 'push_error'}):
+        raise ValueError('failure_error_types must include engine, gut and push_error')
     return opts
 
 
@@ -110,7 +117,42 @@ def check(xml_path: str, config: str, default_dir: str, args: list[str]) -> str:
     return f'{count} test(s), {len(actual)} script(s)'
 
 
+def check_output(log_path: str) -> str:
+    """GUT owns in-session error assertions; bootstrap and parse failures do not."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", Path(log_path).read_text(encoding="utf-8", errors="replace"))
+    in_gut = False
+    finished = False
+    shutdown = []
+    for line in text.splitlines():
+        if "GUT version:" in line:
+            in_gut = True
+        if line.startswith("Results saved to "):
+            finished = True
+        if re.search(r"SCRIPT ERROR|Failed to load script|invalid UID", line):
+            raise ValueError(line)
+        if line.startswith("ERROR:"):
+            if finished and (re.fullmatch(r"ERROR: \d+ resources still in use at exit \(run with --verbose for details\)\.", line)
+                    or re.fullmatch(r"ERROR: \d+ RID allocations of type '.+' were leaked at exit\.", line)):
+                shutdown.append(line)
+            elif not in_gut or finished:
+                raise ValueError(line)
+    # These are real diagnostic debt, not test failures. Keep both the counts
+    # and the complete engine transcript; never discard or relabel them clean.
+    return "\n".join("[GUT] shutdown diagnostic: " + line for line in shutdown)
+
+
 def main(argv: list[str]) -> int:
+    if argv and argv[0] == 'output':
+        if len(argv) != 2:
+            return 2
+        try:
+            note = check_output(argv[1])
+            if note:
+                print(note)
+        except (OSError, ValueError) as exc:
+            print(f'GUT output FAIL — {exc}', file=sys.stderr)
+            return 1
+        return 0
     if argv and argv[0] == 'validate':
         if len(argv) != 2:
             return 2
