@@ -14,7 +14,6 @@ GATE_TAG="PARSE"
 GATE_SLOT="parse"
 TIMEOUT_SECONDS="${GDK_PARSE_TIMEOUT:-300}"
 GDK_PARSE_SWEEP_SCRIPT="${GDK_PARSE_SWEEP_SCRIPT:-res://tools/dev/runners/compile_sweep.gd}"
-ERROR_PATTERN='SCRIPT ERROR:|^ERROR:|Parse Error|invalid UID'
 
 usage() {
  cat <<'USAGE_EOF'
@@ -92,24 +91,33 @@ if gdk_timeout_is_hang "$ENGINE_EXIT"; then
  GDK_GATE_VERDICT=HANG
  gdk_gate_verdict "$GATE_TAG" "FAIL (import timeout)" "$LOG"; exit 1
 fi
-if [ "$ENGINE_EXIT" -ne 0 ] || grep -qE "$ERROR_PATTERN" "$LOG"; then
- grep -E "$ERROR_PATTERN" "$LOG" | head -20 || true
+# Classify editor and sweep output separately; keep both raw phases in the main log.
+IMPORT_LOG="${LOG%.log}-import.log"
+if ! cp "$LOG" "$IMPORT_LOG"; then
+ gdk_gate_verdict "$GATE_TAG" "FAIL (cannot preserve import transcript)" "$LOG"; exit 1
+fi
+OUTPUT_STATUS=0
+python3 "$(dirname "$LIB")/runners/gut_junit.py" import-output "$LOG" || OUTPUT_STATUS=$?
+if [ "$ENGINE_EXIT" -ne 0 ] || [ "$OUTPUT_STATUS" -ne 0 ]; then
  gdk_gate_verdict "$GATE_TAG" "FAIL (import exit $ENGINE_EXIT; inspect engine log)" "$LOG"; exit 1
 fi
 export GDK_SWEEP_MAIN_SCENE=1
-gdk_gate_capture "$LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
+SWEEP_LOG="${LOG%.log}-sweep.log"
+: > "$SWEEP_LOG"
+gdk_gate_capture "$SWEEP_LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
  "$GDK_GODOT" --path . --headless -s "$GDK_PARSE_SWEEP_SCRIPT"
 SWEEP_EXIT="$GDK_GATE_EXIT"
+cat "$SWEEP_LOG" >> "$LOG"
 if gdk_timeout_is_hang "$SWEEP_EXIT"; then
  GDK_GATE_VERDICT=HANG
  gdk_gate_verdict "$GATE_TAG" "FAIL (compile/boot timeout)" "$LOG"; exit 1
 fi
-RESULT="$(gdk_sweep_result_line "$LOG")"
+RESULT="$(gdk_sweep_result_line "$SWEEP_LOG")"
 COMPILED="$(gdk_sweep_result_field "$RESULT" 1)"
 TOTAL="$(gdk_sweep_result_field "$RESULT" 2)"
 OUTPUT_STATUS=0
-python3 "$(dirname "$LIB")/runners/gut_junit.py" parse-output "$LOG" || OUTPUT_STATUS=$?
-if [ "$SWEEP_EXIT" -ne 0 ] || [ "$OUTPUT_STATUS" -ne 0 ] || grep -qE '^SWEEP_FAIL ' "$LOG" || \
+python3 "$(dirname "$LIB")/runners/gut_junit.py" parse-output "$SWEEP_LOG" || OUTPUT_STATUS=$?
+if [ "$SWEEP_EXIT" -ne 0 ] || [ "$OUTPUT_STATUS" -ne 0 ] || grep -qE '^SWEEP_FAIL ' "$SWEEP_LOG" || \
  [[ ! "$TOTAL" =~ ^[1-9][0-9]*$ ]] || [ "$COMPILED" != "$TOTAL" ]; then
  tail -40 "$LOG"
  gdk_gate_verdict "$GATE_TAG" "FAIL (compile/boot exit $SWEEP_EXIT, compiled ${COMPILED:-0}/${TOTAL:-0})" "$LOG"; exit 1
