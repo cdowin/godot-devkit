@@ -89,8 +89,9 @@ fi
 CENSUS="$(python3 "$RUNNER_DIR/gut_junit.py" "$JUNIT" "$GDK_GUT_CONFIG" "$GDK_CAPTURE_TEST_ROOT" \
 	-gdir= "-gtest=res://$TEST" 2>&1)"
 CENSUS_STATUS=$?
-if [ "$STATUS" -ne 0 ] || [ ! -f "$OUT" ] || [ "$CENSUS_STATUS" -ne 0 ] || \
-	printf '%s\n' "$RAW" | grep -Eq 'SCRIPT ERROR: Parse Error|Failed to load script|^ERROR:'; then
+OUTPUT_STATUS=0
+python3 "$RUNNER_DIR/gut_junit.py" output "$LOG" || OUTPUT_STATUS=$?
+if [ "$STATUS" -ne 0 ] || [ ! -f "$OUT" ] || [ "$CENSUS_STATUS" -ne 0 ] || [ "$OUTPUT_STATUS" -ne 0 ]; then
 	gdk_gate_verdict CAPTURE "FAIL ($NAME: engine=$STATUS, $CENSUS, PNG=$OUT)" "$LOG"
 	exit 1
 fi
