@@ -11,7 +11,7 @@ wrappers; use `make help` to find the target.
 ## Agents and models (agentic-sdlc 4.9.0)
 
 - Before you delegate to a subagent, read the model guide:
-  https://github.com/cdowin/agentic-sdlc/blob/v4.9.0/AGENTS-AND-MODELS.md
+  https://github.com/cdowin/agentic-sdlc/blob/v4.14.0/AGENTS-AND-MODELS.md
 - Set the model and effort on every delegation. Never inherit them. Effort is capped at
   `high`.
 - Take any unclaimed task you have the capabilities for. A `needs:<capability>` label
