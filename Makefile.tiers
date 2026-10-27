@@ -85,8 +85,13 @@ export GDK_GATE_LIB
 # Arguments, overridden on the command line (ARGS is the include's):
 #   ARGS — GUT options               make unit ARGS="-gtest=res://tests/unit/test_foo.gd"
 #   NAME — capture test             make capture NAME=eyes
+#   SCENE/SHEET, OUT, RECT — render  make render SCENE=rooms/a.tscn OUT=a.png
 #   BASE — the spot check's base    make spot BASE=origin/main
 NAME ?=
+SCENE ?=
+SHEET ?=
+OUT   ?=
+RECT  ?=
 REF  ?= HEAD
 BASE ?= main
 
@@ -99,7 +104,7 @@ ifneq ($(origin GDK_SHARD),undefined)
 $(error GDK_SHARD was removed in 4.0; select GUT files through ARGS or use a project CI matrix)
 endif
 
-.PHONY: parse lint spot unit integration capture import \
+.PHONY: parse lint spot unit integration capture render import \
         godot-check uid-scan hermetic-scan runners-self-test gdk-precommit-retired
 
 # --- Tier 1: static / fast gates ---------------------------------------------
@@ -174,6 +179,10 @@ integration: ## GUT integration config; GDK_INTEGRATION_PER_FILE=1 isolates file
 capture: ## Headed visual capture (LOCAL, needs a display) -> PNG:  make capture NAME=<test>
 	@test -n "$(NAME)" || { echo "usage: make capture NAME=<test>"; exit 2; }
 	@bash $(GDK_RUNNERS_DIR)/capture.sh $(NAME)
+
+render: ## Draw a scene (or SHEET=<dir> as a contact sheet) to a PNG (LOCAL, needs a display):  make render SCENE=<x.tscn> OUT=<x.png> [RECT=x,y,w,h]
+	@test -n "$(OUT)" && test -n "$(SCENE)$(SHEET)" || { echo "usage: make render SCENE=<x.tscn> OUT=<x.png> [RECT=x,y,w,h] | make render SHEET=<dir> OUT=<sheet.png>"; exit 2; }
+	@bash $(GDK_RUNNERS_DIR)/render.sh $(if $(SHEET),--sheet "$(SHEET)","$(SCENE)") --out "$(OUT)" $(if $(RECT),--rect "$(RECT)")
 
 import: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
 	@bash $(GDK_RUNNERS_DIR)/import_cache.sh

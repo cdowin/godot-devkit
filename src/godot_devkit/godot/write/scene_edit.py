@@ -85,6 +85,7 @@ TILEMAP_LAYER = 'TileMapLayer'
 TILE_SET_TYPE = 'TileSet'
 TILE_SET_PROP = 'tile_set'
 Z_INDEX_PROP = 'z_index'
+Z_INDEX_DEFAULT = 0
 SCRIPT_TYPE = 'Script'
 SCRIPTED_SUB_TYPE = 'Resource'
 SUB_REF = 'SubResource("{id}")'
@@ -236,7 +237,7 @@ def _do_add(doc: TscnDocument, args) -> str:
             _refuse_other_layer_settings(doc, existing, path, args)
             return UNCHANGED
         props: list[tuple[str, str]] = []
-        if args.z is not None:
+        if args.z not in (None, Z_INDEX_DEFAULT):   # the saver omits a default
             props.append((Z_INDEX_PROP, str(args.z)))
         if args.tile_set is not None:
             _refuse_missing(doc, args.tile_set)
@@ -265,8 +266,9 @@ def _refuse_other_layer_settings(doc: TscnDocument, node: Section, path: str,
     differs = []
     if args.z is not None:
         held = node.prop(Z_INDEX_PROP)
-        if held is None or held.value.strip() != str(args.z):
-            differs.append(f'{Z_INDEX_PROP}={held.value.strip() if held else "unset"}')
+        current = held.value.strip() if held else str(Z_INDEX_DEFAULT)
+        if current != str(args.z):
+            differs.append(f'{Z_INDEX_PROP}={current}')
     if args.tile_set is not None:
         held = node.prop(TILE_SET_PROP)
         match = EXT_RESOURCE_ONLY.match(held.value.strip()) if held else None
