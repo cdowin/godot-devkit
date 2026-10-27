@@ -293,15 +293,20 @@ class TscnDocument:
         """Assign `key = value` on a node. Returns 'set' or 'added'."""
         return self.set_section_prop(self.node(node_path), key, value)
 
-    def set_section_prop(self, section: Section, key: str, value: str) -> str:
+    def set_section_prop(self, section: Section, key: str, value: str,
+                         before: tuple[str, ...] = ()) -> str:
         """Assign `key = value` on any property-bodied section (a node, the
         `[resource]` body, a `[sub_resource]`): replace the existing span in
-        place — inline comment preserved — or append to the section's body."""
+        place — inline comment preserved — or append to the section's body.
+        A NEW key lands above the first of `before` the section has, which is
+        how a caller that knows the saver's order keeps a fresh line in it."""
         existing = section.prop(key)
         if existing is not None:
             self._splice(existing.start, existing.end, [existing.render(value)])
             return 'set'
-        self._splice(section.body_end, section.body_end, [f'{key}{PROP_ASSIGN}{value}'])
+        anchor = next((section.prop(k).start for k in before
+                       if section.prop(k) is not None), section.body_end)
+        self._splice(anchor, anchor, [f'{key}{PROP_ASSIGN}{value}'])
         return 'added'
 
     def remove_prop(self, node_path: str, key: str) -> None:
