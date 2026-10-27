@@ -20,6 +20,9 @@ ask the engine, and this package never boots the engine.
 """
 from __future__ import annotations
 
+import secrets
+from typing import Callable
+
 UID_PREFIX = 'uid://'
 INVALID_TEXT = f'{UID_PREFIX}<invalid>'
 INVALID_ID = -1
@@ -72,3 +75,13 @@ def canonical(text: str) -> str | None:
     """id_to_text(text_to_id(text)) — None when the text does not decode."""
     uid = text_to_id(text)
     return None if uid == INVALID_ID else id_to_text(uid)
+
+
+def mint(taken: set[int], draw: Callable[[int], int] = secrets.randbits) -> str:
+    """A fresh uid the way ResourceUID::create_id makes one — a random 63-bit
+    id, drawn again while it is 0 or already `taken` — in the engine's text
+    form. `draw` is injectable so a test can force a collision."""
+    while True:
+        uid = draw(63) & _ID_MASK
+        if uid and uid not in taken:
+            return id_to_text(uid)

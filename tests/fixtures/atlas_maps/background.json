@@ -1,0 +1,57 @@
+{
+ "columns": 4,
+ "material_period": [
+  2,
+  2
+ ],
+ "entries": [
+  {
+   "id": "floor_p00",
+   "material_phase": [
+    0,
+    0
+   ],
+   "atlas_cell": {
+    "index": 0,
+    "x": 0,
+    "y": 0
+   }
+  },
+  {
+   "id": "floor_p10",
+   "material_phase": [
+    1,
+    0
+   ],
+   "atlas_cell": {
+    "index": 1,
+    "x": 1,
+    "y": 0
+   }
+  },
+  {
+   "id": "floor_p01",
+   "material_phase": [
+    0,
+    1
+   ],
+   "atlas_cell": {
+    "index": 2,
+    "x": 2,
+    "y": 0
+   }
+  },
+  {
+   "id": "floor_p11",
+   "material_phase": [
+    1,
+    1
+   ],
+   "atlas_cell": {
+    "index": 3,
+    "x": 3,
+    "y": 0
+   }
+  }
+ ]
+}

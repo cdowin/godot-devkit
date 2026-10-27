@@ -47,6 +47,7 @@ INSTALLABLES = REPO_ROOT / 'src' / 'godot_devkit' / 'godot' / 'installables'
 LIBRARY = INSTALLABLES / 'gdk_runners.sh'
 RUNNER = INSTALLABLES / 'import_cache.sh'
 CAPTURE = INSTALLABLES / 'capture.sh'
+RENDER = INSTALLABLES / 'render.sh'
 UNIT = INSTALLABLES / 'unit.sh'
 INTEGRATION = INSTALLABLES / 'integration.sh'
 PARSE = INSTALLABLES / 'parse.sh'
@@ -343,6 +344,48 @@ def test_capture_runs_one_headed_gut_file_and_requires_a_fresh_png(tmp_path):
     done = capture()
     assert done.returncode == 1 and '[CAPTURE] FAIL' in done.stdout, done.stdout + done.stderr
     assert (root / '.capture-reports/previous/eyes.png').is_file()
+
+
+# A stub engine for render.sh: it writes the PNG `--out` names and prints the
+# helper's contract, or (RENDER_STUB=fail / error) the two ways a draw goes red.
+RENDER_STUB = textwrap.dedent('''\
+    #!/usr/bin/env bash
+    while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done; shift
+    out=''; scene=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in --out) out="$2" ;; --scene|--sheet) scene="$2" ;; esac; shift 2
+    done
+    case "${RENDER_STUB:-ok}" in
+      fail) echo "RENDER_FAIL $scene does not load as a PackedScene"; exit 1 ;;
+      error) echo "SCRIPT ERROR: Invalid call"; echo image > "$out"; echo "RENDER_RESULT 1 1 $out" ;;
+      *) echo image > "$out"; echo "RENDER_SCENE $scene 64x32 scale=1"; echo "RENDER_RESULT 1 1 $out" ;;
+    esac
+''')
+
+
+def test_render_requires_a_fresh_png_and_fails_on_a_render_or_engine_error(tmp_path):
+    root = tmp_path / 'repo'
+    _project(root, RENDER)
+    (root / 'rooms').mkdir()
+    (root / 'rooms/a.tscn').write_text('[gd_scene format=3]\n', encoding='utf-8')
+    stub = _stub_engine(tmp_path, RENDER_STUB)
+    env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
+           'HOME': str(tmp_path / 'home'),
+           'GDK_ENGINE_GATE_HOME': os.environ['GDK_ENGINE_GATE_HOME']}
+
+    def render(*argv, **extra):
+        return subprocess.run(['bash', 'tools/dev/runners/render.sh', *argv], cwd=root,
+                              text=True, capture_output=True, env={**env, **extra})
+    done = render('rooms/a.tscn', '--out', 'out/a.png')
+    assert done.returncode == 0 and '[RENDER] PASS (res://rooms/a.tscn: 1 of 1 scene(s)' \
+        in done.stdout, done.stdout + done.stderr
+    assert (root / 'out/a.png').is_file()
+    for mode in ('error', 'fail'):
+        done = render('rooms/a.tscn', '--out', 'out/a.png', RENDER_STUB=mode)
+        assert done.returncode == 1 and '[RENDER] FAIL' in done.stdout, done.stdout + done.stderr
+    assert not (root / 'out/a.png').exists()      # a stale PNG never passes for a fresh one
+    done = render('rooms/none.tscn', '--out', 'out/a.png')
+    assert done.returncode == 1 and 'no scene at res://rooms/none.tscn' in done.stderr, done.stderr
 
 
 # --- parse.sh: one engine run, driven through the RUNNER ---------------------
@@ -774,6 +817,8 @@ DESTINATIONS = {
     'tests/integration/integration_test_template.gd',
     'tests/integration/measure_test_template.gd',
     'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
+    'tools/dev/runners/render.sh', 'tools/dev/runners/render_scene.gd',
+    'tools/dev/runners/render_scene.gd.uid',
     'tools/dev/runners/hermetic_run_scan.sh',
     'tools/hooks/cc-godot-sandbox.sh',
     '.github/actions/godot-toolchain/action.yml',
@@ -789,7 +834,7 @@ UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
 # GDK_CHECKS names.
 GODOT_TARGETS = ('parse', 'lint', 'spot', 'unit', 'integration',
-                 'capture', 'import', 'hermetic-scan', 'godot-check')
+                 'capture', 'render', 'import', 'hermetic-scan', 'godot-check')
 
 
 @contextlib.contextmanager

@@ -22,8 +22,13 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # the [resource] body of a .tres, or a
                                     # [sub_resource] by the id `scene --props`
                                     # prints — read output is write input
+    godot-devkit scene set      <file> <node-path> <prop> --new-sub-resource
+                                <res://x.gd|Type> [key=value ...]
+                                    # make a [sub_resource] and point the
+                                    # property at it
     godot-devkit scene rename   <file> <node-path> <new-name>
     godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
+                                [--tile-set res://x.tres] [--z N] [--group G]
     godot-devkit scene add      <file> <parent-path> <name> --instance res://x.tscn
                                     # an instance node (no type=); its ref is
                                     # minted from the scene's own uid, or refused
@@ -33,6 +38,10 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene disconnect <file> <signal> <from> <to> <method> [--flags N]
                                     # author / remove one [connection]; ambiguous
                                     # matches are refused, --flags names one
+    godot-devkit scene new      <file> --root <Type> [--script res://x.gd] [--name N]
+    godot-devkit scene new      <file> --inherits res://base.tscn [--name N]
+                                    # a whole new scene with a fresh header uid
+                                    # no file in the project already claims
     godot-devkit refs --retarget <old-res-path> <new-res-path> [--dry-run]
                                     # after a git mv: rewrite every ext_resource
                                     # path attr + exact preload/load literal that
@@ -54,12 +63,13 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # --respell / --order re-spell floats and
                                     # typed arrays and reorder properties the
                                     # way the editor's save would
-    godot-devkit tiles paint <file> --layer NAME --region X0,Y0,X1,Y1
-                                    --tile SRC/AX,AY[/ALT]
-    godot-devkit tiles erase <file> --layer NAME --region X0,Y0,X1,Y1
-                                    # fill / clear a rectangle of one
-                                    # TileMapLayer; only that one property's
-                                    # base64 is regenerated
+    godot-devkit tiles paint <file> --layer NAME (--region X0,Y0,X1,Y1 | --at X,Y ...)
+                                    (--tile SRC/AX,AY[/ALT] | --atlas-map MAP.json --source SRC)
+    godot-devkit tiles erase <file> --layer NAME (--region X0,Y0,X1,Y1 | --at X,Y ...)
+                                    # fill / clear cells of one TileMapLayer;
+                                    # only that one property's base64 is
+                                    # regenerated; --atlas-map autotiles and
+                                    # re-slots the same-source neighbors
     godot-devkit autoloads add <Name> <res://path>  |  autoloads rm <Name>
                                     # declare / remove one project.godot autoload
     godot-devkit pot [--dry-run | --check]

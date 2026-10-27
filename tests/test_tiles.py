@@ -27,11 +27,15 @@ from pathlib import Path
 
 from support import FIXTURES
 
-from godot_devkit.godot.format import tilemap, tscn, tscn_document
+from godot_devkit.godot.format import atlas_map, tilemap, tscn, tscn_document
 from godot_devkit.godot.read import tiles
 from godot_devkit.godot.write import tiles_paint
 
 SCENE = FIXTURES / 'tilemap.tscn'
+CORPUS = FIXTURES / 'corpus'
+CONNECT16 = FIXTURES / 'atlas_maps/connect16.json'      # period [2, 1], atlas index = mask slot + 16 * phase x
+BACKGROUND = FIXTURES / 'atlas_maps/background.json'    # period [2, 2], no masks
+MASK_SLOTS = (0, 2, 16, 18, 64, 66, 80, 82, 8, 10, 24, 26, 72, 74, 88, 90)
 FLOOR = 'FloorLayer'
 EMPTY = 'EmptyLayer'
 NESTED_WALL = 'Nested/WallLayer'
@@ -49,6 +53,16 @@ class Codec(unittest.TestCase):
         data = tilemap.decode(value)
         self.assertEqual((data.version, data.cells), (0, {(-3, 7): tilemap.Tile(2, 1, 4, 1)}))
         self.assertEqual(tilemap.encode(data), value)
+
+    def test_every_corpus_layer_re_encodes_to_its_own_bytes(self) -> None:
+        # Real editor-written grids, not a hand vector: decode then encode must
+        # give the exact value back, or a no-op paint is a whole-line diff.
+        values = [prop.value for path in sorted(CORPUS.rglob('*.tscn'))
+                  for section in tscn.parse(str(path))
+                  for prop in [section.prop(tscn.TILE_MAP_DATA_PROP)] if prop is not None]
+        self.assertGreaterEqual(len(values), 6, 'corpus lost its tile layers — the proof checks nothing')
+        for value in values:
+            self.assertEqual(tilemap.encode(tilemap.decode(value)), value)
 
     def test_refuses_each_corrupt_shape_rather_than_half_reading(self) -> None:
         for value in ('PackedInt32Array(1, 2)',          # not a PackedByteArray
@@ -123,6 +137,43 @@ class Case(unittest.TestCase):
         return tilemap.decode_or_empty(prop.value if prop is not None else None).cells
 
 
+def wall(coord: tuple[int, int], mask: int) -> tilemap.Tile:
+    """The connect16 fixture's slot for `mask` at `coord`'s phase, on source 3."""
+    index = MASK_SLOTS.index(mask) + 16 * (coord[0] % 2)
+    return tilemap.Tile(3, index % 4, index // 4)
+
+
+class AtlasMap(unittest.TestCase):
+    """The autotile rule at function altitude; the verb's wiring is `Paint`'s."""
+
+    def test_a_background_map_slots_by_phase_alone_and_re_slots_nothing(self) -> None:
+        amap = atlas_map.load(BACKGROUND)
+        held = {(2, 0): tilemap.Tile(7, 0, 0)}
+        got = atlas_map.autotile(held, [(-1, 0), (1, 1)], 7, amap)
+        self.assertEqual(got, {(-1, 0): tilemap.Tile(7, 1, 0), (1, 1): tilemap.Tile(7, 3, 0)})
+
+    def test_refuses_a_map_or_a_paint_it_would_have_to_guess_at(self) -> None:
+        good = atlas_map.parse({'material_period': [1, 1], 'entries': [
+            {'canonical_neighbor_mask': 0, 'material_phase': [0, 0], 'atlas_cell': {'x': 0, 'y': 0}}]})
+        entry = {'canonical_neighbor_mask': 0, 'material_phase': [0, 0], 'atlas_cell': {'x': 0, 'y': 0}}
+        for data in ({'material_period': [1, 1], 'entries': []},                     # no entries
+                     {'material_period': [0, 1], 'entries': [entry]},                # empty period
+                     {'material_period': [1, 1], 'entries': [entry, entry]},         # two slots, one key
+                     {'material_period': [1, 1], 'entries': [entry, {                # mixed kinds
+                         'material_phase': [0, 0], 'atlas_cell': {'x': 1, 'y': 0}}]},
+                     {'material_period': [1, 1], 'entries': [dict(entry, canonical_neighbor_mask=4)]},
+                     {'material_period': [1, 1], 'entries': [dict(entry, material_phase=[1, 0])]},
+                     {'columns': 4, 'material_period': [1, 1], 'entries': [
+                         dict(entry, atlas_cell={'index': 5, 'x': 0, 'y': 0})]}):
+            with self.subTest(data=data), self.assertRaises(atlas_map.AtlasMapError):
+                atlas_map.parse(data)
+        with self.assertRaises(atlas_map.AtlasMapError):              # no slot for mask 16
+            atlas_map.autotile({}, [(0, 0), (1, 0)], 3, good)
+        with self.assertRaises(atlas_map.AtlasMapError):              # a neighbour the map does not own
+            atlas_map.autotile({(1, 0): tilemap.Tile(3, 9, 9)}, [(0, 0)], 3,
+                               atlas_map.load(CONNECT16))
+
+
 class Read(Case):
     def test_reports_count_bounds_kinds_and_the_edges(self) -> None:
         # Per-column counts are how an author finds where a wall stops without
@@ -173,6 +224,32 @@ class Paint(Case):
         self.assertEqual(self.cells(EMPTY), {(x, y): tilemap.Tile(4, 1, 2, 3)
                                              for y in (-1, 0) for x in (-1, 0, 1)})
         self.assertIn('6 added, 0 replaced, 0 erased', self.output.getvalue())
+
+    def test_at_sets_single_cells_and_erase_takes_them_back(self) -> None:
+        self.verb(tiles_paint.main, ['paint', self.path, '--layer', EMPTY, '--at', '-3,-3',
+                                     '--at', '4,0', '--tile', '2/1,1'])
+        self.assertEqual(self.cells(EMPTY), {(-3, -3): tilemap.Tile(2, 1, 1), (4, 0): tilemap.Tile(2, 1, 1)})
+        self.assertIn('2 added, 0 replaced, 0 erased at 2 cell(s)', self.output.getvalue())
+        self.verb(tiles_paint.main, ['erase', self.path, '--layer', EMPTY, '--at', '-3,-3'])
+        self.assertEqual(self.cells(EMPTY), {(4, 0): tilemap.Tile(2, 1, 1)})
+
+    def test_autotile_slots_by_mask_and_phase_re_slots_neighbours_and_repeats_as_a_no_op(self) -> None:
+        row = ['paint', self.path, '--layer', EMPTY, '--region', '0,0,2,0',
+               '--atlas-map', str(CONNECT16), '--source', '3']
+        self.assertEqual(self.verb(tiles_paint.main, row), tiles_paint.EXIT_OK, self.output.getvalue())
+        self.assertEqual(self.cells(EMPTY), {(0, 0): wall((0, 0), 16), (1, 0): wall((1, 0), 24),
+                                             (2, 0): wall((2, 0), 8)})
+        once = self.text()
+        self.verb(tiles_paint.main, row)
+        self.assertIn(tiles_paint.UNCHANGED, self.output.getvalue())
+        self.assertEqual(self.text(), once)
+        # A cell below the middle: it gets UP, and the middle gains DOWN.
+        self.verb(tiles_paint.main, ['paint', self.path, '--layer', EMPTY, '--at', '1,1',
+                                     '--atlas-map', str(CONNECT16), '--source', '3'])
+        self.assertEqual(self.cells(EMPTY)[(1, 1)], wall((1, 1), 2))
+        self.assertEqual(self.cells(EMPTY)[(1, 0)], wall((1, 0), 88))
+        self.assertIn('1 neighbor(s) re-slotted', self.output.getvalue())
+        self.assertIn('1 added, 1 replaced', self.output.getvalue())
 
     def test_counts_added_and_replaced_separately(self) -> None:
         """(2,1) is a hole in the fixture slab — filling it is an ADD inside a
