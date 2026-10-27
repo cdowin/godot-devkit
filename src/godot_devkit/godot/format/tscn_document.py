@@ -31,7 +31,9 @@ a plausible-looking wrong answer.
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import zlib
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable
@@ -81,6 +83,10 @@ SCRIPT_PROP = 'script'
 LOAD_STEPS_ATTR = 'load_steps'
 EXT_REF = 'ExtResource("{id}")'
 PACKED_SCENE_TYPE = 'PackedScene'
+UNIQUE_ID_ATTR = 'unique_id'
+UNIQUE_ID_MASK = 0x7FFFFFFF          # Godot's node ids are positive int32
+SUB_ID_CHARS = '0123456789abcdefghijklmnopqrstuvwxyz'
+SUB_ID_LENGTH = 5                    # `Resource_x7k2q`, as the editor mints them
 
 PathMap = dict[tuple[str, ...], tuple[str, ...]]
 
@@ -412,14 +418,19 @@ class TscnDocument:
         self._prune_unreferenced_ext_resources()
 
     def add_node(self, parent_path: str, name: str, node_type: str,
-                 script: str | None = None) -> None:
+                 script: str | None = None, *, groups: tuple[str, ...] = (),
+                 props: tuple[tuple[str, str], ...] = ()) -> None:
+        """Add a typed node. `props` are written in the order given, then the
+        script, which is where the saver puts `script` on a node: after the
+        engine properties, before the exports."""
         parent = self.node(parent_path)
         parent_abs = self.node_path(parent)
         if any(self.node_path(n) == parent_abs + (name,) for n in self.nodes):
             raise TscnError(f'{parent_path!r} already has a child named {name!r}')
         header = (f'[node name="{name}" type="{node_type}" '
-                  f'parent="{join_path(list(parent_abs))}"]')
-        body = [header]
+                  f'parent="{join_path(list(parent_abs))}"'
+                  f'{self._unique_id_attr(parent_abs + (name,))}{_groups_attr(groups)}]')
+        body = [header, *(f'{key}{PROP_ASSIGN}{value}' for key, value in props)]
         if script:
             ref_id = self._ensure_ext_resource(script, 'Script')
             body.append(f'{SCRIPT_PROP}{PROP_ASSIGN}{EXT_REF.format(id=ref_id)}')
@@ -435,10 +446,52 @@ class TscnDocument:
         if any(self.node_path(n) == parent_abs + (name,) for n in self.nodes):
             raise TscnError(f'{parent_path!r} already has a child named {name!r}')
         ref_id = self._ensure_ext_resource(res_path, PACKED_SCENE_TYPE)
-        header = (f'[node name="{name}" parent="{join_path(list(parent_abs))}" '
+        header = (f'[node name="{name}" parent="{join_path(list(parent_abs))}"'
+                  f'{self._unique_id_attr(parent_abs + (name,))} '
                   f'instance={EXT_REF.format(id=ref_id)}]')
         insert = self._subtree_end(self.node(parent_path))
         self._splice(insert, insert, ['', header])
+
+    def append_block(self, lines: list[str]) -> None:
+        """Append a section at the end of the file, after a blank separator,
+        keeping the file's final newline where it was."""
+        end = len(self.lines)
+        while end > 0 and not self.lines[end - 1].strip():
+            end -= 1                                 # trailing blanks and the final ''
+        self._splice(end, end, ['', *lines])
+
+    def ext_ref(self, res_path: str, res_type: str) -> str:
+        """`ExtResource("id")` for `res_path`, reusing or minting its ext_resource."""
+        return EXT_REF.format(id=self._ensure_ext_resource(res_path, res_type))
+
+    def add_sub_resource(self, sub_type: str, seed: str,
+                         props: tuple[tuple[str, str], ...]) -> str:
+        """Append a `[sub_resource]` after the last one (or after the
+        ext_resources) and return its id. The id is Godot's `Type_xxxxx` shape,
+        derived from `seed` rather than drawn at random, so the same command on
+        the same file mints the same id."""
+        taken = {s.attrs.get('id') for s in self.sections if s.kind == SUB_RESOURCE_KIND}
+        sub_id = next(candidate for salt in range(len(taken) + 1)
+                      for candidate in [f'{sub_type}_{_short_hash(f"{seed}#{salt}")}']
+                      if candidate not in taken)
+        body = [f'[{SUB_RESOURCE_KIND} type="{sub_type}" id="{sub_id}"]',
+                *(f'{key}{PROP_ASSIGN}{value}' for key, value in props)]
+        anchor = max((s.body_end for s in self.sections
+                      if s.kind in (SUB_RESOURCE_KIND, EXT_RESOURCE_KIND, *SCENE_KINDS)),
+                     default=0)
+        self._splice(anchor, anchor, ['', *body])
+        self._bump_load_steps()
+        return sub_id
+
+    def _unique_id_attr(self, path: tuple[str, ...]) -> str:
+        """` unique_id=N` when this file's nodes carry Godot 4.6+'s node ids,
+        else nothing — a file that does not use them is not upgraded by one
+        new node. N is derived from the node's path (deterministic, so a retry
+        mints the same bytes) and moved past any id the file already holds."""
+        held = {s.attrs['unique_id'] for s in self.nodes if 'unique_id' in s.attrs}
+        if not held:
+            return ''
+        return f' {UNIQUE_ID_ATTR}={mint_unique_id(join_path(list(path)), held)}'
 
     def add_connection(self, signal_name: str, from_attr: str, to_attr: str,
                        method: str, flags: str | None = None) -> None:
@@ -700,7 +753,10 @@ class TscnDocument:
             attrs = f'type="{res_type}" uid="{uid}" path="{res_path}" id="{ref_id}"'
         anchor = max((s.body_end for s in self.sections
                       if s.kind in (EXT_RESOURCE_KIND, *SCENE_KINDS)), default=1)
-        self._splice(anchor, anchor, [f'[{EXT_RESOURCE_KIND} {attrs}]'])
+        # The first ext_resource opens its own block below the header, the way
+        # the saver writes it; later ones join that block.
+        line = f'[{EXT_RESOURCE_KIND} {attrs}]'
+        self._splice(anchor, anchor, [line] if used else ['', line])
         self._bump_load_steps()
         return ref_id
 
@@ -795,3 +851,26 @@ def _relative_path(owner: tuple[str, ...], target: tuple[str, ...]) -> str:
     hops = [PARENT_SEG] * (len(owner) - common)
     rest = list(target[common:])
     return PATH_SEP.join(hops + rest) if (hops or rest) else ROOT_PATH
+
+
+def mint_unique_id(seed: str, held: set[str]) -> str:
+    """A positive int32 node id derived from `seed`, stepped past `held`."""
+    value = zlib.crc32(seed.encode('utf-8')) & UNIQUE_ID_MASK or 1
+    while str(value) in held:
+        value = value % UNIQUE_ID_MASK + 1
+    return str(value)
+
+
+def _short_hash(seed: str) -> str:
+    number = int.from_bytes(hashlib.sha1(seed.encode('utf-8')).digest()[:8], 'big')
+    chars = []
+    for _ in range(SUB_ID_LENGTH):
+        number, digit = divmod(number, len(SUB_ID_CHARS))
+        chars.append(SUB_ID_CHARS[digit])
+    return ''.join(chars)
+
+
+def _groups_attr(groups: tuple[str, ...]) -> str:
+    if not groups:
+        return ''
+    return ' groups=[' + ', '.join(f'"{g}"' for g in groups) + ']'

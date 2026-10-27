@@ -22,7 +22,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from godot_devkit.core import walk
 from godot_devkit.core.project import git_lines
+from godot_devkit.godot.index.uid_codec import INVALID_ID, text_to_id
 
 RES_PREFIX = 'res://'
 UID_ATTR = re.compile(r'\buid="(uid://[0-9a-z]+)"')
@@ -32,6 +34,8 @@ IMPORT_SUFFIX = '.import'
 HEADER_SCAN_BYTES = 4096          # the uid is always in the first header line
 EXT_RESOURCE_PREFIX = '[ext_resource '
 HEADER_PREFIXES = ('[gd_scene ', '[gd_resource ')
+UID_HOMES = ('.tscn', '.tres', UID_SIDECAR_SUFFIX, IMPORT_SUFFIX)
+ANY_UID = re.compile(r'uid://[0-9a-z]+')
 
 
 class UidIndex:
@@ -100,3 +104,30 @@ class UidIndex:
                     if path_m and uid_m:
                         self._cross_reference.setdefault(path_m.group(1), uid_m.group(1))
         return self._cross_reference.get(res_path)
+
+
+def project_uids(root: Path) -> set[int]:
+    """Every uid a file under `root` already claims for itself: the header of a
+    .tscn/.tres, a .uid sidecar, an .import file. What `scene new` must not
+    mint twice — Godot resolves a duplicated uid to whichever file it met first."""
+    taken: set[int] = set()
+    for file in walk.descendants(root, walk.Kind.FILE):
+        if file.suffix not in UID_HOMES:
+            continue
+        try:
+            with file.open(encoding='utf-8', errors='replace') as handle:
+                head = handle.read(HEADER_SCAN_BYTES)
+        except OSError:
+            continue
+        if file.suffix == UID_SIDECAR_SUFFIX:
+            match = ANY_UID.match(head.strip())
+        elif file.suffix == IMPORT_SUFFIX:
+            match = UID_ATTR.search(head)
+        else:
+            first = head.split('\n', 1)[0]
+            match = UID_ATTR.search(first) if first.startswith(HEADER_PREFIXES) else None
+        if match is not None:
+            uid = text_to_id(match.group(match.lastindex or 0))
+            if uid != INVALID_ID:
+                taken.add(uid)
+    return taken

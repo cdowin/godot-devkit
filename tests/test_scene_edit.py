@@ -24,6 +24,8 @@ from godot_devkit.godot.read import scene_summary
 from godot_devkit.godot.write import scene_edit
 from godot_devkit.godot.format.tscn import TscnError
 from godot_devkit.godot.format.tscn_document import TscnDocument
+from godot_devkit.godot.index import uid_codec
+from godot_devkit.godot.index.uid_index import project_uids
 
 SINK = FIXTURES / 'kitchen_sink.tscn'
 DASH_TRES = FIXTURES / 'corpus/editor_written/data/abilities/dash/standard_t1.tres'
@@ -194,7 +196,13 @@ class MainMechanics(VerbCase):
                      ('add', str(self.scene), '.', 'X'),
                      ('add', str(self.scene), '.', 'X',
                       '--instance', 'res://scenes/panel.tscn',
-                      '--script', 'res://systems/logic.gd')):
+                      '--script', 'res://systems/logic.gd'),
+                     ('set', str(self.scene), 'Sandbox', 'x', '1', '--new-sub-resource', 'Resource'),
+                     ('set', str(self.scene), 'Sandbox', 'x'),
+                     ('add', str(self.scene), '.', 'X', 'Node2D', '--tile-set', 'res://t.tres'),
+                     ('new', str(self.tmp / 'n.tscn')),
+                     ('new', str(self.tmp / 'n.tscn'), '--inherits', 'res://a.tscn',
+                      '--script', 'res://b.gd')):
             with self.assertRaises(SystemExit) as bail, \
                     contextlib.redirect_stderr(io.StringIO()):
                 self.run_verb(*argv)
@@ -391,3 +399,92 @@ class ConnectDisconnect(VerbCase):
         self.run_verb('disconnect', str(self.scene), 'toggled', 'Nested/Deep',
                       'TileRoomContract', '_on_toggled')
         self.assertEqual(self.scene.read_bytes(), before)
+
+
+TILE_SET = '[gd_resource type="TileSet" format=3 uid="uid://btilesetfix1"]\n\n[resource]\n'
+
+
+class WholeScenes(VerbCase):
+    """`new`, a TileMapLayer in one `add`, and `set --new-sub-resource`: the
+    verbs that build a scene from nothing. Each is exact on its first run, a
+    no-op on its second, and a refusal when the file already says otherwise."""
+
+    def test_new_writes_a_canonical_scene_with_a_fresh_uid_and_a_retry_is_a_no_op(self) -> None:
+        with temp_repo('canon_repo') as root:
+            taken = project_uids(root)
+            scene = root / 'rooms/base_room.tscn'
+            argv = ('new', str(scene), '--root', 'Node2D', '--script', 'res://systems/logic.gd')
+            self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())
+            text = self.text(scene)
+            self.second_run_is_a_no_op(*argv)
+            self.refused('new', str(scene), '--root', 'Node3D', saying=('never overwrites',))
+        uid = re.match(r'\[gd_scene format=4 uid="(uid://[a-z0-9]+)"\]\n', text).group(1)
+        self.assertEqual(uid_codec.canonical(uid), uid)
+        self.assertNotIn(uid_codec.text_to_id(uid), taken)
+        self.assertEqual(text.split('\n', 1)[1], (
+            '\n[ext_resource type="Script" uid="uid://dcanonlogic" '
+            'path="res://systems/logic.gd" id="1_logic"]\n'
+            '\n[node name="BaseRoom" type="Node2D" unique_id=' + text.split('unique_id=')[1]))
+        self.assertTrue(text.endswith(']\nscript = ExtResource("1_logic")\n'), text)
+
+    def test_mint_draws_again_rather_than_reuse_a_claimed_uid(self) -> None:
+        draws = iter([0, 42, 43])
+        self.assertEqual(uid_codec.mint({42}, draw=lambda bits: next(draws)),
+                         uid_codec.id_to_text(43))
+
+    def test_new_inherits_takes_the_base_root_name_and_refuses_a_missing_base(self) -> None:
+        with temp_repo('canon_repo') as root:
+            scene = root / 'rooms/variant.tscn'
+            argv = ('new', str(scene), '--inherits', 'res://scenes/panel.tscn')
+            self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())
+            text = self.text(scene)
+            self.second_run_is_a_no_op(*argv)
+            self.assertEqual(self.run_verb('new', str(root / 'rooms/ghost.tscn'), '--inherits',
+                                           'res://scenes/ghost.tscn'), scene_edit.EXIT_REFUSED)
+            self.assertFalse((root / 'rooms/ghost.tscn').exists())
+        self.assertTrue(text.endswith('\n\n[ext_resource type="PackedScene" uid="uid://dcanonpanel" '
+                                      'path="res://scenes/panel.tscn" id="1_panel"]\n'
+                                      '\n[node name="Panel" instance=ExtResource("1_panel")]\n'), text)
+
+    def test_add_makes_a_tile_layer_in_one_command(self) -> None:
+        with temp_repo('canon_repo') as root:
+            (root / 'tiles').mkdir()
+            (root / 'tiles/set.tres').write_text(TILE_SET, encoding='utf-8')
+            scene = root / 'rooms/room.tscn'
+            self.run_verb('new', str(scene), '--root', 'Node2D')
+            argv = ('add', str(scene), '.', 'Wall', 'TileMapLayer', '--tile-set',
+                    'res://tiles/set.tres', '--z', '-5', '--group', 'wall', '--group', 'solid')
+            self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())
+            text = self.text(scene)
+            self.second_run_is_a_no_op(*argv)
+            self.refused('add', str(scene), '.', 'Wall', 'TileMapLayer', '--z', '3',
+                         saying=('z_index=-5',))
+            self.refused('add', str(scene), '.', 'Roof', 'TileMapLayer', '--tile-set',
+                         'res://tiles/none.tres', saying=('does not exist',))
+        self.assertIn('[ext_resource type="TileSet" uid="uid://btilesetfix1" '
+                      'path="res://tiles/set.tres" id="1_set"]\n', text)
+        self.assertRegex(text, r'\n\[node name="Wall" type="TileMapLayer" parent="\." '
+                               r'unique_id=\d+ groups=\["wall", "solid"\]\]\n'
+                               r'z_index = -5\ntile_set = ExtResource\("1_set"\)\n$')
+
+    def test_set_new_sub_resource_makes_points_and_then_holds(self) -> None:
+        with temp_repo('canon_repo') as root:
+            scene = root / 'scenes/panel.tscn'
+            argv = ('set', str(scene), 'Inner', 'context', '--new-sub-resource',
+                    'res://systems/logic.gd', 'id=&"spawn_a"', 'speed=2.0')
+            self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())
+            self.run_verb('set', str(scene), 'Footer', 'shape', '--new-sub-resource',
+                          'RectangleShape2D', 'size=Vector2(16, 16)')
+            text = self.text(scene)
+            self.second_run_is_a_no_op(*argv)
+            self.refused('set', str(scene), 'Inner', 'context', '--new-sub-resource',
+                         'res://systems/logic.gd', 'id=&"spawn_b"', saying=('--sub-resource',))
+            self.refused('set', str(scene), 'Inner', 'x', '--new-sub-resource', 'Resource', 'novalue',
+                         saying=('key=value',))
+        sub = re.search(r'\[sub_resource type="Resource" id="(Resource_[a-z0-9]{5})"\]\n'
+                        r'script = ExtResource\("1_logic"\)\nid = &"spawn_a"\nspeed = 2.0\n\n'
+                        r'\[sub_resource type="RectangleShape2D" id="(RectangleShape2D_[a-z0-9]{5})"\]\n'
+                        r'size = Vector2\(16, 16\)\n\n\[node name="Panel"', text)
+        self.assertIsNotNone(sub, text)
+        self.assertIn(f'text = "base"\ncontext = SubResource("{sub.group(1)}")\n', text)
+        self.assertIn(f'shape = SubResource("{sub.group(2)}")', text)
