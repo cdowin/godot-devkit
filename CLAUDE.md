@@ -41,7 +41,8 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
    least.
 7. **Semver, enforced by habit** (a version is a release tag made when it ships; a PR need not bump it): patch = fix with identical interface; minor = new verb, flag, config
    key or output shape; major = anything a consumer Makefile or hook must edit to survive.
-   `__version__` in `src/godot_devkit/__init__.py` and `version` in `pyproject.toml` move together,
+   `__version__` in `src/godot_devkit/__init__.py`, `version` in `pyproject.toml` and the plugin version
+   in `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` move together,
    always — two version sites that disagree ship two products.
 8. **This package knows nothing about its consumers.** No file here names a consuming project, reads
    a path outside this checkout, or gates on another repo's state; realistic data is VENDORED under
@@ -122,6 +123,6 @@ incantation: `make help` lists every target, and a check that is not a target ge
   session publishes there; a cloud session drafts the wiki text in its PR body and the issue is marked
   blocked-by Chris (local session). This repo keeps no `docs/` and no `.md` outside `README.md`, `CLAUDE.md`,
   `AGENTS.md` (`tests/test_docs_ratchet.py`); the bundled machine-loaded skill files listed there are also allowed. `README.md` stays under 80 lines.
-- **Release:** bump `version` in `pyproject.toml` and `__version__` together on `main`; `auto-tag.yml` tags it
+- **Release:** bump all 4 version sites (rule 7) together on `main`; `auto-tag.yml` tags it
   and `release.yml` publishes the wheel to the index. Never tag by hand.
 - Report in ASD-STE100: numbered NEEDS YOU list first, outcome first, one fact per sentence, numbers not adjectives.

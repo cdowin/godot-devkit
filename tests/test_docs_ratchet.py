@@ -1,7 +1,7 @@
 """test_docs_ratchet.py — docs for people live in the wiki, so the repo cannot grow them back.
 
 Fails when a tracked file is a `docs/` path, a `CHANGELOG*` file, or a `.md` outside the
-allowlist (root entrypoints, the bundled agent skill, and `.md` test fixtures).
+allowlist (root entrypoints, the bundled agent skills, the plugin skill, and `.md` test fixtures).
 README.md is a landing page: at most README_MAX_LINES lines.
 """
 import subprocess
@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = "src/godot_devkit/godot/installables/skills"
 ALLOWED_MD = {
     "README.md", "CLAUDE.md", "AGENTS.md",
+    "plugin/skills/godot-devkit/SKILL.md",  # the Claude Code plugin's skill
     *(f"{SKILLS_DIR}/{skill}/{name}" for skill in SKILLS
       for name in FILES + EXTRA_FILES.get(skill, ()) if name.endswith(".md")),
 }

@@ -1,0 +1,10 @@
+{
+  "name": "godot-devkit",
+  "version": "4.2.0",
+  "description": "Points agents at godot-devkit verbs for .tscn/.tres edits, editor save churn, renames, tile painting and code-size stats.",
+  "author": { "name": "Chris Dowin" },
+  "homepage": "https://github.com/cdowin/godot-devkit",
+  "repository": "https://github.com/cdowin/godot-devkit",
+  "license": "MIT",
+  "keywords": ["godot", "tscn", "tres", "scenes", "tilemap"]
+}
