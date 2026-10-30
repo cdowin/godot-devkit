@@ -29,12 +29,15 @@ import re
 from godot_devkit.godot.format.tscn import (
     COMMENT_CHAR,
     EXT_RESOURCE_KIND,
+    HEADER_ATTR,
+    NODE_KIND,
     RESOURCE_REF,
     Section,
     ext_index,
+    join_path,
     script_path,
 )
-from godot_devkit.godot.format.tscn_document import TscnDocument
+from godot_devkit.godot.format.tscn_document import TscnDocument, mint_unique_id
 from godot_devkit.godot.format.value_order import OrderRefusal, animations_in_engine_order
 from godot_devkit.godot.index.gdscript import ScriptIndex
 
@@ -42,6 +45,8 @@ SUB_RESOURCE_KIND = 'sub_resource'
 RESOURCE_KIND = 'resource'
 HEADER_KINDS = ('gd_scene', 'gd_resource')
 RESOURCE_HEADER = 'gd_resource'
+SCENE_HEADER = 'gd_scene'
+ID_PRECEDES = ('name', 'type', 'parent', 'index')
 LOAD_STEPS = re.compile(r' load_steps=\d+')
 TYPE_ATTR = re.compile(r'\btype="[^"]*"')
 SCRIPT_CLASS_ATTR = re.compile(r' script_class="[^"]*"')
@@ -196,9 +201,56 @@ def order_sub_resources(doc: TscnDocument) -> list[str]:
     return [f'  SUB ORDER  {len(order)} sub_resource(s) moved to first-use order']
 
 
+def mint_unique_ids(doc: TscnDocument) -> list[str]:
+    """`unique_id=` on every node this scene CREATES that lacks one.
+
+    The editor writes one on every node of a `.tscn` and KEEPS any it reads,
+    so its own value is random but any valid id survives the next save: a
+    deterministic one (from the node's path, as `scene add` mints) is the
+    form an editor save leaves alone. An override of an instance's child is
+    different — the editor copies the BASE node's id — so it is reported,
+    never minted.
+    """
+    header = _header(doc)
+    if header is None or header.kind != SCENE_HEADER:
+        return []
+    held = {s.attrs['unique_id'] for s in doc.nodes if 'unique_id' in s.attrs}
+    report, overrides, edits = [], 0, []
+    for node in doc.nodes:
+        if 'unique_id' in node.attrs:
+            continue
+        created = node.attrs.get('parent') is None or 'type' in node.attrs \
+            or 'instance' in node.attrs
+        if not created:
+            overrides += 1
+            continue
+        line = doc.lines[node.header_line]
+        attrs = list(HEADER_ATTR.finditer(line))
+        names = [m.group(1) for m in attrs]
+        lead = [i for i, name in enumerate(names) if name in ID_PRECEDES]
+        if not lead or lead != list(range(len(lead))):
+            report.append(f'  UNRESOLVED  unique_id: node {node.attrs.get("name")} has an '
+                          f'attribute order the tool cannot place unique_id in — left as written')
+            continue
+        value = mint_unique_id(join_path(list(doc.node_path(node))) or '.', held)
+        held.add(value)
+        cut = attrs[lead[-1]].end()
+        edits.append((node.header_line, f'{line[:cut]} unique_id={value}{line[cut:]}'))
+    for index, line in edits:
+        doc.replace_lines(index, index + 1, [line])
+    if edits:
+        report.append(f'  UNIQUE ID  {len(edits)} node(s) given a unique_id= (an editor save '
+                      f'keeps it)')
+    if overrides:
+        report.append(f'  NOTE  {overrides} instance-child override(s) lack unique_id= — the '
+                      f'editor copies the base node\'s id; left as written')
+    return report
+
+
 def layout(doc: TscnDocument, scripts: ScriptIndex | None) -> list[str]:
     """Every file-level pass, in the order `--order` runs them."""
-    report = order_sub_resources(doc)
+    report = mint_unique_ids(doc)
+    report += order_sub_resources(doc)
     report += sort_ext_resources(doc)
     report += drop_load_steps(doc)
     if scripts is not None:

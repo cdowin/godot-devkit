@@ -89,6 +89,7 @@ TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
 SCENE_HEADER_KINDS = ('gd_scene', RESOURCE_HEADER_KIND)
 INSTANCE_ATTR = 'instance'
+NOTE = '  NOTE  '
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
@@ -331,6 +332,10 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
         report += _elide_redundant_defaults(doc, analyzer)
     if canonical is not None and respell:
         report += respell_values(doc, canonical)
+        if analyzer is not None:
+            # A default spelled long (`PackedFloat32Array(0.0, 1.0)`) equals
+            # its entry only once re-spelled: elide again, or a second run would.
+            report += _elide_redundant_defaults(doc, analyzer)
     if canonical is not None and order:
         report += order_properties(doc, canonical)
         report += layout(doc, canonical.scripts)
@@ -384,8 +389,10 @@ def main(argv: list[str]) -> int:
             refused += 1
             continue
         unresolved += sum(1 for line in report if 'UNRESOLVED' in line)
-        if after == before and not report:
+        if after == before and all(line.startswith(NOTE) for line in report):
             print(f'canonicalize  {path}  already canonical')
+            for line in report:
+                print(line)
             continue
         if args.dry_run:
             print(render_diff(before, after, path.name), end='')
@@ -397,7 +404,8 @@ def main(argv: list[str]) -> int:
         # "changes", not "restored": with --elide-defaults a change can be a
         # deletion, and a count that lies about its own direction is worse than
         # no count.
-        changes = sum(1 for line in report if 'UNRESOLVED' not in line)
+        changes = sum(1 for line in report if 'UNRESOLVED' not in line
+                      and not line.startswith(NOTE))
         print(f'canonicalize  {path}  {changes} change(s), '
               f'{sum(1 for line in report if "UNRESOLVED" in line)} unresolved'
               f'{" (dry run)" if args.dry_run else ""}')

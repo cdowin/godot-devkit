@@ -85,6 +85,8 @@ def findings_of(root: Path, rel: str, analyzer: CanonicalAnalyzer,
                   for prop, position in item.moved]
     # File-level layout: the same passes `--order` runs, on a scratch copy.
     for line in layout(doc, analyzer.scripts):
+        if line.startswith('  NOTE  '):
+            continue
         if 'UNRESOLVED' in line:
             census['layout: ' + line.split('  UNRESOLVED  ', 1)[1].split(' — ')[0]] += 1
         else:

@@ -1,5 +1,5 @@
 [gd_scene format=3 uid="uid://bgap10bunique"]
 
-[node name="Root" type="Node2D" unique_id=837590703]
+[node name="Root" type="Node2D" unique_id=248832578]
 
-[node name="Child" type="Node2D" parent="." unique_id=1420642760]
+[node name="Child" type="Node2D" parent="." unique_id=1668447021]
