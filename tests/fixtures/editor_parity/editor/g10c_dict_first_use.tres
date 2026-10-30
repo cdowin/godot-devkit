@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://bgapmdict"]
+
+[ext_resource type="Script" uid="uid://65pb8l8fq6ct" path="res://systems/item.gd" id="1_item"]
+
+[sub_resource type="PlaceholderTexture2D" id="for_a"]
+size = Vector2(2, 2)
+
+[sub_resource type="PlaceholderTexture2D" id="for_z"]
+size = Vector2(3, 3)
+
+[resource]
+script = ExtResource("1_item")
+table = {
+"a": SubResource("for_a"),
+"z": SubResource("for_z")
+}
+label = "l"

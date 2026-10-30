@@ -45,6 +45,7 @@ from godot_devkit.godot import VENDORED_DEFAULT
 from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_text
 from godot_devkit.godot.index.gdscript import ScriptIndex
 from godot_devkit.godot.index.resource_canonical import CanonicalAnalyzer
+from godot_devkit.godot.write.editor_layout import layout
 
 CONFIG_SECTION = 'canonical'
 EXIT_OK = 0
@@ -76,10 +77,18 @@ def findings_of(root: Path, rel: str, analyzer: CanonicalAnalyzer,
     lines = [f'  DRIFT  {rel} : {item.where}.{item.prop.key} = {item.prop.value} '
              f'— the saver writes {", ".join(item.changes)}'
              for item in analysis.rewrites]
+    lines += [f'  DRIFT  {rel} : {item.where}.{item.prop.key} — the saver writes '
+              f'{", ".join(item.changes)}' for item in analysis.restructures]
     for item in analysis.reorders:
         lines += [f'  DRIFT  {rel} : {item.where}.{prop.key} — the saver writes it '
                   f'at position {position} of {len(item.order)} (declaration order)'
                   for prop, position in item.moved]
+    # File-level layout: the same passes `--order` runs, on a scratch copy.
+    for line in layout(doc, analyzer.scripts):
+        if 'UNRESOLVED' in line:
+            census['layout: ' + line.split('  UNRESOLVED  ', 1)[1].split(' — ')[0]] += 1
+        else:
+            lines.append(f'  DRIFT  {rel} : {line.strip()}')
     return lines
 
 
@@ -107,7 +116,7 @@ def report(root: Path, files: list[str], analyzer: CanonicalAnalyzer) -> int:
         print(f'{GATE} FAIL — scanned 0 files; check [{CONFIG_SECTION}] exclude_prefixes')
         return EXIT_FINDINGS
     if findings:
-        print(f'{GATE} FAIL — {len(findings)} drifting propert(ies) in {dirty} of '
+        print(f'{GATE} FAIL — {len(findings)} drift(s) in {dirty} of '
               f'{scanned} .tres file(s); Godot\'s saver will rewrite them on the '
               f'next editor save')
         print('  Fix: godot-devkit scene canonicalize --respell --order <file>...')

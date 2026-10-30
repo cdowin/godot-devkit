@@ -83,6 +83,7 @@ from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_tex
 from godot_devkit.godot.index.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
 from godot_devkit.godot.write import (file_exists, render_diff,
                                       utf8_refusal_reason)
+from godot_devkit.godot.write.editor_layout import layout
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
@@ -280,17 +281,25 @@ def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> l
 
 def respell_values(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
     """Re-spell values the way the saver writes them — tokens, never lines."""
-    analysis = analyzer.analyze(doc.lines, doc.sections, order=False)
+    analysis = analyzer.analyze(doc.lines, doc.sections, order=False, structure=False)
     report = [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
               for item in analysis.rewrites]
     report += [_unresolved(refusal) for refusal in analysis.refusals]
     doc.rewrite_props([(item.prop, item.lines) for item in analysis.rewrites])
+    # Item order inside a value (dictionary keys, SpriteFrames animations),
+    # read from the re-spelled text: a second analysis, never two rewrites of
+    # one property from one parse.
+    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False, order=False)
+    report += [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
+               for item in analysis.restructures]
+    report += [_unresolved(refusal) for refusal in analysis.refusals]
+    doc.rewrite_props([(item.prop, item.lines) for item in analysis.restructures])
     return report
 
 
 def order_properties(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
     """Move each scripted section's properties into the saver's order."""
-    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False)
+    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False, structure=False)
     report = []
     for item in analysis.reorders:
         doc.reorder_props(item.section, item.order)
@@ -324,6 +333,7 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
         report += respell_values(doc, canonical)
     if canonical is not None and order:
         report += order_properties(doc, canonical)
+        report += layout(doc, canonical.scripts)
     return doc.text, report
 
 

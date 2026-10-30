@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="Item" load_steps=2 format=3 uid="uid://dcanonclean"]
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://dcanonclean"]
 
 [ext_resource type="Script" uid="uid://dcanonitem" path="res://systems/item.gd" id="1_item"]
 

@@ -282,6 +282,10 @@ class TscnDocument:
         self.lines[start:end] = replacement
         self._reparse()
 
+    def replace_lines(self, start: int, end: int, replacement: list[str]) -> None:
+        """Replace lines `start:end` with `replacement`, then reparse."""
+        self._splice(start, end, replacement)
+
     def _block_span(self, section: Section) -> tuple[int, int]:
         """The lines a section owns for move/delete: its header and body, any
         contiguous comment lines directly above it (they document THIS section),

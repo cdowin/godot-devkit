@@ -26,7 +26,9 @@ SCRIPTS = ['systems/base_item.gd', 'systems/item.gd', 'systems/tooled.gd',
            'systems/plain.gd', 'systems/holder.gd']
 
 # The gaps canonicalize closes: hand form -> editor form, byte for byte.
-DERIVABLE = ('g01_order.tres',)
+DERIVABLE = ('g01_order.tres', 'g02_ext.tres', 'g04_class.tres', 'g04b_noclass.tres',
+             'g05_array.tres', 'g08_frames.tres', 'g09_dict.tres', 'g10_scene.tscn',
+             'g10c_dict_first_use.tres')
 
 
 def run(name: str) -> tuple[str, list[str]]:

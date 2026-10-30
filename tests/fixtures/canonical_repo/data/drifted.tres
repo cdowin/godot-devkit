@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="Item" load_steps=6 format=3 uid="uid://dcanondrifted"]
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://dcanondrifted"]
 
 [ext_resource type="Script" uid="uid://dcanonitem" path="res://systems/item.gd" id="1_item"]
 
