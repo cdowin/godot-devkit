@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="Item" load_steps=2 format=3 uid="uid://bgap1adict"]
+
+[ext_resource type="Script" uid="uid://65pb8l8fq6ct" path="res://systems/item.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+table = {
+"b": {
+"y": 1,
+"x": 2
+},
+"B": 3,
+"a": [{
+"q": 1,
+"p": 2
+}],
+2: "two",
+1: "one",
+&"n": 4,
+"_u": 5,
+"10": 6,
+"9": 7
+}

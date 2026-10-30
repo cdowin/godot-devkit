@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://bgap05array"]
+
+[ext_resource type="Script" uid="uid://65pb8l8fq6ct" path="res://systems/item.gd" id="1_item"]
+[ext_resource type="Texture2D" uid="uid://dsa25yf8bm506" path="res://art/a.tres" id="2_a"]
+[ext_resource type="Texture2D" uid="uid://db33bbpsfdrpf" path="res://art/b.tres" id="3_b"]
+
+[resource]
+script = ExtResource("1_item")
+parts = [ExtResource("2_a"), ExtResource("3_b")]

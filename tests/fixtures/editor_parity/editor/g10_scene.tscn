@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://bgap10scene"]
+
+[ext_resource type="Script" uid="uid://cys6nchjwr68d" path="res://systems/holder.gd" id="1_hold"]
+
+[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_abcde"]
+size = Vector2(2, 2)
+
+[sub_resource type="PlaceholderTexture2D" id="tex_b"]
+size = Vector2(4, 4)
+
+[sub_resource type="PlaceholderTexture2D" id="tex_c"]
+size = Vector2(6, 6)
+
+[node name="Root" type="Node2D" unique_id=1101]
+script = ExtResource("1_hold")
+
+[node name="First" type="Sprite2D" parent="." unique_id=2202]
+texture = SubResource("PlaceholderTexture2D_abcde")
+
+[node name="Second" type="Sprite2D" parent="." unique_id=3303]
+texture = SubResource("tex_b")
+
+[node name="Third" type="Sprite2D" parent="Second" unique_id=4404]
+texture = SubResource("tex_c")

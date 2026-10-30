@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="Bogus" format=3 uid="uid://bgap04noclass"]
+
+[ext_resource type="Script" uid="uid://fidnkceuvtda" path="res://systems/plain.gd" id="1_plain"]
+
+[resource]
+script = ExtResource("1_plain")
+amount = 3

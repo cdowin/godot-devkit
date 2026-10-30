@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://bgap01order"]
+
+[ext_resource type="Script" uid="uid://65pb8l8fq6ct" path="res://systems/item.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+price = 3.0
+count = 4
+weight = 2.0
+label = "x"
