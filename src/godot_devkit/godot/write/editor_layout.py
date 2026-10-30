@@ -12,7 +12,8 @@ and is pinned by a pair under `tests/fixtures/editor_parity/`:
 * **ext_resources** — one contiguous block, no blank line inside, sorted by
   id in natural order (`2_a` < `9_item` < `10_b` < `b_c`).
 * **sub_resources** — in the order the saver first REACHES each one: walk the
-  `[resource]` (or every `[node]`, in file order) property by property, and a
+  `[resource]` (or every `[node]`, in file order) property by property — a
+  resource section's properties sorted by NAME, not as written — and a
   sub_resource's own references come before it. The walk reads each value as
   written, so a dictionary is walked in its written key order — the order the
   NEXT save walks a file whose keys are already sorted. SpriteFrames
@@ -145,7 +146,10 @@ def sort_ext_resources(doc: TscnDocument) -> list[str]:
 def _refs(section: Section, kind: str | None) -> list[str]:
     """SubResource ids a section references, in the order the saver walks them."""
     ids = []
-    for entry in section.entries:
+    entries = section.entries
+    if section.kind in (RESOURCE_KIND, SUB_RESOURCE_KIND):
+        entries = sorted(entries, key=lambda entry: entry.key)
+    for entry in entries:
         value = entry.value
         if kind == SPRITE_FRAMES and entry.key == ANIMATIONS:
             value = animations_in_engine_order(value, 0)
