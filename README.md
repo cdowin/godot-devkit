@@ -17,7 +17,7 @@ never an error, it is silent partial success); **read output is write input**; *
 because models retry; **bounded blast radius**; and **`scene-diff`**, so an edit is provable
 without re-reading the file.
 
-Docs: https://github.com/cdowin/godot-devkit/wiki (verbs, checks, CI and [migration to 4.0](https://github.com/cdowin/godot-devkit/wiki/Migrating-from-3.x-to-4.0)).
+Claude Code plugin (the `godot-devkit` skill): `/plugin marketplace add cdowin/godot-devkit`, then `/plugin install godot-devkit@godot-devkit`. Docs: https://github.com/cdowin/godot-devkit/wiki (verbs, checks, CI and [migration to 4.0](https://github.com/cdowin/godot-devkit/wiki/Migrating-from-3.x-to-4.0)).
 
 ## Install
 
