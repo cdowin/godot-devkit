@@ -21,7 +21,15 @@ SCOPE — read this before wiring it in. What is judged is exactly what
     engine class, or a `class_name` script the file already references;
   * the order of a scripted section's properties — only where every key is
     `script` or one of the script's `@export`s. An engine property's place is
-    not in the ClassDB snapshot, so such a section is counted, not judged.
+    not in the ClassDB snapshot, so such a section is counted, not judged;
+  * dictionary key order and SpriteFrames `animations` (by name, `"loop"`
+    as an int); `Array[T](...)` on an untyped `Array` export;
+  * the file layout `editor_layout` writes: `load_steps=`, the header
+    `script_class=`, ext_resource and sub_resource order, and a
+    ShaderMaterial's `shader_parameter/*` lines (the windowed editor form).
+
+A `@tool` script's resource default — the editor adds an ext_resource for it
+under a random id — is not derivable, and is named in the census.
 
 Anything else — an engine-typed float, an enum element type, an export with
 an accessor — is censused as NOT A FINDING and never reported. A PASS means

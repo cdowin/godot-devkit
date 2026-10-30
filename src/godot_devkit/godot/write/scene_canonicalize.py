@@ -52,15 +52,26 @@ because deleting them is only safe where the redundancy is PROVEN
 re-save it touches nothing else: comments, ordering, uids and value spellings all
 survive, which is what makes it safe to run over a whole tree.
 
-`--respell` and `--order` are the other two things an editor save of a `.tres`
-changes, each proven by `resource_canonical` from the section's own script:
-floats in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
-`Array[T]` export wrapped as `Array[T]([...])`, and a scripted section's
-properties in declaration order. Both are LINE edits — a respell rewrites
-tokens inside the lines a value occupies, a reorder moves whole property lines
-— so comments, `uid=` and every other line survive byte for byte, and what the
-tool cannot prove it names as UNRESOLVED and leaves alone. `check canonical`
-is the gate over the same analysis.
+`--respell` and `--order` are the rest of what a Godot 4.7 editor save changes,
+each proven from the file, its scripts and its shader, and each pinned by an
+editor-saved pair under `tests/fixtures/editor_parity/`. `--respell`: floats
+in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
+`Array[T]` export wrapped as `Array[T]([...])` and `Array[T](...)` on an
+untyped `Array` export unwrapped, dictionary keys sorted, and SpriteFrames
+`animations` rebuilt (sorted by name, `"loop"` as an int). `--order`: a
+scripted section's properties in the saver's order (the script's own exports,
+then its base's), and the file's layout (`editor_layout`): `load_steps=`
+dropped, the header `script_class=`, ext_resources sorted by id with no blank
+line between, sub_resources in first-use order, a ShaderMaterial's
+`shader_parameter/*` lines as a WINDOWED editor writes them, and a
+deterministic `unique_id=` on each node a `.tscn` creates (the editor keeps
+it). `--elide-defaults` also drops an engine resource's property equal to its
+vendored default (`engine_defaults`). These are LINE edits: a respell rewrites
+tokens inside the lines a value occupies, a reorder moves whole lines, so
+comments, `uid=` and every other line survive byte for byte. What a parse
+cannot prove — a `@tool` script's `preload()` default, which the editor adds
+under a random ext_resource id — it names as UNRESOLVED and leaves alone.
+`check canonical` is the gate over the same analysis.
 
 Each is restored from evidence, never invented: a uid comes from the target's own
 `.uid` sidecar, its `[gd_scene/gd_resource]` header, or its `.import` file, and an
@@ -356,12 +367,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument('--respell', action='store_true',
                         help='also re-spell values as Godot\'s saver writes them: '
                              'floats in their shortest form, a bare list on an '
-                             'Array[T] export wrapped as Array[T]([...]); see '
-                             '`check canonical`')
+                             'Array[T] export wrapped as Array[T]([...]), '
+                             'dictionary keys sorted, SpriteFrames animations '
+                             'rebuilt; see `check canonical`')
     parser.add_argument('--order', action='store_true',
                         help='also move a scripted section\'s properties into '
-                             'the saver\'s order (script, then declaration '
-                             'order); see `check canonical`')
+                             'the saver\'s order (script, own exports, then the '
+                             'base\'s) and lay the file out as the editor does '
+                             '(header, ext_resource and sub_resource order, '
+                             'shader parameters, unique_id); see `check canonical`')
     args = parser.parse_args(argv)
 
     root = repo_root()
