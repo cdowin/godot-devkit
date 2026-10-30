@@ -338,7 +338,7 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
             report += _elide_redundant_defaults(doc, analyzer)
     if canonical is not None and order:
         report += order_properties(doc, canonical)
-        report += layout(doc, canonical.scripts)
+        report += layout(doc, canonical.scripts, root)
     return doc.text, report
 
 

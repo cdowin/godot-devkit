@@ -25,6 +25,7 @@ references (the saver would DROP it — a deletion is not a reorder).
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from godot_devkit.godot.format.tscn import (
     COMMENT_CHAR,
@@ -35,11 +36,13 @@ from godot_devkit.godot.format.tscn import (
     Section,
     ext_index,
     join_path,
+    ref_path,
     script_path,
 )
 from godot_devkit.godot.format.tscn_document import TscnDocument, mint_unique_id
 from godot_devkit.godot.format.value_order import OrderRefusal, animations_in_engine_order
 from godot_devkit.godot.index.gdscript import ScriptIndex
+from godot_devkit.godot.index.shader_uniforms import UniformRefusal, material_parameters
 
 SUB_RESOURCE_KIND = 'sub_resource'
 RESOURCE_KIND = 'resource'
@@ -47,6 +50,12 @@ HEADER_KINDS = ('gd_scene', 'gd_resource')
 RESOURCE_HEADER = 'gd_resource'
 SCENE_HEADER = 'gd_scene'
 ID_PRECEDES = ('name', 'type', 'parent', 'index')
+SHADER_MATERIAL = 'ShaderMaterial'
+SHADER_PROP = 'shader'
+PARAM_PREFIX = 'shader_parameter/'
+RES_PREFIX = 'res://'
+TOOL_ANNOTATION = re.compile(r'^@tool\b', re.M)
+RESOURCE_DEFAULT = re.compile(r'^(?:pre)?load\("([^"]+)"\)$')
 LOAD_STEPS = re.compile(r' load_steps=\d+')
 TYPE_ATTR = re.compile(r'\btype="[^"]*"')
 SCRIPT_CLASS_ATTR = re.compile(r' script_class="[^"]*"')
@@ -247,12 +256,108 @@ def mint_unique_ids(doc: TscnDocument) -> list[str]:
     return report
 
 
-def layout(doc: TscnDocument, scripts: ScriptIndex | None) -> list[str]:
+def _material_sections(doc: TscnDocument) -> list[Section]:
+    header = _header(doc)
+    return [s for s in doc.sections
+            if (s.kind == RESOURCE_KIND and header is not None
+                and header.attrs.get('type') == SHADER_MATERIAL)
+            or (s.kind == SUB_RESOURCE_KIND and s.attrs.get('type') == SHADER_MATERIAL)]
+
+
+def write_shader_parameters(doc: TscnDocument, root: Path) -> list[str]:
+    """Each ShaderMaterial's `shader_parameter/*` lines, as a windowed editor writes them."""
+    report = []
+    for section in _material_sections(doc):
+        where = f'{section.kind} {section.attrs.get("id", "")}'.strip()
+        try:
+            body = _material_body(doc, section, root)
+        except UniformRefusal as refusal:
+            report.append(f'  UNRESOLVED  {where} shader parameters: {refusal} — left as written')
+            continue
+        first = section.header_line + 1
+        if body is None or body == doc.lines[first:section.body_end]:
+            continue
+        added = len(body) - (section.body_end - first)
+        doc.replace_lines(first, section.body_end, body)
+        report.append(f'  SHADER  {where}: {added} shader_parameter(s) written from the '
+                      f'shader\'s uniform defaults, in declaration order')
+    return report
+
+
+def _material_body(doc: TscnDocument, section: Section, root: Path) -> list[str] | None:
+    keys = [e.key for e in section.entries]
+    shader = section.prop(SHADER_PROP)
+    if shader is None:
+        return None
+    path = ref_path(shader.value, ext_index(doc.sections))
+    if path is None or not path.startswith(RES_PREFIX):
+        raise UniformRefusal('the shader is not an ext_resource .gdshader in this repo')
+    file = root / path[len(RES_PREFIX):]
+    if not file.is_file():
+        raise UniformRefusal(f'{path} is not readable')
+    params = material_parameters(file.read_text(encoding='utf-8'))
+    names = {name for name, _ in params}
+    if keys[0] != SHADER_PROP or any(not k.startswith(PARAM_PREFIX) for k in keys[1:]):
+        raise UniformRefusal('the material holds a property other than shader and '
+                             'shader_parameter/* — its place is not measured')
+    unknown = [k for k in keys[1:] if k[len(PARAM_PREFIX):] not in names]
+    if unknown:
+        raise UniformRefusal(f'{", ".join(unknown)} names no uniform of {path}')
+    if sum(e.end - e.start for e in section.entries) != section.body_end - section.header_line - 1:
+        raise UniformRefusal('a comment or blank line sits among the material\'s properties')
+    lines = list(doc.lines[shader.start:shader.end])
+    for name, value in params:
+        held = section.prop(PARAM_PREFIX + name)
+        lines += (doc.lines[held.start:held.end] if held is not None
+                  else [f'{PARAM_PREFIX}{name} = {value}'])
+    return lines
+
+
+def tool_default_refs(doc: TscnDocument, scripts: ScriptIndex) -> list[str]:
+    """Name what a parse cannot write: a `@tool` script's resource default.
+
+    The editor runs a `@tool` script, so an export left at a `preload()` /
+    `load()` default makes the save add an ext_resource for that resource —
+    under an id the editor generates at random, with no property using it.
+    Nothing a parse can derive; reported so a PASS never hides it.
+    """
+    ext = ext_index(doc.sections)
+    held = {attrs.get('path') for attrs in ext.values()}
+    report = []
+    for section in doc.sections:
+        if section.kind not in (RESOURCE_KIND, SUB_RESOURCE_KIND):
+            continue
+        script = script_path(section, ext)
+        if script is None or not scripts.has(script) or not _is_tool(scripts, script):
+            continue
+        resolved = scripts.resolve(script)
+        for name, decl in resolved.declarations.items():
+            match = RESOURCE_DEFAULT.match((decl.default or '').strip())
+            if match and section.prop(name) is None and match.group(1) not in held:
+                report.append(f'  UNRESOLVED  {section.kind}.{name}: @tool default '
+                              f'{match.group(1)} — the editor adds an ext_resource for it '
+                              f'under a random id; not derivable by parse')
+    return report
+
+
+def _is_tool(scripts: ScriptIndex, script: str) -> bool:
+    try:
+        text = (scripts.root / script[len(RES_PREFIX):]).read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return False
+    return TOOL_ANNOTATION.search(text) is not None
+
+
+def layout(doc: TscnDocument, scripts: ScriptIndex | None,
+           root: Path | None = None) -> list[str]:
     """Every file-level pass, in the order `--order` runs them."""
     report = mint_unique_ids(doc)
+    if root is not None:
+        report += write_shader_parameters(doc, root)
     report += order_sub_resources(doc)
     report += sort_ext_resources(doc)
     report += drop_load_steps(doc)
     if scripts is not None:
         report += restore_script_class(doc, scripts)
+        report += tool_default_refs(doc, scripts)
     return report
