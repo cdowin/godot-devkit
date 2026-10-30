@@ -1,0 +1,6 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://bgaprmany"]
+
+[ext_resource type="Shader" uid="uid://dpd25i52pluyj" path="res://art/many.gdshader" id="1_many"]
+
+[resource]
+shader = ExtResource("1_many")

@@ -32,8 +32,10 @@ from dataclasses import dataclass
 from godot_devkit.godot.index.gd_declarations import Declaration
 from godot_devkit.godot.index.gdscript import Resolution, ScriptIndex
 from godot_devkit.godot.format.tscn import Prop, Section, ext_index, script_path
+from godot_devkit.godot.index import engine_defaults
 
 CHECKED_KINDS = ('resource', 'sub_resource')
+RESOURCE_HEADER = 'gd_resource'
 SCRIPT_PROP = 'script'
 PATH_FORM_KEY = '/'
 INTERNAL_PREFIX = '_'
@@ -244,15 +246,18 @@ class DefaultAnalyzer:
         """-> the redundant assignments; everything else lands in `census`."""
         census = Counter() if census is None else census
         ext = ext_index(sections)
+        header = next((s for s in sections if s.kind == RESOURCE_HEADER), None)
         findings: list[Redundant] = []
         for section in sections:
             if section.kind not in CHECKED_KINDS:
                 continue
-            findings += self._analyze_section(section, ext, census)
+            kind = (header.attrs.get('type') if header is not None else None) \
+                if section.kind == 'resource' else section.attrs.get('type')
+            findings += self._analyze_section(section, ext, census, kind)
         return findings
 
     def _analyze_section(self, section: Section, ext: dict[str, dict],
-                         census: Counter) -> list[Redundant]:
+                         census: Counter, kind: str | None = None) -> list[Redundant]:
         entries = [e for e in section.entries if not _is_skipped_key(e.key)]
         census['engine-synthesized key (script / _x / a/b form)'] += (
             len(section.entries) - len(entries))
@@ -260,8 +265,7 @@ class DefaultAnalyzer:
             return []
         script_rel = script_path(section, ext)
         if script_rel is None:
-            census[NO_SCRIPT] += len(entries)
-            return []
+            return self._engine_defaults(section, entries, kind, census)
         if not self.scripts.has(script_rel):
             census[SCRIPT_UNREADABLE] += len(entries)
             return []
@@ -293,6 +297,23 @@ class DefaultAnalyzer:
                 continue
             findings.append(Redundant(section, entry, _label(section),
                                       decl.default or f'{decl.declared_type}()'))
+        return findings
+
+
+    @staticmethod
+    def _engine_defaults(section: Section, entries: list[Prop], kind: str | None,
+                         census: Counter) -> list[Redundant]:
+        """An engine resource: elide what EQUALS a vendored engine default."""
+        findings: list[Redundant] = []
+        for entry in entries:
+            default = engine_defaults.default_of(kind, entry.key)
+            if default is None:
+                census[NO_SCRIPT] += 1
+            elif entry.value.strip() == default:
+                findings.append(Redundant(section, entry, _label(section),
+                                          f'{default}, the {kind} engine default'))
+            else:
+                census[DIFFERS] += 1
         return findings
 
 

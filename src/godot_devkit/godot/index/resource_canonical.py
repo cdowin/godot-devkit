@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.format.tscn import EXT_RESOURCE_KIND, Prop, Section, ext_index, script_path
+from godot_devkit.godot.format.value_order import OrderRefusal, rebuild_animations, sort_dicts
 from godot_devkit.godot.format.value_spelling import (
     COMPONENT_CTORS,
     FLOAT_CONTEXT,
@@ -63,7 +64,11 @@ SCRIPT_PROP = 'script'
 SCRIPT_TYPE = 'Script'
 ASSIGN = '='
 ARRAY_OF_RE = re.compile(r'^Array\[(.+)\]$')
-UNTYPED_CONTAINERS = ('Array', 'Dictionary')
+UNTYPED_ARRAY = 'Array'
+UNTYPED_CONTAINERS = (UNTYPED_ARRAY, 'Dictionary')
+RESOURCE_HEADER = 'gd_resource'
+SPRITE_FRAMES = 'SpriteFrames'
+ANIMATIONS = 'animations'
 FLOAT_TYPE = 'float'
 LIST_DEFAULT = '['
 DICT_DEFAULT = '{'
@@ -125,6 +130,7 @@ class Reorder:
 @dataclass
 class Analysis:
     rewrites: list[Rewrite] = field(default_factory=list)
+    restructures: list[Rewrite] = field(default_factory=list)
     reorders: list[Reorder] = field(default_factory=list)
     refusals: list[Refusal] = field(default_factory=list)
 
@@ -135,6 +141,25 @@ class _Slot:
     scalar: str | None = OPAQUE_CONTEXT
     elements: str | None = OPAQUE_CONTEXT
     element_type: str | None = None       # T of a declared Array[T]
+
+
+def section_type(section: Section, sections: list[Section]) -> str | None:
+    """The engine class a `[resource]` / `[sub_resource]` section builds."""
+    if section.kind == 'resource':
+        header = next((s for s in sections if s.kind == RESOURCE_HEADER), None)
+        return header.attrs.get('type') if header is not None else None
+    return section.attrs.get('type')
+
+
+def _unwrap(tokens: list[Token], text: str, edits: list, changes: list[str]) -> None:
+    """`Array[T]([...])` on an UNTYPED `Array` export: the saver writes `[...]`."""
+    element = typed_array(tokens, text)
+    if element is None:
+        return
+    call = matching(tokens, 1) + 1
+    edits.append((tokens[0].start, tokens[call].end, ''))
+    edits.append((tokens[-1].start, tokens[-1].end, ''))
+    changes.append(f'unwrap Array[{element}](...) (the export is an untyped Array)')
 
 
 def label(section: Section) -> str:
@@ -210,7 +235,7 @@ class CanonicalAnalyzer:
 
     def analyze(self, lines: list[str], sections: list[Section],
                 census: Counter | None = None, *, spelling: bool = True,
-                order: bool = True) -> Analysis:
+                order: bool = True, structure: bool = True) -> Analysis:
         """-> what the saver would rewrite; everything unsettled lands in `census`.
 
         `lines` are the document's line contents — the spans every `Prop`
@@ -230,6 +255,11 @@ class CanonicalAnalyzer:
                     if entry.key != SCRIPT_PROP:
                         self._spell(lines, section, entry, resolved, why,
                                     script_refs, census, analysis)
+            if structure:
+                kind = section_type(section, sections)
+                for entry in section.entries:
+                    if entry.key != SCRIPT_PROP:
+                        self._restructure(lines, section, kind, entry, census, analysis)
             if order:
                 self._order(section, resolved, why, census, analysis)
         return analysis
@@ -311,6 +341,8 @@ class CanonicalAnalyzer:
         edits = list(result.edits)
         if slot.element_type is not None:
             self._wrap(tokens, text, slot.element_type, script_refs, edits, changes, reasons)
+        elif decl is not None and decl.declared_type == UNTYPED_ARRAY:
+            _unwrap(tokens, text, edits, changes)
         if reasons:
             analysis.refusals.append(Refusal(where, entry.key, '; '.join(reasons)))
             census[REFUSED] += 1
@@ -357,6 +389,34 @@ class CanonicalAnalyzer:
         edits.append((tokens[0].start, tokens[0].start, opening))
         edits.append((tokens[-1].end, tokens[-1].end, WRAP_CLOSE))
         changes.append(f'wrap {opening}...{WRAP_CLOSE}')
+
+    # --- structure ------------------------------------------------------------
+    def _restructure(self, lines: list[str], section: Section, kind: str | None,
+                     entry: Prop, census: Counter, analysis: Analysis) -> None:
+        """Item order inside one value: dictionary keys, SpriteFrames animations."""
+        raw = list(lines[entry.start:entry.end])
+        text = '\n'.join(raw)
+        start = raw[0].index(ASSIGN) + 1
+        changes: list[str] = []
+        try:
+            new = text
+            if kind == SPRITE_FRAMES and entry.key == ANIMATIONS:
+                new, changes = rebuild_animations(new, start)
+            new, sorted_count = sort_dicts(new, start)
+        except OrderRefusal as refusal:
+            analysis.refusals.append(Refusal(label(section), entry.key, str(refusal)))
+            census[REFUSED] += 1
+            return
+        if sorted_count:
+            changes.append(f'keys sorted in {sorted_count} dictionar'
+                           f'{"y" if sorted_count == 1 else "ies"}')
+        if new == text:
+            return
+        rewritten = new.split('\n')
+        if len(rewritten) != len(raw):
+            census[OUTSIDE_GRAMMAR] += 1
+            return
+        analysis.restructures.append(Rewrite(section, entry, label(section), rewritten, changes))
 
     # --- order ----------------------------------------------------------------
     def _order(self, section: Section, resolved: Resolution | None, why: str | None,

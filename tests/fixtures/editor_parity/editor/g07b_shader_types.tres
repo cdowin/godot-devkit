@@ -1,0 +1,17 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://bgaprmany"]
+
+[ext_resource type="Shader" uid="uid://dpd25i52pluyj" path="res://art/many.gdshader" id="1_many"]
+
+[resource]
+shader = ExtResource("1_many")
+shader_parameter/count = 3
+shader_parameter/on = true
+shader_parameter/offset = Vector2(1, 0.5)
+shader_parameter/axis = Vector3(0, 1, 0)
+shader_parameter/plain4 = Vector4(0.25, 0.5, 0.75, 1)
+shader_parameter/rgb = Color(1, 0.5, 0.25, 1)
+shader_parameter/tenth = 0.1
+shader_parameter/ranged = 1.0
+shader_parameter/bare = 0.0
+shader_parameter/cells = Vector2i(2, 3)
+shader_parameter/grouped = 0.5

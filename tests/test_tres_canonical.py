@@ -145,14 +145,14 @@ class RespellAndOrder(unittest.TestCase):
                 '[ext_resource type="Script" path="res://systems/item.gd" id="1"]\r\n\r\n'
                 '[resource]\r\n'
                 'script = ExtResource("1")\r\n'
+                'weight = 3.0\r\n'
                 'price = 2.0 ; kept\r\n'
                 'ratios = Array[float]([1.0,\r\n'
-                '2.0])\r\n'
-                'weight = 3.0\r\n')
+                '2.0])\r\n')
         after, report = both_passes(text)
         self.assertEqual(after, text.replace(
-            'price = 2.0 ; kept\r\nratios = Array[float]([1.0,\r\n2.0])\r\nweight = 3.0\r\n',
-            'weight = 3.0\r\nprice = 2.0 ; kept\r\nratios = Array[float]([1.0,\r\n2.0])\r\n'))
+            'weight = 3.0\r\nprice = 2.0 ; kept\r\nratios = Array[float]([1.0,\r\n2.0])\r\n',
+            'price = 2.0 ; kept\r\nratios = Array[float]([1.0,\r\n2.0])\r\nweight = 3.0\r\n'))
         self.assertEqual(report, ['  ORDER  [resource]: 3 of 4 properties moved to '
                                   'declaration order'])
 
@@ -170,7 +170,7 @@ class Gate(unittest.TestCase):
         drift = [line for line in out.split('\n') if line.startswith('  DRIFT  ')]
         # One line per re-spelled property, one per property out of place.
         self.assertEqual(len(drift), RESPELLED_PROPERTIES + OUT_OF_PLACE, out)
-        self.assertIn('[sub_resource id="Child"].weight — the saver writes it at '
+        self.assertIn('[sub_resource id="Child"].price — the saver writes it at '
                       'position 2 of 3', out)
         self.assertIn('in 1 of 2 .tres file(s)', out)
         code, out = self.run_report([CLEAN])

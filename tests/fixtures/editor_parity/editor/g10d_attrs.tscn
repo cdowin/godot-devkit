@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://bgapqattrs"]
+
+[ext_resource type="Script" uid="uid://dkpjqes0p2snp" path="res://systems/pointer.gd" id="1_ptr"]
+
+[node name="Root" type="Node2D" unique_id=248832578 groups=["g1"]]
+
+[node name="Ptr" type="Node" parent="." unique_id=1722112832 node_paths=PackedStringArray("target") groups=["g2"]]
+script = ExtResource("1_ptr")
+target = NodePath("..")

@@ -68,6 +68,7 @@ class Resolution:
     engine_base: str | None       # the Godot class the `extends` chain lands on
     opaque: bool                  # True => do not call anything on it "dead"
     # Inheritance-folded declarations; a subclass re-declaring a name wins.
+    # Iteration order is the saver's: the script's own, then its base's.
     declarations: dict[str, Declaration] = field(default_factory=dict)
     enum_members: dict[str, int] = field(default_factory=dict)
     consts: dict[str, str] = field(default_factory=dict)
@@ -217,7 +218,11 @@ class ScriptIndex:
             base = target
         else:
             opaque = True                          # e.g. `extends SomeAddonClass`
-        declarations.update(facts.declared.declarations)
+        # Godot lists a script's own properties before its base's
+        # (`get_script_property_list` walks derived -> base), and the saver
+        # writes them in that order.
+        own = facts.declared.declarations
+        declarations = {**own, **{k: v for k, v in declarations.items() if k not in own}}
         enum_members.update(facts.declared.enum_members)
         consts.update(facts.declared.consts)
         aliases.update(facts.declared.aliases)

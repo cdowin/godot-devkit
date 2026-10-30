@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="Tooled" format=3 uid="uid://bgap03tool"]
+
+[ext_resource type="Texture2D" uid="uid://iu1k0uj4kbbm" path="res://art/d.tres" id="1_6r0cn"]
+[ext_resource type="Script" uid="uid://b4ou5v4nq3ek7" path="res://systems/tooled.gd" id="1_tool"]
+
+[resource]
+script = ExtResource("1_tool")
+amount = 2

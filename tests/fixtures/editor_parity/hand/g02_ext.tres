@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://bgap02ext"]
+
+[ext_resource type="Texture2D" uid="uid://uxcx25nlq3p4" path="res://art/c.tres" id="b_c"]
+
+[ext_resource type="Texture2D" uid="uid://dsa25yf8bm506" path="res://art/a.tres" id="2_a"]
+[ext_resource type="Script" uid="uid://65pb8l8fq6ct" path="res://systems/item.gd" id="9_item"]
+
+[ext_resource type="Texture2D" uid="uid://db33bbpsfdrpf" path="res://art/b.tres" id="10_b"]
+
+[resource]
+script = ExtResource("9_item")
+parts = [ExtResource("10_b"), ExtResource("b_c"), ExtResource("2_a")]

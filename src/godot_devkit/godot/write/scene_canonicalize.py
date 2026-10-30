@@ -52,15 +52,26 @@ because deleting them is only safe where the redundancy is PROVEN
 re-save it touches nothing else: comments, ordering, uids and value spellings all
 survive, which is what makes it safe to run over a whole tree.
 
-`--respell` and `--order` are the other two things an editor save of a `.tres`
-changes, each proven by `resource_canonical` from the section's own script:
-floats in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
-`Array[T]` export wrapped as `Array[T]([...])`, and a scripted section's
-properties in declaration order. Both are LINE edits — a respell rewrites
-tokens inside the lines a value occupies, a reorder moves whole property lines
-— so comments, `uid=` and every other line survive byte for byte, and what the
-tool cannot prove it names as UNRESOLVED and leaves alone. `check canonical`
-is the gate over the same analysis.
+`--respell` and `--order` are the rest of what a Godot 4.7 editor save changes,
+each proven from the file, its scripts and its shader, and each pinned by an
+editor-saved pair under `tests/fixtures/editor_parity/`. `--respell`: floats
+in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
+`Array[T]` export wrapped as `Array[T]([...])` and `Array[T](...)` on an
+untyped `Array` export unwrapped, dictionary keys sorted, and SpriteFrames
+`animations` rebuilt (sorted by name, `"loop"` as an int). `--order`: a
+scripted section's properties in the saver's order (the script's own exports,
+then its base's), and the file's layout (`editor_layout`): `load_steps=`
+dropped, the header `script_class=`, ext_resources sorted by id with no blank
+line between, sub_resources in first-use order, a ShaderMaterial's
+`shader_parameter/*` lines as a WINDOWED editor writes them, and a
+deterministic `unique_id=` on each node a `.tscn` creates (the editor keeps
+it). `--elide-defaults` also drops an engine resource's property equal to its
+vendored default (`engine_defaults`). These are LINE edits: a respell rewrites
+tokens inside the lines a value occupies, a reorder moves whole lines, so
+comments, `uid=` and every other line survive byte for byte. What a parse
+cannot prove — a `@tool` script's `preload()` default, which the editor adds
+under a random ext_resource id — it names as UNRESOLVED and leaves alone.
+`check canonical` is the gate over the same analysis.
 
 Each is restored from evidence, never invented: a uid comes from the target's own
 `.uid` sidecar, its `[gd_scene/gd_resource]` header, or its `.import` file, and an
@@ -83,11 +94,13 @@ from godot_devkit.godot.format.tscn_document import TscnDocument, read_scene_tex
 from godot_devkit.godot.index.uid_index import PATH_ATTR, RES_PREFIX, UID_ATTR, UidIndex
 from godot_devkit.godot.write import (file_exists, render_diff,
                                       utf8_refusal_reason)
+from godot_devkit.godot.write.editor_layout import layout
 
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
 SCENE_HEADER_KINDS = ('gd_scene', RESOURCE_HEADER_KIND)
 INSTANCE_ATTR = 'instance'
+NOTE = '  NOTE  '
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_USAGE = 2
@@ -280,17 +293,25 @@ def _elide_redundant_defaults(doc: TscnDocument, analyzer: DefaultAnalyzer) -> l
 
 def respell_values(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
     """Re-spell values the way the saver writes them — tokens, never lines."""
-    analysis = analyzer.analyze(doc.lines, doc.sections, order=False)
+    analysis = analyzer.analyze(doc.lines, doc.sections, order=False, structure=False)
     report = [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
               for item in analysis.rewrites]
     report += [_unresolved(refusal) for refusal in analysis.refusals]
     doc.rewrite_props([(item.prop, item.lines) for item in analysis.rewrites])
+    # Item order inside a value (dictionary keys, SpriteFrames animations),
+    # read from the re-spelled text: a second analysis, never two rewrites of
+    # one property from one parse.
+    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False, order=False)
+    report += [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
+               for item in analysis.restructures]
+    report += [_unresolved(refusal) for refusal in analysis.refusals]
+    doc.rewrite_props([(item.prop, item.lines) for item in analysis.restructures])
     return report
 
 
 def order_properties(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
     """Move each scripted section's properties into the saver's order."""
-    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False)
+    analysis = analyzer.analyze(doc.lines, doc.sections, spelling=False, structure=False)
     report = []
     for item in analysis.reorders:
         doc.reorder_props(item.section, item.order)
@@ -322,8 +343,13 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
         report += _elide_redundant_defaults(doc, analyzer)
     if canonical is not None and respell:
         report += respell_values(doc, canonical)
+        if analyzer is not None:
+            # A default spelled long (`PackedFloat32Array(0.0, 1.0)`) equals
+            # its entry only once re-spelled: elide again, or a second run would.
+            report += _elide_redundant_defaults(doc, analyzer)
     if canonical is not None and order:
         report += order_properties(doc, canonical)
+        report += layout(doc, canonical.scripts, root)
     return doc.text, report
 
 
@@ -341,12 +367,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument('--respell', action='store_true',
                         help='also re-spell values as Godot\'s saver writes them: '
                              'floats in their shortest form, a bare list on an '
-                             'Array[T] export wrapped as Array[T]([...]); see '
-                             '`check canonical`')
+                             'Array[T] export wrapped as Array[T]([...]), '
+                             'dictionary keys sorted, SpriteFrames animations '
+                             'rebuilt; see `check canonical`')
     parser.add_argument('--order', action='store_true',
                         help='also move a scripted section\'s properties into '
-                             'the saver\'s order (script, then declaration '
-                             'order); see `check canonical`')
+                             'the saver\'s order (script, own exports, then the '
+                             'base\'s) and lay the file out as the editor does '
+                             '(header, ext_resource and sub_resource order, '
+                             'shader parameters, unique_id); see `check canonical`')
     args = parser.parse_args(argv)
 
     root = repo_root()
@@ -374,8 +403,10 @@ def main(argv: list[str]) -> int:
             refused += 1
             continue
         unresolved += sum(1 for line in report if 'UNRESOLVED' in line)
-        if after == before and not report:
+        if after == before and all(line.startswith(NOTE) for line in report):
             print(f'canonicalize  {path}  already canonical')
+            for line in report:
+                print(line)
             continue
         if args.dry_run:
             print(render_diff(before, after, path.name), end='')
@@ -387,7 +418,8 @@ def main(argv: list[str]) -> int:
         # "changes", not "restored": with --elide-defaults a change can be a
         # deletion, and a count that lies about its own direction is worse than
         # no count.
-        changes = sum(1 for line in report if 'UNRESOLVED' not in line)
+        changes = sum(1 for line in report if 'UNRESOLVED' not in line
+                      and not line.startswith(NOTE))
         print(f'canonicalize  {path}  {changes} change(s), '
               f'{sum(1 for line in report if "UNRESOLVED" in line)} unresolved'
               f'{" (dry run)" if args.dry_run else ""}')

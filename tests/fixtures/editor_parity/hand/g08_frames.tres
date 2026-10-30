@@ -1,0 +1,42 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://bgap08frames"]
+
+[ext_resource type="Texture2D" uid="uid://dsa25yf8bm506" path="res://art/a.tres" id="1_a"]
+
+[sub_resource type="PlaceholderTexture2D" id="Tex_run"]
+size = Vector2(5, 5)
+
+[sub_resource type="PlaceholderTexture2D" id="Tex_attack"]
+size = Vector2(2, 2)
+
+[sub_resource type="PlaceholderTexture2D" id="Tex_idle"]
+size = Vector2(3, 3)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("Tex_run")
+}],
+"loop": true,
+"name": &"run",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 2.0,
+"texture": SubResource("Tex_attack")
+}, {
+"duration": 1.0,
+"texture": ExtResource("1_a")
+}],
+"loop": false,
+"name": &"Attack",
+"speed": 8.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("Tex_idle")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 5.0
+}]
