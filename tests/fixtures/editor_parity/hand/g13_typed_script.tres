@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="Roster" format=3 uid="uid://bgap13typed"]
+
+[ext_resource type="Script" path="res://systems/roster.gd" id="1_roster"]
+[ext_resource type="Resource" path="res://art/e.tres" id="2_e"]
+
+[resource]
+script = ExtResource("1_roster")
+items = [ExtResource("2_e")]

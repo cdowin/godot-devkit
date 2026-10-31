@@ -18,7 +18,7 @@ SCOPE — read this before wiring it in. What is judged is exactly what
   * floats, in the saver's shortest round-trip spelling — only where the
     32- and 64-bit spellings agree, so the verdict never depends on a build;
   * a bare list on an `@export var x: Array[T]`, where T is a builtin, an
-    engine class, or a `class_name` script the file already references;
+    engine class, or a `class_name` script (its ext_resource added if missing);
   * the order of a scripted section's properties — only where every key is
     `script` or one of the script's `@export`s. An engine property's place is
     not in the ClassDB snapshot, so such a section is counted, not judged;

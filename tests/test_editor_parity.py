@@ -26,18 +26,19 @@ from godot_devkit.godot.write.scene_canonicalize import BaseScenes, canonicalize
 
 ROOT = FIXTURES / 'editor_parity'
 SCRIPTS = ['systems/base_item.gd', 'systems/item.gd', 'systems/tooled.gd',
-           'systems/plain.gd', 'systems/holder.gd', 'systems/pointer.gd', 'systems/pair.gd']
+           'systems/plain.gd', 'systems/holder.gd', 'systems/pointer.gd', 'systems/pair.gd', 'systems/roster.gd']
 
 # The gaps canonicalize closes: hand form -> editor form, byte for byte. Two
 # editor forms are the editor's save of canonicalize's OUTPUT, because the
 # editor's own value is not a fixed point: g10b/g10d (the editor mints a random
-# unique_id but keeps any it reads) and g10c (a second save re-walks the
-# now-sorted dictionary). There, equality proves an editor save is a no-op.
+# unique_id but keeps any it reads), g10c (a second save re-walks the
+# now-sorted dictionary) and g13 (the editor adds a typed array's script
+# ext_resource under a random id, and keeps any id it reads). There, equality proves an editor save is a no-op.
 DERIVABLE = ('g10b_unique.tscn', 'g10d_attrs.tscn', 'g07_shader.tres', 'g07b_shader_types.tres',
              'g01_order.tres', 'g02_ext.tres', 'g04_class.tres', 'g04b_noclass.tres',
              'g05_array.tres', 'g08_frames.tres', 'g09_dict.tres', 'g10_scene.tscn',
              'g10c_dict_first_use.tres', 'g06_gradient.tres', 'g11_sub_by_name.tres',
-             'g12_ext_named.tres')
+             'g12_ext_named.tres', 'g13_typed_script.tres')
 ELIDED = ('g06_gradient.tres',)
 
 
@@ -95,6 +96,14 @@ REFUSED = {
     'unreferenced sub_resource': (
         HEAD + '[sub_resource type="Resource" id="b"]\n\n[sub_resource type="Resource" id="a"]'
         '\n\n[resource]\nnext = SubResource("a")\n', 'referenced by nothing'),
+    'two ext_resources for the element script': (
+        '[gd_resource type="Resource" script_class="Roster" format=3]\n\n'
+        '[ext_resource type="Script" path="res://systems/roster.gd" id="1_roster"]\n'
+        '[ext_resource type="Script" path="res://systems/item.gd" id="2_item"]\n'
+        '[ext_resource type="Script" path="res://systems/item.gd" id="3_item"]\n'
+        '[ext_resource type="Resource" path="res://art/e.tres" id="4_e"]\n\n'
+        '[resource]\nscript = ExtResource("1_roster")\nitems = [ExtResource("4_e")]\n',
+        'has several ext_resources'),
     'engine property on a material': (MATERIAL.format(shader='tint.gdshader', extra='next_pass = null\n'),
                       'other than shader'),
 }

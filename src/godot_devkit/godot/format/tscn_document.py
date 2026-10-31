@@ -742,11 +742,13 @@ class TscnDocument:
         for ref_id, section in self.ext_resources().items():
             if section.attrs.get('path') == res_path:
                 return ref_id
+        ref_id = mint_ext_id(res_path, self.ext_resources())
+        self.add_ext_resource(res_path, res_type, ref_id)
+        return ref_id
+
+    def add_ext_resource(self, res_path: str, res_type: str, ref_id: str) -> None:
+        """Append `[ext_resource]` for `res_path` under `ref_id`, uid from the sidecar."""
         used = self.ext_resources()
-        ordinal = max((int(k.split('_')[0]) for k in used if k.split('_')[0].isdigit()),
-                      default=0) + 1
-        stem = res_path.rsplit(PATH_SEP, 1)[-1].rsplit('.', 1)[0]
-        ref_id = f'{ordinal}_{stem}'
         uid = self._uid_of(res_path)
         if uid is None:
             self.notes.append(f'NO UID  {res_path} has no resolvable uid (.uid sidecar, '
@@ -762,7 +764,6 @@ class TscnDocument:
         line = f'[{EXT_RESOURCE_KIND} {attrs}]'
         self._splice(anchor, anchor, [line] if used else ['', line])
         self._bump_load_steps()
-        return ref_id
 
     def _uid_of(self, res_path: str) -> str | None:
         """The uid to write into a new ref, via the resolver the caller injected.
@@ -855,6 +856,14 @@ def _relative_path(owner: tuple[str, ...], target: tuple[str, ...]) -> str:
     hops = [PARENT_SEG] * (len(owner) - common)
     rest = list(target[common:])
     return PATH_SEP.join(hops + rest) if (hops or rest) else ROOT_PATH
+
+
+def mint_ext_id(res_path: str, used) -> str:
+    """`<n>_<stem>`: one past the highest numbered id in `used`; the editor keeps it."""
+    ordinal = max((int(k.split('_')[0]) for k in used if k.split('_')[0].isdigit()),
+                  default=0) + 1
+    stem = res_path.rsplit(PATH_SEP, 1)[-1].rsplit('.', 1)[0]
+    return f'{ordinal}_{stem}'
 
 
 def mint_unique_id(seed: str, held: set[str]) -> str:
