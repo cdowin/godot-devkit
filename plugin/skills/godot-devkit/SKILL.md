@@ -13,9 +13,11 @@ takes `--dry-run`. Run it as the project pins it (`uv run godot-devkit …`). Wi
 
 ## The rule
 
-Write scenes and resources only through devkit verbs or Godot's own saver. Then run
-`scene canonicalize`, so the Godot editor finds nothing to re-write on save. Never hand-edit
-scene text with `sed` or a script, and never write your own `.tscn` parser or compare tool.
+When a Godot editor is running with a live MCP bridge (for example godot-ai), edit scenes
+through the bridge, so the editor writes the file. Headless agents, generators and CI use devkit
+write verbs, then `scene canonicalize --respell --order`, so the editor finds nothing to re-write.
+`check canonical` guards both. Never hand-edit scene text with `sed` or a script, and never write
+your own `.tscn` parser or compare tool.
 
 ## Which verb
 
