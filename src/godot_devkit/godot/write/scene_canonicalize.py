@@ -58,8 +58,8 @@ editor-saved pair under `tests/fixtures/editor_parity/`. `--respell`: floats
 in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
 `Array[T]` export wrapped as `Array[T]([...])` and `Array[T](...)` on an
 untyped `Array` export unwrapped, dictionary keys sorted, and SpriteFrames
-`animations` rebuilt (sorted by name, `"loop"` as an int). `--order`: a
-scripted section's properties in the saver's order (the script's own exports,
+`animations` rebuilt (sorted by name, `"loop"` as an int, one key per line).
+`--order`: a scripted section's properties in the saver's order (the script's own exports,
 then its base's), and the file's layout (`editor_layout`): `load_steps=`
 dropped, the header `script_class=`, ext_resources sorted by id with no blank
 line between, sub_resources in first-use order, a ShaderMaterial's
@@ -309,7 +309,15 @@ def respell_values(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
     report += [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
                for item in analysis.restructures]
     report += [_unresolved(refusal) for refusal in analysis.refusals]
-    doc.rewrite_props([(item.prop, item.lines) for item in analysis.restructures])
+    kept = [item for item in analysis.restructures
+            if len(item.lines) == item.prop.end - item.prop.start]
+    doc.rewrite_props([(item.prop, item.lines) for item in kept])
+    # A re-laid-out value changes its line count: replace bottom-up, so no
+    # pending span shifts.
+    spans = sorted(((item.prop.start, item.prop.end, item.lines)
+                    for item in analysis.restructures if item not in kept), reverse=True)
+    for start, end, lines in spans:
+        doc.replace_lines(start, end, lines)
     return report
 
 

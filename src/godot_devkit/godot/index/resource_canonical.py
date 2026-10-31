@@ -428,7 +428,7 @@ class CanonicalAnalyzer:
         if new == text:
             return
         rewritten = new.split('\n')
-        if len(rewritten) != len(raw):
+        if len(rewritten) != len(raw) and not (kind == SPRITE_FRAMES and entry.key == ANIMATIONS):
             census[OUTSIDE_GRAMMAR] += 1
             return
         analysis.restructures.append(Rewrite(section, entry, label(section), rewritten, changes))

@@ -38,7 +38,8 @@ DERIVABLE = ('g10b_unique.tscn', 'g10d_attrs.tscn', 'g07_shader.tres', 'g07b_sha
              'g01_order.tres', 'g02_ext.tres', 'g04_class.tres', 'g04b_noclass.tres',
              'g05_array.tres', 'g08_frames.tres', 'g09_dict.tres', 'g10_scene.tscn',
              'g10c_dict_first_use.tres', 'g06_gradient.tres', 'g11_sub_by_name.tres',
-             'g12_ext_named.tres', 'g13_typed_script.tres')
+             'g12_ext_named.tres', 'g13_typed_script.tres',
+             'g15_frames_inline.tres')
 ELIDED = ('g06_gradient.tres',)
 
 
@@ -104,6 +105,10 @@ REFUSED = {
         '[ext_resource type="Resource" path="res://art/e.tres" id="4_e"]\n\n'
         '[resource]\nscript = ExtResource("1_roster")\nitems = [ExtResource("4_e")]\n',
         'has several ext_resources'),
+    'container inside a call in animations': (
+        '[gd_resource type="SpriteFrames" format=3]\n\n[resource]\nanimations = [{"frames": '
+        'Array[Dictionary]([{"duration": 1.0}]), "loop": true, "name": &"a", "speed": 5.0}]\n',
+        'container inside a call'),
     'engine property on a material': (MATERIAL.format(shader='tint.gdshader', extra='next_pass = null\n'),
                       'other than shader'),
 }

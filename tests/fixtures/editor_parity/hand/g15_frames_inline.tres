@@ -1,0 +1,6 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://bgap15inline"]
+
+[ext_resource type="Texture2D" uid="uid://dsa25yf8bm506" path="res://art/a.tres" id="1_a"]
+
+[resource]
+animations = [{"frames": [{"duration": 1.0, "texture": ExtResource("1_a")}], "loop": true, "name": &"idle", "speed": 5.0}, {"frames": [], "loop": false, "name": &"empty", "speed": 4.0}]
