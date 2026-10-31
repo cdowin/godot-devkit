@@ -58,8 +58,8 @@ editor-saved pair under `tests/fixtures/editor_parity/`. `--respell`: floats
 in the saver's shortest spelling (`0.30` -> `0.3`), a bare list on an
 `Array[T]` export wrapped as `Array[T]([...])` and `Array[T](...)` on an
 untyped `Array` export unwrapped, dictionary keys sorted, and SpriteFrames
-`animations` rebuilt (sorted by name, `"loop"` as an int). `--order`: a
-scripted section's properties in the saver's order (the script's own exports,
+`animations` rebuilt (sorted by name, `"loop"` as an int, one key per line).
+`--order`: a scripted section's properties in the saver's order (the script's own exports,
 then its base's), and the file's layout (`editor_layout`): `load_steps=`
 dropped, the header `script_class=`, ext_resources sorted by id with no blank
 line between, sub_resources in first-use order, a ShaderMaterial's
@@ -96,6 +96,7 @@ from godot_devkit.godot.write import (file_exists, render_diff,
                                       utf8_refusal_reason)
 from godot_devkit.godot.write.editor_layout import layout
 
+SCRIPT_TYPE = 'Script'
 TYPE_ATTR = re.compile(r'(\btype="[^"]*")')
 RESOURCE_HEADER_KIND = 'gd_resource'
 SCENE_HEADER_KINDS = ('gd_scene', RESOURCE_HEADER_KIND)
@@ -298,6 +299,9 @@ def respell_values(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
               for item in analysis.rewrites]
     report += [_unresolved(refusal) for refusal in analysis.refusals]
     doc.rewrite_props([(item.prop, item.lines) for item in analysis.rewrites])
+    for script, ref_id in analysis.added_exts.items():
+        doc.add_ext_resource(script, SCRIPT_TYPE, ref_id)
+        report.append(f'  EXT  {script} added as id="{ref_id}" (a typed array\'s element type)')
     # Item order inside a value (dictionary keys, SpriteFrames animations),
     # read from the re-spelled text: a second analysis, never two rewrites of
     # one property from one parse.
@@ -305,7 +309,15 @@ def respell_values(doc: TscnDocument, analyzer: CanonicalAnalyzer) -> list[str]:
     report += [f'  RESPELL  {item.where}.{item.prop.key}: {", ".join(item.changes)}'
                for item in analysis.restructures]
     report += [_unresolved(refusal) for refusal in analysis.refusals]
-    doc.rewrite_props([(item.prop, item.lines) for item in analysis.restructures])
+    kept = [item for item in analysis.restructures
+            if len(item.lines) == item.prop.end - item.prop.start]
+    doc.rewrite_props([(item.prop, item.lines) for item in kept])
+    # A re-laid-out value changes its line count: replace bottom-up, so no
+    # pending span shifts.
+    spans = sorted(((item.prop.start, item.prop.end, item.lines)
+                    for item in analysis.restructures if item not in kept), reverse=True)
+    for start, end, lines in spans:
+        doc.replace_lines(start, end, lines)
     return report
 
 
@@ -331,7 +343,7 @@ def canonicalize(path: Path, root: Path, uids: UidIndex, bases: BaseScenes,
                  canonical: CanonicalAnalyzer | None = None, *,
                  respell: bool = False, order: bool = False) -> tuple[str, list[str]]:
     """-> (canonical text, one report line per restoration or refusal)."""
-    doc = TscnDocument(read_scene_text(path), path)
+    doc = TscnDocument(read_scene_text(path), path, uids.of)
     try:
         rel = str(path.resolve().relative_to(root))
     except ValueError:

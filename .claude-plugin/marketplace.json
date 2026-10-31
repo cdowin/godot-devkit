@@ -7,7 +7,7 @@
       "name": "godot-devkit",
       "source": "./plugin",
       "description": "The godot-devkit skill: which devkit verb does each scene, resource, tile, rename and stats job.",
-      "version": "4.3.0",
+      "version": "4.4.0",
       "license": "MIT"
     }
   ]

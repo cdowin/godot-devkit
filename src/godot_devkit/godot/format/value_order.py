@@ -10,11 +10,13 @@ Two facts, measured on a Godot 4.7.2 editor save and pinned by the pairs under
   separated the same way is REFUSED: the order is not proven for it, or
   permuting it would reflow text.
 * **SpriteFrames `animations` is rebuilt by the engine on save:** the array is
-  sorted by each animation's `name` (code point), and `"loop"` is written as
-  an int (`true` -> `1`).
+  sorted by each animation's `name` (code point), `"loop"` is written as an
+  int (`true` -> `1`), and it is laid out the way the saver writes every
+  value: a dictionary one key per line, an array inline.
 
-Every rewrite here is a PERMUTATION of item texts that share one separator, so
-a value keeps its length in lines and every item keeps its own bytes.
+A dictionary sort is a PERMUTATION of item texts that share one separator, so
+the value keeps its length in lines and every item keeps its own bytes. The
+`animations` rebuild alone re-lays the value out, and may change its line count.
 """
 from __future__ import annotations
 
@@ -132,6 +134,33 @@ def _field(text: str, item: list[Token], name: str) -> list[Token] | None:
     return None
 
 
+def _laid_out(text: str, item: list[Token]) -> str:
+    """One value as the saver lays it out: a dictionary one key per line, an
+    array inline with `, ` between items, anything else as written."""
+    head, last = item[0], len(item) - 1
+    if head.kind == PUNCT and head.text in (DICT_OPEN, LIST_OPEN) and matching(item, 0) == last:
+        entries = split_items(item, 0, last)
+        if head.text == LIST_OPEN:
+            return LIST_OPEN + ', '.join(_laid_out(text, e) for e in entries) + ']'
+        if not entries:
+            return '{}'
+        pairs = []
+        for entry in entries:
+            colon = next((i for i, t in enumerate(entry)
+                          if t.kind == PUNCT and t.text == KEY_COLON), None)
+            if colon is None or colon == 0 or colon == len(entry) - 1:
+                raise OrderRefusal('dictionary item without a key')
+            key = text[entry[0].start:entry[colon - 1].end]
+            pairs.append(f'{key}: {_laid_out(text, entry[colon + 1:])}')
+        return '{\n' + ',\n'.join(pairs) + '\n}'
+    if any(t.kind == PUNCT and t.text in (DICT_OPEN, LIST_OPEN) for t in item):
+        raise OrderRefusal('a container inside a call — its layout is not measured')
+    raw = text[head.start:item[-1].end]
+    if '\n' in raw:
+        raise OrderRefusal('a value broken across lines — its layout is not measured')
+    return raw
+
+
 def rebuild_animations(text: str, start: int) -> tuple[str, list[str]]:
     """-> (SpriteFrames `animations` as the engine writes it, what changed)."""
     tokens = _scan(text, start)
@@ -148,17 +177,20 @@ def rebuild_animations(text: str, start: int) -> tuple[str, list[str]]:
         loop = _field(text, item, LOOP_KEY)
         if loop and len(loop) == 1 and loop[0].kind == IDENT and loop[0].text in BOOL_INTS:
             edits.append((loop[0].start, loop[0].end, BOOL_INTS[loop[0].text]))
-    changes = [f'"loop": {text[s:e]} -> {new}' for s, e, new in edits]
-    order = sorted(range(len(items)), key=lambda i: names[i])
     if len(set(names)) != len(names):
         raise OrderRefusal('two animations share a name')
-    text = apply_edits(text, edits)
+    changes = [f'"loop": {text[s:e]} -> {new}' for s, e, new in edits]
+    order = sorted(range(len(items)), key=lambda i: names[i])
     if order != list(range(len(items))):
-        tokens = _scan(text, start)
-        text = apply_edits(text, [_permute(text, split_items(tokens, 0, len(tokens) - 1),
-                                           order)])
         changes.append('animations sorted by name')
-    return text, changes
+    text = apply_edits(text, edits)
+    tokens = _scan(text, start)
+    items = split_items(tokens, 0, len(tokens) - 1)
+    body = LIST_OPEN + ', '.join(_laid_out(text, items[i]) for i in order) + ']'
+    laid = text[:tokens[0].start] + body + text[tokens[-1].end:]
+    if laid.count('\n') != text.count('\n'):
+        changes.append('one key per line')
+    return laid, changes
 
 
 def animations_in_engine_order(text: str, start: int) -> str:

@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="Pair" format=3 uid="uid://bgap11subname"]
+
+[ext_resource type="Script" uid="uid://cfm7q2rk6bv5g" path="res://systems/pair.gd" id="1_pair"]
+
+[sub_resource type="Resource" id="A"]
+script = ExtResource("1_pair")
+
+[sub_resource type="Resource" id="M"]
+script = ExtResource("1_pair")
+
+[sub_resource type="Resource" id="Z2"]
+script = ExtResource("1_pair")
+
+[sub_resource type="Resource" id="Z1"]
+script = ExtResource("1_pair")
+
+[sub_resource type="Resource" id="Z"]
+script = ExtResource("1_pair")
+zeta = SubResource("Z1")
+alpha = SubResource("Z2")
+
+[resource]
+script = ExtResource("1_pair")
+zeta = SubResource("Z")
+alpha = SubResource("A")
+mid = SubResource("M")

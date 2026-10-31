@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://bgap12extname"]
+
+[ext_resource type="Script" uid="uid://65pb8l8fq6ct" path="res://systems/item.gd" id="1"]
+[ext_resource type="Shader" uid="uid://dpd25i52pluyj" path="res://art/many.gdshader" id="2"]
+[ext_resource type="Texture2D" uid="uid://db33bbpsfdrpf" path="res://art/b.tres" id="6_hpjp2"]
+[ext_resource type="Resource" uid="uid://bgapeitem" path="res://art/e.tres" id="charms"]
+[ext_resource type="Texture2D" uid="uid://iu1k0uj4kbbm" path="res://art/d.tres" id="charm_roller"]
+[ext_resource type="Shader" uid="uid://6pffobc4ic2a" path="res://art/tint.gdshader" id="gear_bases"]
+[ext_resource type="Texture2D" uid="uid://uxcx25nlq3p4" path="res://art/c.tres" id="gear_roller"]
+
+[resource]
+script = ExtResource("1")
+parts = [ExtResource("2"), ExtResource("6_hpjp2"), ExtResource("charms"), ExtResource("charm_roller"), ExtResource("gear_bases"), ExtResource("gear_roller")]

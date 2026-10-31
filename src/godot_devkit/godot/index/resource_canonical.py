@@ -10,8 +10,9 @@ parse can prove and no others:
   on an `@export var x: Array[T]` wrapped the way the saver writes a typed
   array, `Array[T]([a, b])`. `T` is spelled as the saver spells it: a builtin
   by name, an engine class by name, a `class_name` script as
-  `ExtResource("<id>")` — and only when the file already carries that
-  ext_resource, because minting one is a different edit.
+  `ExtResource("<id>")`. A file without that script's ext_resource gets one
+  (`added_exts`): the editor adds it under a random id and keeps any id it
+  reads, so a minted `<n>_<stem>` is what its next save leaves alone.
 * **order** — the saver writes `script` and then the script's properties in
   DECLARATION order, the base script's first. That is knowable only for a
   section whose every key is `script` or a declared `@export`: an engine
@@ -34,6 +35,7 @@ from dataclasses import dataclass, field
 
 from godot_devkit.godot.format import classdb
 from godot_devkit.godot.format.tscn import EXT_RESOURCE_KIND, Prop, Section, ext_index, script_path
+from godot_devkit.godot.format.tscn_document import mint_ext_id
 from godot_devkit.godot.format.value_order import OrderRefusal, rebuild_animations, sort_dicts
 from godot_devkit.godot.format.value_spelling import (
     COMPONENT_CTORS,
@@ -133,6 +135,7 @@ class Analysis:
     restructures: list[Rewrite] = field(default_factory=list)
     reorders: list[Reorder] = field(default_factory=list)
     refusals: list[Refusal] = field(default_factory=list)
+    added_exts: dict[str, str] = field(default_factory=dict)   # script path -> minted id
 
 
 @dataclass(frozen=True)
@@ -246,6 +249,8 @@ class CanonicalAnalyzer:
         ext = ext_index(sections)
         script_refs = self._script_refs(sections)
         analysis = Analysis()
+        self._used_ids = set(ext)
+        self._added = analysis.added_exts
         for section in sections:
             if section.kind not in CHECKED_KINDS:
                 continue
@@ -262,6 +267,9 @@ class CanonicalAnalyzer:
                         self._restructure(lines, section, kind, entry, census, analysis)
             if order:
                 self._order(section, resolved, why, census, analysis)
+        written = '\n'.join(line for item in analysis.rewrites for line in item.lines)
+        analysis.added_exts = {script: ref_id for script, ref_id in self._added.items()
+                               if EXT_REF.format(id=ref_id) in written}
         return analysis
 
     # --- evidence -------------------------------------------------------------
@@ -298,9 +306,16 @@ class CanonicalAnalyzer:
             ids = script_refs.get(script, [])
             if len(ids) == 1:
                 return EXT_REF.format(id=ids[0]), True, ''
-            return None, True, (f'element type {element_type} is a script the file '
-                                f'{"has no" if not ids else "has several"} ext_resource '
-                                f'for — the saver would mint or choose one')
+            if ids:
+                return None, True, (f'element type {element_type} is a script the file '
+                                    f'has several ext_resources for — the saver would '
+                                    f'choose one')
+            # The saver adds an ext_resource under a random id and keeps any id
+            # it reads, so a minted one is the form its next save leaves alone.
+            if script not in self._added:
+                self._added[script] = mint_ext_id(script, self._used_ids)
+                self._used_ids.add(self._added[script])
+            return EXT_REF.format(id=self._added[script]), True, ''
         if classdb.is_known(element_type):
             return element_type, True, ''
         return None, False, (f'element type {element_type} is not knowable by parse '
@@ -413,7 +428,7 @@ class CanonicalAnalyzer:
         if new == text:
             return
         rewritten = new.split('\n')
-        if len(rewritten) != len(raw):
+        if len(rewritten) != len(raw) and not (kind == SPRITE_FRAMES and entry.key == ANIMATIONS):
             census[OUTSIDE_GRAMMAR] += 1
             return
         analysis.restructures.append(Rewrite(section, entry, label(section), rewritten, changes))
