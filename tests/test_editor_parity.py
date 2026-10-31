@@ -36,7 +36,8 @@ SCRIPTS = ['systems/base_item.gd', 'systems/item.gd', 'systems/tooled.gd',
 DERIVABLE = ('g10b_unique.tscn', 'g10d_attrs.tscn', 'g07_shader.tres', 'g07b_shader_types.tres',
              'g01_order.tres', 'g02_ext.tres', 'g04_class.tres', 'g04b_noclass.tres',
              'g05_array.tres', 'g08_frames.tres', 'g09_dict.tres', 'g10_scene.tscn',
-             'g10c_dict_first_use.tres', 'g06_gradient.tres', 'g11_sub_by_name.tres')
+             'g10c_dict_first_use.tres', 'g06_gradient.tres', 'g11_sub_by_name.tres',
+             'g12_ext_named.tres')
 ELIDED = ('g06_gradient.tres',)
 
 

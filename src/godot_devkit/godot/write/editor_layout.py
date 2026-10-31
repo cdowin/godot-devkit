@@ -10,7 +10,8 @@ and is pinned by a pair under `tests/fixtures/editor_parity/`:
   `script_class="<name>"` right after `type=`, and one whose script has none
   carries no `script_class`.
 * **ext_resources** — one contiguous block, no blank line inside, sorted by
-  id in natural order (`2_a` < `9_item` < `10_b` < `b_c`).
+  id in natural order, letters compared upper-cased, whatever order they
+  were written in (`1` < `6_hpjp2` < `charms` < `charm_roller`).
 * **sub_resources** — in the order the saver first REACHES each one: walk the
   `[resource]` (or every `[node]`, in file order) property by property — a
   resource section's properties sorted by NAME, not as written — and a
@@ -110,8 +111,11 @@ def restore_script_class(doc: TscnDocument, scripts: ScriptIndex) -> list[str]:
 
 
 def natural_key(text: str) -> tuple:
-    """Godot's natural, case-insensitive order: digit runs compare as numbers."""
-    return tuple((ord('0'), int(part)) if part.isdigit() else (ord(part.lower()), 0)
+    """Godot's `naturalnocasecmp_to`: digit runs compare as numbers, letters UPPER-cased.
+
+    Upper-casing puts `_` after every letter: `charms` < `charm_roller`.
+    """
+    return tuple((ord('0'), int(part)) if part.isdigit() else (ord(part.upper()), 0)
                  for part in DIGITS.findall(text))
 
 
