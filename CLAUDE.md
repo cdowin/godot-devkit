@@ -42,7 +42,7 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
 7. **Semver, enforced by habit** (a version is a release tag made when it ships; a PR need not bump it): patch = fix with identical interface; minor = new verb, flag, config
    key or output shape; major = anything a consumer Makefile or hook must edit to survive.
    `__version__` in `src/godot_devkit/__init__.py`, `version` in `pyproject.toml` and the plugin version
-   in `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` move together,
+   in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` move together,
    always — two version sites that disagree ship two products.
 8. **This package knows nothing about its consumers.** No file here names a consuming project, reads
    a path outside this checkout, or gates on another repo's state; realistic data is VENDORED under

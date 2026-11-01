@@ -575,7 +575,7 @@ def test_spot_checks_only_the_changed_scripts_and_a_scene_only_change_passes_cen
     (stub / 'gdlint').chmod(0o755)
     log = tmp_path / 'stub.log'
     env = {'PATH': f'{stub}:/usr/bin:/bin', 'HOME': str(tmp_path / 'home'),
-           'GDK_STUB_LOG': str(log)}
+           'GDK_STUB_LOG': str(log), 'GDK_ENGINE_GATE_HOME': str(tmp_path / 'gate-home')}
 
     def spot(**extra: str) -> subprocess.CompletedProcess:
         return subprocess.run(['bash', 'tools/dev/runners/spot.sh'], cwd=root, text=True,

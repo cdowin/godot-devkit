@@ -23,7 +23,7 @@ USAGE = ('usage: godot-devkit install-skills [--runtime codex|claude] '
          'the default is .agents/skills for Codex or .claude/skills for Claude.')
 
 
-SKILLS = ('godot-101', 'godot-native-first', 'godot-ui')
+SKILLS = ('godot-101', 'godot-devkit', 'godot-native-first', 'godot-ui')
 # Files a skill ships beyond FILES, named here so enumeration stays in core.walk.
 EXTRA_FILES = {
     'godot-101': tuple(f'reference/{name}.md' for name in (
