@@ -1,0 +1,5 @@
+interface:
+  display_name: "Godot Dev Kit"
+  short_description: "Edit Godot scenes through deterministic devkit commands"
+policy:
+  allow_implicit_invocation: true

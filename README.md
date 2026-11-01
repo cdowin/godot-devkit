@@ -70,10 +70,10 @@ MIT — see [LICENSE](LICENSE).
 
 ## Agent skills
 
-`godot-devkit install-skills --runtime codex` installs every bundled skill (`godot-101`,
-`godot-ui`, `godot-native-first`) in `.agents/skills/`; `--skill NAME` installs one;
+`godot-devkit install-skills --runtime codex` installs all four bundled skills (`godot-101`,
+`godot-devkit`, `godot-ui`, `godot-native-first`) in `.agents/skills/`; `--skill NAME` installs one;
 `--runtime claude` uses `.claude/skills/`. `--dest <skills-root>` selects another scope.
-Use `--check` to verify installed files. Start Godot work with `godot-101`; use
+Use `--check` to verify installed files. Restart Codex after installation. Start Godot work with `godot-101`; use
 `godot-native-first` before designing a manager, registry or other custom system. `godot-ui`
 covers native Control layouts and visual proof.
 `install-runners` prints a context block for your CLAUDE.md and AGENTS.md; it never writes them.

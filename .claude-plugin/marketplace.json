@@ -1,13 +1,15 @@
 {
   "name": "godot-devkit",
-  "owner": { "name": "Chris Dowin" },
+  "owner": {
+    "name": "Chris Dowin"
+  },
   "description": "Godot 4 scene tooling for agents: edit .tscn/.tres through deterministic verbs instead of hand edits or ad-hoc scripts.",
   "plugins": [
     {
       "name": "godot-devkit",
-      "source": "./plugin",
+      "source": "./",
       "description": "The godot-devkit skill: which devkit verb does each scene, resource, tile, rename and stats job.",
-      "version": "4.4.0",
+      "version": "4.5.0",
       "license": "MIT"
     }
   ]

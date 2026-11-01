@@ -18,7 +18,7 @@ def test_pyproject_lock_and_dunder_version_agree():
     locked = next(p["version"] for p in lock["package"] if p["name"] == "godot-devkit")
     init = (ROOT / "src" / "godot_devkit" / "__init__.py").read_text()
     dunder = re.search(r"""^__version__\s*=\s*['"]([^'"]+)['"]""", init, re.M).group(1)
-    plugin = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())["version"]
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
     listed = next(p["version"] for p in market["plugins"] if p["name"] == "godot-devkit")
     assert project == locked == dunder == plugin == listed, (

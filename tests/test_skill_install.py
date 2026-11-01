@@ -1,6 +1,7 @@
-"""The godot-ui skill installer: currentness, refusal, and root selection."""
+"""The bundled skill installer: currentness, refusal, and root selection."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from godot_devkit.godot import skill_install
@@ -141,12 +142,19 @@ def test_every_bundled_skill_installs_and_skill_selects_one(tmp_path, capsys):
     assert skill_install.main(['--dest', str(both)]) == 0
     capsys.readouterr()
     assert (both / 'godot-ui' / 'SKILL.md').is_file()
+    assert (both / 'godot-devkit' / 'SKILL.md').read_text() == skill_install._source('godot-devkit', 'SKILL.md')
+    root = Path(__file__).resolve().parents[1]
+    marketplace = json.loads((root / '.claude-plugin/marketplace.json').read_text())
+    plugin = root / marketplace['plugins'][0]['source']
+    manifest = json.loads((plugin / '.claude-plugin/plugin.json').read_text())
+    assert (plugin / manifest['skills'] / 'godot-devkit/SKILL.md').read_text() == \
+        (both / 'godot-devkit/SKILL.md').read_text()
     assert (both / 'godot-native-first' / 'SKILL.md').is_file()
 
     one = tmp_path / 'one'
-    assert skill_install.main(['--dest', str(one), '--skill', 'godot-native-first']) == 0
+    assert skill_install.main(['--dest', str(one), '--skill', 'godot-devkit']) == 0
     capsys.readouterr()
-    assert [p.name for p in one.iterdir()] == ['godot-native-first']
+    assert [p.name for p in one.iterdir()] == ['godot-devkit']
 
     assert skill_install.main(['--dest', str(one), '--skill', 'nope']) == 2
     assert 'unknown skill' in capsys.readouterr().err
