@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/good_modal.tscn" id="1_base"]
+
+[node name="Override" instance=ExtResource("1_base")]
+
+[node name="Bar" parent="." index="1"]
+visible = true
+
+[node name="Again" type="Button" parent="Bar" index="3"]
+ui_role = "primary"

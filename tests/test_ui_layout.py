@@ -10,7 +10,7 @@ from godot_devkit import cli
 from godot_devkit.godot.checks import roster, ui_layout
 
 GOOD = ['project.godot', 'scenes/good_modal.tscn', 'scenes/action_bar.tscn',
-        'scenes/inherited_modal.tscn']
+        'scenes/inherited_modal.tscn', 'scripts/action_bar.gd', 'scripts/modal.gd']
 CYCLE = ['scenes/cycle_a.tscn', 'scenes/cycle_b.tscn']
 CONFIG = '''[ui_layout]
 action_bar_types = ["ActionBar"]
@@ -108,6 +108,31 @@ class UiLayout(unittest.TestCase):
         with temp_repo('ui_layout_repo', only=['project.godot']):
             self.assertNotIn('ui-layout', roster.all_roster())
         self.assertIn('ui-layout', roster.OPT_IN_GATES)
+
+    def test_script_class_names_match_not_only_type(self) -> None:
+        # The fixtures spell a real project's shape: type="Control" + script=.
+        # Naming only the native type matches nothing; the class_name matches.
+        code, out = _gate(GOOD, config=CONFIG.replace('["ActionBar"]', '["Control"]'))
+        self.assertEqual(code, 0, out)
+
+    def test_override_node_keeps_base_state_and_override_props_are_judged(self) -> None:
+        # Setting `visible` on the inherited Bar must not turn its actions into
+        # action-outside-bar.
+        code, out = _gate(GOOD + ['scenes/override_bar.tscn'])
+        self.assertEqual(code, 0, out)
+        # A base finding is reported once, in the base file; an inheriting
+        # scene whose override fixes it reports nothing.
+        kids = ['scripts/modal.gd', 'scenes/base_bad.tscn',
+                'scenes/kid1.tscn', 'scenes/kid2.tscn']
+        code, out = _gate(GOOD + kids)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out.count('label-no-overflow  scenes/'), 1, out)
+        self.assertIn('label-no-overflow  scenes/base_bad.tscn : L', out)
+
+    def test_theme_variation_does_not_cover_a_label(self) -> None:
+        code, out = _gate(GOOD + ['scenes/themed_label.tscn'])
+        self.assertEqual(code, 1, out)
+        self.assertIn('label-no-overflow  scenes/themed_label.tscn : Title', out)
 
 
 if __name__ == '__main__':
