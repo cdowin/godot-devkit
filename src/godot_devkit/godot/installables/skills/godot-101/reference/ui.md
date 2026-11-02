@@ -1,7 +1,7 @@
 # UI (Godot 4.7)
 
-For design, layout contracts and visual proof, use the `godot-ui` skill. This file is the engine
-vocabulary.
+Surface rules (HUD, menu, info screen, modal, transient, readouts), layout contracts and visual
+proof live in the `godot-ui` skill; do not repeat them here. This file is the engine vocabulary.
 
 ## Nodes and resources
 

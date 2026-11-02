@@ -72,3 +72,12 @@ paths = ["src/**/*.gd"]
 exclude = ["src/debug/**"]         # optional
 message = "Use the logger, not print()."
                                    # a line opts out with `# lint-allow: no-print`
+[ui_layout]                         # opt-in: name "ui-layout" in [roster] checks; absent = PASS
+action_bar_types = ["ActionBar"]   # required: a node of one of these types holds every action node
+modal_types = ["Modal"]            # required
+panel_types = ["Panel"]            # optional
+role_property = "ui_role"          # required: the node property that marks an action
+action_roles = ["primary", "destructive", "cancel"]   # required: role values that are actions
+include_prefixes = ["ui/"]         # stock: the whole repo
+exclude_prefixes = ["addons/"]
+baseline = { "ui/old_dialog.tscn" = 2 }

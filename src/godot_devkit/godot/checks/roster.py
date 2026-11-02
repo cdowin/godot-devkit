@@ -26,7 +26,8 @@ KNOWN_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
 # import pass in `parse` already fails on uid drift. `canonical` and `patterns`
 # each start red on any tree its fixer never ran over. A repo opts in by naming
 # a gate; the aggregate never grows under anyone.
-OPT_IN_GATES = ('uid', 'tres', 'canonical', 'patterns', 'test-shape')
+OPT_IN_GATES = ('uid', 'tres', 'canonical', 'patterns', 'test-shape',
+                'ui-layout')
 
 ROSTER_SECTION = 'roster'
 ROSTER_KEY = 'checks'
