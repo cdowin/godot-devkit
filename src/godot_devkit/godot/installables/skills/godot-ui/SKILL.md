@@ -9,18 +9,30 @@ Treat the user's task and approved wireframe as the design input. Identify the s
 interaction intent before changing a dimension. A stable panel that obscures the task still fails.
 Use this workflow for the affected surface; reuse existing contracts for a small edit.
 
-## Connect the existing tools
+## Start here
 
-- Read project instructions, the UI/theme contract, and the installed Godot version. Use the
-  project's sandboxed build, scenario and capture commands. This skill grants no extra permissions.
-- Inventory the nearest native shell, identity badge, list row, picker, theme and component gallery.
-  Reuse or refactor those before introducing another component with the same responsibility.
-- When available, read `ui-patterns` for shared interaction principles. Apply `visual-layout` and
-  `usability-review` to relevant native evidence when doing visual acceptance or a usability audit.
-  Their web/CSS capture sizes and tools do not replace the project's Godot viewports and input modes.
-  These optional skills are independent; this workflow also works without another skill package.
-- Devkit scene inspection and `scene-diff` prove authored structure. Static gates do not establish
-  rendered fit or usability. Headless execution supplies behavior evidence, not rendered pixels.
+1. Read the project instructions, the UI/theme contract and the installed Godot version.
+2. Read the project's screen map: the rule file the project names, for example
+   `.claude/rules/screen-map.md`. If there is none, ask the owner before you place anything.
+   The pages below give rules, never project positions.
+3. Name the surface, then read only its page in `reference/`:
+
+| Surface | Page |
+| --- | --- |
+| What UI may cover the world; safe area | `reference/playfield-and-safe-area.md` |
+| HUD | `reference/hud.md` |
+| Title, pause, settings | `reference/menu-screen.md` |
+| Character, inventory, codex | `reference/info-screen.md` |
+| Modal dialog, action bar | `reference/modal-dialog.md` |
+| Toast, tooltip, context menu | `reference/transient.md` |
+| Label/value rows, long text, numbers | `reference/readouts-and-text.md` |
+
+4. Reuse the nearest native shell, row, theme and gallery before you add a component.
+5. Optional skills `ui-patterns`, `visual-layout` and `usability-review` add principles and audits.
+   Their web capture sizes do not replace the project's Godot viewports and input modes.
+6. Enforcement: the opt-in `godot-devkit check ui-layout` fails an action button outside the action
+   bar, a button inside a modal scroll, and a Label with no overflow policy. Configure it in
+   `godot-devkit.toml` under `[ui_layout]`. It is static; it does not prove fit or usability.
 
 ## Define the component contract
 

@@ -29,6 +29,9 @@ EXTRA_FILES = {
     'godot-101': tuple(f'reference/{name}.md' for name in (
         'animation', 'audio', 'physics-and-collision', 'saving-and-data',
         'scenes-and-lifecycle', 'streaming-and-performance', 'testing-and-debugging', 'ui')),
+    'godot-ui': tuple(f'reference/{name}.md' for name in (
+        'playfield-and-safe-area', 'hud', 'menu-screen', 'info-screen', 'modal-dialog',
+        'transient', 'readouts-and-text')),
 }
 
 

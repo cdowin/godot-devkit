@@ -9,7 +9,7 @@ from godot_devkit.godot import skill_install
 
 def _bundled(skill: str, name: str) -> str:
     return {'SKILL.md': '# Bundled skill\n',
-            'agents/openai.yaml': f'name: {skill}\n'}[name]
+            'agents/openai.yaml': f'name: {skill}\n'}.get(name, f'# {name}\n')
 
 
 def test_default_roots_check_and_idempotence(tmp_path, monkeypatch, capsys):
