@@ -99,3 +99,21 @@ def is_known(class_name: str) -> bool:
         seen.add(current)
         current = table[current]['inherits']
     return True
+
+
+def derives_from(class_name: str, ancestor: str) -> bool | None:
+    """True when `class_name` is `ancestor` or inherits it; None when the
+    snapshot does not know `class_name` (the caller must census that, not guess)."""
+    table = _table()
+    seen: set[str] = set()
+    current: str | None = class_name
+    while current:
+        if current == ancestor:
+            return True
+        if current not in table:
+            return None
+        if current in seen:
+            return False
+        seen.add(current)
+        current = table[current]['inherits']
+    return False

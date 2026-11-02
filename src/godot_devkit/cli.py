@@ -103,8 +103,8 @@ The installer (writes each file once; after that it is the repo's):
 Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check warnings | props | defaults | rng
                       | tres-comment | unit-disk | test-shape
-                      | uid [--fix] | tres | canonical | patterns
-                                    # the last four are opt-in: not in the stock `check all`
+                      | uid [--fix] | tres | canonical | patterns | ui-layout
+                                    # the last five are opt-in: not in the stock `check all`
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
@@ -233,6 +233,9 @@ def _check_module(name: str):
     if name == 'patterns':
         from godot_devkit.godot.checks import patterns
         return patterns
+    if name == 'ui-layout':
+        from godot_devkit.godot.checks import ui_layout
+        return ui_layout
     return None
 
 

@@ -1,0 +1,9 @@
+[gd_scene format=3]
+
+[node name="Root" type="Modal"]
+
+[node name="Save" type="Button" parent="."]
+ui_role = "primary"
+
+[node name="Delete" type="Button" parent="."]
+ui_role = "destructive"
