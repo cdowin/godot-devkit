@@ -50,15 +50,15 @@ func _ready() -> void:
     _sort()
 
 func _sort() -> void:
-    var buttons: Array[Node] = get_children().filter(func(n: Node) -> bool: return n != _spacer)
+    var buttons := get_children().filter(func(n: Node) -> bool: return n != _spacer)
     buttons.sort_custom(func(a: Node, b: Node) -> bool: return _role(a) < _role(b))
-    var gap := buttons.filter(func(n: Node) -> bool: return _role(n) == Role.DESTRUCTIVE).size()
     for i in buttons.size():
-        move_child(buttons[i], i if i < gap else i + 1)
-    move_child(_spacer, gap)
+        move_child(buttons[i], i)
+    move_child(_spacer, buttons.filter(func(n: Node) -> bool: return _role(n) == Role.DESTRUCTIVE).size())
 
 func _role(node: Node) -> int:
-    return int(node.get(&"ui_role"))  # exported Role on the button's script
+    var role: Variant = node.get(&"ui_role")  # exported Role on the button's script
+    return Role.PRIMARY if role == null else int(role)
 ```
 
 The role property name must match `role_property` in `[ui_layout]`. Adapt the enum to the
