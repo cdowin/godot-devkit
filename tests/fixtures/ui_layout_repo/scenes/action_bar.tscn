@@ -1,0 +1,12 @@
+[gd_scene format=3]
+
+[node name="Bar" type="ActionBar"]
+
+[node name="Cancel" type="Button" parent="."]
+ui_role = "cancel"
+
+[node name="Destructive" type="Button" parent="."]
+ui_role = "destructive"
+
+[node name="Primary" type="Button" parent="."]
+ui_role = "primary"

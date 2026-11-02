@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[node name="Root" type="Panel"]
+
+[node name="Title" type="Label" parent="."]
+text = "No overflow policy"

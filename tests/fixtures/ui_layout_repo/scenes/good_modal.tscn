@@ -1,0 +1,15 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/action_bar.tscn" id="1_bar"]
+
+[node name="Root" type="Modal"]
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+
+[node name="Body" type="VBoxContainer" parent="Scroll"]
+
+[node name="Text" type="Label" parent="Scroll/Body"]
+autowrap_mode = 3
+text = "Body"
+
+[node name="Bar" parent="." instance=ExtResource("1_bar")]
