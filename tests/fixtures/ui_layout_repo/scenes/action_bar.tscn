@@ -1,6 +1,9 @@
 [gd_scene format=3]
 
-[node name="Bar" type="ActionBar"]
+[ext_resource type="Script" path="res://scripts/action_bar.gd" id="9_script"]
+
+[node name="Bar" type="Control"]
+script = ExtResource("9_script")
 
 [node name="Cancel" type="Button" parent="."]
 ui_role = "cancel"

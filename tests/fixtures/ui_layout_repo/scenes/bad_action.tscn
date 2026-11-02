@@ -1,6 +1,9 @@
 [gd_scene format=3]
 
-[node name="Root" type="Modal"]
+[ext_resource type="Script" path="res://scripts/modal.gd" id="9_script"]
+
+[node name="Root" type="Control"]
+script = ExtResource("9_script")
 
 [node name="Save" type="Button" parent="."]
 ui_role = "primary"

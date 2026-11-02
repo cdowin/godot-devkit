@@ -1,8 +1,10 @@
 [gd_scene load_steps=2 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/action_bar.tscn" id="1_bar"]
+[ext_resource type="Script" path="res://scripts/modal.gd" id="9_script"]
 
-[node name="Root" type="Modal"]
+[node name="Root" type="Control"]
+script = ExtResource("9_script")
 
 [node name="Scroll" type="ScrollContainer" parent="."]
 
