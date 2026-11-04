@@ -12,8 +12,6 @@ agentic-sdlc has agent guardrails; neither imports the other. Agent hooks, agent
 come from the agentic-sdlc plugin. Which repos consume this one is none of its business (rule 8).
 Public repo, MIT. **Every change here lands in other projects' commit gates — treat the CLI as a
 published API.**
-
-Process: cdowin/signalandecho (README, skills work-intake and branch-plan).
 Model guide: cdowin/agentic-sdlc (which agent, which model, when).
 
 ## Hard rules
@@ -125,4 +123,3 @@ incantation: `make help` lists every target, and a check that is not a target ge
   `AGENTS.md` (`tests/test_docs_ratchet.py`); the bundled machine-loaded skill files listed there are also allowed. `README.md` stays under 80 lines.
 - **Release:** bump all 4 version sites (rule 7) together on `main`; `auto-tag.yml` tags it
   and `release.yml` publishes the wheel to the index. Never tag by hand.
-- Report in ASD-STE100: numbered NEEDS YOU list first, outcome first, one fact per sentence, numbers not adjectives.

@@ -8,7 +8,7 @@ The devkit Python CLI is pure text parsing; installed shell runners boot Godot
 through sandboxed `make` targets. Never run `godot --headless` outside those
 wrappers; use `make help` to find the target.
 
-## Agents and models (agentic-sdlc 4.9.0)
+## Agents and models
 
 - Before you delegate to a subagent, read the model guide:
   https://github.com/cdowin/agentic-sdlc/blob/v4.14.0/AGENTS-AND-MODELS.md
