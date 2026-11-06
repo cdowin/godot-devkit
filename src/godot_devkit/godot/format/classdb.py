@@ -74,46 +74,44 @@ def engine_names_from() -> str:
 
 
 @lru_cache(maxsize=512)
+def _ancestry(class_name: str) -> tuple[tuple[str, ...], str | None, bool]:
+    """Walk `class_name` up its `inherits` chain: the snapshot classes met in
+    order, the first name the snapshot lacks (None when the walk reached a
+    root), and whether the walk stopped on a cycle."""
+    table = _table()
+    chain: list[str] = []
+    current: str | None = class_name
+    while current:
+        if current not in table:
+            return tuple(chain), current, False
+        if current in chain:
+            return tuple(chain), None, True
+        chain.append(current)
+        current = table[current]['inherits']
+    return tuple(chain), None, False
+
+
+@lru_cache(maxsize=512)
 def properties_of(class_name: str) -> frozenset[str]:
     """Every ClassDB property of `class_name` and of every ancestor class."""
-    names: set[str] = set()
-    seen: set[str] = set()
-    current: str | None = class_name
     table = _table()
-    while current and current in table and current not in seen:
-        seen.add(current)
-        names.update(table[current]['props'])
-        current = table[current]['inherits']
-    return frozenset(names)
+    chain, _missing, _cyclic = _ancestry(class_name)
+    return frozenset(name for cls in chain for name in table[cls]['props'])
 
 
 @lru_cache(maxsize=512)
 def is_known(class_name: str) -> bool:
     """True when `class_name` AND its whole ancestor chain are in the snapshot."""
-    table = _table()
-    seen: set[str] = set()
-    current: str | None = class_name
-    while current:
-        if current in seen or current not in table:
-            return False
-        seen.add(current)
-        current = table[current]['inherits']
-    return True
+    _chain, missing, cyclic = _ancestry(class_name)
+    return missing is None and not cyclic
 
 
 def derives_from(class_name: str, ancestor: str) -> bool | None:
     """True when `class_name` is `ancestor` or inherits it; None when the
     snapshot does not know `class_name` (the caller must census that, not guess)."""
-    table = _table()
-    seen: set[str] = set()
-    current: str | None = class_name
-    while current:
-        if current == ancestor:
-            return True
-        if current not in table:
-            return None
-        if current in seen:
-            return False
-        seen.add(current)
-        current = table[current]['inherits']
-    return False
+    if not class_name:
+        return False
+    chain, missing, _cyclic = _ancestry(class_name)
+    if ancestor in chain or ancestor == missing:
+        return True
+    return None if missing is not None else False

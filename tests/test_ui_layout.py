@@ -29,6 +29,11 @@ def _gate(scenes, extra='', config=CONFIG):
         return run_check(ui_layout)
 
 
+def _findings(out):
+    return [line for line in out.splitlines()
+            if line.startswith('  ') and not line.startswith('  NOT A FINDING')]
+
+
 def _cli(config):
     with temp_repo('ui_layout_repo', only=GOOD) as root:
         (root / 'godot-devkit.toml').write_text(config, encoding='utf-8')
@@ -128,6 +133,23 @@ class UiLayout(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertEqual(out.count('label-no-overflow  scenes/'), 1, out)
         self.assertIn('label-no-overflow  scenes/base_bad.tscn : L', out)
+
+    def test_override_in_inherited_scene_reports_in_the_inheriting_file(self) -> None:
+        # override_base.tscn has a Button with no role: clean. override_role.tscn
+        # overrides it with a role, so the finding is the inheriting file's alone.
+        code, out = _gate(GOOD + ['scenes/override_base.tscn', 'scenes/override_role.tscn'])
+        self.assertEqual(code, 1, out)
+        self.assertEqual(_findings(out), [
+            '  action-outside-bar  scenes/override_role.tscn : Help — '
+            'ui_role = "primary" sits in no ActionBar ancestor'])
+
+    def test_inline_script_class_node_is_a_bar(self) -> None:
+        # Bar is type="HBoxContainer" with the ActionBar script, not an instance.
+        code, out = _gate(GOOD + ['scenes/script_class_bar.tscn'])
+        self.assertEqual(code, 1, out)
+        self.assertEqual(_findings(out), [
+            '  action-outside-bar  scenes/script_class_bar.tscn : Delete — '
+            'ui_role = "destructive" sits in no ActionBar ancestor'])
 
     def test_theme_variation_does_not_cover_a_label(self) -> None:
         code, out = _gate(GOOD + ['scenes/themed_label.tscn'])
