@@ -104,10 +104,17 @@ def test_the_runner_fails_an_empty_scope_and_refuses_a_missing_plan(project):
     done = subprocess.run(['bash', RUNNER, 'none.txt'], cwd=project, text=True,
                           capture_output=True)
     assert done.returncode == 2 and 'no plan at none.txt' in done.stderr
+    done = _runner(project, 'window 1280 720\nscene res://ui/gallery/cut_pass.tscn\n')
+    assert done.returncode == 2, done.stdout + done.stderr   # a cold checkout: no boot
+    assert 'no import cache' in done.stderr and 'make import' in done.stderr, done.stderr
+    assert not done.stdout.strip(), done.stdout
 
 
 @pytest.mark.skipif(GODOT is None, reason='needs a Godot engine (godot or GDK_GODOT)')
 def test_the_runner_reports_each_kind_on_its_failing_scene_only(project):
+    imported = subprocess.run(['bash', 'tools/dev/runners/import_cache.sh'], cwd=project,
+                              text=True, capture_output=True)
+    assert imported.returncode == 0, imported.stdout + imported.stderr
     done = _runner(project)
     findings = [line for line in done.stdout.splitlines() if line.startswith('  ')]
     assert done.returncode == 1, done.stdout + done.stderr
