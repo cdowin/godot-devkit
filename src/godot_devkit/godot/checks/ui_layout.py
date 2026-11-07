@@ -30,7 +30,9 @@ INHERITANCE. In an inherited scene a node written with no `type=` and no `instan
 overrides the base scene's node of that path: it keeps the base node's type and
 state, and its properties are merged over the base's before it is judged. A base
 node's finding is reported in the base file only; the inheriting file reports an
-overridden node only when the override changes the outcome.
+overridden node only when the override changes the outcome. A host's override of a node inside an instanced scene (the editable-children
+form, `[node name=.. parent="Inst/Path"]`) is merged the same way, at any instance
+depth, and judged in the host.
 
 SCOPE. Static parse of tracked `.tscn` files; nothing is booted. A PASS means the
 three rules hold for the nodes the parse could type. An instanced scene that is
@@ -247,7 +249,9 @@ class Scan:
         """Judge scene `rel` placed at `prefix` in `host`. Returns, per node path,
         the state its children inherit (the root `.` included). `muted` places a
         base scene whose own findings belong to its own file; `reg` carries
-        {path: (node, ident)} from a base scene to the scene inheriting it."""
+        {path: (node, ident, muted)} from a base scene to the scene inheriting
+        it, and from an instanced scene to its host, so an override of either
+        is merged over the node it overrides."""
         sections = self.load(rel)
         if sections is None:
             self.unverified['instanced scene(s) missing or unreadable'] += 1
@@ -267,14 +271,14 @@ class Scan:
             nested = node.attrs.get('instance')
             if (not is_root and not node.attrs.get('type') and not nested
                     and path in states):
-                # An override of an inherited node: keep its type and state.
+                # An override of an inherited or instanced node: keep its type and state.
                 if path in reg:
-                    base, ident = reg[path]
+                    base, ident, base_muted = reg[path]
                     merged = Merged(base, node)
                     if not muted:
                         self.rejudge(host, where, base, merged, ident.kind,
-                                     above, base_muted=not prefix)
-                    reg[path] = (merged, ident)
+                                     above, base_muted)
+                    reg[path] = (merged, ident, base_muted)
                 else:
                     self.unverified['override(s) of a node inside an instanced '
                                     'scene'] += 1
@@ -290,15 +294,20 @@ class Scan:
                 states.update(inner or {})
             if not (is_root and prefix) and not muted:
                 self.judge(host, where, node, ident.kind, above)
-            reg[path] = (node, ident)
+            reg[path] = (node, ident, muted or (is_root and bool(prefix)))
             after = self.advance(above, ident)
             states[path] = after
             if nested and not is_root:
                 target = self.instance_target(node, ext)
-                inner = self._instance(host, target, where, after, seen, muted)
+                sub_reg: dict = {}
+                inner = self._instance(host, target, where, after, seen, muted,
+                                       sub_reg)
                 for sub, sub_state in (inner or {}).items():
                     if sub != '.':
                         states[f'{path}/{sub}'] = sub_state
+                for sub, held in sub_reg.items():
+                    if sub != '.':
+                        reg[f'{path}/{sub}'] = held
         return states
 
     def _instance(self, host: str, rel: str | None, where: str, entry: State,
