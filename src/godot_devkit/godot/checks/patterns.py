@@ -15,7 +15,7 @@ nothing and exits 0.
 A line opts out with a comment that names the rule: `# lint-allow: no-print`
 (several ids: `# lint-allow: no-print, other-id`).
 
-Rule 4: a rule whose globs match no tracked file FAILS. A typo in a glob must
+Rule 4: a rule whose globs match no tracked file, or none it can read, FAILS. A typo in a glob must
 not read as a clean tree. Config mistakes (a missing key, a bad regex, a
 duplicate id) are exit 2.
 
@@ -126,16 +126,21 @@ def run() -> int:
         files = [rel for rel in tracked
                  if any(g.match(rel) for g in rule.paths)
                  and not any(g.match(rel) for g in rule.exclude)]
-        if not files:
-            empty.append(rule.id)
+        scanned = 0
         for rel in files:
             try:
                 content = (root / rel).read_text(encoding='utf-8', errors='replace')
             except OSError:
                 continue
+            scanned += 1
             findings.extend(scan_text(content, rel, rule))
-    for rule_id in empty:
-        print(f'  EMPTY  {rule_id} — its paths match no tracked file; check the globs')
+        if not files:
+            empty.append(f'{rule.id} — its paths match no tracked file; check the globs')
+        elif not scanned:
+            empty.append(f'{rule.id} — none of its {len(files)} tracked file(s) '
+                         f'could be read')
+    for line in empty:
+        print(f'  EMPTY  {line}')
     for finding in findings:
         print(finding)
     if findings or empty:
