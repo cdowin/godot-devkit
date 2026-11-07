@@ -16,7 +16,7 @@ message = "Use the logger."
 '''
 
 
-def _gate(files, config=None):
+def _gate(files, config=None, removed=()):
     with temp_repo('rng_repo', only=['project.godot']) as root:
         for rel, body in files.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -24,6 +24,8 @@ def _gate(files, config=None):
         if config is not None:
             (root / 'godot-devkit.toml').write_text(config, encoding='utf-8')
         subprocess.run(['git', 'add', '-A'], cwd=root, check=True)
+        for rel in removed:  # tracked in the index, gone from disk
+            (root / rel).unlink()
         return run_check(patterns)
 
 
@@ -53,6 +55,9 @@ class Patterns(unittest.TestCase):
 
     def test_a_rule_matching_no_file_fails(self) -> None:
         code, out = _gate({'other/a.gd': 'x\n'}, RULE)
+        self.assertEqual(code, 1, out)
+        self.assertIn('EMPTY  no-print', out)
+        code, out = _gate({'src/a.gd': 'print(1)\n'}, RULE, removed=['src/a.gd'])
         self.assertEqual(code, 1, out)
         self.assertIn('EMPTY  no-print', out)
 

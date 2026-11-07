@@ -42,12 +42,16 @@ func _run() -> void:
 		quit(2)
 		return
 	var total := 1
+	var out: String = args["out"]
 	if args.has("sheet"):
-		total = await _sheet(args["sheet"], args["out"])
+		var dir_path: String = args["sheet"]
+		total = await _sheet(dir_path, out)
 	else:
-		var image: Image = await _draw(args["scene"], args.get("rect", Rect2i()))
+		var scene_path: String = args["scene"]
+		var rect: Rect2i = args.get("rect", Rect2i())
+		var image: Image = await _draw(scene_path, rect)
 		if image != null:
-			_save(image, args["out"], total)
+			_save(image, out, total)
 	quit(1 if _failures > 0 else 0)
 
 
@@ -65,7 +69,8 @@ func _parse(tokens: PackedStringArray) -> Dictionary:
 		_fail("need --out and exactly one of --scene or --sheet")
 		return {}
 	if args.has("rect"):
-		var parts := String(args["rect"]).split(",")
+		var rect_text: String = args["rect"]
+		var parts := rect_text.split(",")
 		if parts.size() != 4 or args.has("sheet"):
 			_fail("--rect is X,Y,W,H, and only with --scene")
 			return {}
@@ -103,11 +108,11 @@ func _sheet(dir_path: String, out: String) -> int:
 		_fail("no %s files in %s" % [SCENE_SUFFIX, dir_path])
 		return 0
 	var grid := GridContainer.new()
-	grid.columns = int(ceil(sqrt(paths.size())))
+	grid.columns = ceili(sqrt(paths.size()))
 	grid.add_theme_constant_override("h_separation", PAD)
 	grid.add_theme_constant_override("v_separation", PAD)
 	grid.position = Vector2(PAD, PAD)
-	for path in paths:
+	for path: String in paths:
 		var image: Image = await _draw(path, Rect2i())
 		grid.add_child(_tile(path, image))
 	var viewport := _viewport()
@@ -165,7 +170,9 @@ func _grab(viewport: SubViewport) -> Image:
 func _bounds(node: Node) -> Rect2:
 	var area := Rect2()
 	var found := false
-	for item in [node] + node.find_children("*", "", true, false):
+	var items: Array[Node] = node.find_children("*", "", true, false)
+	items.push_front(node)
+	for item: Node in items:
 		var piece := _extent(item)
 		if piece.has_area():
 			area = piece if not found else area.merge(piece)
@@ -197,7 +204,7 @@ func _scenes_in(dir_path: String) -> PackedStringArray:
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
 		return found
-	for file in dir.get_files():
+	for file: String in dir.get_files():
 		if file.ends_with(SCENE_SUFFIX):
 			found.append(dir_path.trim_suffix("/") + "/" + file)
 	found.sort()

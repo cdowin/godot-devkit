@@ -143,6 +143,19 @@ class UiLayout(unittest.TestCase):
             '  action-outside-bar  scenes/override_role.tscn : Help — '
             'ui_role = "primary" sits in no ActionBar ancestor'])
 
+    def test_host_override_on_an_instanced_label_is_merged(self) -> None:
+        # host_*.tscn instance stack.tscn, which instances header.tscn's bare
+        # Label. host_override sets text_overrun_behavior on it; host_bare does not.
+        inner = ['scenes/header.tscn', 'scenes/stack.tscn']
+        code, out = _gate(GOOD + inner + ['scenes/host_override.tscn'])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('override(s) of a node inside an instanced scene', out)
+        code, out = _gate(GOOD + inner + ['scenes/host_bare.tscn'])
+        self.assertEqual(code, 1, out)
+        self.assertEqual(_findings(out), [
+            '  label-no-overflow  scenes/host_bare.tscn : Stack/Header/Title — '
+            'sets neither autowrap_mode nor text_overrun_behavior'])
+
     def test_inline_script_class_node_is_a_bar(self) -> None:
         # Bar is type="HBoxContainer" with the ActionBar script, not an instance.
         code, out = _gate(GOOD + ['scenes/script_class_bar.tscn'])

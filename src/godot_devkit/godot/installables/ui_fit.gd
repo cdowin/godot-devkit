@@ -73,23 +73,28 @@ func _run() -> void:
 	var booted := {}
 	await _pass(plan, "", booted)
 	if plan.has("hook"):
-		if _call_hook(plan["hook"]):
+		var hook: PackedStringArray = plan["hook"]
+		if _call_hook(hook):
 			await _pass(plan, ", large text", booted)
 	var dirty := {}
 	var keys := _found.keys()
 	keys.sort()
-	for key in keys:
+	for key: Array in keys:
+		var owner_scene: String = key[1]
 		var group: Dictionary = _found[key]
-		var line := "  %s  %s : %s — %s" % [key[0], key[1].trim_prefix("res://"), key[2], group["why"]]
+		var instances: Dictionary = group["at"]
+		var line := "  %s  %s : %s — %s" % [key[0], owner_scene.trim_prefix("res://"), key[2], group["why"]]
 		var first: Array = group["first"]
-		if group["at"].size() > 1 or first != [key[1], key[2]]:
-			line += " (x%d, e.g. %s : %s)" % [group["at"].size(), first[0].trim_prefix("res://"), first[1]]
+		var first_scene: String = first[0]
+		if instances.size() > 1 or first != [key[1], key[2]]:
+			line += " (x%d, e.g. %s : %s)" % [instances.size(), first_scene.trim_prefix("res://"), first[1]]
 		print(line)
-		for at in group["at"]:
+		for at: Array in instances:
 			dirty[at[0]] = true
-	for scene in dirty.keys():
+	for scene: String in dirty.keys():
 		print("UI_FIT_DIRTY " + scene)
-	print("UI_FIT_RESULT %d %d %d" % [booted.size(), plan["scenes"].size(), _found.size()])
+	var scenes: Array[String] = plan["scenes"]
+	print("UI_FIT_RESULT %d %d %d" % [booted.size(), scenes.size(), _found.size()])
 	quit(1 if _failures > 0 or not _found.is_empty() else 0)
 
 
@@ -101,25 +106,27 @@ func _read_plan(tokens: PackedStringArray) -> Dictionary:
 	if text.is_empty():
 		_fail("cannot read the plan at %s" % tokens[1])
 		return {}
-	var plan := {"windows": [], "scenes": []}
-	for line in text.split("\n", false):
+	var windows: Array[Vector2i] = []
+	var scenes: Array[String] = []
+	var plan := {"windows": windows, "scenes": scenes}
+	for line: String in text.split("\n", false):
 		var parts := line.split(" ", false)
 		if line.begins_with("scene res://"):
-			plan["scenes"].append(line.trim_prefix("scene "))
+			scenes.append(line.trim_prefix("scene "))
 		elif parts.size() == 3 and parts[0] == "window" and parts[1].to_int() > 0 and parts[2].to_int() > 0:
-			plan["windows"].append(Vector2i(parts[1].to_int(), parts[2].to_int()))
+			windows.append(Vector2i(parts[1].to_int(), parts[2].to_int()))
 		elif parts.size() == 3 and parts[0] == "large_text":
-			plan["hook"] = [parts[1], parts[2]]
+			plan["hook"] = parts.slice(1)
 		else:
 			_fail("unreadable plan line: %s" % line)
 			return {}
-	if plan["windows"].is_empty():
+	if windows.is_empty():
 		_fail("the plan names no window")
 		return {}
 	return plan
 
 
-func _call_hook(hook: Array) -> bool:
+func _call_hook(hook: PackedStringArray) -> bool:
 	var script := load(hook[0]) as Script
 	if script == null:
 		_fail("large text hook %s does not load as a script" % hook[0])
@@ -132,16 +139,18 @@ func _call_hook(hook: Array) -> bool:
 
 
 func _pass(plan: Dictionary, stress: String, booted: Dictionary) -> void:
-	for window: Vector2i in plan["windows"]:
+	var windows: Array[Vector2i] = plan["windows"]
+	var scenes: Array[String] = plan["scenes"]
+	for window: Vector2i in windows:
 		root.size = window
-		for scene: String in plan["scenes"]:
+		for scene: String in scenes:
 			var packed := load(scene) as PackedScene
 			if packed == null:
 				_fail("%s does not load as a PackedScene" % scene)
 				continue
 			var node := packed.instantiate()
 			root.add_child(node)
-			for i in SETTLE_FRAMES:
+			for _i: int in SETTLE_FRAMES:
 				await process_frame
 			booted[scene] = true
 			_judge(scene, node, "at %dx%d%s" % [window.x, window.y, stress])
@@ -150,8 +159,9 @@ func _pass(plan: Dictionary, stress: String, booted: Dictionary) -> void:
 
 
 func _judge(scene: String, top: Node, stress: String) -> void:
-	var nodes: Array = [top] + top.find_children("*", "Control", true, true)
-	for item in nodes:
+	var nodes: Array[Node] = top.find_children("*", "Control", true, true)
+	nodes.push_front(top)
+	for item: Node in nodes:
 		var c := item as Control
 		if c == null or not c.is_visible_in_tree():
 			continue
@@ -203,7 +213,10 @@ func _asked_size(c: Control, parent: Control) -> Vector2:
 
 ## Why `c`'s text is cut, or "" when it fits or the node chose a policy.
 func _cut(c: Control) -> String:
-	if not (c is Label or c is Button) or String(c.get("text")).is_empty():
+	if not (c is Label or c is Button):
+		return ""
+	var text: String = c.get("text")
+	if text.is_empty():
 		return ""
 	if c.get("autowrap_mode") != TextServer.AUTOWRAP_OFF:
 		return ""
@@ -248,8 +261,10 @@ func _add(kind: String, scene: String, top: Node, c: Control, why: String) -> vo
 		key = [kind, owner.scene_file_path, String(owner.get_path_to(c))]
 	if not _found.has(key):
 		_found[key] = {"why": why, "first": at, "at": {}}
-	if not _found[key]["at"].has(at):
-		_found[key]["at"][at] = true
+	var group: Dictionary = _found[key]
+	var instances: Dictionary = group["at"]
+	if not instances.has(at):
+		instances[at] = true
 		print("UI_FIT_AT %s %s : %s — %s" % [kind, scene.trim_prefix("res://"), at[1], why])
 
 
