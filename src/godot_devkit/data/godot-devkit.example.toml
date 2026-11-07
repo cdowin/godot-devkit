@@ -81,3 +81,9 @@ action_roles = ["primary", "destructive", "cancel"]   # required: role values th
 include_prefixes = ["ui/"]         # stock: the whole repo
 exclude_prefixes = ["addons/"]
 baseline = { "ui/old_dialog.tscn" = 2 }
+
+[ui_fit]                           # `make ui-fit`: boots these scenes under stress; absent = the stock values
+scenes = ["ui/gallery/"]           # stock: ui/gallery/; .tscn files or folders ending "/" (subfolders too)
+smallest_window = [1280, 720]      # stock
+largest_window = [3840, 2160]      # stock
+large_text_hook = "res://ui/text_size.gd:use_large_text"   # stock: "" (no large-text pass); a static func, no arguments

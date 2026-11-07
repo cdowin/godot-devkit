@@ -14,6 +14,8 @@ Introspection (pure parse, never boots Godot):
                        [--cols] [--rows] [--at X,Y] [--region X0,Y0,X1,Y1]
                                     # a TileMapLayer's grid: cell count, bounds,
                                     # tile-kind histogram, per-column/row counts
+    godot-devkit ui-fit-plan        # the scenes and windows `make ui-fit`
+                                    # boots, from [ui_fit]; 0 scenes FAILS
 
 Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene set      <file> <node-path> <prop> <value>
@@ -314,6 +316,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'stats':
         from godot_devkit.godot.read import stats
         return stats.main(rest)
+    if cmd == 'ui-fit-plan':
+        from godot_devkit.godot.read import ui_fit_plan
+        return ui_fit_plan.main(rest)
     if cmd == 'install-runners':
         from godot_devkit.godot import install
         return install.main(rest)

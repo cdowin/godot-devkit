@@ -1,0 +1,7 @@
+; The ui-fit fixture: one passing and one failing scene per finding kind.
+
+config_version=5
+
+[application]
+
+config/name="ui-fit fixture"

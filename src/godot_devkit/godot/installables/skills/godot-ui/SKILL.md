@@ -33,6 +33,8 @@ Use this workflow for the affected surface; reuse existing contracts for a small
 6. Enforcement: the opt-in `godot-devkit check ui-layout` fails an action button outside the action
    bar, a button inside a modal scroll, and a Label with no overflow policy. Configure it in
    `godot-devkit.toml` under `[ui_layout]`. It is static; it does not prove fit or usability.
+7. A game keeps its parts gallery at `<ui folder>/gallery/` and runs `make ui-fit` on it: each
+   scene boots pseudolocalized at the smallest and largest window and reports `spills` and `cut`.
 
 ## Define the component contract
 

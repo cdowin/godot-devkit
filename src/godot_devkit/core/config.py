@@ -176,6 +176,20 @@ def pattern(sect: dict, name: str, key: str, fallback: str) -> str:
     return value
 
 
+def size_pair(sect: dict, name: str, key: str,
+              fallback: tuple[int, int]) -> tuple[int, int]:
+    """A `[width, height]` setting: two positive integers (a bool is refused)."""
+    value = sect.get(key)
+    if value is None:
+        return fallback
+    if (not isinstance(value, list) or len(value) != 2
+            or not all(isinstance(v, int) and not isinstance(v, bool) and v > 0
+                       for v in value)):
+        raise ConfigError(f'[{name}] {key} must be [width, height] in positive '
+                          f'integers, got {value!r}')
+    return value[0], value[1]
+
+
 def number(sect: dict, name: str, key: str, fallback: int) -> int:
     value = sect.get(key, fallback)
     if not isinstance(value, int) or isinstance(value, bool):
