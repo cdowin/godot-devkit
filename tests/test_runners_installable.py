@@ -819,6 +819,8 @@ DESTINATIONS = {
     'tools/dev/runners/integration.sh', 'tools/dev/runners/capture.sh',
     'tools/dev/runners/render.sh', 'tools/dev/runners/render_scene.gd',
     'tools/dev/runners/render_scene.gd.uid',
+    'tools/dev/runners/ui_fit.sh', 'tools/dev/runners/ui_fit.gd',
+    'tools/dev/runners/ui_fit.gd.uid',
     'tools/dev/runners/hermetic_run_scan.sh',
     'tools/hooks/cc-godot-sandbox.sh',
     '.github/actions/godot-toolchain/action.yml',
@@ -834,7 +836,7 @@ UID_GUARD = '.github/workflows/uid-guard.yml'
 # The Godot targets the story names, the builder's `spot`, and the one
 # GDK_CHECKS names.
 GODOT_TARGETS = ('parse', 'lint', 'spot', 'unit', 'integration',
-                 'capture', 'render', 'import', 'hermetic-scan', 'godot-check')
+                 'capture', 'render', 'ui-fit', 'import', 'hermetic-scan', 'godot-check')
 
 
 @contextlib.contextmanager
