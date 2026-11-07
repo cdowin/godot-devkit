@@ -20,7 +20,11 @@ extends SceneTree
 ## Findings, one per node and kind (the first stress that shows it):
 ##   spills  a visible Control's rect leaves its parent Control's rect (the
 ##           viewport's, for the scene root); a ScrollContainer's scrolling
-##           axis is allowed
+##           axis is allowed. Under a parent that is not a Container, only an
+##           axis the control GREW along counts: its size passed what its
+##           anchors and offsets ask for. An overhang the offsets ask for
+##           (a tick taller than its track, a corner ornament at negative
+##           offsets, a touch target sized by code) is the author's rect.
 ##   cut     a Label or Button whose text needs more than its own rect, or is
 ##           hidden by a clip_contents ancestor (a ScrollContainer's scrolling
 ##           axis is allowed), and which set neither autowrap_mode nor
@@ -166,9 +170,22 @@ func _spill(c: Control, top: Node) -> String:
 	var free_y := scroll != null and scroll.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED
 	var out_x := r.position.x < outer.position.x - SLACK or r.end.x > outer.end.x + SLACK
 	var out_y := r.position.y < outer.position.y - SLACK or r.end.y > outer.end.y + SLACK
+	if parent != null and not parent is Container:
+		var asked := _asked_size(c, parent)
+		free_x = c.size.x <= asked.x + SLACK
+		free_y = c.size.y <= asked.y + SLACK
 	if (out_x and not free_x) or (out_y and not free_y):
 		return "rect %s leaves %s %s" % [_rect(r), name, _rect(outer)]
 	return ""
+
+
+## The size `c`'s anchors and offsets ask for inside `parent`. A Control only
+## grows past it when its minimum size forces it; code that sets `size` moves
+## the offsets, so a rect sized by hand asks for exactly what it gets.
+func _asked_size(c: Control, parent: Control) -> Vector2:
+	return Vector2(
+		(c.anchor_right - c.anchor_left) * parent.size.x + c.offset_right - c.offset_left,
+		(c.anchor_bottom - c.anchor_top) * parent.size.y + c.offset_bottom - c.offset_top)
 
 
 ## Why `c`'s text is cut, or "" when it fits or the node chose a policy.
