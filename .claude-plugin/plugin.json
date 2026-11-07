@@ -1,6 +1,6 @@
 {
   "name": "godot-devkit",
-  "version": "4.6.0",
+  "version": "4.7.0",
   "description": "Points agents at godot-devkit verbs for .tscn/.tres edits, editor save churn, renames, tile painting and code-size stats.",
   "author": {
     "name": "Chris Dowin"
