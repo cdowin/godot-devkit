@@ -24,8 +24,11 @@ extends SceneTree
 ##   cut     a Label or Button whose text needs more than its own rect, or is
 ##           hidden by a clip_contents ancestor (a ScrollContainer's scrolling
 ##           axis is allowed), and which set neither autowrap_mode nor
-##           text_overrun_behavior (a chosen ellipsis is by design). Text a
-##           grown control pushes off screen is a `spills`, not a `cut`.
+##           text_overrun_behavior (a chosen ellipsis is by design). clip_text
+##           is not a policy: it only drops the text from the minimum size,
+##           and it hides text mid-glyph with no cue; a deliberate hard cut is
+##           text_overrun_behavior = OVERRUN_TRIM_CHAR. Text a grown control
+##           pushes off screen is a `spills`, not a `cut`.
 ##
 ## Output contract (the wrapper greps these; the exit code is advisory):
 ##   "  <kind>  <scene> : <node path> — <why>"     one per finding
@@ -181,8 +184,9 @@ func _cut(c: Control) -> String:
 	var natural := c.get_minimum_size()
 	c.set("clip_text", clipped)
 	if natural.x > c.size.x + SLACK or natural.y > c.size.y + SLACK:
-		return "text needs %dx%d in %dx%d and sets neither autowrap_mode nor text_overrun_behavior" % [
-			ceili(natural.x), ceili(natural.y), ceili(c.size.x), ceili(c.size.y)]
+		return "text needs %dx%d in %dx%d and sets neither autowrap_mode nor text_overrun_behavior%s" % [
+			ceili(natural.x), ceili(natural.y), ceili(c.size.x), ceili(c.size.y),
+			" (clip_text cuts mid-glyph; OVERRUN_TRIM_CHAR is the declared hard cut)" if clipped else ""]
 	var r := c.get_global_rect()
 	var up := c.get_parent() as Control
 	while up != null:
