@@ -1,6 +1,7 @@
 """`ui-fit`: the plan `[ui_fit]` resolves to, and the installed runner over the
 fixture project — one passing and one failing scene per finding kind, plus a
-sub-scene instanced 3 times whose authored overhang must pass.
+sub-scene instanced 3 times: authored overhang (must pass) and a grown label
+(one grouped line).
 
 The plan is pure parse and proven in-process. The runner is proven the way
 every runner is (installed into a scratch copy, never this repo's copy), and
@@ -79,7 +80,7 @@ def test_the_plan_takes_the_gallery_default_and_refuses_bad_config(project):
         'window 1280 720', 'window 3840 2160',
         'scene res://ui/gallery/cut_fail.tscn', 'scene res://ui/gallery/cut_pass.tscn',
         'scene res://ui/gallery/spills_fail.tscn', 'scene res://ui/gallery/spills_pass.tscn',
-        'scene res://ui/gallery/tracks_pass.tscn']
+        'scene res://ui/gallery/tracks_fail.tscn', 'scene res://ui/gallery/tracks_pass.tscn']
     (project / 'godot-devkit.toml').unlink()
     assert _plan()[1] == out                  # no config behaves as the defaults
     code, out, _ = _plan('[ui_fit]\nscenes = ["ui/gallery/cut_pass.tscn"]\n'
@@ -122,9 +123,15 @@ def test_the_runner_reports_each_kind_on_its_failing_scene_only(project):
     assert done.returncode == 1, done.stdout + done.stderr
     assert [line.split(' — ')[0] for line in findings] == [
         '  cut  ui/gallery/cut_fail.tscn : Title',
-        '  spills  ui/gallery/spills_fail.tscn : Bar'], done.stdout
+        '  spills  ui/gallery/spills_fail.tscn : Bar',
+        '  spills  ui/parts/value_track.tscn : Value'], done.stdout
     assert 'at 1280x720' in findings[1]       # the smallest window is what spills it
-    assert '[UI-FIT] FAIL (2 finding(s) in 5 scene(s)' in done.stdout
+    assert findings[2].endswith('(x3, e.g. ui/gallery/tracks_fail.tscn : Rows/A/Value)')
+    log = (project / '.gate-reports' / 'ui-fit.log').read_text(encoding='utf-8')
+    assert [line.split(' — ')[0] for line in log.splitlines()
+            if line.startswith('UI_FIT_AT spills ui/gallery/tracks')] == [
+        f'UI_FIT_AT spills ui/gallery/tracks_fail.tscn : Rows/{row}/Value' for row in 'ABC']
+    assert '[UI-FIT] FAIL (3 finding(s) in 6 scene(s)' in done.stdout
     (project / 'godot-devkit.toml').write_text(
         '[ui_fit]\nscenes = ["ui/gallery/cut_pass.tscn", "ui/gallery/spills_pass.tscn",'
         ' "ui/gallery/tracks_pass.tscn"]\n', encoding='utf-8')

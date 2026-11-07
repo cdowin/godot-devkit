@@ -19,15 +19,19 @@ for `ui-fit-plan` (the [ui_fit] section of godot-devkit.toml). A plan file
 written by `godot-devkit ui-fit-plan` works too. Boots the engine headless
 inside the user:// sandbox, turns on Godot's pseudolocalization, and loads
 each scene at the smallest and the largest window (and again after the large
-text hook, when the plan names one). One line per finding:
+text hook, when the plan names one). One line per cause:
 
   spills  <scene> : <node path> — a visible Control leaves its parent's rect
+          (under a plain Control parent: only where it grew past its offsets)
   cut     <scene> : <node path> — a Label/Button's text does not fit and it
           set neither autowrap_mode nor text_overrun_behavior
 
-A plan with no scene, a scene that does not boot, or an engine ERROR line is a
-failure. A checkout with no import cache (.godot/global_script_class_cache.cfg)
-exits 2 before the boot: run `make import` first. For each scene with findings, render.sh draws a PNG to
+<scene> is the scene that saved the node, so every instance of a sub-scene is
+one line, ending "(x<n>, e.g. <booted scene> : <path>)"; the full log lists
+each instance (UI_FIT_AT). A plan with no scene, a scene that does not boot,
+or an engine ERROR line is a failure. A checkout with no import cache
+(.godot/global_script_class_cache.cfg) exits 2 before the boot: run
+`make import` first. For each scene with findings, render.sh draws a PNG to
 .ui-fit-reports/ (needs a display; GDK_UI_FIT_CAPTURE=0 skips it).
 
 Env: GDK_UI_FIT_TIMEOUT seconds (default 300), GDK_UI_FIT_REPORT_DIR,

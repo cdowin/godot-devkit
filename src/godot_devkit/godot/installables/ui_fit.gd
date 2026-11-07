@@ -17,7 +17,7 @@ extends SceneTree
 ## every pass. Each scene boots once per window; when the plan names a large
 ## text hook, the hook is called once and every scene boots again per window.
 ##
-## Findings, one per node and kind (the first stress that shows it):
+## Findings (the first stress that shows each):
 ##   spills  a visible Control's rect leaves its parent Control's rect (the
 ##           viewport's, for the scene root); a ScrollContainer's scrolling
 ##           axis is allowed. Under a parent that is not a Container, only an
@@ -34,11 +34,18 @@ extends SceneTree
 ##           text_overrun_behavior = OVERRUN_TRIM_CHAR. Text a grown control
 ##           pushes off screen is a `spills`, not a `cut`.
 ##
+## Grouping: a finding is keyed by kind, the scene that saved the node (its
+## owner's scene file, so every instance of a sub-scene shares one key) and the
+## node's path inside that scene. One line per key; the instance count and the
+## first instance follow when the key is not simply the booted scene's own node.
+##
 ## Output contract (the wrapper greps these; the exit code is advisory):
-##   "  <kind>  <scene> : <node path> — <why>"     one per finding
-##   UI_FIT_DIRTY <res://scene>                     one per scene with findings
+##   "  <kind>  <scene> : <node path> — <why>[ (x<n>, e.g. <scene> : <path>)]"
+##                                                  one per key, sorted
+##   UI_FIT_AT <kind> <scene> : <node path> — <why> one per instance (the log)
+##   UI_FIT_DIRTY <res://scene>                     one per booted scene with findings
 ##   UI_FIT_FAIL <reason>                           one per harness failure
-##   UI_FIT_RESULT <booted> <total> <findings>      last
+##   UI_FIT_RESULT <booted> <total> <findings>      last; findings = keys
 
 const EXPANSION_RATIO := 0.3
 const SLACK := 1.0
@@ -47,6 +54,7 @@ const SPILLS := "spills"
 const CUT := "cut"
 
 var _failures := 0
+## [kind, owner scene, path in it] -> {"why", "first": [scene, path], "at": {[scene, path]: true}}
 var _found := {}
 
 
@@ -71,8 +79,14 @@ func _run() -> void:
 	var keys := _found.keys()
 	keys.sort()
 	for key in keys:
-		print(_found[key])
-		dirty[key[1]] = true
+		var group: Dictionary = _found[key]
+		var line := "  %s  %s : %s — %s" % [key[0], key[1].trim_prefix("res://"), key[2], group["why"]]
+		var first: Array = group["first"]
+		if group["at"].size() > 1 or first != [key[1], key[2]]:
+			line += " (x%d, e.g. %s : %s)" % [group["at"].size(), first[0].trim_prefix("res://"), first[1]]
+		print(line)
+		for at in group["at"]:
+			dirty[at[0]] = true
 	for scene in dirty.keys():
 		print("UI_FIT_DIRTY " + scene)
 	print("UI_FIT_RESULT %d %d %d" % [booted.size(), plan["scenes"].size(), _found.size()])
@@ -141,13 +155,12 @@ func _judge(scene: String, top: Node, stress: String) -> void:
 		var c := item as Control
 		if c == null or not c.is_visible_in_tree():
 			continue
-		var where := String(top.get_path_to(c))
 		var why := _spill(c, top)
 		if not why.is_empty():
-			_add(SPILLS, scene, where, "%s %s" % [why, stress])
+			_add(SPILLS, scene, top, c, "%s %s" % [why, stress])
 		why = _cut(c)
 		if not why.is_empty():
-			_add(CUT, scene, where, "%s %s" % [why, stress])
+			_add(CUT, scene, top, c, "%s %s" % [why, stress])
 
 
 ## Why `c` leaves its parent's rect, or "" when it stays inside.
@@ -226,10 +239,18 @@ func _scrolls_over(clipper: Control, r: Rect2) -> bool:
 	return not out_x and not out_y
 
 
-func _add(kind: String, scene: String, where: String, why: String) -> void:
-	var key := [kind, scene, where]
+## Record `c`'s finding under its group key; the first instance gives the why.
+func _add(kind: String, scene: String, top: Node, c: Control, why: String) -> void:
+	var at := [scene, String(top.get_path_to(c))]
+	var key := [kind] + at
+	var owner := c.owner
+	if owner != null and not owner.scene_file_path.is_empty():
+		key = [kind, owner.scene_file_path, String(owner.get_path_to(c))]
 	if not _found.has(key):
-		_found[key] = "  %s  %s : %s — %s" % [kind, scene.trim_prefix("res://"), where, why]
+		_found[key] = {"why": why, "first": at, "at": {}}
+	if not _found[key]["at"].has(at):
+		_found[key]["at"][at] = true
+		print("UI_FIT_AT %s %s : %s — %s" % [kind, scene.trim_prefix("res://"), at[1], why])
 
 
 func _rect(r: Rect2) -> String:
