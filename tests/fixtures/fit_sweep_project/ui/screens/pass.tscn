@@ -1,0 +1,60 @@
+[gd_scene format=3]
+
+[node name="Pass" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.1, 0.12, 1)
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Title" type="Label" parent="Column"]
+layout_mode = 2
+text = "Settings"
+
+[node name="Lede" type="Label" parent="Column"]
+layout_mode = 2
+text = "Every option here applies at once and is saved when you leave this screen, so there is nothing to confirm."
+autowrap_mode = 3
+
+[node name="Hint" type="Label" parent="Column"]
+layout_mode = 2
+text = "A hint that ends in an ellipsis when the window is too narrow to hold all of it on one line, by design."
+text_overrun_behavior = 3
+
+[node name="Play" type="Button" parent="Column"]
+custom_minimum_size = Vector2(160, 48)
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Play"
+
+[node name="Glow" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 1, 1, 0.05)

@@ -1,0 +1,8 @@
+; The fit-sweep fixture: a scene that clips, one with controls out of reach,
+; and one that passes, swept at every size of design/layout.json.
+
+config_version=5
+
+[application]
+
+config/name="fit-sweep fixture"

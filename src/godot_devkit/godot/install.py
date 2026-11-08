@@ -116,6 +116,12 @@ PLAN: tuple[tuple[str, str], ...] = (
     ('ui_fit.sh', 'tools/dev/runners/ui_fit.sh'),
     ('ui_fit.gd', 'tools/dev/runners/ui_fit.gd'),
     ('ui_fit.gd.uid', 'tools/dev/runners/ui_fit.gd.uid'),
+    # The fit sweep: fit_sweep.sh boots the [fit_sweep] scenes at every size of
+    # the game's size-class table (the plan `godot-devkit fit-sweep-plan`
+    # prints) through fit_sweep.gd, beside it with its minted .uid sidecar.
+    ('fit_sweep.sh', 'tools/dev/runners/fit_sweep.sh'),
+    ('fit_sweep.gd', 'tools/dev/runners/fit_sweep.gd'),
+    ('fit_sweep.gd.uid', 'tools/dev/runners/fit_sweep.gd.uid'),
     # The gate ON the library rather than a gate that uses it: it proves a
     # run's HOME self-destructs and nothing persists beside the spool.
     ('hermetic_run_scan.sh', 'tools/dev/runners/hermetic_run_scan.sh'),
@@ -193,7 +199,10 @@ headless is blind to render), render.sh (+ its render_scene.gd and .uid
 sidecar: one scene, or a folder as a labeled contact sheet, to a PNG),
 ui_fit.sh (+ its ui_fit.gd and .uid sidecar: the [ui_fit] scenes booted
 headless under pseudolocalization at the smallest and largest window, with
-`spills` and `cut` findings), and
+`spills` and `cut` findings), fit_sweep.sh (+ its fit_sweep.gd and .uid
+sidecar: the [fit_sweep] scenes at every size of the game's size-class table,
+with `clipped`, `unreachable` and `small` findings and a PNG per scene per
+size), and
 hermetic_run_scan.sh — the gate proving a
 run's HOME self-destructs. The shell runners carry --help and --self-test.
 The installer also writes .gutconfig.json, .gutconfig.integration.json and
@@ -213,7 +222,7 @@ copy is left in place and named as retired: safe to delete when GDK_CHECKS
 names `godot-check` and `[roster] checks` keeps `uid` (then `check uid` runs
 in `make check`), and to keep otherwise.
 Plus Makefile.tiers at the repo root: the Godot targets that call the
-runners (parse lint spot unit integration capture render ui-fit import hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
+runners (parse lint spot unit integration capture render ui-fit fit-sweep import hermetic-scan …), `godot-check` (`check all`, for GDK_CHECKS), and
 the GDK_PRECOMMIT_TIERS / GDK_VERIFY_TIERS lists the gate framework's
 compositions run. It runs `uv run --frozen godot-devkit` when uv.lock names the kit
 (the run prints the pyproject.toml block that locks it), or — the legacy

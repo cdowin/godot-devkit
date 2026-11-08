@@ -16,6 +16,8 @@ Introspection (pure parse, never boots Godot):
                                     # tile-kind histogram, per-column/row counts
     godot-devkit ui-fit-plan        # the scenes and windows `make ui-fit`
                                     # boots, from [ui_fit]; 0 scenes FAILS
+    godot-devkit fit-sweep-plan     # the sizes and scenes `make fit-sweep`
+                                    # boots, from [fit_sweep] and its table
 
 Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
     godot-devkit scene set      <file> <node-path> <prop> <value>
@@ -325,6 +327,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == 'ui-fit-plan':
         from godot_devkit.godot.read import ui_fit_plan
         return ui_fit_plan.main(rest)
+    if cmd == 'fit-sweep-plan':
+        from godot_devkit.godot.read import fit_sweep_plan
+        return fit_sweep_plan.main(rest)
     if cmd == 'install-runners':
         from godot_devkit.godot import install
         return install.main(rest)

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from godot_devkit.core.config import ConfigError, config_section, str_tuple, text
 from godot_devkit.core.project import git_lines, repo_root
+from godot_devkit.core.walk import glob_re
 
 SECTION = 'patterns'
 RULE_KEY = 'rule'
@@ -43,28 +44,6 @@ class Rule:
     paths: tuple[re.Pattern, ...]
     exclude: tuple[re.Pattern, ...]
     message: str
-
-
-def glob_re(glob: str) -> re.Pattern:
-    """A repo-relative glob as a regex: `**` crosses `/`, `*` and `?` do not."""
-    out, i = '', 0
-    while i < len(glob):
-        if glob.startswith('**/', i):
-            out += '(?:.*/)?'
-            i += 3
-        elif glob.startswith('**', i):
-            out += '.*'
-            i += 2
-        elif glob[i] == '*':
-            out += '[^/]*'
-            i += 1
-        elif glob[i] == '?':
-            out += '[^/]'
-            i += 1
-        else:
-            out += re.escape(glob[i])
-            i += 1
-    return re.compile(out + r'\Z')
 
 
 def _rules(sect: dict) -> list[Rule]:

@@ -1,0 +1,32 @@
+{
+  "$description": "A size-class table in the format of a design system contract/layout.json (format 1), trimmed for the fit-sweep fixture: two classes, and a button whose least height is a number of px so the touch-target rule has one to read.",
+  "format": 1,
+  "budgetScale": 1.5,
+  "budgetScaleTv": 2,
+  "textFloor": {"at": 1080, "pc": 18, "tv": 26},
+  "widthClasses": {"compact": 0, "medium": 600, "expanded": 840, "large": 1200, "extra-large": 1600},
+  "widthSteps": [],
+  "sizeClasses": {
+    "phone": {
+      "rule": {"maxHeight": 500},
+      "worst": [800, 360],
+      "floor": [667, 360],
+      "also": [
+        [844, 390]
+      ]
+    },
+    "desktop": {
+      "rule": {"minHeight": 501, "minWidth": 1200},
+      "worst": [1280, 720],
+      "also": []
+    }
+  },
+  "components": {
+    "button": {
+      "size": {
+        "min": {"w": 120, "h": 44},
+        "max": {"w": 360, "h": 120}
+      }
+    }
+  }
+}
