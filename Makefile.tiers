@@ -190,6 +190,13 @@ render: ## Draw a scene (or SHEET=<dir> as a contact sheet) to a PNG (LOCAL, nee
 ui-fit: ## Boot the [ui_fit] scenes (default ui/gallery/) pseudolocalized at the smallest and largest window; report spills and cut text
 	@bash $(GDK_RUNNERS_DIR)/ui_fit.sh -- $(GODOT_DEVKIT)
 
+# The size-class sweep. The runner asks the godot-devkit command for the
+# [fit_sweep] plan (pure parse: the table and the scenes; a scenes entry that
+# matches nothing FAILS there), boots it, and draws every scene at every size
+# to .gate-reports/fit-sweep/ (GDK_FIT_SWEEP_PNG=0: headless, no drawing).
+fit-sweep: ## Every [fit_sweep] scene at every size of the size-class table; report clipped text and controls out of reach, a PNG each
+	@bash $(GDK_RUNNERS_DIR)/fit_sweep.sh -- $(GODOT_DEVKIT)
+
 import: ## Rebuild the .godot import cache, sandboxed (new class_name, moved files, stale art)
 	@bash $(GDK_RUNNERS_DIR)/import_cache.sh
 # =============================================================================

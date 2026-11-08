@@ -95,3 +95,7 @@ scenes = ["ui/gallery/"]           # stock: ui/gallery/; .tscn files or folders 
 smallest_window = [1280, 720]      # stock
 largest_window = [3840, 2160]      # stock
 large_text_hook = "res://ui/text_size.gd:use_large_text"   # stock: "" (no large-text pass); a static func, no arguments
+
+[fit_sweep]                        # `make fit-sweep`: every scene at every size class; no stock values
+table = "design/layout.json"       # required: repo-relative size-class table (a design system layout.json, format 1)
+scenes = ["res://ui/title.tscn", "res://ui/screens/**"]   # required: res:// scenes or globs (** crosses folders)

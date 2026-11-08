@@ -40,6 +40,7 @@ breaks the build.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -206,3 +207,25 @@ def descendants(path: Path, kind: Kind = Kind.ANY, suffix: str | None = None,
         (kept.append(candidate) if candidate.suffix.lower() == want
          else skipped.append(Skip(candidate, SkipReason.SUFFIX_MISMATCH)))
     return Walk(tuple(kept), tuple(skipped))
+
+
+def glob_re(glob: str) -> re.Pattern:
+    """A repo-relative glob as a regex: `**` crosses `/`, `*` and `?` do not."""
+    out, i = '', 0
+    while i < len(glob):
+        if glob.startswith('**/', i):
+            out += '(?:.*/)?'
+            i += 3
+        elif glob.startswith('**', i):
+            out += '.*'
+            i += 2
+        elif glob[i] == '*':
+            out += '[^/]*'
+            i += 1
+        elif glob[i] == '?':
+            out += '[^/]'
+            i += 1
+        else:
+            out += re.escape(glob[i])
+            i += 1
+    return re.compile(out + r'\Z')
