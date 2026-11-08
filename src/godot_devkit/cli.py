@@ -106,7 +106,10 @@ Static gates (exit 1 on findings; run from anywhere inside the repo):
     godot-devkit check warnings | props | defaults | rng
                       | tres-comment | unit-disk | test-shape
                       | uid [--fix] | tres | canonical | patterns | ui-layout
-                                    # the last five are opt-in: not in the stock `check all`
+                      | addon [--fix]
+                                    # the last six are opt-in: not in the stock `check all`
+                                    # `addon --fix` mints the uids an add-on
+                                    # must ship: .gd.uid sidecars and header uids
     godot-devkit check <gate> --help  # that gate's contract, config and scope
                                     # `uid --fix` applies the repairs the gate
                                     # already computes: stale Script ref uids
@@ -139,7 +142,7 @@ RENAME_FLAG = '--rename'
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
-FIXABLE_CHECKS = frozenset({'uid'})
+FIXABLE_CHECKS = frozenset({'uid', 'addon'})
 
 # The verbs that LEFT with the repo-discipline family (0.25.0). Routed to one
 # line and exit 2 rather than falling through to `unknown command`: a consumer
@@ -238,6 +241,9 @@ def _check_module(name: str):
     if name == 'ui-layout':
         from godot_devkit.godot.checks import ui_layout
         return ui_layout
+    if name == 'addon':
+        from godot_devkit.godot.checks import addon
+        return addon
     return None
 
 
