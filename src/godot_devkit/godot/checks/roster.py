@@ -27,7 +27,7 @@ KNOWN_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
 # each start red on any tree its fixer never ran over. A repo opts in by naming
 # a gate; the aggregate never grows under anyone.
 OPT_IN_GATES = ('uid', 'tres', 'canonical', 'patterns', 'test-shape',
-                'ui-layout')
+                'ui-layout', 'addon')
 
 ROSTER_SECTION = 'roster'
 ROSTER_KEY = 'checks'
