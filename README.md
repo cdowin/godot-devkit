@@ -4,6 +4,8 @@
 projects, shipped as a **pinned-tag, stdlib-only** Python package. Its Python CLI reads and edits
 `.tscn`/`.tres` as text without starting Godot. The installed shell runners use a sandboxed
 `user://` to run the engine's import, GUT tests and other project checks.
+Made by [Signal and Echo](https://signalandecho.com), an indie game studio, for its own Godot
+games, and published under MIT for any Godot project.
 
 > **Any change you can make to a scene by hand, you should be able to make through one
 > deterministic command that touches nothing else — and prove it, without ever reading the file.**
