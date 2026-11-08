@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dkitpanelscn1"]
+
+[ext_resource type="Script" uid="uid://c4ktp4nel0q1x" path="res://addons/kit/panel.gd" id="1_kit"]
+
+[node name="KitPanel" type="PanelContainer"]
+script = ExtResource("1_kit")
