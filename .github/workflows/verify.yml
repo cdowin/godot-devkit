@@ -93,3 +93,17 @@ jobs:
           path: .gate-reports/
           if-no-files-found: ignore
           retention-days: 3
+  # The 1 required check. The repo needs a toolchain action (setup-uv, pinned-shellcheck), so it keeps its
+  # own workflow in the studio shape. No heavy lane: the fast job runs on drafts and on ready PRs alike.
+  gate:
+    needs: [verify]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: every job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          if echo "$NEEDS" | grep -Eq '"result": *"(failure|cancelled|skipped)"'; then exit 1; fi

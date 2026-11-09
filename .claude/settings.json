@@ -7,9 +7,12 @@
       "source": {
         "source": "github",
         "repo": "cdowin/agentic-sdlc",
-        "ref": "v4.14.0"
+        "ref": "v5.0.0"
       }
     }
+  },
+  "env": {
+    "LAND_CHECK": "make precommit"
   },
   "enabledPlugins": {
     "agentic-sdlc@agentic-sdlc": true
