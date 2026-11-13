@@ -11,7 +11,7 @@ paths, URL-ish schemes, whitespace, newlines, quotes, unicode confusables,
 over-long strings) and drives them through the REAL CLI against a scratch
 tree, asserting the property the write verbs' docstrings claim:
 
-  VERB REFUSAL TOTALITY (scene / refs --retarget) — for every mangled node
+  VERB REFUSAL TOTALITY (scene set / add) — for every mangled node
   path / sub_resource id / res:// path: exit 0 with the edit confined to the
   file the command named, or a refusal with the tree byte-identical — never an
   exception escaping `cli.main` (the real CLI's traceback), never a write to a
@@ -72,7 +72,6 @@ pytestmark = pytest.mark.fuzz
 # covered, so it moves only with a recorded reason.
 SEED = 20260830
 SCENE_CASES = 320
-RETARGET_CASES = 100
 
 
 # --- the mangler --------------------------------------------------------------
@@ -257,8 +256,7 @@ def _build_scene(outer: Path, root: Path) -> None:
 def _scene_argv(rng: random.Random) -> tuple[str, ...]:
     file = _SCENE if rng.random() < 0.8 else _mangle(rng, _FILE_BASES)
     np = _mangle(rng, _NODE_BASES)
-    kind = rng.choice(('set', 'set', 'sub', 'rm', 'rename', 'add', 'script',
-                       'connect'))
+    kind = rng.choice(('set', 'set', 'sub', 'add', 'script'))
     if kind == 'set':
         value = '"fuzz"' if rng.random() < 0.7 else _mangle(rng, ('true',))
         prop = 'text' if rng.random() < 0.7 else _mangle(rng, ('text',))
@@ -266,17 +264,10 @@ def _scene_argv(rng: random.Random) -> tuple[str, ...]:
     if kind == 'sub':
         return ('scene', 'set', file, '--sub-resource',
                 _mangle(rng, _SUB_BASES), 'bg_color', '"red"')
-    if kind == 'rm':
-        return 'scene', 'rm', file, np
-    if kind == 'rename':
-        return 'scene', 'rename', file, np, _mangle(rng, ('Renamed',))
     if kind == 'add':
         return 'scene', 'add', file, np, _mangle(rng, ('Fresh',)), 'Node2D'
-    if kind == 'script':
-        return ('scene', 'add', file, '.', 'Scripted', 'Node2D', '--script',
-                _mangle(rng, ('res://systems/logic.gd',)))
-    return ('scene', 'connect', file, _mangle(rng, ('pressed',)), np,
-            _mangle(rng, _NODE_BASES), 'on_fuzz')
+    return ('scene', 'add', file, '.', 'Scripted', 'Node2D', '--script',
+            _mangle(rng, ('res://systems/logic.gd',)))
 
 
 def _named_file(argv: tuple[str, ...], root: Path) -> Path | None:
@@ -334,65 +325,6 @@ def test_scene_verbs_refuse_or_edit_only_the_named_file():
         + '\n\n'.join(violations[:8]))
 
 
-_OLD = 'res://scripts/old_helper.gd'
-_NEW = 'res://scripts/new_helper.gd'
-_SOURCE_SUFFIXES = ('.tscn', '.tres', '.gd')
-
-
-def _build_retarget(outer: Path, root: Path) -> None:
-    shutil.copytree(FIXTURES / 'retarget_repo', root)
-    (outer / 'outside.tscn').write_text(
-        '[gd_scene load_steps=2 format=3]\n\n'
-        f'[ext_resource type="Script" path="{_OLD}" id="1_h"]\n',
-        encoding='utf-8')
-
-
-@functools.lru_cache(maxsize=1)
-def _retarget_results() -> tuple[tuple[str, ...], dict]:
-    rng = random.Random(SEED + 2)
-    violations: list[str] = []
-    census: Counter = Counter()
-    with _scratch(_build_retarget) as (outer, root):
-        base = _snap(outer)
-        for _ in range(RETARGET_CASES):
-            old = _OLD if rng.random() < 0.4 else _mangle(rng, (_OLD,))
-            new = _NEW if rng.random() < 0.4 else _mangle(rng, (_NEW,))
-            argv = ('refs', '--retarget', old, new)
-            code, out, escaped = _run(argv)
-            delta = _delta(base, _snap(outer))
-            where = f'{argv!r} -> code={code} delta={delta} out={out[:160]!r}'
-            if escaped is not None:
-                violations.append(f'TRACEBACK {type(escaped).__name__}: '
-                                  f'{escaped!r} on {where}')
-            elif code not in (0, 1, 2):
-                violations.append(f'EXIT CODE outside the contract on {where}')
-            elif code == 2 and delta:
-                violations.append(f'USAGE ERROR WROTE on {where}')
-            else:
-                # exit 1 with rewrites is contractual here: a skip is loud
-                # (exit 1) while provable refs are still rewritten.
-                for rel in delta:
-                    inside = (outer / rel).resolve().is_relative_to(
-                        root.resolve())
-                    if not inside or not rel.endswith(_SOURCE_SUFFIXES):
-                        violations.append(
-                            f'WROTE OUTSIDE THE SWEEP: {rel} on {where}')
-            census['refused'] += 1 if code in (1, 2) and not delta else 0
-            census['accepted-write'] += 1 if delta else 0
-            for cls in _classes_of(old) | _classes_of(new):
-                census[f'class:{cls}'] += 1
-            if delta:
-                _restore(outer, base)
-    return tuple(violations), dict(census)
-
-
-def test_retarget_refuses_or_sweeps_only_source_files_in_repo():
-    violations, _ = _retarget_results()
-    assert not violations, (
-        f'{len(violations)} retarget violations (seed {SEED + 2}):\n\n'
-        + '\n\n'.join(violations[:8]))
-
-
 # --- the teeth ----------------------------------------------------------------
 def test_the_corpus_actually_exercises_every_hostile_class_and_both_verdicts():
     """A fuzz whose corpus is all one answer proves nothing.
@@ -400,21 +332,15 @@ def test_the_corpus_actually_exercises_every_hostile_class_and_both_verdicts():
     Two censuses, asserted rather than trusted: the generator must still emit
     every hostile input class it advertises, and the runs must contain both
     refusals AND accepted writes — a corpus the CLI always refuses would let
-    the containment clauses rot unexercised. The class floor is asked of the
-    two corpora TOGETHER: the mangler is one generator, and which corpus a
-    class lands in is the seed's business, not the property's.
+    the containment clauses rot unexercised.
     """
     _, scene = _scene_results()
-    _, retarget = _retarget_results()
     for cls in ('dot-segment', 'empty-segment', 'backslash', 'glob',
                 'absolute', 'scheme', 'whitespace', 'newline', 'quote',
                 'confusable', 'overlong', 'dash'):
-        seen = scene.get(f'class:{cls}', 0) + retarget.get(f'class:{cls}', 0)
-        assert seen >= 8, (cls, scene, retarget)
+        assert scene.get(f'class:{cls}', 0) >= 8, (cls, scene)
     assert scene['refused'] >= 100, scene
     assert scene['accepted-write'] >= 5, scene
-    assert retarget['refused'] >= 30, retarget
-    assert retarget['accepted-write'] >= 3, retarget
 
 
 def test_overlong_path_arguments_are_refused_across_the_scene_plane():
@@ -423,21 +349,14 @@ def test_overlong_path_arguments_are_refused_across_the_scene_plane():
     At the pinned HEAD a file argument longer than NAME_MAX escaped as a raw
     OSError (ENAMETOOLONG) out of `Path.is_file` — the scene plane lacked the
     exists/OSError guard the pm plane grew for exactly this. Every verb that
-    stats a caller-supplied path now refuses instead: the write verbs at
-    exit 2 ("no such file"), `refs --retarget` at exit 1 (its missing-target
-    refusal), and `scene add --instance` via its instance-target refusal.
+    stats a caller-supplied path now refuses instead: `scene set` at exit 2
+    ("no such file"), and `scene add --instance` via its instance-target refusal.
     """
     overlong = 'x' * 300
     with _scratch(_build_scene) as (outer, _):
         base = _snap(outer)
         refusals = (
             (('scene', 'set', f'{overlong}.tscn', '.', 'text', '"x"'), 2),
-            (('scene', 'rm', f'{overlong}.tscn', 'Inner'), 2),
-            (('scene', 'canonicalize', f'{overlong}.tscn'), 2),
-            (('tiles', 'paint', f'{overlong}.tscn', '--layer', 'L',
-              '--region', '0,0,1,1', '--tile', '0/0,0'), 2),
-            (('refs', '--retarget', 'res://scripts/old_helper.gd',
-              f'res://{overlong}.gd'), 1),
             (('scene', 'add', 'scenes/panel.tscn', '.', 'Inst',
               '--instance', f'res://{overlong}.tscn'), 1),
         )

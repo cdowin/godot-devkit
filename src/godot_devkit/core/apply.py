@@ -147,7 +147,6 @@ class Applied:
     error: str = ''
 
 
-
 @dataclass
 class Plan:
     """An explicit list of intended operations. Decide, then apply."""
@@ -349,11 +348,6 @@ def write(path: Path, text: str, *, newline: str | None = '') -> Applied:
     """Write one file, creating its directory. Raw newlines by default, so a
     template's own line endings survive the round trip."""
     return Plan().overwrite(path, text, newline=newline).apply(decide=False)
-
-
-def write_translated(path: Path, text: str) -> Applied:
-    """`Path.write_text` semantics — `\\n` translated on write."""
-    return write(path, text, newline=None)
 
 
 def make_dir(path: Path) -> Applied:

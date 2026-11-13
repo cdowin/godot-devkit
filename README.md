@@ -10,7 +10,9 @@ games, and published under MIT for any Godot project.
 > **Godot writes its own files. The devkit reads them, cheaply, and checks the outcomes.**
 
 A scene changes through the editor, or headless through a short GDScript that loads it, edits it
-and saves it with `ResourceSaver` (the `godot-devkit` skill shows the pattern). The devkit's part is
+and saves it with `ResourceSaver` (the `godot-devkit` skill shows the pattern). For an inherited
+scene with overrides, which a headless save damages, `scene set` and `scene add` change only their
+own lines. The devkit's part is
 the read side: a tile-heavy scene costs 100k+ tokens to read where `scene` costs a few hundred, and
 `scene-diff` proves an edit without re-reading the file. A gate that scanned nothing fails, loudly.
 

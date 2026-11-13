@@ -297,7 +297,7 @@ TOOLCHAIN_STEP = ('      - uses: ./.github/actions/godot-toolchain\n'
 # it, so the retirement is not silence (a file that looks installed and that
 # nothing maintains any more).
 UID_GUARD = '.github/workflows/uid-guard.yml'
-# `warnings.sh` became `check warnings`, a parse of project.godot (4.0).
+# `warnings.sh` retired in 4.0; Project Settings hold the warning levels.
 WARNINGS_RUNNER = 'tools/dev/runners/warnings.sh'
 SCENARIO_RUNNER = 'tools/dev/runners/scenario.sh'
 RETIRED: tuple[str, ...] = (UID_GUARD, WARNINGS_RUNNER, SCENARIO_RUNNER)
@@ -317,12 +317,8 @@ def retired_line(rel: str) -> str:
     """
     head = f'[install] retired: {rel} is no longer written by {COMMAND} — '
     if rel == WARNINGS_RUNNER:
-        if 'warnings' in all_roster():
-            return (head + '`check warnings` replaces it in `check all`; '
-                    'it was left in place and is safe to delete')
-        return (head + '`check warnings` is omitted from this repo\'s '
-                '`[roster] checks`; it was left in place — keep it or add '
-                '"warnings" to that roster')
+        return (head + 'set analyzer warning levels in Project Settings; it '
+                'was left in place and is safe to delete')
     if rel == SCENARIO_RUNNER:
         return (head + '`integration.sh` now runs native GUT tests; it was left '
                 'in place and is safe to delete after updating Makefile.tiers')
@@ -363,6 +359,9 @@ CONTEXT_BLOCK = (
     'themes, resources) before code. A .tscn is the layout, with authored '
     'sample content; code only binds live data. "Data-driven" means data the '
     'editor writes (scenes and resources), never UI trees built in code. '
+    'Run the scene, not the game: a test or proof opens the one scene it cares '
+    'about with sample data; booting the whole game is for a few real journeys '
+    'and performance measurements. '
     'Use named class_name types and scene-node ownership for gameplay state. '
     'Keep gameplay autoloads near zero; reserve them for a few app-lifetime '
     'services such as save slots and settings. '

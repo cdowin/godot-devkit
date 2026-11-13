@@ -2,6 +2,10 @@
 
 ## Tests
 
+**Run the scene, not the game.** A test or proof opens the one scene it cares about with sample
+data (`godot --path . res://x.tscn`, Run Current Scene in the editor, GUT headless). Booting the
+whole game is for a few real journeys and performance measurements.
+
 Godot has no built-in unit test runner. Use a test framework addon, for example GUT (Godot Unit
 Test) or another from the Asset Library. Pick one per project and run it headless in CI. Test a
 scene or a resource with the smallest setup that shows the rule: instantiate one scene, add it to

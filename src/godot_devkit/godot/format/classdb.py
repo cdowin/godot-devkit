@@ -80,14 +80,3 @@ def is_known(class_name: str) -> bool:
     """True when `class_name` AND its whole ancestor chain are in the snapshot."""
     _chain, missing, cyclic = _ancestry(class_name)
     return missing is None and not cyclic
-
-
-def derives_from(class_name: str, ancestor: str) -> bool | None:
-    """True when `class_name` is `ancestor` or inherits it; None when the
-    snapshot does not know `class_name` (the caller must census that, not guess)."""
-    if not class_name:
-        return False
-    chain, missing, _cyclic = _ancestry(class_name)
-    if ancestor in chain or ancestor == missing:
-        return True
-    return None if missing is not None else False

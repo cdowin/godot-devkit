@@ -1,9 +1,0 @@
-[gd_scene format=3]
-
-[ext_resource type="Script" path="res://scripts/modal.gd" id="9_script"]
-
-[node name="Root" type="Control"]
-script = ExtResource("9_script")
-
-[node name="L" type="Label" parent="."]
-text = "No overflow policy"

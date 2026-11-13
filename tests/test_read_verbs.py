@@ -130,7 +130,7 @@ class RemovedVerbs(unittest.TestCase):
             with contextlib.redirect_stderr(err):
                 code = cli.main(list(argv))
             self.assertEqual(code, 2, argv)
-            self.assertIn('removed in 5.0; use ', err.getvalue())
+            self.assertIn('removed in 5.0: ', err.getvalue())
 
 
 class AutoloadsCensus(unittest.TestCase):

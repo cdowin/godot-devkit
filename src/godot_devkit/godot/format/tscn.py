@@ -32,7 +32,6 @@ SECTION_HEADER = re.compile(r'^\[(\w+)\s*(.*)\]\s*$')
 HEADER_ATTR = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\w+\("[^"]*"\)|[^\s\]]+)')
 PACKED_ARRAY = re.compile(r'^Packed\w+Array\(')
 RESOURCE_REF = re.compile(r'(Ext|Sub)Resource\("([^"]*)"\)')
-NODE_PATH_LITERAL = re.compile(r'(\^?)NodePath\("([^"]*)"\)')
 REF_ARROW = '→'
 
 EXT_RESOURCE_ONLY = re.compile(r'^ExtResource\("([^"]*)"\)$')
@@ -45,9 +44,6 @@ OPENERS = '([{'
 CLOSERS = ')]}'
 ROOT_PATH = '.'
 PATH_SEP = '/'
-PARENT_SEG = '..'
-SELF_SEG = '.'
-SUBNAME_SEP = ':'
 ABSOLUTE_PATH_PREFIX = '/'
 PROP_ASSIGN = ' = '
 TILE_MAP_DATA_PROP = 'tile_map_data'
@@ -277,25 +273,3 @@ def split_path(path: str) -> list[str]:
 
 def join_path(segments: list[str]) -> str:
     return PATH_SEP.join(segments) if segments else ROOT_PATH
-
-
-def resolve_node_path(owner: list[str], literal: str) -> list[str] | None:
-    """Resolve a relative NodePath literal against the node that carries it.
-
-    Returns absolute segments from the scene root, or None when the path is
-    absolute (`/root/...`) or walks above the root — neither is a scene-local
-    reference and neither may be rewritten by a rename.
-    """
-    if literal.startswith(ABSOLUTE_PATH_PREFIX):
-        return None
-    segments = list(owner)
-    for part in literal.split(PATH_SEP):
-        if part in ('', SELF_SEG):
-            continue
-        if part == PARENT_SEG:
-            if not segments:
-                return None
-            segments.pop()
-            continue
-        segments.append(part)
-    return segments

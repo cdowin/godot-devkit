@@ -1012,7 +1012,7 @@ def test_the_plan_writes_its_files_once_and_prints_the_hook_entry(tmp_path):
     ('[roster]\nchecks = ["uid"]\n', 'is safe to delete once it does'),
     # The stock roster leaves `uid` out (opt-in since 4.0), and so does any roster not naming it.
     ('', '`[roster] checks` leaves `uid` out'),
-    ('[roster]\nchecks = ["tres"]\n', '`[roster] checks` leaves `uid` out'),
+    ('[roster]\nchecks = ["props"]\n', '`[roster] checks` leaves `uid` out'),
 ])
 def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
     """uid-guard.yml is the consumer's file after the write: a run leaves it
@@ -1034,13 +1034,10 @@ def test_a_retired_destination_is_kept_and_named(tmp_path, toml, says):
             assert guard.read_text(encoding='utf-8') == 'name: UID Guard\n'
 
 
-@pytest.mark.parametrize('toml, safe', [('', True), ('[roster]\nchecks = ["uid"]\n', False)])
-def test_a_stale_warnings_runner_is_kept_and_named_retired(tmp_path, toml, safe):
-    """warnings.sh became `check warnings`: the old runner is no longer written,
-    never deleted, and named on every run that finds it."""
+def test_a_stale_warnings_runner_is_kept_and_named_retired(tmp_path):
+    """warnings.sh retired in 4.0: the old runner is no longer written, never
+    deleted, and named on every run that finds it."""
     with consumer_repo(tmp_path) as root:
-        if toml:
-            (root / 'godot-devkit.toml').write_text(toml, encoding='utf-8')
         old = root / 'tools/dev/runners/warnings.sh'
         old.parent.mkdir(parents=True)
         old.write_text('echo old\n', encoding='utf-8')
@@ -1048,7 +1045,7 @@ def test_a_stale_warnings_runner_is_kept_and_named_retired(tmp_path, toml, safe)
         assert code == 0, out + err
         line = next(l for l in out.splitlines()
                     if l.startswith('[install] retired: tools/dev/runners/warnings.sh'))
-        assert '`check warnings`' in line and ('safe to delete' in line) is safe, line
+        assert 'Project Settings' in line and 'safe to delete' in line, line
         assert old.read_text(encoding='utf-8') == 'echo old\n'
 
 

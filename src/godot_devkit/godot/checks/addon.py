@@ -26,7 +26,7 @@ opt-in (name `addon` in `[roster] checks`):
                       games agree. `check addon --fix` mints them: a fresh
                       random uid in the engine's text form, drawn again while
                       any file in the project already claims it — what
-                      `scene new` does and what ResourceUID.create_id does.
+                      what ResourceUID.create_id does.
 
 A line opts out of a code rule with a comment that names the rule AND says
 why: `# lint-allow: root-add-child -- the debug console outlives scenes`. An

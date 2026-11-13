@@ -4,8 +4,9 @@ A library of base primitives any Godot 4.x project wants (read-only scene parsin
 search, the uid codec, stats, outcome checks, sandboxed engine runners) plus a few agent skills,
 consumed as a **pinned-tag, stdlib-only Python package**. The test for a module: would any Godot
 project want this primitive, and does the editor or the model not already do it? Godot writes its
-own scene files (the editor, or a headless GDScript with `ResourceSaver`); the devkit adds no
-scene-text write verb. The why is [`README.md`](README.md); this file is the enforceable form.
+own scene files (the editor, or a headless GDScript with `ResourceSaver`); the devkit keeps one
+narrow writer, `scene set` and `scene add`, for inherited scenes a headless save damages, and adds
+no other. The why is [`README.md`](README.md); this file is the enforceable form.
 
 godot-devkit has Godot tooling and the gate framework games run (`Makefile.gates`, `Makefile.tiers`);
 agentic-sdlc has agent guardrails; neither imports the other. Agent hooks, agents and the model guide

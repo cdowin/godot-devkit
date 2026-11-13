@@ -26,8 +26,6 @@ Choose 1 policy per slot and write it down:
   maximum height with a scroll.
 
 A Label with neither is a defect. These are Label properties; a Theme cannot supply them.
-`godot-devkit check ui-layout` reports a Label under a configured panel or modal that sets
-neither.
 
 ## Focus and input
 

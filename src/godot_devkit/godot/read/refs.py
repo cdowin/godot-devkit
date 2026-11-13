@@ -9,7 +9,7 @@ signal hits the typed index cannot resolve (`entity.died.connect(` on an
 untyped `entity`, `emit_signal(&"died")`, `connect("died", …)`). Those are
 not proven references, and they are not nothing either: a zero verdict prints
 only when BOTH buckets are empty, because zero is the answer that gets a
-signal deleted (#19). `refs --retarget` never acts on a dynamic hit.
+signal deleted (#19).
 It also indexes what Godot itself wires, which no `.gd` line spells: a
 `[connection signal=… method=…]` in a scene (typed, `scene connections`), and
 an autoload NAME from `project.godot [autoload]`, indexed like a `class_name`
@@ -88,8 +88,7 @@ def _relpath(root: Path, path: Path) -> str:
 
 def exclude_prefixes() -> tuple[str, ...]:
     """The `[refs] exclude_prefixes` scope, guarded — one key, one scope,
-    shared by `refs` and `refs --retarget` (write side) so the two can never
-    disagree about what the refs family looks at."""
+    the one key the refs family reads."""
     return str_tuple(config_section(CONFIG_SECTION), CONFIG_SECTION,
                      'exclude_prefixes', DEFAULT_EXCLUDE)
 
@@ -393,7 +392,7 @@ def run(symbol: str, include_tests: bool) -> int:
         print(f'\n## {title} ({len(hits)})')
         if kind == DYNAMIC_KIND:
             print('# textual hits on a receiver the index cannot type — not '
-                  'proven references; `refs --retarget` does not act on these')
+                  'proven references')
         for hit in hits:
             location = f'{hit.path}:{hit.line}' if hit.line else hit.path
             print(f'  {location}  {hit.text}')

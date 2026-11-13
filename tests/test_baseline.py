@@ -29,8 +29,7 @@ from support import FIXTURES
 
 from godot_devkit.core.baseline import Baseline
 from godot_devkit.core.config import ConfigError, path_count_table
-from godot_devkit.godot.checks import (defaults, props, rng, tres, tres_comment,
-                                       unit_disk)
+from godot_devkit.godot.checks import props, tres_comment, unit_disk
 
 LOAD_CONFIG = 'godot_devkit.core.config.load_config'
 
@@ -150,31 +149,11 @@ class EveryGateFreezesAndStillCatchesGrowth(unittest.TestCase):
                  lambda text: text + '\nfunc _grown() -> String:\n'
                                      '\treturn "user://grown"\n',
                  f'DISK-WRITE  {user_path}', None),
-                (rng, 'rng_repo',
-                 ['project.godot', 'systems/clean.gd', 'systems/loot.gd'],
-                 'rng', 'systems/loot.gd', 2,
-                 lambda text: text + '\nfunc _grown() -> int:\n\treturn randi()\n',
-                 'BARE-RNG  systems/loot.gd', None),
-                (defaults, 'defaults_repo',
-                 ['project.godot', 'data/redundant.tres', 'systems/rule.gd',
-                  'systems/base_rule.gd', 'systems/ids.gd'],
-                 'defaults', 'data/redundant.tres', 15,
-                 lambda text: text + 'untouched = 0\n',
-                 'REDUNDANT  data/redundant.tres', None),
                 (props, 'props_repo',
                  ['project.godot', 'systems/contract.gd', 'scenes/clean.tscn',
                   'scenes/drift.tscn'],
                  'props', 'scenes/drift.tscn', 2,
                  lambda text: text + 'phantom_grown = 1\n',
-                 'DEAD  scenes/drift.tscn', None),
-                # No fixture carries a path-only ref, so the probe makes one:
-                # strip the uid from one ref, then — the growth — the other.
-                (tres, 'uid_repo',
-                 ['project.godot', 'systems/rule.gd', 'systems/rule.gd.uid',
-                  'scenes/clean.tscn', 'scenes/drifted.tscn'],
-                 'tres', 'scenes/drifted.tscn', 1,
-                 lambda text: text.replace('uid="uid://dstaleuid000" ', '', 1),
-                 'PATH-ONLY  scenes/drifted.tscn',
-                 lambda text: text.replace('uid="uid://dcleanscene0" ', '', 1))):
+                 'DEAD  scenes/drift.tscn', None)):
             with self.subTest(gate=probe[3]):
                 self._probe(*probe)

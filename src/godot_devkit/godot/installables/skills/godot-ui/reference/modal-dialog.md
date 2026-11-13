@@ -58,13 +58,9 @@ func bind(primary_text: String, destructive_text: String = "") -> void:
     _destructive.visible = not destructive_text.is_empty()
 ```
 
-If the project runs `check ui-layout`, give each button the role property named by
-`role_property` in `[ui_layout]`, with a role from `action_roles`.
-
 ## Proof to capture
 
 - Capture the dialog with a short and a very long body: the bar stays in place.
-- Run `godot-devkit check ui-layout` (`action-outside-bar`, `button-in-modal-scroll`).
 - Drive `ui_cancel` and `ui_accept` through real input and confirm the result and focus return.
 
 ## Sources

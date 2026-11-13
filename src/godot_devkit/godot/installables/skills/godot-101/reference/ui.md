@@ -7,6 +7,9 @@
 2. **A `.tscn` is the layout**, with authored sample content; code only binds live data.
 3. **"Data-driven" means data the editor writes** (scenes and resources), never UI trees built
    in code.
+4. **Run the scene, not the game.** A test or proof opens the one scene it cares about with
+   sample data (`godot --path . res://x.tscn`, Run Current Scene, GUT headless). Booting the
+   whole game is for a few real journeys and performance measurements.
 
 Surface rules (HUD, menu, info screen, modal, transient, readouts), layout contracts and visual
 proof live in the `godot-ui` skill; do not repeat them here. This file is the engine vocabulary.

@@ -1,8 +1,8 @@
 """uid_index.py — where a Godot resource's uid actually lives.
 
 Godot 4 stores a resource's uid in a different place for every resource kind,
-and both `scene canonicalize` (restoring refs a packed save dropped) and
-`scene add --script` (minting a new ref) need the same answer. Four routes, in
+and `scene add --script` (minting a new ref) and `check uid` need the same
+answer. Four routes, in
 order of authority:
 
     res://x.gd            -> the `x.gd.uid` sidecar
@@ -108,8 +108,8 @@ class UidIndex:
 
 def project_uids(root: Path) -> set[int]:
     """Every uid a file under `root` already claims for itself: the header of a
-    .tscn/.tres, a .uid sidecar, an .import file. What `scene new` must not
-    mint twice — Godot resolves a duplicated uid to whichever file it met first."""
+    .tscn/.tres, a .uid sidecar, an .import file. What `check addon --fix` must
+    not mint twice — Godot resolves a duplicated uid to whichever file it met first."""
     taken: set[int] = set()
     for file in walk.descendants(root, walk.Kind.FILE):
         if file.suffix not in UID_HOMES:

@@ -46,10 +46,9 @@ LAYERS = ('format', 'index', 'read', 'write', 'checks')
 # crosses a `core/config.py` guard (`str_tuple` & co).
 CONFIG_IMPORT_ALLOWLIST = frozenset((
     'core/config.py', 'cli.py',
-    'godot/checks/addon.py', 'godot/checks/canonical.py', 'godot/checks/roster.py',
-    'godot/checks/defaults.py', 'godot/checks/patterns.py', 'godot/checks/props.py', 'godot/checks/rng.py',
-    'godot/checks/test_shape.py', 'godot/checks/tres.py', 'godot/checks/tres_comment.py',
-    'godot/checks/ui_layout.py', 'godot/checks/uid.py', 'godot/checks/unit_disk.py', 'godot/checks/warnings.py',
+    'godot/checks/addon.py', 'godot/checks/roster.py', 'godot/checks/patterns.py',
+    'godot/checks/props.py', 'godot/checks/tres_comment.py', 'godot/checks/uid.py',
+    'godot/checks/unit_disk.py',
     'godot/install.py',
     'godot/read/autoloads.py', 'godot/read/orphans.py', 'godot/read/refs.py',
     'godot/read/stats.py', 'godot/read/ui_fit_plan.py', 'godot/read/fit_sweep_plan.py', 'godot/write/pot.py',

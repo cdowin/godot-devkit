@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from support import REPO_ROOT, run_check, temp_repo
 
 from godot_devkit import cli
-from godot_devkit.godot.checks import roster, tres, uid
+from godot_devkit.godot.checks import roster, uid
 
 CLEAN = ['project.godot', 'systems/rule.gd', 'systems/rule.gd.uid', 'scenes/clean.tscn']
 DRIFTED = [*CLEAN, 'scenes/drifted.tscn', 'data/drifted.tres']
@@ -299,33 +299,6 @@ class TrackedButDeleted(unittest.TestCase):
         self.assertIn(self.GAP, out)
         self.assertIn('across 2 file(s)', out)       # the gap is not counted scanned
 
-    def test_check_tres_reports_a_path_only_ref_and_censuses_the_gap(self) -> None:
-        """Two claims on one run. The gap is censused instead of crashing, as
-        for `check uid`. And the gate's one finding — an `[ext_resource]`
-        with a path and no uid — is reported: amended in 0.25.0's probe pass,
-        where a `check tres` whose path-only detector had gone blind reddened
-        NOTHING in the suite (every tres case asked only for a PASS or a
-        census). This is the cheapest tres run, so it carries the finding —
-        and, since 0.25.0's review, the ZERO-CENSUS half too: `tres` was the
-        one gate of eight whose rule-4 guard was asserted by nothing, so
-        disarming `if not checked:` left the whole suite green."""
-        with temp_repo('uid_repo', only=DRIFTED) as root:
-            (root / 'data/drifted.tres').unlink()
-            scene = root / 'scenes/drifted.tscn'
-            scene.write_text(scene.read_text(encoding='utf-8').replace(
-                'uid="uid://dcleanscene0" ', '', 1), encoding='utf-8')
-            code, out = run_check(tres)
-        self.assertEqual(code, 1, out)
-        self.assertIn(self.GAP, out)
-        self.assertIn('PATH-ONLY  scenes/drifted.tscn:6:', out)
-        self.assertIn('1 path-only ext_resource ref(s) across 2 file(s)', out)
-        # Rule 4's half: a tree holding no .tres/.tscn at all FAILS rather
-        # than PASSing over nothing, and says which "0" it means.
-        with temp_repo('uid_repo', only=[]):
-            empty_code, empty_out = run_check(tres)
-        self.assertEqual(empty_code, 1, empty_out)
-        self.assertIn('[check:tres] FAIL — scanned 0 of 0 tracked', empty_out)
-
 
 class CliRouting(unittest.TestCase):
     """`--fix` is a contract on ONE gate; anywhere else it must be a loud usage
@@ -336,8 +309,7 @@ class CliRouting(unittest.TestCase):
     reddens every one; that is the roster being wrong for the repo, not a
     reason to weaken a gate. 4.0 refuses the retired key `[checks] godot` (see `LegacyConfigNames`)."""
 
-    STOCK_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
-                 'unit-disk')
+    STOCK_GATES = ('props', 'tres-comment', 'unit-disk')
 
     def _check_all(self, root: Path) -> tuple[int, str]:
         # A fresh process, so two runs compare bytes and not cache state.
@@ -351,12 +323,12 @@ class CliRouting(unittest.TestCase):
         with temp_repo('uid_repo', only=DRIFTED) as root:
             code, out = run_cli('check', 'uid', '--fix')
             scene = (root / 'scenes/drifted.tscn').read_text(encoding='utf-8')
-            tres_code, tres_out = run_cli('check', 'tres', '--fix')
+            props_code, props_out = run_cli('check', 'props', '--fix')
             all_code, _ = run_cli('check', 'all', '--fix')
         self.assertEqual(code, 0, out)
         self.assertIn(ACTUAL_UID, scene)
-        self.assertEqual(tres_code, 2)
-        self.assertIn('unexpected argument', tres_out)
+        self.assertEqual(props_code, 2)
+        self.assertIn('unexpected argument', props_out)
         self.assertEqual(all_code, 2)
 
     def test_the_stock_roster_is_the_stock_and_a_declared_one_runs_what_it_names(

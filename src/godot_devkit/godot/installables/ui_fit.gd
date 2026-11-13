@@ -1,7 +1,6 @@
 extends SceneTree
 ## UI fit — boot each listed scene under stress and report what spills or is
-## cut. The runtime half of `godot-devkit check ui-layout`, which only reads
-## scene text.
+## cut.
 ##
 ## Run by ui_fit.sh — never invoke godot directly: the wrapper owns the
 ## user:// sandbox, the bound and the plan. Layout and font metrics resolve

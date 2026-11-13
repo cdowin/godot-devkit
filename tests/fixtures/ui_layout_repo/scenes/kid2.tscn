@@ -1,8 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="PackedScene" path="res://scenes/base_bad.tscn" id="1_base"]
-
-[node name="Kid" instance=ExtResource("1_base")]
-
-[node name="L" parent="." index="0"]
-autowrap_mode = 3
