@@ -1,11 +1,11 @@
 # CLAUDE.md — godot-devkit
 
-Scene tooling, configurable checks and installable Godot runners for Godot 4.x, consumed as a **pinned-tag, stdlib-only
-Python package** by shipping game repos. Two audiences, humans and LLMs; for the second the
-deliverables are a stable verb vocabulary, determinism, and token reduction. The northstar in one
-line: *any change you can make to a scene by hand should be makeable through one deterministic
-command that touches nothing else — and provable without reading the file.* The why is
-[`README.md`](README.md); this file is the enforceable form of it, not a second copy.
+A library of base primitives any Godot 4.x project wants (read-only scene parsing, reference
+search, the uid codec, stats, outcome checks, sandboxed engine runners) plus a few agent skills,
+consumed as a **pinned-tag, stdlib-only Python package**. The test for a module: would any Godot
+project want this primitive, and does the editor or the model not already do it? Godot writes its
+own scene files (the editor, or a headless GDScript with `ResourceSaver`); the devkit adds no
+scene-text write verb. The why is [`README.md`](README.md); this file is the enforceable form.
 
 godot-devkit has Godot tooling and the gate framework games run (`Makefile.gates`, `Makefile.tiers`);
 agentic-sdlc has agent guardrails; neither imports the other. Agent hooks, agents and the model guide
@@ -69,12 +69,9 @@ Model guide: cdowin/agentic-sdlc (which agent, which model, when).
 - **New check** = module in `godot/checks/` + a branch in `_dispatch_check` + a check-reference
   wiki row drafted in the PR body + a Release-notes section, plus the probe below.
   **New read verb** = module + `cli.py` route + a Verb-reference wiki row drafted in the PR body + a
-  Release-notes section. **New write verb** = usually a scene subverb — a row in `scene_edit.py`'s
-  `VERBS` + `HANDLERS` plus `_build_parser`/`_check_usage`; a new top-level verb is module + route +
-  wiki row + Release-notes section.
-  Either way: a round-trip fidelity case in the corpus, a refusal path with a test proving it declines
-  rather than mangles, and an idempotence test. Address nodes by PATH (`parent` + `name`), the way
-  Godot does; read output must be valid write input.
+  Release-notes section. **No new scene write verb** (see the top). A repair flag on a check
+  (`uid --fix`) needs a refusal path with a test proving it declines rather than mangles, and an
+  idempotence test.
 - **Every config value goes through `src/godot_devkit/core/config.py`.** Never `tuple(cfg.get(...))` — a bare string
   is iterable, and that is how a silent PASS over an empty census ships.
 - **Known gap:** `refs` does not index autoload NAMES (declared in `project.godot`, not via

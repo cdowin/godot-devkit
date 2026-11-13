@@ -51,12 +51,6 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # path attr + exact preload/load literal that
                                     # names old; anything unprovable is SKIPPED
                                     # with a reason, and skips exit 1
-    godot-devkit refs --rename <old> <new> [--dry-run]
-                                    # rename a class_name / method / signal /
-                                    # autoload across .gd, .tscn, .tres and
-                                    # project.godot as one plan; any dynamic,
-                                    # string or unproven site refuses it whole;
-                                    # tests/ is always in scope
     godot-devkit scene canonicalize <file>... [--elide-defaults]
                                     [--respell] [--order]
                                     # restore what PackedScene.pack() drops:
@@ -74,8 +68,6 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                     # only that one property's base64 is
                                     # regenerated; --atlas-map autotiles and
                                     # re-slots the same-source neighbors
-    godot-devkit autoloads add <Name> <res://path>  |  autoloads rm <Name>
-                                    # declare / remove one project.godot autoload
     godot-devkit pot [--dry-run | --check]
                                     # the localization POT the editor writes,
                                     # from project.godot's translations_pot_files
@@ -140,7 +132,6 @@ from godot_devkit.godot.checks.roster import KNOWN_GATES, OPT_IN_GATES, all_rost
 FIX_FLAG = '--fix'
 HELP_FLAGS = ('-h', '--help')
 RETARGET_FLAG = '--retarget'
-RENAME_FLAG = '--rename'
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
@@ -158,10 +149,33 @@ FIXABLE_CHECKS = frozenset({'uid', 'addon'})
 RETIRED_COMMANDS = frozenset({'pm', 'init', 'gates-extra'})
 RETIRED_CHECKS = frozenset({'doc', 'shell', 'pm', 'hooks', 'repo-hygiene'})
 
+# The scene-text write verbs 5.0 removed, keyed by (command, argument), each with
+# what does the job now. Godot writes its own files: the editor, or a headless
+# GDScript that loads, edits and saves with ResourceSaver (the godot-devkit skill).
+REMOVED_VERBS = {
+    ('refs', '--rename'): 'rename in the editor, or edit by hand and prove no '
+                          'caller is left with `refs <symbol>`',
+    ('autoloads', 'add'): 'Project Settings > Autoload, or '
+                          'ProjectSettings.set_setting() + save() in a headless script',
+    ('autoloads', 'rm'): 'Project Settings > Autoload, or '
+                         'ProjectSettings.clear() + save() in a headless script',
+}
+
 
 def _usage() -> int:
     print(__doc__.strip())
     return 2
+
+
+def _removed(cmd: str, rest: list[str]) -> int | None:
+    """Exit 2 with the replacement for a verb 5.0 removed, else None."""
+    for arg in rest:
+        replacement = REMOVED_VERBS.get((cmd, arg))
+        if replacement:
+            print(f'godot-devkit: `{cmd} {arg}` was removed in 5.0; use '
+                  f'{replacement}', file=sys.stderr)
+            return 2
+    return None
 
 
 def _retired(verb: str) -> int:
@@ -279,6 +293,9 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__.strip())
         return 0
     cmd, rest = args[0], args[1:]
+    removed = _removed(cmd, rest)
+    if removed is not None:
+        return removed
     if cmd in ('-V', '--version', 'version'):
         print(f'godot-devkit {__version__}')
         return 0
@@ -304,18 +321,12 @@ def main(argv: list[str] | None = None) -> int:
         if RETARGET_FLAG in rest:
             from godot_devkit.godot.write import refs_retarget
             return refs_retarget.main(rest)
-        if RENAME_FLAG in rest:
-            from godot_devkit.godot.write import refs_rename
-            return refs_rename.main(rest)
         from godot_devkit.godot.read import refs
         return refs.main(rest)
     if cmd == 'orphans':
         from godot_devkit.godot.read import orphans
         return orphans.main(rest)
     if cmd == 'autoloads':
-        from godot_devkit.godot.write import autoloads_edit
-        if rest and rest[0] in autoloads_edit.VERBS:
-            return autoloads_edit.main(rest)
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
     if cmd == 'pot':

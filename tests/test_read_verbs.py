@@ -25,6 +25,7 @@ from pathlib import Path
 
 from support import FIXTURES, REPO_ROOT, temp_repo
 
+from godot_devkit import cli
 from godot_devkit.core.project import load_config, repo_root
 from godot_devkit.godot import VENDORED_DEFAULT
 from godot_devkit.godot.read import autoloads, orphans, refs
@@ -118,6 +119,18 @@ class ConfigThroughCore(unittest.TestCase):
         self.assertEqual(done.returncode, 2, done.stderr)
         self.assertIn('must be a table', done.stderr)
         self.assertNotIn('Traceback', done.stderr)
+
+
+class RemovedVerbs(unittest.TestCase):
+    def test_a_removed_write_verb_is_exit_2_naming_its_replacement(self) -> None:
+        # A consumer Makefile that still calls a removed verb must stop red,
+        # never run the read verb that shares its command word and pass.
+        for argv in (('refs', '--rename', 'A', 'B'), ('autoloads', 'add', 'A', 'res://a.gd')):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = cli.main(list(argv))
+            self.assertEqual(code, 2, argv)
+            self.assertIn('removed in 5.0; use ', err.getvalue())
 
 
 class AutoloadsCensus(unittest.TestCase):

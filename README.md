@@ -1,23 +1,18 @@
 # godot-devkit
 
-**godot-devkit** is scene tooling, configurable checks and installable Godot runners for Godot 4.x
-projects, shipped as a **pinned-tag, stdlib-only** Python package. Its Python CLI reads and edits
-`.tscn`/`.tres` as text without starting Godot. The installed shell runners use a sandboxed
-`user://` to run the engine's import, GUT tests and other project checks.
+**godot-devkit** is a library of base primitives for Godot 4.x projects, shipped as a
+**pinned-tag, stdlib-only** Python package: read-only scene parsing, reference search, the uid
+codec, code stats, a few outcome checks, and installable runners that use a sandboxed `user://` to
+run the engine's import, GUT tests, renders and fit sweeps. Plus a few agent skills.
 Made by [Signal and Echo](https://signalandecho.com), an indie game studio, for its own Godot
 games, and published under MIT for any Godot project.
 
-> **Any change you can make to a scene by hand, you should be able to make through one
-> deterministic command that touches nothing else — and prove it, without ever reading the file.**
+> **Godot writes its own files. The devkit reads them, cheaply, and checks the outcomes.**
 
-For a human, the editor stops being mandatory for mechanical work and diffs stay reviewable. For an
-LLM: a small stable vocabulary of verbs instead of a bespoke `sed`; determinism, because a tool that
-reformats what it was not asked to touch hides its damage inside a legitimate diff; and token
-reduction, because a tile-heavy scene costs 100k+ tokens to read where `scene` costs a few hundred
-and a write verb costs zero. The commitments: **refuse rather than mangle** (the worst outcome is
-never an error, it is silent partial success); **read output is write input**; **idempotence**,
-because models retry; **bounded blast radius**; and **`scene-diff`**, so an edit is provable
-without re-reading the file.
+A scene changes through the editor, or headless through a short GDScript that loads it, edits it
+and saves it with `ResourceSaver` (the `godot-devkit` skill shows the pattern). The devkit's part is
+the read side: a tile-heavy scene costs 100k+ tokens to read where `scene` costs a few hundred, and
+`scene-diff` proves an edit without re-reading the file. A gate that scanned nothing fails, loudly.
 
 Claude Code plugin (the `godot-devkit` skill): `/plugin marketplace add cdowin/godot-devkit`, then `/plugin install godot-devkit@godot-devkit`. Docs: https://github.com/cdowin/godot-devkit/wiki (verbs, checks, CI and [migration to 4.0](https://github.com/cdowin/godot-devkit/wiki/Migrating-from-3.x-to-4.0)).
 
@@ -36,12 +31,11 @@ Pin it and read the rest: [Installing and pinning](https://github.com/cdowin/god
 
 ```sh
 godot-devkit scene scenes/world/hub.tscn                  # node tree, ext_resources, a few hundred tokens
-godot-devkit scene set scenes/world/hub.tscn Player/Camera zoom "Vector2(2, 2)"
 godot-devkit scene-diff scenes/world/hub.tscn --git HEAD  # the one line that changed, and nothing else
 godot-devkit check all                                    # the configured static checks
 ```
 
-Every write verb takes `--dry-run` and is idempotent. More: [Quickstart](https://github.com/cdowin/godot-devkit/wiki/Quickstart), [Verb reference](https://github.com/cdowin/godot-devkit/wiki/Verb-reference).
+More: [Quickstart](https://github.com/cdowin/godot-devkit/wiki/Quickstart), [Verb reference](https://github.com/cdowin/godot-devkit/wiki/Verb-reference).
 The stock check roster covers selected static drift; UID, `.tres` and pattern checks are opt-in via
 `[roster] checks`. Installed `make parse` imports, compiles every script and boots the main scene.
 
