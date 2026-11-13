@@ -19,6 +19,37 @@ write verbs, then `scene canonicalize --respell --order`, so the editor finds no
 `check canonical` guards both. Never hand-edit scene text with `sed` or a script, and never write
 your own `.tscn` parser or compare tool.
 
+## Change a scene headless with Godot itself
+
+With no editor open, let the engine write the file: a short GDScript loads the scene, edits
+nodes, tiles or properties with the normal API, and saves it with `ResourceSaver`. Godot then
+writes its own format, uids and ordering, so nothing re-writes it later.
+
+```gdscript
+# tools/dev/edit_hud.gd
+extends SceneTree
+
+func _init() -> void:
+    var path := "res://ui/hud.tscn"
+    var root := (load(path) as PackedScene).instantiate()
+    var ammo := Label.new()
+    ammo.name = "Ammo"
+    ammo.text = "30"                    # authored sample content
+    root.get_node("Margin/Row").add_child(ammo)
+    ammo.owner = root                   # a node with no owner is not saved
+    # Tiles: root.get_node("Ground").set_cell(Vector2i(4, 2), 0, Vector2i(1, 0))
+    var packed := PackedScene.new()
+    packed.pack(root)
+    var err := ResourceSaver.save(packed, path)
+    root.free()
+    quit(0 if err == OK else 1)
+```
+
+Run it through the project's sandboxed engine wrapper (a `make` target that sources
+`gdk_runners.sh` and calls `gdk_sandbox_home`), never a raw `godot --headless`: the script
+boots the project's autoloads. Prove the result with `scene-diff <file> --git HEAD`. A
+`.tres` works the same way: `load`, change it, `ResourceSaver.save(res, path)`.
+
 ## Which verb
 
 | Need | Verb |

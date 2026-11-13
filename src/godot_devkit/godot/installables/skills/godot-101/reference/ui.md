@@ -1,5 +1,13 @@
 # UI (Godot 4.7)
 
+## Principles
+
+1. **Godot native first.** Use the editor's building blocks (scenes, containers, themes,
+   resources) before code.
+2. **A `.tscn` is the layout**, with authored sample content; code only binds live data.
+3. **"Data-driven" means data the editor writes** (scenes and resources), never UI trees built
+   in code.
+
 Surface rules (HUD, menu, info screen, modal, transient, readouts), layout contracts and visual
 proof live in the `godot-ui` skill; do not repeat them here. This file is the engine vocabulary.
 

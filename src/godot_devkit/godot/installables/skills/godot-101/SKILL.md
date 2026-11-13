@@ -77,6 +77,7 @@ This mapping is this skill's guidance, not a quote from the book. Read the patte
 | Spatial partition | The physics server (`Area2D`, space queries) and `TileMapLayer` |
 | Dirty flag | Notifications and property setters |
 | Type object | A `Resource` subclass as the data type |
+| Data-driven UI | An authored `.tscn` with sample content plus Resources; code only binds live data (`reference/ui.md`) |
 
 ## 5. The mental model
 

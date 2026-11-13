@@ -5,6 +5,15 @@ description: Design, implement, or review native Godot menus, HUDs, dialogs, car
 
 # Godot UI: component contract to native proof
 
+## Principles
+
+1. **Godot native first.** Use the editor's building blocks (scenes, containers, themes,
+   resources) before code.
+2. **A `.tscn` is the layout**, with authored sample content, so it opens in the editor and
+   renders on its own. Code only binds live data into the nodes the scene already has.
+3. **"Data-driven" means data the editor writes** (scenes and resources), never UI trees built
+   in code. `add_child` and `.new()` in a UI script are for real lists of runtime items only.
+
 Treat the user's task and approved wireframe as the design input. Identify the spatial and
 interaction intent before changing a dimension. A stable panel that obscures the task still fails.
 Use this workflow for the affected surface; reuse existing contracts for a small edit.
@@ -57,8 +66,8 @@ inside its graph region. Distinguish these cases instead of forbidding every siz
 
 ## Translate into Godot deliberately
 
-- Author layout in scenes using the project's conventions. In a `Container`, the parent manages
-  child positions and sizes; hand-set offsets are not a substitute for the right hierarchy.
+- Author the node tree in the `.tscn` (principle 2). In a `Container`, the parent manages child
+  positions and sizes; hand-set offsets are not a substitute for the right hierarchy.
 - `custom_minimum_size` is a floor, not a fixed rectangle. Content, fonts and visible children can
   contribute a larger minimum. `Expand`/`Fill` alone do not establish a bounded scroll viewport.
 - Choose the sizing/minimum-propagation behavior for each allocated region. Put scroll boundaries

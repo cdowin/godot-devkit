@@ -359,6 +359,10 @@ HOOK_SETTINGS = '''{
 # never written, for the same reason as the hook entry: those files are
 # hand-maintained.
 CONTEXT_BLOCK = (
+    'Godot native first: the editor\'s building blocks (scenes, containers, '
+    'themes, resources) before code. A .tscn is the layout, with authored '
+    'sample content; code only binds live data. "Data-driven" means data the '
+    'editor writes (scenes and resources), never UI trees built in code. '
     'Use named class_name types and scene-node ownership for gameplay state. '
     'Keep gameplay autoloads near zero; reserve them for a few app-lifetime '
     'services such as save slots and settings. '
