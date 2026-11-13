@@ -12,12 +12,6 @@ Two things a caller can ask:
 `is_known` is the honesty valve: an unknown class means the gate must report the
 node as UNVERIFIED rather than guess (a false PASS is survivable, a false FAIL
 gets the gate switched off).
-
-And the engine's NAMES, from the same file: `engine_methods()` (every method on
-any class or builtin type, and every utility function) and `engine_signals()`
-(every class signal), stamped `engine_names_from()` — possibly a newer dump than
-the props, which only ever adds a refusal. `refs --rename` refuses a name in
-either set: without types, `x.play()` may be the engine's.
 """
 from __future__ import annotations
 
@@ -55,24 +49,6 @@ def godot_version() -> str:
     return _payload()['godot_version']
 
 
-@lru_cache(maxsize=1)
-def engine_methods() -> frozenset[str]:
-    """Every method name the engine owns: any class, any builtin type, any utility function."""
-    return frozenset(_payload()['engine_methods'])
-
-
-@lru_cache(maxsize=1)
-def engine_signals() -> frozenset[str]:
-    """Every signal name any engine class declares."""
-    return frozenset(_payload()['engine_signals'])
-
-
-@lru_cache(maxsize=1)
-def engine_names_from() -> str:
-    """The dump the engine names came from (`Godot Engine v4.7.2.stable.official`)."""
-    return _payload()['names_from']
-
-
 @lru_cache(maxsize=512)
 def _ancestry(class_name: str) -> tuple[tuple[str, ...], str | None, bool]:
     """Walk `class_name` up its `inherits` chain: the snapshot classes met in
@@ -104,14 +80,3 @@ def is_known(class_name: str) -> bool:
     """True when `class_name` AND its whole ancestor chain are in the snapshot."""
     _chain, missing, cyclic = _ancestry(class_name)
     return missing is None and not cyclic
-
-
-def derives_from(class_name: str, ancestor: str) -> bool | None:
-    """True when `class_name` is `ancestor` or inherits it; None when the
-    snapshot does not know `class_name` (the caller must census that, not guess)."""
-    if not class_name:
-        return False
-    chain, missing, _cyclic = _ancestry(class_name)
-    if ancestor in chain or ancestor == missing:
-        return True
-    return None if missing is not None else False

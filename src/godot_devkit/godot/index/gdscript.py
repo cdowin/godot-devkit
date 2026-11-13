@@ -18,11 +18,6 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from godot_devkit.godot.index.gd_declarations import (
-    Declaration,
-    DeclarationFacts,
-    scan_declarations,
-)
 from godot_devkit.godot.format.tscn import scan_line
 
 RES_PREFIX = 'res://'
@@ -56,9 +51,6 @@ class ScriptFacts:
     extends: str | None = None
     exports: set[str] = field(default_factory=set)
     dynamic_properties: bool = False
-    # What each export is DECLARED as (type + initializer) and the script's
-    # enum tables — the value grammar `check defaults` compares against.
-    declared: DeclarationFacts = field(default_factory=DeclarationFacts)
 
 
 @dataclass
@@ -67,12 +59,6 @@ class Resolution:
     exports: frozenset[str]
     engine_base: str | None       # the Godot class the `extends` chain lands on
     opaque: bool                  # True => do not call anything on it "dead"
-    # Inheritance-folded declarations; a subclass re-declaring a name wins.
-    # Iteration order is the saver's: the script's own, then its base's.
-    declarations: dict[str, Declaration] = field(default_factory=dict)
-    enum_members: dict[str, int] = field(default_factory=dict)
-    consts: dict[str, str] = field(default_factory=dict)
-    aliases: dict[str, str] = field(default_factory=dict)
 
 
 def code_only(line: str) -> str:
@@ -95,7 +81,7 @@ def code_only(line: str) -> str:
 
 def scan_script(text: str, res_path: str) -> ScriptFacts:
     """Extract class_name / extends / @export names from one .gd source."""
-    facts = ScriptFacts(res_path=res_path, declared=scan_declarations(text))
+    facts = ScriptFacts(res_path=res_path)
     pending_export = False
     lines = text.split('\n')
     index = -1
@@ -184,17 +170,6 @@ class ScriptIndex:
         exports = set(facts.exports)
         opaque = facts.dynamic_properties
         base: str | None = None
-        declarations: dict[str, Declaration] = {}
-        enum_members: dict[str, int] = {}
-        consts: dict[str, str] = {}
-        aliases: dict[str, str] = {}
-
-        def inherit(parent: Resolution) -> None:
-            declarations.update(parent.declarations)
-            enum_members.update(parent.enum_members)
-            consts.update(parent.consts)
-            aliases.update(parent.aliases)
-
         target = facts.extends
         if target is None:
             base = 'RefCounted'                    # implicit base of a bare script
@@ -207,27 +182,13 @@ class ScriptIndex:
                 exports |= parent.exports
                 base = parent.engine_base
                 opaque = opaque or parent.opaque
-                inherit(parent)
         elif target in self.by_class:
             parent = self._resolve(self.by_class[target], seen)
             exports |= parent.exports
             base = parent.engine_base
             opaque = opaque or parent.opaque
-            inherit(parent)
         elif classdb.is_known(target):
             base = target
         else:
             opaque = True                          # e.g. `extends SomeAddonClass`
-        # Godot lists a script's own properties before its base's
-        # (`get_script_property_list` walks derived -> base), and the saver
-        # writes them in that order.
-        own = facts.declared.declarations
-        declarations = {**own, **{k: v for k, v in declarations.items() if k not in own}}
-        enum_members.update(facts.declared.enum_members)
-        consts.update(facts.declared.consts)
-        aliases.update(facts.declared.aliases)
-        for enum_name, members in facts.declared.enums.items():
-            for member, value in members.items():
-                enum_members[f'{enum_name}.{member}'] = value
-        return Resolution(frozenset(exports), base, opaque, declarations,
-                          enum_members, consts, aliases)
+        return Resolution(frozenset(exports), base, opaque)

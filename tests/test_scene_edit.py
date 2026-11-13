@@ -1,4 +1,4 @@
-"""Tier 2 — the surgical write verbs.
+"""Tier 2 — the narrow scene writer, `scene set` and `scene add`.
 
 Three properties are load-bearing: the verbs touch ONLY what they were asked
 to (measured as changed lines), they are idempotent, and they REFUSE rather
@@ -25,7 +25,6 @@ from godot_devkit.godot.write import scene_edit
 from godot_devkit.godot.format.tscn import TscnError
 from godot_devkit.godot.format.tscn_document import TscnDocument
 from godot_devkit.godot.index import uid_codec
-from godot_devkit.godot.index.uid_index import project_uids
 
 SINK = FIXTURES / 'kitchen_sink.tscn'
 DASH_TRES = FIXTURES / 'corpus/editor_written/data/abilities/dash/standard_t1.tres'
@@ -77,40 +76,6 @@ class VerbCase(unittest.TestCase):
         self.assertEqual(Path(argv[1]).read_bytes(), once)
 
 
-class RenameRewritesReferences(VerbCase):
-    """The verb's whole reason to exist: a blanket sed rewrote
-    NodePath("Sandbox/TileRoomContract") while renaming prose and broke a
-    scenario. Rename resolves paths; it does not text-match."""
-
-    def test_rewrites_every_reference_and_nothing_else(self) -> None:
-        """`wall_layer` is an EXPORT name and `node_paths=` lists export names —
-        neither is a path, and neither may move when the node does. An
-        Animation's tracks live in a sub_resource with no path of its own and
-        resolve against the AnimationPlayer's `root_node`; a rename that
-        misses them breaks the animation silently. `--dry-run` (one mechanism
-        in `main`, shared by every verb) writes nothing."""
-        before = self.text()
-        self.run_verb('rename', str(self.scene), 'WallLayer', 'Walls', '--dry-run')
-        self.assertEqual(self.text(), before)
-        self.run_verb('rename', str(self.scene), 'WallLayer', 'Walls')
-        text = self.text()
-        for kept in ('wall_layer = NodePath("../Walls")',
-                     'target = NodePath("../../Walls")',
-                     'tracks/0/path = NodePath("Walls:modulate")',
-                     'node_paths=PackedStringArray("wall_layer")',
-                     '; The contract wires the layers by NodePath'):
-            self.assertIn(kept, text)
-        self.assertNotIn('WallLayer', text)
-        self.assertEqual(len(self.changed_lines(before)), 4)
-        self.second_run_is_a_no_op('rename', str(self.scene), 'WallLayer', 'Walls')
-        self.run_verb('rename', str(self.scene), 'Nested', 'Container')
-        self.assertIn('[node name="Deep" type="Marker2D" parent="Container"]', self.text())
-
-    def test_refuses_a_name_collision(self) -> None:
-        self.refused('rename', str(self.scene), 'Nested', 'WallLayer')
-        self.assertNotIn('name="WallLayer" type="Node2D"', self.text())
-
-
 class SetProperty(VerbCase):
     def test_replaces_a_value_in_place_keeping_an_inline_comment(self) -> None:
         before = self.text()
@@ -133,7 +98,7 @@ class SetProperty(VerbCase):
         self.refused('set', str(self.scene), 'Nope', 'x', '1')
 
 
-class AddRemoveReparent(VerbCase):
+class AddNode(VerbCase):
     def test_add_places_the_node_after_the_parent_subtree(self) -> None:
         self.run_verb('add', str(self.scene), 'Nested', 'Extra', 'Sprite2D')
         text = self.text()
@@ -142,29 +107,6 @@ class AddRemoveReparent(VerbCase):
         self.second_run_is_a_no_op('add', str(self.scene), 'Nested', 'Extra', 'Sprite2D')
         # Same name, different type: not a re-run, a shadowing — refused.
         self.refused('add', str(self.scene), 'Nested', 'Extra', 'Node2D')
-
-    def test_rm_takes_descendants_connections_markers_and_orphaned_resources(self) -> None:
-        self.run_verb('rm', str(self.scene), 'Panel')
-        text = self.text()
-        for gone in ('name="Panel"', 'name="Inner"', '[connection', '[editable',
-                     'panel.tscn'):
-            self.assertNotIn(gone, text)
-        self.assertIn('load_steps=7', text)          # 8 -> 7, one resource fewer
-        # `rm` of a path that resolves nothing REFUSES (exit 1): with no node
-        # there is no evidence a removal ever happened, so a typo'd path must
-        # not read as success. `--force` opts back into the exit-0 no-op.
-        self.refused('rm', str(self.scene), 'Panel')
-        self.second_run_is_a_no_op('rm', str(self.scene), 'Panel', '--force')
-
-    def test_reparent_moves_the_subtree_and_fixes_its_nodepaths(self) -> None:
-        self.run_verb('reparent', str(self.scene), 'Nested/Deep', '.')
-        text = self.text()
-        self.assertIn('[node name="Deep" type="Marker2D" parent="."]', text)
-        # One `..` fewer now that the node sits one level higher.
-        self.assertIn('target = NodePath("../WallLayer")', text)
-        self.second_run_is_a_no_op('reparent', str(self.scene), 'Nested/Deep', '.')
-        self.refused('reparent', str(self.scene), 'Nested', 'Nested/Deep')
-
 
 class MainMechanics(VerbCase):
     """What `main` does for every verb before and after the handler."""
@@ -199,10 +141,7 @@ class MainMechanics(VerbCase):
                       '--script', 'res://systems/logic.gd'),
                      ('set', str(self.scene), 'Sandbox', 'x', '1', '--new-sub-resource', 'Resource'),
                      ('set', str(self.scene), 'Sandbox', 'x'),
-                     ('add', str(self.scene), '.', 'X', 'Node2D', '--tile-set', 'res://t.tres'),
-                     ('new', str(self.tmp / 'n.tscn')),
-                     ('new', str(self.tmp / 'n.tscn'), '--inherits', 'res://a.tscn',
-                      '--script', 'res://b.gd')):
+                     ('add', str(self.scene), '.', 'X', 'Node2D', '--tile-set', 'res://t.tres')):
             with self.assertRaises(SystemExit) as bail, \
                     contextlib.redirect_stderr(io.StringIO()):
                 self.run_verb(*argv)
@@ -312,146 +251,27 @@ class AddResolvesRefs(VerbCase):
                                        'Packed', '--instance', 'res://scenes/packed.tscn')
 
 
-class ConnectDisconnect(VerbCase):
-    """`connect` appends a `[connection]` in Godot's serialization position
-    (after all nodes); `disconnect` removes exactly the matching one, refusing
-    ambiguity."""
-
-    NEW_CONN = ('[connection signal="toggled" from="Nested/Deep" '
-                'to="TileRoomContract" method="_on_toggled"]')
-
-    def test_connect_appends_in_serialization_position(self) -> None:
-        before = self.text()
-        self.assertEqual(self.run_verb('connect', str(self.scene), 'toggled', 'Nested/Deep',
-                                       'TileRoomContract', '_on_toggled'), scene_edit.EXIT_OK)
-        text = self.text()
-        self.assertIn(self.NEW_CONN, text)
-        self.assertLess(text.index('[connection signal="pressed"'),
-                        text.index(self.NEW_CONN))
-        self.assertLess(text.index(self.NEW_CONN), text.index('[editable'))
-        self.assertEqual(len(self.changed_lines(before)), 1)
-        self.second_run_is_a_no_op('connect', str(self.scene), 'toggled', 'Nested/Deep',
-                                   'TileRoomContract', '_on_toggled')
-        # The root addressed by its own name is written as `.`, as .tscn spells it.
-        self.run_verb('connect', str(self.scene), 'ready', 'Sandbox',
-                      'TileRoomContract', '_on_ready')
-        self.assertIn('[connection signal="ready" from="." to="TileRoomContract" '
-                      'method="_on_ready"]', self.text())
-
-    def test_first_connection_lands_at_eof_and_disconnect_restores_the_bytes(self) -> None:
-        # No stray trailing blank line may survive the disconnect.
-        panel = self.copy_of(PANEL_TSCN)
-        before = panel.read_bytes()
-        self.assertEqual(self.run_verb('connect', str(panel), 'pressed', 'Inner', '.',
-                                       '_on_pressed'), scene_edit.EXIT_OK)
-        self.assertTrue(self.text(panel).endswith(
-            '[node name="Footer" type="HBoxContainer" parent="."]\n\n'
-            '[connection signal="pressed" from="Inner" to="." '
-            'method="_on_pressed"]\n'))
-        self.run_verb('disconnect', str(panel), 'pressed', 'Inner', '.', '_on_pressed')
-        self.assertEqual(panel.read_bytes(), before)
-
-    def test_connect_serializes_flags_and_refuses_a_route_that_differs_only_in_flags(
-            self) -> None:
-        self.run_verb('connect', str(self.scene), 'toggled', 'Nested/Deep',
-                      'TileRoomContract', '_on_toggled')
-        self.refused('connect', str(self.scene), 'toggled', 'Nested/Deep',
-                     'TileRoomContract', '_on_toggled', '--flags', '3', saying=('flags',))
-        self.run_verb('connect', str(self.scene), 'ready', 'Nested/Deep',
-                      'TileRoomContract', '_on_ready', '--flags', '3')
-        self.assertIn('method="_on_ready" flags=3]', self.text())
-
-    def test_disconnect_removes_exactly_the_matching_connection_once(self) -> None:
-        hazard = self.copy_of(HAZARD_TSCN)
-        before = hazard.read_text(encoding='utf-8')
-        self.assertEqual(self.run_verb('disconnect', str(hazard), 'body_entered',
-                                       'DetectorArea', '.', '_on_detector_body_entered'),
-                         scene_edit.EXIT_OK)
-        after = self.text(hazard)
-        self.assertNotIn('_on_detector_body_entered', after)
-        self.assertIn('[connection signal="body_exited" from="DetectorArea" to="." '
-                      'method="_on_detector_body_exited"]', after)
-        self.assertEqual(len(before.splitlines()) - len(after.splitlines()), 1)
-        # A second disconnect matches nothing: REFUSED, and not a byte moves.
-        self.refused('disconnect', str(hazard), 'body_entered',
-                     'DetectorArea', '.', '_on_detector_body_entered')
-
-    def test_disconnect_refuses_ambiguity_and_flags_disambiguate(self) -> None:
-        hazard = self.copy_of(HAZARD_TSCN)
-        with hazard.open('a', encoding='utf-8') as handle:
-            handle.write('[connection signal="body_entered" from="DetectorArea" '
-                         'to="." method="_on_detector_body_entered" flags=3]\n')
-        self.refused('disconnect', str(hazard), 'body_entered',
-                     'DetectorArea', '.', '_on_detector_body_entered', saying=('--flags',))
-        self.assertEqual(self.run_verb('disconnect', str(hazard), 'body_entered',
-                                       'DetectorArea', '.', '_on_detector_body_entered',
-                                       '--flags', '3'), scene_edit.EXIT_OK)
-        text = self.text(hazard)
-        self.assertNotIn('flags=3', text)
-        self.assertIn('method="_on_detector_body_entered"]', text)
-
-    def test_connect_then_disconnect_restores_the_exact_bytes(self) -> None:
-        """Disconnect must not eat the blank separator of the NEXT section
-        (the [editable] marker's, here) — a byte it was not asked to touch."""
-        before = self.scene.read_bytes()
-        self.run_verb('connect', str(self.scene), 'toggled', 'Nested/Deep',
-                      'TileRoomContract', '_on_toggled')
-        self.run_verb('disconnect', str(self.scene), 'toggled', 'Nested/Deep',
-                      'TileRoomContract', '_on_toggled')
-        self.assertEqual(self.scene.read_bytes(), before)
-
-
 TILE_SET = '[gd_resource type="TileSet" format=3 uid="uid://btilesetfix1"]\n\n[resource]\n'
 
 
 class WholeScenes(VerbCase):
-    """`new`, a TileMapLayer in one `add`, and `set --new-sub-resource`: the
-    verbs that build a scene from nothing. Each is exact on its first run, a
+    """A TileMapLayer in one `add`, and `set --new-sub-resource`: the verbs
+    that build structure from nothing. Each is exact on its first run, a
     no-op on its second, and a refusal when the file already says otherwise."""
-
-    def test_new_writes_a_canonical_scene_with_a_fresh_uid_and_a_retry_is_a_no_op(self) -> None:
-        with temp_repo('canon_repo') as root:
-            taken = project_uids(root)
-            scene = root / 'rooms/base_room.tscn'
-            argv = ('new', str(scene), '--root', 'Node2D', '--script', 'res://systems/logic.gd')
-            self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())
-            text = self.text(scene)
-            self.second_run_is_a_no_op(*argv)
-            self.refused('new', str(scene), '--root', 'Node3D', saying=('never overwrites',))
-        uid = re.match(r'\[gd_scene format=4 uid="(uid://[a-z0-9]+)"\]\n', text).group(1)
-        self.assertEqual(uid_codec.canonical(uid), uid)
-        self.assertNotIn(uid_codec.text_to_id(uid), taken)
-        self.assertEqual(text.split('\n', 1)[1], (
-            '\n[ext_resource type="Script" uid="uid://dcanonlogic" '
-            'path="res://systems/logic.gd" id="1_logic"]\n'
-            '\n[node name="BaseRoom" type="Node2D" unique_id=' + text.split('unique_id=')[1]))
-        self.assertTrue(text.endswith(']\nscript = ExtResource("1_logic")\n'), text)
 
     def test_mint_draws_again_rather_than_reuse_a_claimed_uid(self) -> None:
         draws = iter([0, 42, 43])
         self.assertEqual(uid_codec.mint({42}, draw=lambda bits: next(draws)),
                          uid_codec.id_to_text(43))
 
-    def test_new_inherits_takes_the_base_root_name_and_refuses_a_missing_base(self) -> None:
-        with temp_repo('canon_repo') as root:
-            scene = root / 'rooms/variant.tscn'
-            argv = ('new', str(scene), '--inherits', 'res://scenes/panel.tscn')
-            self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())
-            text = self.text(scene)
-            self.second_run_is_a_no_op(*argv)
-            self.assertEqual(self.run_verb('new', str(root / 'rooms/ghost.tscn'), '--inherits',
-                                           'res://scenes/ghost.tscn'), scene_edit.EXIT_REFUSED)
-            self.assertFalse((root / 'rooms/ghost.tscn').exists())
-        self.assertTrue(text.endswith('\n\n[ext_resource type="PackedScene" uid="uid://dcanonpanel" '
-                                      'path="res://scenes/panel.tscn" id="1_panel"]\n'
-                                      '\n[node name="Panel" instance=ExtResource("1_panel")]\n'), text)
-
     def test_add_makes_a_tile_layer_in_one_command(self) -> None:
         with temp_repo('canon_repo') as root:
             (root / 'tiles').mkdir()
             (root / 'tiles/set.tres').write_text(TILE_SET, encoding='utf-8')
             scene = root / 'rooms/room.tscn'
-            self.run_verb('new', str(scene), '--root', 'Node2D')
+            scene.parent.mkdir(exist_ok=True)
+            scene.write_text('[gd_scene format=3 uid="uid://croomscene01"]\n\n'
+                             '[node name="Room" type="Node2D" unique_id=1]\n', encoding='utf-8')
             argv = ('add', str(scene), '.', 'Wall', 'TileMapLayer', '--tile-set',
                     'res://tiles/set.tres', '--z', '-5', '--group', 'wall', '--group', 'solid')
             self.assertEqual(self.run_verb(*argv), scene_edit.EXIT_OK, self.output.getvalue())

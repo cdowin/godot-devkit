@@ -23,9 +23,6 @@ from support import FIXTURES
 
 from godot_devkit.godot.format.tscn import parse_text
 from godot_devkit.godot.format.tscn_document import TscnDocument
-from godot_devkit.godot.index.gdscript import ScriptIndex
-from godot_devkit.godot.index.resource_canonical import CanonicalAnalyzer
-from godot_devkit.godot.write.scene_canonicalize import order_properties, respell_values
 
 # Every one of these appears in real consumer scenes and breaks a naive parser.
 AWKWARD_CONSTRUCTS = (
@@ -77,10 +74,6 @@ CORPUS = FIXTURES / 'corpus'
 # Raising this floor is part of growing the corpus; a shrinking corpus must be
 # a loud, deliberate edit here — never a silent glob over fewer files.
 CORPUS_FLOOR = 66
-# The corpus carries no scripts, so over it `--respell` can prove only what a
-# constructor settles by itself (`Vector2(1.50, 2.0)`, `PackedFloat32Array`).
-# The floor keeps that proof from going vacuous: lines it must re-spell.
-RESPELL_LINES_FLOOR = 7
 
 # What each slice of the corpus was SELECTED to exercise. A corpus that rots
 # into vacuity (files deleted, constructs edited away) fails here, not by
@@ -144,28 +137,10 @@ class CommittedCorpusRoundTrip(unittest.TestCase):
                         'no corpus file carries an inline comment after a value')
 
     def test_every_corpus_file_round_trips_in_memory(self) -> None:
-        # And survives `--respell --order`: same line count, no header or
-        # comment line touched, and a second pass that changes nothing.
-        canonical = CanonicalAnalyzer(ScriptIndex(CORPUS, []))
-        respelled = 0
         for path in corpus_files():
             original = path.read_text(encoding='utf-8')
             if TscnDocument(original, path).text != original:
                 self.fail(f'round trip changed {path.relative_to(CORPUS)}')
-            doc = TscnDocument(original, path)
-            respell_values(doc, canonical)
-            order_properties(doc, canonical)
-            before, after = original.split('\n'), doc.text.split('\n')
-            self.assertEqual(len(before), len(after), path)
-            changed = [line for line, new in zip(before, after) if line != new]
-            self.assertEqual([line for line in changed if line.startswith((';', '['))], [])
-            respelled += len(changed)
-            again = TscnDocument(doc.text, path)
-            respell_values(again, canonical)
-            order_properties(again, canonical)
-            self.assertEqual(again.text, doc.text, path)
-        self.assertGreaterEqual(respelled, RESPELL_LINES_FLOOR)
-
 
 MIXED = (b'[gd_scene format=3]\r\n'
          b'\n'

@@ -5,6 +5,18 @@ description: Design, implement, or review native Godot menus, HUDs, dialogs, car
 
 # Godot UI: component contract to native proof
 
+## Principles
+
+1. **Godot native first.** Use the editor's building blocks (scenes, containers, themes,
+   resources) before code.
+2. **A `.tscn` is the layout**, with authored sample content, so it opens in the editor and
+   renders on its own. Code only binds live data into the nodes the scene already has.
+3. **"Data-driven" means data the editor writes** (scenes and resources), never UI trees built
+   in code. `add_child` and `.new()` in a UI script are for real lists of runtime items only.
+4. **Run the scene, not the game.** A test or proof opens the one scene it cares about with
+   sample data (`godot --path . res://x.tscn`, Run Current Scene, GUT headless). Booting the
+   whole game is for a few real journeys and performance measurements.
+
 Treat the user's task and approved wireframe as the design input. Identify the spatial and
 interaction intent before changing a dimension. A stable panel that obscures the task still fails.
 Use this workflow for the affected surface; reuse existing contracts for a small edit.
@@ -30,10 +42,7 @@ Use this workflow for the affected surface; reuse existing contracts for a small
 4. Reuse the nearest native shell, row, theme and gallery before you add a component.
 5. Optional skills `ui-patterns`, `visual-layout` and `usability-review` add principles and audits.
    Their web capture sizes do not replace the project's Godot viewports and input modes.
-6. Enforcement: the opt-in `godot-devkit check ui-layout` fails an action button outside the action
-   bar, a button inside a modal scroll, and a Label with no overflow policy. Configure it in
-   `godot-devkit.toml` under `[ui_layout]`. It is static; it does not prove fit or usability.
-7. A game keeps its parts gallery at `<ui folder>/gallery/` and runs `make ui-fit` on it: each
+6. A game keeps its parts gallery at `<ui folder>/gallery/` and runs `make ui-fit` on it: each
    scene boots pseudolocalized at the smallest and largest window and reports `spills` and `cut`.
 
 ## Define the component contract
@@ -57,8 +66,8 @@ inside its graph region. Distinguish these cases instead of forbidding every siz
 
 ## Translate into Godot deliberately
 
-- Author layout in scenes using the project's conventions. In a `Container`, the parent manages
-  child positions and sizes; hand-set offsets are not a substitute for the right hierarchy.
+- Author the node tree in the `.tscn` (principle 2). In a `Container`, the parent manages child
+  positions and sizes; hand-set offsets are not a substitute for the right hierarchy.
 - `custom_minimum_size` is a floor, not a fixed rectangle. Content, fonts and visible children can
   contribute a larger minimum. `Expand`/`Fill` alone do not establish a bounded scroll viewport.
 - Choose the sizing/minimum-propagation behavior for each allocated region. Put scroll boundaries

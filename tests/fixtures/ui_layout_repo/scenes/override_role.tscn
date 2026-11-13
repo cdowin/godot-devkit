@@ -1,8 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="PackedScene" path="res://scenes/override_base.tscn" id="1_base"]
-
-[node name="Override" instance=ExtResource("1_base")]
-
-[node name="Help" parent="." index="0"]
-ui_role = "primary"

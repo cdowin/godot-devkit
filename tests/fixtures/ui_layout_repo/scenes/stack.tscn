@@ -1,7 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="PackedScene" path="res://scenes/header.tscn" id="1_header"]
-
-[node name="Stack" type="VBoxContainer"]
-
-[node name="Header" parent="." instance=ExtResource("1_header")]

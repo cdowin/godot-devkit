@@ -184,7 +184,7 @@ render: ## Draw a scene (or SHEET=<dir> as a contact sheet) to a PNG (LOCAL, nee
 	@test -n "$(OUT)" && test -n "$(SCENE)$(SHEET)" || { echo "usage: make render SCENE=<x.tscn> OUT=<x.png> [RECT=x,y,w,h] | make render SHEET=<dir> OUT=<sheet.png>"; exit 2; }
 	@bash $(GDK_RUNNERS_DIR)/render.sh $(if $(SHEET),--sheet "$(SHEET)","$(SCENE)") --out "$(OUT)" $(if $(RECT),--rect "$(RECT)")
 
-# The runtime half of `check ui-layout`. The runner asks the godot-devkit
+# Text fit at runtime. The runner asks the godot-devkit
 # command for the [ui_fit] plan (pure parse; 0 scenes FAILS there), boots it,
 # and draws a scene with findings to .ui-fit-reports/ through render.sh.
 ui-fit: ## Boot the [ui_fit] scenes (default ui/gallery/) pseudolocalized at the smallest and largest window; report spills and cut text

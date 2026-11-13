@@ -14,20 +14,20 @@ from godot_devkit.core.config import ConfigError, config_section, str_tuple
 # `[roster] checks` may carry is a name `check <name>` runs — there is no
 # second list for either fact to drift from.
 #
-# Stock is what the engine does NOT already catch. `warnings` reads the
-# project's analyzer levels; `props`, `defaults`, `rng`, `tres-comment`,
-# `unit-disk` finds what the engine drops silently or the
-# editor rewrites. Project-specific test-shape policy is opt-in.
-KNOWN_GATES = ('warnings', 'props', 'defaults', 'rng', 'tres-comment',
-               'unit-disk')
+# Stock is what the engine drops silently: `props` (an assigned property no
+# script or class declares), `tres-comment` (a comment the saver deletes),
+# `unit-disk` (a no-boot test touching live save data).
+KNOWN_GATES = ('props', 'tres-comment', 'unit-disk')
 
 # Gates that dispatch and that `[roster] checks` may name, but that the STOCK
-# roster leaves out. `uid` and `tres` police what the editor owns, and the
-# import pass in `parse` already fails on uid drift. `canonical` and `patterns`
-# each start red on any tree its fixer never ran over. A repo opts in by naming
-# a gate; the aggregate never grows under anyone.
-OPT_IN_GATES = ('uid', 'tres', 'canonical', 'patterns', 'test-shape',
-                'ui-layout', 'addon')
+# roster leaves out: `uid` (the import pass in `parse` also fails on drift),
+# `patterns` (a project's own rules) and `addon` (for add-on repos).
+OPT_IN_GATES = ('uid', 'patterns', 'addon')
+
+# Gates 5.0 removed: the engine writes the form they policed, or they were one
+# project's house rule. Named so a roster that still lists one is told so.
+REMOVED_GATES = ('warnings', 'defaults', 'rng', 'tres', 'canonical',
+                 'test-shape', 'ui-layout')
 
 ROSTER_SECTION = 'roster'
 ROSTER_KEY = 'checks'
@@ -52,6 +52,11 @@ def all_roster() -> tuple[str, ...]:
         raise ConfigError('[checks] godot was removed in 4.0; use [roster] checks')
     roster = str_tuple(config_section(ROSTER_SECTION), ROSTER_SECTION,
                        ROSTER_KEY, KNOWN_GATES)
+    removed = [c for c in roster if c in REMOVED_GATES]
+    if removed:
+        raise ConfigError(
+            f'[{ROSTER_SECTION}] {ROSTER_KEY} names gate(s) removed in 5.0: '
+            f'{", ".join(removed)} — drop them')
     unknown = [c for c in roster if c not in (*KNOWN_GATES, *OPT_IN_GATES)]
     if unknown:
         raise ConfigError(

@@ -20,8 +20,5 @@
 [uid]
 exclude_prefixes = ["addons/", "tests/fixtures/"]
 
-[tres]
-exclude_prefixes = ["addons/", "tests/fixtures/"]
-
 [props]
 exclude_prefixes = ["addons/", "tests/fixtures/"]

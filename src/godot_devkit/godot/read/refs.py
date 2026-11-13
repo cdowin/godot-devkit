@@ -9,7 +9,7 @@ signal hits the typed index cannot resolve (`entity.died.connect(` on an
 untyped `entity`, `emit_signal(&"died")`, `connect("died", …)`). Those are
 not proven references, and they are not nothing either: a zero verdict prints
 only when BOTH buckets are empty, because zero is the answer that gets a
-signal deleted (#19). `refs --retarget` never acts on a dynamic hit.
+signal deleted (#19).
 It also indexes what Godot itself wires, which no `.gd` line spells: a
 `[connection signal=… method=…]` in a scene (typed, `scene connections`), and
 an autoload NAME from `project.godot [autoload]`, indexed like a `class_name`
@@ -88,8 +88,7 @@ def _relpath(root: Path, path: Path) -> str:
 
 def exclude_prefixes() -> tuple[str, ...]:
     """The `[refs] exclude_prefixes` scope, guarded — one key, one scope,
-    shared by `refs` and `refs --retarget` (write side) so the two can never
-    disagree about what the refs family looks at."""
+    the one key the refs family reads."""
     return str_tuple(config_section(CONFIG_SECTION), CONFIG_SECTION,
                      'exclude_prefixes', DEFAULT_EXCLUDE)
 
@@ -218,27 +217,6 @@ def _dynamic_pattern(symbol: str, autoload: bool = False) -> re.Pattern:
 PRELOAD_LOAD = re.compile(r'(?:preload|load)\(\s*"([^"]+)"\s*\)')
 
 
-def typed_spans(symbol: str, stripped: str, global_name: bool = False) -> set[tuple[int, int]]:
-    """The `(start, end)` of every `symbol` token the typed arms claim on one
-    comment-stripped `.gd` line — the definition, typed-ref and call/emit
-    grammar `scan_gd_files` counts the line by, down to the token. What
-    `refs --rename` may rewrite is exactly this set, so the read side and the
-    write side can never disagree about what a reference is. `global_name`:
-    the symbol is an autoload or a `class_name` — see `_global_pattern`."""
-    token = re.compile(rf'(?<!\w){re.escape(symbol)}(?!\w)')
-    tokens = [(m.start(), m.end()) for m in token.finditer(stripped)]
-    spans: set[tuple[int, int]] = set()
-    patterns = [_definition_pattern(symbol), _typed_ref_pattern(symbol),
-                _call_emit_pattern(symbol), _bare_call_pattern(symbol)]
-    if global_name:
-        patterns.append(_global_pattern(symbol))
-    for pattern in patterns:
-        for match in pattern.finditer(stripped):
-            spans.update(t for t in tokens
-                         if match.start() <= t[0] and t[1] <= match.end())
-    return spans
-
-
 def scan_gd_files(root: Path, symbol: str, files: list[Path],
                   autoload: bool = False) -> dict[str, list[Hit]]:
     """One pass per `.gd` file, feeding all four line-based scan kinds at
@@ -365,18 +343,13 @@ SECTION_TITLES = (
 
 @dataclass
 class Scan:
-    """One symbol's hits over the `refs` scope, with the walk behind them —
-    the census a reader prints, and the files a writer re-reads."""
+    """One symbol's hits over the `refs` scope, with the walk behind them."""
     searched: walk.Walk
-    gd_files: list[Path]
-    scene_files: list[Path]
     hits: dict[str, list[Hit]]
-    global_name: bool     # an autoload or a `class_name` — see `_global_pattern`
 
 
 def scan(root: Path, symbol: str, include_tests: bool) -> Scan:
-    """Every hit of `symbol`, by kind — what `refs <symbol>` prints and what
-    `refs --rename` rewrites or refuses on."""
+    """Every hit of `symbol`, by kind — what `refs <symbol>` prints."""
     exclude = exclude_prefixes()
     gd_walk = iter_files(root, exclude, GD_GLOB, include_tests)
     scene_walk = walk.Walk(())
@@ -389,10 +362,7 @@ def scan(root: Path, symbol: str, include_tests: bool) -> Scan:
     hits_by_kind = scan_gd_files(root, symbol, gd_files, autoload=bool(autoload_hits))
     hits_by_kind[DEFINITION_KIND][:0] = autoload_hits
     hits_by_kind.update(scan_scene_refs(root, symbol, scene_files))
-    class_name_pattern = _class_name_pattern(symbol)
-    global_name = bool(autoload_hits) or any(
-        class_name_pattern.search(hit.text) for hit in hits_by_kind[DEFINITION_KIND])
-    return Scan(gd_walk.merge(scene_walk), gd_files, scene_files, hits_by_kind, global_name)
+    return Scan(gd_walk.merge(scene_walk), hits_by_kind)
 
 
 def run(symbol: str, include_tests: bool) -> int:
@@ -422,7 +392,7 @@ def run(symbol: str, include_tests: bool) -> int:
         print(f'\n## {title} ({len(hits)})')
         if kind == DYNAMIC_KIND:
             print('# textual hits on a receiver the index cannot type — not '
-                  'proven references; `refs --retarget` does not act on these')
+                  'proven references')
         for hit in hits:
             location = f'{hit.path}:{hit.line}' if hit.line else hit.path
             print(f'  {location}  {hit.text}')

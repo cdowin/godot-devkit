@@ -19,7 +19,9 @@ Introspection (pure parse, never boots Godot):
     godot-devkit fit-sweep-plan     # the sizes and scenes `make fit-sweep`
                                     # boots, from [fit_sweep] and its table
 
-Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
+Scene writer (pure parse; edits only its own lines, or refuses). Godot writes
+scenes; these two are for inherited scenes with overrides or local materials,
+which a headless load-and-save damages:
     godot-devkit scene set      <file> <node-path> <prop> <value>
     godot-devkit scene set      <file> --resource <prop> <value>
     godot-devkit scene set      <file> --sub-resource <id> <prop> <value>
@@ -30,59 +32,19 @@ Scene surgery (pure parse; edits only the lines it was asked to, or refuses):
                                 <res://x.gd|Type> [key=value ...]
                                     # make a [sub_resource] and point the
                                     # property at it
-    godot-devkit scene rename   <file> <node-path> <new-name>
     godot-devkit scene add      <file> <parent-path> <name> <type> [--script ...]
                                 [--tile-set res://x.tres] [--z N] [--group G]
     godot-devkit scene add      <file> <parent-path> <name> --instance res://x.tscn
                                     # an instance node (no type=); its ref is
                                     # minted from the scene's own uid, or refused
-    godot-devkit scene rm       <file> <node-path>
-    godot-devkit scene reparent <file> <node-path> <new-parent>
-    godot-devkit scene connect    <file> <signal> <from> <to> <method> [--flags N]
-    godot-devkit scene disconnect <file> <signal> <from> <to> <method> [--flags N]
-                                    # author / remove one [connection]; ambiguous
-                                    # matches are refused, --flags names one
-    godot-devkit scene new      <file> --root <Type> [--script res://x.gd] [--name N]
-    godot-devkit scene new      <file> --inherits res://base.tscn [--name N]
-                                    # a whole new scene with a fresh header uid
-                                    # no file in the project already claims
-    godot-devkit refs --retarget <old-res-path> <new-res-path> [--dry-run]
-                                    # after a git mv: rewrite every ext_resource
-                                    # path attr + exact preload/load literal that
-                                    # names old; anything unprovable is SKIPPED
-                                    # with a reason, and skips exit 1
-    godot-devkit refs --rename <old> <new> [--dry-run]
-                                    # rename a class_name / method / signal /
-                                    # autoload across .gd, .tscn, .tres and
-                                    # project.godot as one plan; any dynamic,
-                                    # string or unproven site refuses it whole;
-                                    # tests/ is always in scope
-    godot-devkit scene canonicalize <file>... [--elide-defaults]
-                                    [--respell] [--order]
-                                    # restore what PackedScene.pack() drops:
-                                    # uid-in-refs, the header uid, index= on
-                                    # instance children; --elide-defaults also
-                                    # removes assignments equal to the script's
-                                    # @export default (what the editor omits);
-                                    # --respell / --order re-spell floats and
-                                    # typed arrays and reorder properties the
-                                    # way the editor's save would
-    godot-devkit tiles paint <file> --layer NAME (--region X0,Y0,X1,Y1 | --at X,Y ...)
-                                    (--tile SRC/AX,AY[/ALT] | --atlas-map MAP.json --source SRC)
-    godot-devkit tiles erase <file> --layer NAME (--region X0,Y0,X1,Y1 | --at X,Y ...)
-                                    # fill / clear cells of one TileMapLayer;
-                                    # only that one property's base64 is
-                                    # regenerated; --atlas-map autotiles and
-                                    # re-slots the same-source neighbors
-    godot-devkit autoloads add <Name> <res://path>  |  autoloads rm <Name>
-                                    # declare / remove one project.godot autoload
+                                    # (both take --dry-run and are idempotent)
+
     godot-devkit pot [--dry-run | --check]
                                     # the localization POT the editor writes,
                                     # from project.godot's translations_pot_files
                                     # (.gd only) to `[pot] output`; --check
                                     # exits 1 on drift and names each missing
                                     # and extra msgid
-    (every verb takes --dry-run, prints a unified diff, and is idempotent)
 
 The installer (writes each file once; after that it is the repo's):
     godot-devkit install-runners [--force] [--diff]
@@ -105,11 +67,9 @@ The installer (writes each file once; after that it is the repo's):
                                     # into a skills root; --check reports drift
 
 Static gates (exit 1 on findings; run from anywhere inside the repo):
-    godot-devkit check warnings | props | defaults | rng
-                      | tres-comment | unit-disk | test-shape
-                      | uid [--fix] | tres | canonical | patterns | ui-layout
-                      | addon [--fix]
-                                    # the last six are opt-in: not in the stock `check all`
+    godot-devkit check props | tres-comment | unit-disk
+                      | uid [--fix] | patterns | addon [--fix]
+                                    # the last three are opt-in: not in the stock `check all`
                                     # `addon --fix` mints the uids an add-on
                                     # must ship: .gd.uid sidecars and header uids
     godot-devkit check <gate> --help  # that gate's contract, config and scope
@@ -135,12 +95,11 @@ import sys
 
 from godot_devkit import __version__
 from godot_devkit.core.config import ConfigError
-from godot_devkit.godot.checks.roster import KNOWN_GATES, OPT_IN_GATES, all_roster
+from godot_devkit.godot.checks.roster import (KNOWN_GATES, OPT_IN_GATES,
+                                             REMOVED_GATES, all_roster)
 
 FIX_FLAG = '--fix'
 HELP_FLAGS = ('-h', '--help')
-RETARGET_FLAG = '--retarget'
-RENAME_FLAG = '--rename'
 
 # The gates that accept `--fix`. A second fixable gate is a row here, not a
 # new inline condition in `_run_check`.
@@ -158,10 +117,44 @@ FIXABLE_CHECKS = frozenset({'uid', 'addon'})
 RETIRED_COMMANDS = frozenset({'pm', 'init', 'gates-extra'})
 RETIRED_CHECKS = frozenset({'doc', 'shell', 'pm', 'hooks', 'repo-hygiene'})
 
+# What 5.0 removed, keyed by (command, subcommand or flag), each with what does
+# the job now. Godot writes its own files: the editor, or a headless GDScript
+# that loads, edits and saves with ResourceSaver (the godot-devkit skill).
+_ENGINE = 'use the editor, or a headless GDScript that saves with ResourceSaver'
+_ROSTER = 'drop it from `[roster] checks`'
+REMOVED_VERBS = {
+    **{('scene', verb): _ENGINE for verb in
+       ('rename', 'rm', 'reparent', 'connect', 'disconnect', 'new')},
+    ('scene', 'canonicalize'): 'nothing replaces it: a file Godot saved is already in its form',
+    ('tiles', 'paint'): 'use TileMapLayer.set_cell / set_cells_terrain_connect in a headless GDScript',
+    ('tiles', 'erase'): 'use TileMapLayer.erase_cell in a headless GDScript',
+    ('refs', '--retarget'): 'move it in the editor\'s FileSystem dock; uid-in-refs '
+                            'finds a moved file and the next save writes its path',
+    ('refs', '--rename'): 'rename in the editor, or edit by hand and prove no '
+                          'caller is left with `refs <symbol>`',
+    ('autoloads', 'add'): 'use Project Settings > Autoload, or '
+                          'ProjectSettings.set_setting() + save() in a headless script',
+    ('autoloads', 'rm'): 'use Project Settings > Autoload, or '
+                         'ProjectSettings.clear() + save() in a headless script',
+    **{('check', gate): _ROSTER for gate in REMOVED_GATES},
+}
+
 
 def _usage() -> int:
     print(__doc__.strip())
     return 2
+
+
+def _removed(cmd: str, rest: list[str]) -> int | None:
+    """Exit 2 with the replacement for a verb 5.0 removed, else None. Looks at
+    the subcommand and at flags only, so a node or file named `rm` is not one."""
+    for arg in rest[:1] + [a for a in rest[1:] if a.startswith('--')]:
+        replacement = REMOVED_VERBS.get((cmd, arg))
+        if replacement:
+            print(f'godot-devkit: `{cmd} {arg}` was removed in 5.0: '
+                  f'{replacement}', file=sys.stderr)
+            return 2
+    return None
 
 
 def _retired(verb: str) -> int:
@@ -210,39 +203,18 @@ def _check_module(name: str):
     if name == 'uid':
         from godot_devkit.godot.checks import uid
         return uid
-    if name == 'tres':
-        from godot_devkit.godot.checks import tres
-        return tres
     if name == 'props':
         from godot_devkit.godot.checks import props
         return props
-    if name == 'defaults':
-        from godot_devkit.godot.checks import defaults
-        return defaults
-    if name == 'rng':
-        from godot_devkit.godot.checks import rng
-        return rng
     if name == 'tres-comment':
         from godot_devkit.godot.checks import tres_comment
         return tres_comment
     if name == 'unit-disk':
         from godot_devkit.godot.checks import unit_disk
         return unit_disk
-    if name == 'test-shape':
-        from godot_devkit.godot.checks import test_shape
-        return test_shape
-    if name == 'warnings':
-        from godot_devkit.godot.checks import warnings
-        return warnings
-    if name == 'canonical':
-        from godot_devkit.godot.checks import canonical
-        return canonical
     if name == 'patterns':
         from godot_devkit.godot.checks import patterns
         return patterns
-    if name == 'ui-layout':
-        from godot_devkit.godot.checks import ui_layout
-        return ui_layout
     if name == 'addon':
         from godot_devkit.godot.checks import addon
         return addon
@@ -279,43 +251,31 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__.strip())
         return 0
     cmd, rest = args[0], args[1:]
+    removed = _removed(cmd, rest)
+    if removed is not None:
+        return removed
     if cmd in ('-V', '--version', 'version'):
         print(f'godot-devkit {__version__}')
         return 0
     if cmd == 'scene':
         from godot_devkit.godot.write import scene_edit
-        if rest and rest[0] == 'canonicalize':
-            from godot_devkit.godot.write import scene_canonicalize
-            return scene_canonicalize.main(rest[1:])
         if rest and rest[0] in scene_edit.VERBS:
             return scene_edit.main(rest)
         from godot_devkit.godot.read import scene_summary
         return scene_summary.main(rest)
     if cmd == 'tiles':
-        from godot_devkit.godot.write import tiles_paint
-        if rest and rest[0] in tiles_paint.VERBS:
-            return tiles_paint.main(rest)
         from godot_devkit.godot.read import tiles
         return tiles.main(rest)
     if cmd == 'scene-diff':
         from godot_devkit.godot.read import scene_diff
         return scene_diff.main(rest)
     if cmd == 'refs':
-        if RETARGET_FLAG in rest:
-            from godot_devkit.godot.write import refs_retarget
-            return refs_retarget.main(rest)
-        if RENAME_FLAG in rest:
-            from godot_devkit.godot.write import refs_rename
-            return refs_rename.main(rest)
         from godot_devkit.godot.read import refs
         return refs.main(rest)
     if cmd == 'orphans':
         from godot_devkit.godot.read import orphans
         return orphans.main(rest)
     if cmd == 'autoloads':
-        from godot_devkit.godot.write import autoloads_edit
-        if rest and rest[0] in autoloads_edit.VERBS:
-            return autoloads_edit.main(rest)
         from godot_devkit.godot.read import autoloads
         return autoloads.main(rest)
     if cmd == 'pot':

@@ -33,41 +33,34 @@ Body text scrolls in its own `ScrollContainer`. Keep button labels short; never 
 
 ## Reference ActionBar
 
+The bar is an authored scene, `action_bar.tscn`; the order is in the file, not in code:
+
+```
+ActionBar (HBoxContainer)
+├── Destructive (Button, text "Delete save")   far left; hidden when the dialog has none
+├── Spacer (Control, size_flags_horizontal = Expand Fill, mouse_filter = Ignore)
+├── Cancel (Button, text "Cancel")
+└── Primary (Button, text "Confirm")
+```
+
+The sample labels make the scene render on its own. The dialog's script only binds live data:
+
 ```gdscript
 class_name ActionBar
 extends HBoxContainer
-## Orders children by role: destructive (far left), spacer, cancel, primary.
 
-enum Role { DESTRUCTIVE, CANCEL, PRIMARY }
+@onready var _destructive: Button = $Destructive
+@onready var _primary: Button = $Primary
 
-var _spacer := Control.new()
-
-func _ready() -> void:
-    _spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    _spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    add_child(_spacer)
-    child_entered_tree.connect(func(_n: Node) -> void: _sort.call_deferred())
-    _sort()
-
-func _sort() -> void:
-    var buttons := get_children().filter(func(n: Node) -> bool: return n != _spacer)
-    buttons.sort_custom(func(a: Node, b: Node) -> bool: return _role(a) < _role(b))
-    for i in buttons.size():
-        move_child(buttons[i], i)
-    move_child(_spacer, buttons.filter(func(n: Node) -> bool: return _role(n) == Role.DESTRUCTIVE).size())
-
-func _role(node: Node) -> int:
-    var role: Variant = node.get(&"ui_role")  # exported Role on the button's script
-    return Role.PRIMARY if role == null else int(role)
+func bind(primary_text: String, destructive_text: String = "") -> void:
+    _primary.text = primary_text
+    _destructive.text = destructive_text
+    _destructive.visible = not destructive_text.is_empty()
 ```
-
-The role property name must match `role_property` in `[ui_layout]`. Adapt the enum to the
-roles you configure in `action_roles`.
 
 ## Proof to capture
 
 - Capture the dialog with a short and a very long body: the bar stays in place.
-- Run `godot-devkit check ui-layout` (`action-outside-bar`, `button-in-modal-scroll`).
 - Drive `ui_cancel` and `ui_accept` through real input and confirm the result and focus return.
 
 ## Sources
