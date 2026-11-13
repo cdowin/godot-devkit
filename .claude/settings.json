@@ -1,6 +1,12 @@
 {
   "permissions": {
-    "allow": ["mcp__github__merge_pull_request"]
+    "allow": [
+      "Bash",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch"
+    ]
   },
   "extraKnownMarketplaces": {
     "agentic-sdlc": {
