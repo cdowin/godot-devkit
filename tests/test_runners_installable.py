@@ -393,9 +393,14 @@ def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
     root = tmp_path / 'repo'
     _project(root, PARSE)
     starts = tmp_path / 'starts.log'
+    # A cold cache: until the class registry exists, a plugin's resource
+    # loader is unregistered and the import errors; the import writes it.
+    registry = '.godot/global_script_class_cache.cfg'
     stub = _stub_engine(tmp_path, '#!/usr/bin/env bash\n'
                         'echo "$*" >> "$GDK_STUB_LOG"\n'
-                        'case "$*" in *--import*) echo "[ DONE ] loading_editor_layout";; '
+                        'case "$*" in *--import*)\n'
+                        f'  [ -f {registry} ] || echo "ERROR: No loader found for resource: res://a.plugdata"\n'
+                        f'  mkdir -p .godot; : > {registry}; echo "[ DONE ] loading_editor_layout";;\n'
                         '*) echo "SWEEP_RESULT 1 1";; esac\n')
     env = {'PATH': f'{stub}:/usr/bin:/bin:{Path(sys.executable).parent}',
            'HOME': str(tmp_path / 'home'), 'GDK_RECEIPTS': '0',
@@ -406,9 +411,21 @@ def test_parse_imports_then_compiles_and_fails_on_engine_errors(tmp_path):
                               text=True, capture_output=True, env=env)
     done = parse()
     assert done.returncode == 0, done.stdout + done.stderr
+    assert '[PARSE] cold cache: seeded the class registry' in done.stdout, done.stdout
+    assert 'No loader found' in (root / '.gate-reports/parse-seed.log').read_text(encoding='utf-8')
+    sweep = '--path . --headless -s res://tools/dev/runners/compile_sweep.gd'
     assert starts.read_text(encoding='utf-8').splitlines() == [
-        '--path . --headless --import',
-        '--path . --headless -s res://tools/dev/runners/compile_sweep.gd']
+        '--path . --headless --import', '--path . --headless --import', sweep]
+    starts.unlink()
+    done = parse()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert starts.read_text(encoding='utf-8').splitlines() == ['--path . --headless --import', sweep]
+    (root / registry).unlink()
+    (stub / 'godot').write_text('#!/usr/bin/env bash\necho "[ DONE ] loading_editor_layout"\n', encoding='utf-8')
+    done = parse()
+    assert done.returncode == 1 and 'seed wrote no class registry' in done.stdout, done.stdout + done.stderr
+    (root / '.godot').mkdir(exist_ok=True)
+    (root / registry).write_text('', encoding='utf-8')
     (stub / 'godot').write_text('#!/usr/bin/env bash\n'
                                 'case "$*" in *--import*) echo "[ DONE ] loading_editor_layout"; exit 0;; esac\n'
                                 'echo "SWEEP_FAIL res://bad.gd"\necho "SWEEP_RESULT 0 1"\n', encoding='utf-8')

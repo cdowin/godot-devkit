@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # parse.sh — native headless import, bounded and isolated from player user://.
-# Godot imports assets and registers named classes, then the compile helper
+# Godot imports assets and registers named classes (a cold cache seeds the
+# registry with a first import), then the compile helper
 # loads all scripts and boots the main scene. A 4.7.2 probe confirmed import
 # alone misses an unloaded script with a syntax error, so the sweep remains.
 set -uo pipefail
@@ -20,7 +21,9 @@ usage() {
 usage: parse.sh [--help] [--self-test]
 
 Import the project, then compile every script and boot the main scene, all
-inside the HOME sandbox. Fail on runtime engine errors, UID drift, missing
+inside the HOME sandbox. A cold cache (no class registry) first gets a seed
+import, so plugin resource loaders are registered before the checked import.
+Fail on runtime engine errors, UID drift, missing
 sweep results, nonzero exits or timeouts. Exact post-completion shutdown
 resource diagnostics stay visible without changing the compile verdict. Writes import caches and sidecars normally.
 
@@ -84,6 +87,23 @@ LOG="$(gdk_gate_log "$GATE_SLOT")"
 # Import writes shared cache state, so exclude concurrent engine readers.
 export GDK_ENGINE_GATE_WEIGHT=all
 export GDK_GATE_VERDICT=FAIL
+# A cold cache seeds the class registry first, so the classified import boots
+# with every plugin resource loader registered. The seed's own errors are the
+# cold boot's, and stay in their own transcript.
+if gdk_cold_class_registry; then
+ SEED_LOG="${LOG%.log}-seed.log"
+ : > "$SEED_LOG"
+ gdk_gate_capture "$SEED_LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
+  "$GDK_GODOT" --path . --headless --import
+ if gdk_timeout_is_hang "$GDK_GATE_EXIT"; then
+  GDK_GATE_VERDICT=HANG
+  gdk_gate_verdict "$GATE_TAG" "FAIL (cold-cache seed import timeout)" "$SEED_LOG"; exit 1
+ fi
+ if gdk_cold_class_registry; then
+  gdk_gate_verdict "$GATE_TAG" "FAIL (cold-cache seed wrote no class registry $GDK_CLASS_REGISTRY, exit $GDK_GATE_EXIT)" "$SEED_LOG"; exit 1
+ fi
+ echo "[$GATE_TAG] cold cache: seeded the class registry — seed log: $SEED_LOG"
+fi
 gdk_gate_capture "$LOG" -- gdk_run_bounded "$TIMEOUT_SECONDS" -- \
  "$GDK_GODOT" --path . --headless --import
 ENGINE_EXIT="$GDK_GATE_EXIT"

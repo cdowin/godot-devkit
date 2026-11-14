@@ -21,7 +21,9 @@
 #     native parse/import target also refreshes them.
 #   - after adding / deleting / moving `.tscn` / `.tres` / asset files.
 #   - a cold checkout with no `.godot/` (the native parse/import target also
-#     prepares a cold checkout).
+#     prepares a cold checkout). A cold registry gets two passes: the first
+#     seeds the `class_name` registry, so the second boots with a plugin's
+#     resource loaders registered before it parses their resources.
 #   - `invalid UID … using text path instead` warnings on a cold run.
 #   - after editing a `.png`/`.tres` asset, before a screenshot capture —
 #     otherwise the capture renders the OLD art.
