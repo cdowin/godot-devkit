@@ -892,38 +892,43 @@ gdk_sweep_failed_paths() {
 # gdk_sandbox_home — the pass boots the project.
 GDK_REBUILD_IMPORT_CACHE_TIMEOUT="${GDK_REBUILD_IMPORT_CACHE_TIMEOUT:-60}"
 
+# The script class registry. The engine registers every `class_name` script —
+# and with it a plugin's custom ResourceFormatLoader — from this file at boot,
+# BEFORE it parses a resource. A cold `.godot/` has none, so the first import
+# parses the plugin's resources with no loader for them; the pass writes the
+# registry, and a second boot reads it. gdk_cold_class_registry is that test.
+GDK_CLASS_REGISTRY=".godot/global_script_class_cache.cfg"
+gdk_cold_class_registry() {
+	[ ! -f "$GDK_CLASS_REGISTRY" ]
+}
+
 # gdk_rebuild_import_cache [seconds]
 # With no inherited lease it takes EVERY engine slot (GDK_ENGINE_GATE_WEIGHT=all,
 # #47): the pass rewrites, in place, the .godot/ a peer run in this checkout
-# reads.
+# reads. On a cold registry it runs the pass TWICE, each up to [seconds]: the
+# first seeds the registry, the second imports with the plugin loaders.
 gdk_rebuild_import_cache() {
-	local secs="${1:-$GDK_REBUILD_IMPORT_CACHE_TIMEOUT}"
-	if [ -n "$GDK_TIMEOUT" ]; then
-		gdk_engine_gate_held 2>/dev/null; local held=$?
-		[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
-		if [ "$held" -eq 1 ]; then
-			GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
-				"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-				"$GDK_GODOT" --path . --headless --import || return $?
-		else
-			"$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s" \
-				"$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
-		fi
-		return 0
-	fi
+	local secs="${1:-$GDK_REBUILD_IMPORT_CACHE_TIMEOUT}" passes=1 held
+	gdk_cold_class_registry && passes=2
 	# No timeout binary. This is best-effort recovery, so it still runs — but
 	# it runs UNBOUNDED, and a caller that printed "up to ${secs}s" would be
 	# stating a bound nothing enforces. gdk_run_bounded REFUSES in the same
 	# situation; the difference is deliberate and is why this says it out loud.
-	echo "$GDK_LIB_TAG: no timeout/gtimeout on PATH — the import pass runs UNBOUNDED" >&2
-	gdk_engine_gate_held 2>/dev/null; local held=$?
-	[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
-	if [ "$held" -eq 1 ]; then
-		GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
-			"$GDK_GODOT" --path . --headless --import
-	else
-		"$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
-	fi
+	[ -n "$GDK_TIMEOUT" ] || echo "$GDK_LIB_TAG: no timeout/gtimeout on PATH — the import pass runs UNBOUNDED" >&2
+	local -a bound=()
+	[ -z "$GDK_TIMEOUT" ] || bound=("$GDK_TIMEOUT" --kill-after="$GDK_TIMEOUT_KILL_AFTER" "${secs}s")
+	while [ "$passes" -gt 0 ]; do
+		passes=$((passes - 1))
+		gdk_engine_gate_held 2>/dev/null; held=$?
+		[ "$held" -ne 2 ] || { echo "$GDK_LIB_TAG: refusing import pass with invalid inherited engine lease" >&2; return 2; }
+		if [ "$held" -eq 1 ]; then
+			GDK_ENGINE_GATE_WEIGHT=all gdk_engine_gate_run import-cache -- bash -c '"$@" >/dev/null 2>&1 || true' _ \
+				${bound[@]+"${bound[@]}"} "$GDK_GODOT" --path . --headless --import || return $?
+		else
+			${bound[@]+"${bound[@]}"} "$GDK_GODOT" --path . --headless --import >/dev/null 2>&1 || true
+		fi
+	done
+	return 0
 }
 
 # --- gdk_cpu_count — cores this process may use ------------------------------
@@ -1184,6 +1189,19 @@ second line' "$(cat "$log")"
 	esac
 	_gdk_st_true 'rebuild_import_cache warns when nothing can bound it' "$status"
 
+	# --- a cold registry is seeded by a first pass, a warm one is not --------
+	# shellcheck disable=SC2016  # the stub expands $GDK_ST_PASSES, not this shell
+	printf '#!/bin/sh\necho pass >> "$GDK_ST_PASSES"\nmkdir -p .godot && : > %s\n' \
+		"$GDK_CLASS_REGISTRY" > "$scratch/stub-bin/godot"
+	mkdir -p "$scratch/cold-project"
+	for want in 2 1; do
+		: > "$scratch/passes"
+		( cd "$scratch/cold-project" && PATH="$scratch/stub-bin:$PATH" GDK_TIMEOUT='' GDK_GODOT='godot' \
+			GDK_ST_PASSES="$scratch/passes" gdk_rebuild_import_cache 5 2>/dev/null )
+		_gdk_st_eq "rebuild_import_cache runs $want pass(es) ($([ "$want" -eq 2 ] && echo cold || echo warm) registry)" \
+			"$want" "$(grep -c pass "$scratch/passes")"
+	done
+
 	# --- gdk_timeout_is_hang: only the two timeout codes are a hang ----------
 	status=0; gdk_timeout_is_hang "$GDK_EXIT_SIGTERM_TIMEOUT" || status=1
 	_gdk_st_true 'timeout_is_hang recognises 124' "$status"
@@ -1418,7 +1436,7 @@ gdk_engine_gate_run, gdk_engine_gate_held,
 gdk_receipt_key, gdk_receipt_hit, gdk_receipt_write,
 gdk_timeout_is_hang, gdk_restore_project_file, gdk_gate_log, gdk_gate_capture, gdk_gate_publish,
 gdk_gate_verdict, gdk_sweep_result_line, gdk_sweep_result_field,
-gdk_sweep_failed_paths, gdk_rebuild_import_cache.
+gdk_sweep_failed_paths, gdk_cold_class_registry, gdk_rebuild_import_cache.
 
 Engine admission defaults to the account home across checkouts.
 GDK_ENGINE_GATE_HOME explicitly selects an isolated domain for test fixtures.
