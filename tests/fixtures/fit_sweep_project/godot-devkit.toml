@@ -1,3 +1,0 @@
-[fit_sweep]
-table = "design/layout.json"
-scenes = ["res://ui/screens/**"]
