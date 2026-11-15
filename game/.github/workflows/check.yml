@@ -1,0 +1,55 @@
+# `make check` on every push and pull request: every script compiles and every scene and resource
+# loads with zero engine errors. GODOT_VERSION is the one place the engine version lives;
+# tools/session-start.sh reads it from here.
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The import cache: the engine re-imports only the assets whose .import file changed.
+      - id: cache-key
+        run: echo "hash=$( { find . \( -path ./.godot -o -path ./.git \) -prune -o -name '*.import' -type f -print0 | LC_ALL=C sort -z; printf 'project.godot\0'; } | xargs -0 sha256sum | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: .godot
+          key: godot-import-${{ env.GODOT_VERSION }}-${{ steps.cache-key.outputs.hash }}
+          restore-keys: godot-import-${{ env.GODOT_VERSION }}-
+      # A runner image may carry the engine at /opt/godot/<version>/godot; otherwise setup-godot fetches it.
+      - id: preinstalled
+        run: |
+          if [ -x "/opt/godot/$GODOT_VERSION/godot" ]; then
+            echo "GODOT=/opt/godot/$GODOT_VERSION/godot" >> "$GITHUB_ENV"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: chickensoft-games/setup-godot@v2
+        if: steps.preinstalled.outputs.found != 'true'
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          include-templates: false
+          use-dotnet: false
+      - run: make check
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: check-log
+          path: .godot/*.log
+          include-hidden-files: true
+          retention-days: 7
