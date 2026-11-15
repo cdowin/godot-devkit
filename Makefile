@@ -3,5 +3,5 @@
 .PHONY: check
 check:
 	shellcheck game/tools/session-start.sh
-	$(MAKE) --no-print-directory -n -C game help import check sheet play editor >/dev/null
+	$(MAKE) --no-print-directory -n -C game help import check sheet script play editor S=x.gd >/dev/null
 	@echo "CHECK PASS"
