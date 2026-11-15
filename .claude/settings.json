@@ -24,7 +24,7 @@
     }
   },
   "env": {
-    "LAND_CHECK": "make precommit"
+    "LAND_CHECK": "make check"
   },
   "enabledPlugins": {
     "agentic-sdlc@agentic-sdlc": true
