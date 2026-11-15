@@ -93,7 +93,8 @@ func _draw(path: String) -> Image:
 	# Containers settle their layout over a few frames.
 	for _frame in 4:
 		await process_frame
-	var area := _bounds(node)
+	# A scene that frees itself as it plays out (a one-shot effect) leaves the viewport's own size.
+	var area := _bounds(node) if is_instance_valid(node) else Rect2(Vector2.ZERO, _size)
 	var scale := minf(1.0, float(MAX_SIDE) / maxf(area.size.x, area.size.y))
 	viewport.size = Vector2i((area.size * scale).ceil())
 	viewport.canvas_transform = Transform2D(0.0, Vector2(scale, scale), 0.0, -area.position * scale)
