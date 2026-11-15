@@ -13,20 +13,5 @@
       "Bash(git push -f:*)",
       "Bash(git push --force-with-lease:*)"
     ]
-  },
-  "extraKnownMarketplaces": {
-    "agentic-sdlc": {
-      "source": {
-        "source": "github",
-        "repo": "cdowin/agentic-sdlc",
-        "ref": "v5.0.0"
-      }
-    }
-  },
-  "env": {
-    "LAND_CHECK": "make precommit"
-  },
-  "enabledPlugins": {
-    "agentic-sdlc@agentic-sdlc": true
   }
 }

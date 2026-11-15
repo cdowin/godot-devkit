@@ -1,24 +1,5 @@
-# verify — this repo's own CI, through its own gate framework. A pull request
-# runs `make precommit`: `check` (shellcheck over tracked scripts, the eight
-# Godot gates over the fixture project) plus `test` (the whole suite on the
-# 3.11 floor). The `matrix` tier (the suite on every interpreter the package
-# claims) is not a PR gate: it runs nightly and on demand in nightly.yml, and
-# the release gate (release.yml) is unchanged. No Godot binary and no
-# agentic-sdlc. One job, so no job waits for a second runner slot.
-#
-# The triggers are deliberately unfiltered (no `paths:`): the required check
-# `verify` must always report, and a path filter would leave it missing on a
-# docs-only pull request, which could then never merge. Skipping is done by the
-# `decide` step instead: the one job always reports, and its later steps skip. A pull
-# request that touches only README.md, CLAUDE.md, AGENTS.md, .claude/ or the issue and
-# PR templates skips the build. Any other .md or a docs/ path runs it, so the docs
-# ratchet (tests/test_docs_ratchet.py) bites on the PR that adds one. Shipped code
-# is never skipped, whatever its extension: the
-# first case below names it.
-#
-# By design, nothing re-verifies the merge commit: the check ran on the pull
-# request's tree, and the ruleset's `strict` is false, so main may move after
-# that run.
+# verify: this repo's own check, `make check` (shellcheck and a dry run of the game Makefile). It
+# runs no Godot. The job `gate` is the required check and always reports.
 name: verify
 
 on:
@@ -29,81 +10,25 @@ on:
 permissions:
   contents: read
 
-# A new push to the same pull request cancels the run it makes stale.
 concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    # Public repo: hosted runner, never the studio Mac runner.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - id: decide
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          code=true
-          files=""
-          if [ "$EVENT" = "pull_request" ]; then
-            files=$(git diff --name-only "origin/$BASE_REF...HEAD")
-          fi
-          echo "Event: $EVENT"
-          echo "Changed files:"
-          echo "$files"
-          if [ -n "$files" ]; then
-            code=false
-            while IFS= read -r f; do
-              case "$f" in
-                # Shipped code, whatever its extension (an installable or a
-                # fixture that happens to be Markdown is still code).
-                src/*|tests/*|tools/*) code=true ;;
-                README.md|CLAUDE.md|AGENTS.md|.claude/*|.github/ISSUE_TEMPLATE/*|.github/pull_request_template.md) ;;
-                *) code=true ;;
-              esac
-            done <<< "$files"
-          fi
-          echo "Decision: code=$code"
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-      - if: steps.decide.outputs.code == 'true'
-        uses: astral-sh/setup-uv@v10.2.0
-        with:
-          enable-cache: true
-      - name: Pinned shellcheck
-        if: steps.decide.outputs.code == 'true'
-        # The `shell` gate runs this release, so a local pass is a CI pass.
-        uses: ./.github/actions/pinned-shellcheck
-      - name: make precommit
-        if: steps.decide.outputs.code == 'true'
-        # CI has no second look, so the gates stream. The interpreter matrix
-        # is nightly.yml's job, not a PR's.
-        env:
-          VERBOSE: "1"
-        run: make precommit
-      - name: keep the gate transcripts of a red run
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: gate-reports
-          path: .gate-reports/
-          if-no-files-found: ignore
-          retention-days: 3
-  # The 1 required check. The repo needs a toolchain action (setup-uv, pinned-shellcheck), so it keeps its
-  # own workflow in the studio shape. No heavy lane: the fast job runs on drafts and on ready PRs alike.
+      - run: make check
   gate:
     needs: [verify]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: every job passed
-        env:
-          NEEDS: ${{ toJSON(needs) }}
+      - env:
+          RESULT: ${{ needs.verify.result }}
         run: |
-          echo "$NEEDS"
-          if echo "$NEEDS" | grep -Eq '"result": *"(failure|cancelled|skipped)"'; then exit 1; fi
+          echo "verify: $RESULT"
+          [ "$RESULT" = success ]
