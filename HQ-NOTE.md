@@ -7,7 +7,7 @@ Read from `origin/main` of each repo on 2026-11-14. Each line: where, what it sa
 - `.claude/skills/onboard-project/SKILL.md` step 6 and its description: "Add the dev dependency ...
   `install-gates`, `install-runners` and `install-skills` ... `make check` includes `Makefile.gates`."
   Becomes: copy `godot-devkit/game/.` into the repo, wire `tools/session-start.sh` and the deny list
-  in `.claude/settings.json` (README "Cloud sessions"), set `GODOT_VERSION` in `check.yml`.
+  in `.claude/settings.json` (README "Cloud sessions"), set `GODOT_PATCH` in `check.yml` (MAJOR.MINOR is `project.godot`'s `config/features`).
 - `.claude/skills/branch-audit/SKILL.md` line 27 (wiki version pin for `godot-devkit`) and line 29
   ("Godot code without `Makefile.gates`, the devkit dependency and the devkit skills"): drop both;
   at most check that a Godot repo has `tools/check.gd` and a CI job running `make check`.

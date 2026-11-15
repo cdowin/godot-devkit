@@ -14,16 +14,17 @@ load. Edit `.tscn` and `.tres` as text or in the editor; the proof is that they 
 
 | File | Without it |
 |---|---|
-| `Makefile` (`import`, `check`, `sheet`, `play`, `editor`) | Every headless run reads and writes the real `user://` of whoever is at the machine: the engine keeps it under `HOME` and has no flag for a per-run one. The Makefile gives each run a throwaway `HOME`. |
-| `tools/check.gd` | `godot --import` and `--check-only` parse files but run no scene. Without it a broken `_ready`, a missing `%Name`, a script that does not compile, or an `ext_resource` whose path is not the file its uid names (the engine loads the uid's file and says nothing) reaches a player. |
+| `Makefile` (`import`, `check`, `sheet`, `script`, `play`, `editor`) | Every headless run reads and writes the real `user://` of whoever is at the machine: the engine keeps it under `HOME` and has no flag for a per-run one. The Makefile gives each run a throwaway `HOME`, and `make script S=<path>` runs a scratch script that way, so an agent denied direct `godot` can still prove something at runtime. |
+| `tools/check.gd` | `godot --import` and `--check-only` parse files but run no scene. Without it a broken `_ready`, a missing `%Name`, a script or shader that does not compile, or an `ext_resource` whose path is not the file its uid names (the engine loads the uid's file and says nothing) reaches a player. A scene whose root's `_get_configuration_warnings()` says it needs a host is a part: judged inside each scene that instances it, not alone. |
 | `tools/sheet.gd` | No way to see every screen at once without clicking through the game. It draws each folder of scenes onto one page, and fails on a scene that errors while drawn. |
-| `.github/workflows/check.yml` | No `make check` on each push. `GODOT_VERSION` in it is the one place the engine version lives. |
+| `.github/workflows/check.yml` | No `make check` on each push. The engine version is `config/features` in `project.godot` plus `GODOT_PATCH` here. |
 | `tools/session-start.sh` | A Claude Code cloud session has no Godot binary, so it cannot run `make check`. |
 
 ## Cloud sessions
 
-A cloud container starts with no Godot. `tools/session-start.sh` installs the version `check.yml`
-names into `/usr/local/bin/godot` and imports the project. It needs `curl`, `unzip`, `make`, a
+A cloud container starts with no Godot. `tools/session-start.sh` installs the version that
+`project.godot` and the workflow's `GODOT_PATCH` name into `/usr/local/bin/godot`, imports the
+project, and fetches `origin/main` when the clone lacks it. It needs `curl`, `unzip`, `make`, a
 network path to github.com and write access to `/usr/local/bin`, all present in a Claude Code
 cloud container. It does nothing on a local machine. Wire it, and keep typed Godot runs off real
 user data, in `.claude/settings.json`:
@@ -38,10 +39,11 @@ user data, in `.claude/settings.json`:
 
 - `make sheet DIRS="ui game/hud"` draws chosen folders; set the default `DIRS` in your copy.
   Add `.sheet/` to `.gitignore`.
-- `check.gd` checks `gd`, `tscn`, `tres`, `gdshader` and `json`. An addon with its own resource
+- `check.gd` checks `gd`, `tscn`, `tres`, `gdshader`, `gdshaderinc` and `json`. An addon with its own resource
   type (a dialogue timeline, say) gets its own line in your copy.
 - `check.gd` and `sheet.gd` skip `addons/` and any folder holding a `.gdignore`.
-- Add your own targets (`pot`, `playtest`) beside these. The file is yours.
+- Add your own targets (`pot`, `playtest`) at the end of the `Makefile`, below the line that says
+  so. The file is yours.
 
 ## What is gone, and why
 

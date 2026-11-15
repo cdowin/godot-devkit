@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Claude Code SessionStart hook. In a cloud container only: install the Godot that CI uses (the
-# GODOT_VERSION line of .github/workflows/check.yml), then import the project once. A local
-# machine has its own engine, and this exits at once there.
+# Claude Code SessionStart hook. In a cloud container only: install the Godot that CI uses
+# (MAJOR.MINOR from project.godot's config/features, the patch from the GODOT_PATCH line of a
+# workflow under .github/workflows), then import the project once. A local machine has its own
+# engine, and this exits at once there.
 set -uo pipefail
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}" || exit 0
 log() { printf '[session-start] %s\n' "$1"; }
 
-version=$(grep -m1 -oE 'GODOT_VERSION: *"?[0-9.]+' .github/workflows/check.yml | grep -oE '[0-9.]+$')
-[ -n "$version" ] || { log "WARN no GODOT_VERSION in .github/workflows/check.yml"; exit 0; }
+line=$(grep -m1 -oE 'config/features=PackedStringArray\("[0-9]+\.[0-9]+' project.godot | grep -oE '[0-9.]+$')
+patch=$(grep -hoE 'GODOT_PATCH: *"?[0-9]+' .github/workflows/*.yml 2>/dev/null | head -n1 | grep -oE '[0-9]+$')
+[ -n "$line" ] && [ -n "$patch" ] || { log "WARN no engine version in project.godot and .github/workflows"; exit 0; }
+version="$line.$patch"
 
 if godot --version 2>/dev/null | grep -q "^$version\.stable"; then
 	log "godot $version present"
@@ -29,4 +32,6 @@ else
 fi
 
 if make import >/dev/null 2>&1; then log "imported the project"; else log "WARN make import failed; run it by hand"; fi
+# Work branches from origin/main; a fresh clone of one branch does not carry it.
+git rev-parse --verify --quiet origin/main >/dev/null || git fetch --quiet origin main:refs/remotes/origin/main || true
 log "READY: make help"

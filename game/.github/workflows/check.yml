@@ -1,6 +1,6 @@
 # `make check` on every push and pull request: every script compiles and every scene and resource
-# loads with zero engine errors. GODOT_VERSION is the one place the engine version lives;
-# tools/session-start.sh reads it from here.
+# loads with zero engine errors. The engine's MAJOR.MINOR is project.godot's config/features; the
+# patch is GODOT_PATCH, the one part that file does not carry. tools/session-start.sh reads both.
 name: check
 
 on:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  GODOT_VERSION: "4.7.2"
+  GODOT_PATCH: "2"
 
 concurrency:
   group: check-${{ github.ref }}
@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - run: echo "GODOT_VERSION=$(grep -m1 -oE 'config/features=PackedStringArray\("[0-9]+\.[0-9]+' project.godot | grep -oE '[0-9.]+$').$GODOT_PATCH" >> "$GITHUB_ENV"
       # The import cache: the engine re-imports only the assets whose .import file changed.
       - id: cache-key
         run: echo "hash=$( { find . \( -path ./.godot -o -path ./.git \) -prune -o -name '*.import' -type f -print0 | LC_ALL=C sort -z; printf 'project.godot\0'; } | xargs -0 sha256sum | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
